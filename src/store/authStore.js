@@ -5,20 +5,20 @@ export const useAuthStore = create(
   persist(
     (set) => ({
       token: null,
-      usuario: null,
+      user: null,           // unificado como 'user' en todo el proyecto
       isAuthenticated: false,
 
-      setAuth: (token, usuario) =>
-        set({ token, usuario, isAuthenticated: true }),
+      setAuth: (token, user) =>
+        set({ token, user, isAuthenticated: true }),
 
       logout: () =>
-        set({ token: null, usuario: null, isAuthenticated: false }),
+        set({ token: null, user: null, isAuthenticated: false }),
     }),
     {
       name: 'wms-auth',
       partialize: (state) => ({
-        token: state.token,
-        usuario: state.usuario,
+        token:           state.token,
+        user:            state.user,
         isAuthenticated: state.isAuthenticated,
       }),
     }
