@@ -1,8 +1,8 @@
 import client from './client'
 
-export const getProductions = (params) => client.get('/production', { params })
-export const getProduction  = (id)     => client.get(`/production/${id}`)
-export const startOrder     = (body)   => client.post('/production/start', body)
-export const confirmOrder   = (body)   => client.post('/production/confirm', body)
-export const advanceOrder   = (body)   => client.post('/production/advance', body)
-export const closeOrder     = (body)   => client.post('/production/close', body)
+export const listProductions  = (params) => client.get('/production', { params }).then(r => r.data)
+export const getProduction    = (id)     => client.get(`/production/${id}`).then(r => r.data)
+export const startProduction  = (body)   => client.post('/production/start', body).then(r => r.data)
+export const confirmMaterials = (body)   => client.post('/production/confirm', body).then(r => r.data)
+export const advancePhase     = (body)   => client.post('/production/advance', body).then(r => r.data)
+export const closeProduction  = (body)   => client.post('/production/close', body).then(r => r.data)
