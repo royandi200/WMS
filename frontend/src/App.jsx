@@ -6,22 +6,13 @@ import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
-
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public */}
-        <Route
-          path="/login"
-          element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />}
-        />
-
-        {/* Protected */}
+        <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<DashboardPage />} />
         </Route>
-
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
