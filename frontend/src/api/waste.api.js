@@ -1,4 +1,4 @@
 import client from './client'
 
-export const getWastes    = (params) => client.get('/waste', { params })
-export const createWaste  = (body)   => client.post('/waste', body)
+export const listWaste   = (params) => client.get('/waste', { params }).then(r => r.data)
+export const reportWaste = (body)   => client.post('/waste', body).then(r => r.data)
