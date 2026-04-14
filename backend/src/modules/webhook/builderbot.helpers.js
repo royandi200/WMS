@@ -1,61 +1,64 @@
-const { User, Role, Product, Lot } = require('../../models');
+const { Usuario, Rol, Producto, Stock } = require('../../models');
 const AppError = require('../../utils/AppError');
 
 /**
- * Busca o crea un usuario ghost por número de teléfono.
- * Permite que operarios de WhatsApp actúen en el sistema sin login tradicional.
+ * Busca o crea un usuario ghost por número de teléfono (campo `telefono` en usuarios).
  */
 exports.buildBotUser = async (phone) => {
-  let user = await User.findOne({
-    where: { phone },
-    include: [{ model: Role, as: 'role' }]
+  let usuario = await Usuario.findOne({
+    where: { telefono: phone },
+    include: [{ model: Rol, as: 'rol' }]
   });
 
-  if (!user) {
-    // Rol por defecto para usuarios WhatsApp no registrados
-    const defaultRole = await Role.findOne({ where: { name: 'Operario' } });
-    if (!defaultRole) throw new AppError('Rol Operario no configurado en el sistema', 500);
-    user = await User.create({
-      name:  `WhatsApp-${phone}`,
-      phone,
-      role_id: defaultRole.id,
-      active: true,
+  if (!usuario) {
+    const rolDefault = await Rol.findOne({ where: { nombre: 'Operario' } });
+    if (!rolDefault) throw new AppError('Rol Operario no configurado en el sistema', 500);
+    usuario = await Usuario.create({
+      nombre:        `WhatsApp-${phone}`,
+      telefono:      phone,
+      email:         `wa_${phone}@wms.local`,
+      rol_id:        rolDefault.id,
+      activo:        true,
       password_hash: 'bot-user-no-login'
     });
-    user = await User.findByPk(user.id, { include: [{ model: Role, as: 'role' }] });
+    usuario = await Usuario.findByPk(usuario.id, { include: [{ model: Rol, as: 'rol' }] });
   }
 
   return {
-    id:    user.id,
-    name:  user.name,
-    phone: user.phone,
-    role:  user.role?.name
+    id:     usuario.id,
+    nombre: usuario.nombre,
+    name:   usuario.nombre,   // alias para compatibilidad
+    phone:  usuario.telefono,
+    rol:    usuario.rol?.nombre,
+    role:   usuario.rol?.nombre  // alias para compatibilidad
   };
 };
 
 /**
- * Busca un producto por SKU (busca en tabla skus o en productos.siigo_code)
+ * Busca un producto por SKU en tabla skus o por siigo_code
  */
 exports.findProductBySku = async (sku) => {
   // Buscar primero en tabla skus
-  const { Sku } = require('../../models');
-  const skuRow = await Sku.findOne({
-    where: { sku, activo: 1 },
-    include: [{ model: Product, as: 'product' }]
-  });
-  if (skuRow?.product) return skuRow.product;
+  try {
+    const { Sku } = require('../../models');
+    const skuRow = await Sku.findOne({
+      where: { sku, activo: 1 },
+      include: [{ model: Producto, as: 'producto' }]
+    });
+    if (skuRow?.producto) return skuRow.producto;
+  } catch (e) { /* tabla skus puede no existir aún */ }
 
   // Fallback: buscar directo en productos por siigo_code
-  const product = await Product.findOne({ where: { siigo_code: sku, activo: 1 } });
-  if (!product) throw new AppError(`Producto con SKU "${sku}" no encontrado`, 404);
-  return product;
+  const producto = await Producto.findOne({ where: { siigo_code: sku, activo: true } });
+  if (!producto) throw new AppError(`Producto con SKU "${sku}" no encontrado`, 404);
+  return producto;
 };
 
 /**
- * Busca un lote por LPN
+ * Busca un stock/lote por código de lote
  */
-exports.findLotByLpn = async (lpn) => {
-  const lot = await Lot.findOne({ where: { lpn } });
-  if (!lot) throw new AppError(`Lote "${lpn}" no encontrado`, 404);
-  return lot;
+exports.findLotByLpn = async (lote) => {
+  const stock = await Stock.findOne({ where: { lote } });
+  if (!stock) throw new AppError(`Lote "${lote}" no encontrado`, 404);
+  return stock;
 };

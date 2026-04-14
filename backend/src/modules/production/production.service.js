@@ -1,4 +1,4 @@
-const { sequelize, Product, ProductionOrder, Lot, BOM } = require('../../models');
+const { sequelize, Producto, OrdenProduccion, Stock, BOM } = require('../../models');
 const { Op } = require('sequelize');
 const { generateOrderCode, generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
@@ -6,146 +6,196 @@ const { consumeFIFO } = require('../../utils/inventoryHelper');
 const AppError = require('../../utils/AppError');
 
 // Inicia una orden de producción. Valida BOM y stock antes de crear.
-exports.start = async ({ product_id, qty_planned, notes }, user) => {
-  const product = await Product.findByPk(product_id);
-  if (!product) throw new AppError('Producto no encontrado', 404);
+exports.start = async ({ product_id, qty_planned, notas }, usuario) => {
+  const producto = await Producto.findByPk(product_id);
+  if (!producto) throw new AppError('Producto no encontrado', 404);
 
   const bom = await BOM.findAll({
-    where: { product_id },
-    include: [{ model: Product, as: 'input_product' }]
+    where: { producto_final_id: product_id },
+    include: [{ model: Producto, as: 'insumo' }]
   });
-  if (!bom.length) throw new AppError(`No existe BOM (receta) para ${product.sku}`, 422);
+  if (!bom.length) throw new AppError(`No existe BOM (receta) para ${producto.siigo_code}`, 422);
 
   // Validar stock de cada insumo
-  const shortages = [];
+  const faltantes = [];
   for (const item of bom) {
-    const needed = parseFloat(item.qty_per_unit) * qty_planned;
-    const available = await Lot.sum('qty_current', {
-      where: { product_id: item.input_product_id, status: 'DISPONIBLE' }
+    const necesario  = parseFloat(item.cantidad_por_unidad) * qty_planned;
+    const disponible = await Stock.sum('cantidad', {
+      where: { producto_id: item.insumo_id, estado: 'disponible' }
     }) || 0;
-    if (available < needed) {
-      shortages.push(`${item.input_product.sku}: necesita ${needed} ${item.unit}, disponible ${available}`);
+    if (disponible < necesario) {
+      faltantes.push(`${item.insumo.siigo_code}: necesita ${necesario} ${item.unidad}, disponible ${disponible}`);
     }
   }
-  if (shortages.length) throw new AppError('Stock insuficiente para iniciar producción', 409, shortages);
+  if (faltantes.length) throw new AppError('Stock insuficiente para iniciar producción', 409, faltantes);
 
-  const order_code = generateOrderCode();
-  const order = await ProductionOrder.create({
-    order_code, product_id, qty_planned,
-    phase: 'F0', status: 'PLANEADA',
-    created_by: user.id, notes
+  const codigo_orden = generateOrderCode();
+  const orden = await OrdenProduccion.create({
+    codigo_orden,
+    producto_id:    product_id,
+    cantidad_planeada: qty_planned,
+    fase:           'F0',
+    estado:         'PLANEADA',
+    creado_por:     usuario.id,
+    notas
   });
 
   await logKardex({
-    productId: product_id, userId: user.id,
-    action: 'PRODUCCION_PLANEADA', qty: qty_planned,
-    reference: order_code, notes: `Orden creada. Pendiente confirmar materiales`
+    productoId:      product_id,
+    usuarioId:       usuario.id,
+    tipo:            'nota',
+    cantidad:        qty_planned,
+    referenciaTipo:  'orden_produccion',
+    referenciaCodigo: codigo_orden,
+    notas:           'Orden creada. Pendiente confirmar materiales'
   });
 
-  return { order, bom_required: bom.map(b => ({ sku: b.input_product.sku, needed: b.qty_per_unit * qty_planned, unit: b.unit })) };
+  return {
+    order:    { ...orden.toJSON(), order_code: codigo_orden },
+    bom_required: bom.map(b => ({ sku: b.insumo.siigo_code, needed: b.cantidad_por_unidad * qty_planned, unit: b.unidad }))
+  };
 };
 
-// Confirma materiales: descuenta insumos por FIFO dentro de una transacción
-exports.confirmMaterials = async ({ order_id, exception_lot_id }, user) => {
+// Confirma materiales: descuenta insumos por FIFO
+exports.confirmMaterials = async ({ order_id, exception_lot_id }, usuario) => {
   return sequelize.transaction({ isolationLevel: 'SERIALIZABLE' }, async (t) => {
-    const order = await ProductionOrder.findByPk(order_id, { transaction: t, lock: t.LOCK.UPDATE });
-    if (!order) throw new AppError('Orden no encontrada', 404);
-    if (order.phase !== 'F0') throw new AppError(`La orden ya pasó la fase F0 (fase actual: ${order.phase})`, 409);
+    const orden = await OrdenProduccion.findByPk(order_id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!orden) throw new AppError('Orden no encontrada', 404);
+    if (orden.fase !== 'F0') throw new AppError(`La orden ya pasó la fase F0 (fase actual: ${orden.fase})`, 409);
 
-    const bom = await BOM.findAll({ where: { product_id: order.product_id }, transaction: t });
-    const consumed = [];
+    const bom = await BOM.findAll({ where: { producto_final_id: orden.producto_id }, transaction: t });
+    const consumido = [];
 
     for (const item of bom) {
-      const needed = parseFloat(item.qty_per_unit) * parseFloat(order.qty_planned);
-      let lots;
+      const necesario = parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada);
+      let stocks;
 
-      // Si hay lote de excepción, priorizarlo (override FIFO para ese insumo)
       if (exception_lot_id) {
-        lots = await Lot.findAll({
-          where: { product_id: item.input_product_id, status: 'DISPONIBLE', qty_current: { [Op.gt]: 0 } },
-          order: sequelize.literal(`CASE WHEN id = '${exception_lot_id}' THEN 0 ELSE 1 END, created_at ASC`),
+        stocks = await Stock.findAll({
+          where: { producto_id: item.insumo_id, estado: 'disponible', cantidad: { [Op.gt]: 0 } },
+          order: sequelize.literal(`CASE WHEN id = '${exception_lot_id}' THEN 0 ELSE 1 END, creado_en ASC`),
           lock: t.LOCK.UPDATE, transaction: t
         });
       } else {
-        lots = await Lot.findAll({
-          where: { product_id: item.input_product_id, status: 'DISPONIBLE', qty_current: { [Op.gt]: 0 } },
-          order: [['created_at', 'ASC']],
+        stocks = await Stock.findAll({
+          where: { producto_id: item.insumo_id, estado: 'disponible', cantidad: { [Op.gt]: 0 } },
+          order: [['creado_en', 'ASC']],
           lock: t.LOCK.UPDATE, transaction: t
         });
       }
 
-      let remaining = needed;
-      for (const lot of lots) {
-        if (remaining <= 0) break;
-        const take = Math.min(parseFloat(lot.qty_current), remaining);
-        const newQty = parseFloat(lot.qty_current) - take;
-        await lot.update({ qty_current: newQty, status: newQty === 0 ? 'AGOTADO' : 'DISPONIBLE' }, { transaction: t });
+      let restante = necesario;
+      for (const stock of stocks) {
+        if (restante <= 0) break;
+        const tomar   = Math.min(parseFloat(stock.cantidad), restante);
+        const nuevaCant = parseFloat(stock.cantidad) - tomar;
+        await stock.update({ cantidad: nuevaCant, estado: nuevaCant === 0 ? 'agotado' : 'disponible' }, { transaction: t });
         await logKardex({
-          lotId: lot.id, productId: item.input_product_id, userId: user.id,
-          action: 'CONSUMO_MATERIAL', qty: take, balanceAfter: newQty,
-          reference: order.order_code, notes: `Consumo FIFO para orden ${order.order_code}`
+          loteId:          stock.id,
+          productoId:      item.insumo_id,
+          usuarioId:       usuario.id,
+          tipo:            'consumo',
+          cantidad:        tomar,
+          saldoDespues:    nuevaCant,
+          referenciaTipo:  'orden_produccion',
+          referenciaCodigo: orden.codigo_orden,
+          notas:           `Consumo FIFO para orden ${orden.codigo_orden}`
         }, t);
-        consumed.push({ lpn: lot.lpn, qty_taken: take });
-        remaining -= take;
+        consumido.push({ lote: stock.lote, qty_taken: tomar });
+        restante -= tomar;
       }
-      if (remaining > 0) throw new AppError(`Stock insuficiente para insumo durante confirmación`, 409);
+      if (restante > 0) throw new AppError(`Stock insuficiente para insumo durante confirmación`, 409);
     }
 
-    await order.update({ phase: 'F1', status: 'EN_PROCESO', materials_confirmed_at: new Date() }, { transaction: t });
-    return { order_code: order.order_code, phase: 'F1', consumed };
+    await orden.update({ fase: 'F1', estado: 'EN_PROCESO', materiales_confirmados_en: new Date() }, { transaction: t });
+    return { order_code: orden.codigo_orden, phase: 'F1', consumed: consumido };
   });
 };
 
-exports.advancePhase = async ({ order_id, phase }, user) => {
-  const order = await ProductionOrder.findByPk(order_id);
-  if (!order) throw new AppError('Orden no encontrada', 404);
-  if (order.status === 'CERRADA') throw new AppError('La orden ya está cerrada', 409);
-  await order.update({ phase });
-  await logKardex({ productId: order.product_id, userId: user.id, action: 'AVANCE_FASE', qty: 0, reference: order.order_code, notes: `Avance a fase ${phase}` });
-  return { order_code: order.order_code, phase };
+exports.advancePhase = async ({ order_id, phase }, usuario) => {
+  const orden = await OrdenProduccion.findByPk(order_id);
+  if (!orden) throw new AppError('Orden no encontrada', 404);
+  if (orden.estado === 'CERRADA') throw new AppError('La orden ya está cerrada', 409);
+  await orden.update({ fase: phase });
+  await logKardex({
+    productoId:      orden.producto_id,
+    usuarioId:       usuario.id,
+    tipo:            'nota',
+    cantidad:        0,
+    referenciaTipo:  'orden_produccion',
+    referenciaCodigo: orden.codigo_orden,
+    notas:           `Avance a fase ${phase}`
+  });
+  return { order_code: orden.codigo_orden, phase };
 };
 
 // Cierra la producción, ingresa producto terminado al inventario
-exports.close = async ({ order_id, qty_real }, user) => {
+exports.close = async ({ order_id, qty_real }, usuario) => {
   return sequelize.transaction({ isolationLevel: 'SERIALIZABLE' }, async (t) => {
-    const order = await ProductionOrder.findByPk(order_id, { transaction: t, lock: t.LOCK.UPDATE });
-    if (!order) throw new AppError('Orden no encontrada', 404);
-    if (order.status === 'CERRADA') throw new AppError('La orden ya está cerrada', 409);
-    if (order.phase === 'F0') throw new AppError('Debes confirmar materiales antes de cerrar', 409);
+    const orden = await OrdenProduccion.findByPk(order_id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!orden) throw new AppError('Orden no encontrada', 404);
+    if (orden.estado === 'CERRADA') throw new AppError('La orden ya está cerrada', 409);
+    if (orden.fase === 'F0')  throw new AppError('Debes confirmar materiales antes de cerrar', 409);
 
-    const lpnTerminado = `LPN-${order.order_code}`;
-    const lot = await Lot.create({
-      lpn: lpnTerminado, product_id: order.product_id,
-      qty_initial: qty_real, qty_current: qty_real,
-      origin: 'PRODUCCION', status: 'DISPONIBLE',
-      production_order_id: order.id, received_by: user.id
+    const loteTerminado = `LPN-${orden.codigo_orden}`;
+    const stock = await Stock.create({
+      lote:         loteTerminado,
+      producto_id:  orden.producto_id,
+      cantidad:     qty_real,
+      reservada:    0,
+      origen:       'produccion',
+      estado:       'disponible',
+      orden_produccion_id: orden.id,
+      recibido_por: usuario.id
     }, { transaction: t });
 
-    await order.update({ qty_real, phase: 'F5', status: 'CERRADA', closed_at: new Date(), approved_by: user.id }, { transaction: t });
+    await orden.update({
+      cantidad_real: qty_real,
+      fase:          'F5',
+      estado:        'CERRADA',
+      cerrado_en:    new Date(),
+      aprobado_por:  usuario.id
+    }, { transaction: t });
 
     await logKardex({
-      lotId: lot.id, productId: order.product_id, userId: user.id,
-      action: 'CIERRE_PRODUCCION', qty: qty_real, balanceAfter: qty_real,
-      reference: order.order_code, notes: 'Producto terminado ingresado a bodega', approvedBy: user.id
+      loteId:          stock.id,
+      productoId:      orden.producto_id,
+      usuarioId:       usuario.id,
+      tipo:            'entrada',
+      cantidad:        qty_real,
+      saldoDespues:    qty_real,
+      referenciaTipo:  'orden_produccion',
+      referenciaCodigo: orden.codigo_orden,
+      notas:           'Producto terminado ingresado a bodega',
+      aprobadoPor:     usuario.id
     }, t);
 
-    const diff = parseFloat(order.qty_planned) - qty_real;
+    const diff     = parseFloat(orden.cantidad_planeada) - qty_real;
     const mermaMsg = diff > 0 ? `Merma de cierre: ${diff} unidades` : diff < 0 ? `Sobreproducción: ${Math.abs(diff)} unidades extra` : 'Sin diferencia';
-    return { order_code: order.order_code, qty_planned: order.qty_planned, qty_real, lpn_terminado: lpnTerminado, mermaMsg };
+    return {
+      order_code:   orden.codigo_orden,
+      qty_planned:  orden.cantidad_planeada,
+      qty_real,
+      lpn_terminado: loteTerminado,
+      mermaMsg
+    };
   });
 };
 
 exports.list = ({ status, page = 1, limit = 30 }) => {
   const where = {};
-  if (status) where.status = status;
-  return ProductionOrder.findAndCountAll({
-    where, include: [{ model: Product, as: 'product', attributes: ['sku','name'] }],
-    order: [['created_at','DESC']], limit: parseInt(limit), offset: (parseInt(page)-1)*parseInt(limit)
+  if (status) where.estado = status;
+  return OrdenProduccion.findAndCountAll({
+    where,
+    include: [{ model: Producto, as: 'producto', attributes: ['siigo_code','nombre'] }],
+    order: [['creado_en','DESC']],
+    limit:  parseInt(limit),
+    offset: (parseInt(page)-1) * parseInt(limit)
   });
 };
 
 exports.getOne = async (id) => {
-  const o = await ProductionOrder.findByPk(id, { include: [{ model: Product, as: 'product' }] });
+  const o = await OrdenProduccion.findByPk(id, { include: [{ model: Producto, as: 'producto' }] });
   if (!o) throw new AppError('Orden no encontrada', 404);
   return o;
 };

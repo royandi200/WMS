@@ -1,4 +1,4 @@
-const { ApprovalQueue, User } = require('../../models');
+const { AprobacionSolicitud, Usuario } = require('../../models');
 const AppError = require('../../utils/AppError');
 const receptionService  = require('../reception/reception.service');
 const productionService = require('../production/production.service');
@@ -7,7 +7,6 @@ const wasteService      = require('../waste/waste.service');
 const returnsService    = require('../returns/returns.service');
 const builderBotService = require('../webhook/builderbot.service');
 
-// Mapa de acción -> función de servicio a ejecutar
 const ACTION_HANDLERS = {
   INGRESO_RECEPCION:           (p, u) => receptionService.receive(p, u),
   SOLICITAR_INICIO_PRODUCCION: (p, u) => productionService.start(p, u),
@@ -18,48 +17,60 @@ const ACTION_HANDLERS = {
   GESTION_DEVOLUCION:          (p, u) => returnsService.processReturn(p, u)
 };
 
-exports.list = () => ApprovalQueue.findAll({
-  where: { status: 'PENDIENTE' },
-  include: [{ model: User, as: 'requester', attributes: ['name','phone'] }],
-  order: [['created_at','ASC']]
+exports.list = () => AprobacionSolicitud.findAll({
+  where: { estado: 'PENDIENTE' },
+  include: [{ model: Usuario, as: 'solicitante', attributes: ['nombre','email'] }],
+  order: [['creado_en','ASC']]
 });
 
-exports.approve = async (request_code, approver) => {
-  const req = await ApprovalQueue.findOne({ where: { request_code, status: 'PENDIENTE' } });
-  if (!req) throw new AppError(`Solicitud ${request_code} no encontrada o ya procesada`, 404);
+exports.approve = async (codigo_solicitud, aprobador) => {
+  const solicitud = await AprobacionSolicitud.findOne({ where: { codigo_solicitud, estado: 'PENDIENTE' } });
+  if (!solicitud) throw new AppError(`Solicitud ${codigo_solicitud} no encontrada o ya procesada`, 404);
 
-  const handler = ACTION_HANDLERS[req.action];
-  if (!handler) throw new AppError(`No hay handler para la acción ${req.action}`, 422);
+  const handler = ACTION_HANDLERS[solicitud.accion];
+  if (!handler) throw new AppError(`No hay handler para la acción ${solicitud.accion}`, 422);
 
-  const result = await handler(req.payload, approver);
+  const result = await handler(solicitud.payload, aprobador);
 
-  await req.update({ status: 'APROBADO', processed_by: approver.id, processed_at: new Date() });
+  await solicitud.update({
+    estado:       'APROBADO',
+    procesado_por: aprobador.id,
+    procesado_en:  new Date()
+  });
 
-  // Notificar al operario que solicitó
-  const requester = await User.findByPk(req.requested_by);
-  if (requester?.phone) {
-    await builderBotService.sendMessage(
-      requester.phone,
-      `✅ *Solicitud ${request_code} Aprobada*\nAcción: ${req.action.replace(/_/g,' ')}\nAprobada por: ${approver.name}`
+  const solicitante = await Usuario.findByPk(solicitud.solicitado_por);
+  if (solicitante?.email) {
+    builderBotService.sendMessage(
+      solicitante.email,
+      `✅ *Solicitud ${codigo_solicitud} Aprobada*\nAcción: ${solicitud.accion.replace(/_/g,' ')}\nAprobada por: ${aprobador.nombre}`
     ).catch(() => {});
   }
 
-  return { request_code, action: req.action, result };
+  return { codigo_solicitud, accion: solicitud.accion, result };
 };
 
-exports.reject = async ({ request_code, reason }, approver) => {
-  const req = await ApprovalQueue.findOne({ where: { request_code, status: 'PENDIENTE' } });
-  if (!req) throw new AppError(`Solicitud ${request_code} no encontrada o ya procesada`, 404);
+exports.reject = async ({ codigo_solicitud, motivo }, aprobador) => {
+  const solicitud = await AprobacionSolicitud.findOne({ where: { codigo_solicitud, estado: 'PENDIENTE' } });
+  if (!solicitud) throw new AppError(`Solicitud ${codigo_solicitud} no encontrada o ya procesada`, 404);
 
-  await req.update({ status: 'RECHAZADO', processed_by: approver.id, processed_at: new Date(), reject_reason: reason });
+  await solicitud.update({
+    estado:           'RECHAZADO',
+    procesado_por:    aprobador.id,
+    procesado_en:     new Date(),
+    motivo_rechazo:   motivo
+  });
 
-  const requester = await User.findByPk(req.requested_by);
-  if (requester?.phone) {
-    await builderBotService.sendMessage(
-      requester.phone,
-      `❌ *Solicitud ${request_code} Rechazada*\n${reason ? 'Motivo: ' + reason : 'Sin motivo especificado'}`
+  const solicitante = await Usuario.findByPk(solicitud.solicitado_por);
+  if (solicitante?.email) {
+    builderBotService.sendMessage(
+      solicitante.email,
+      `❌ *Solicitud ${codigo_solicitud} Rechazada*\n${motivo ? 'Motivo: ' + motivo : 'Sin motivo especificado'}`
     ).catch(() => {});
   }
 
-  return { request_code, status: 'RECHAZADO' };
+  return { codigo_solicitud, estado: 'RECHAZADO' };
 };
+
+// Alias para compatibilidad con builderbot que usa request_code
+exports.approveByCode  = (rc, u) => exports.approve(rc, u);
+exports.rejectByCode   = (d, u)  => exports.reject({ codigo_solicitud: d.request_code, motivo: d.reason }, u);

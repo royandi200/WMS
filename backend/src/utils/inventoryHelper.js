@@ -1,46 +1,47 @@
-const { Lot, Product, BOM, ProductionOrder, sequelize } = require('../models');
+const { Stock, Producto, BOM, OrdenProduccion, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('./AppError');
 
 /**
- * Retorna el stock consolidado de un producto (equivalente a wms_ConsultarInventario).
- * No persiste nada — es una consulta en tiempo real que reemplaza inventario_global.
+ * Retorna el stock consolidado de un producto.
+ * Usa la tabla stock con campos: cantidad, reservada, estado
  */
-async function getStockSummary(productId) {
-  const lots = await Lot.findAll({
-    where: { product_id: productId, status: { [Op.in]: ['DISPONIBLE', 'CUARENTENA', 'COMPROMETIDO'] } },
-    attributes: ['status', [sequelize.fn('SUM', sequelize.col('qty_current')), 'total']],
-    group: ['status'],
+async function getStockSummary(productoId) {
+  const rows = await Stock.findAll({
+    where: { producto_id: productoId, estado: { [Op.in]: ['disponible', 'cuarentena', 'comprometido'] } },
+    attributes: ['estado', [sequelize.fn('SUM', sequelize.col('cantidad')), 'total'], [sequelize.fn('SUM', sequelize.col('reservada')), 'totalReservada']],
+    group: ['estado'],
     raw: true
   });
 
-  let disponible = 0, cuarentena = 0, comprometido = 0;
-  lots.forEach(r => {
-    if (r.status === 'DISPONIBLE')   disponible   = parseFloat(r.total);
-    if (r.status === 'CUARENTENA')  cuarentena   = parseFloat(r.total);
-    if (r.status === 'COMPROMETIDO') comprometido = parseFloat(r.total);
+  let disponible = 0, cuarentena = 0, comprometido = 0, reservada = 0;
+  rows.forEach(r => {
+    if (r.estado === 'disponible')    disponible   = parseFloat(r.total);
+    if (r.estado === 'cuarentena')   cuarentena   = parseFloat(r.total);
+    if (r.estado === 'comprometido') comprometido = parseFloat(r.total);
+    reservada += parseFloat(r.totalReservada || 0);
   });
 
   return {
     disponible,
     cuarentena,
     comprometido,
-    disponible_neto: disponible - comprometido,
-    fisico_total: disponible + cuarentena
+    reservada,
+    disponible_neto: disponible - reservada,
+    fisico_total:    disponible + cuarentena
   };
 }
 
 /**
  * Verifica si hay suficiente stock disponible para cubrir una cantidad requerida.
- * Lanza AppError si no hay suficiente.
  */
-async function assertStock(productId, qtyRequired, t) {
-  const summary = await getStockSummary(productId);
-  if (summary.disponible_neto < qtyRequired) {
-    const product = await Product.findByPk(productId);
+async function assertStock(productoId, cantidadRequerida, t) {
+  const summary = await getStockSummary(productoId);
+  if (summary.disponible_neto < cantidadRequerida) {
+    const producto = await Producto.findByPk(productoId);
     throw new AppError(
-      `Stock insuficiente para ${product?.sku || productId}. ` +
-      `Disponible neto: ${summary.disponible_neto}, Requerido: ${qtyRequired}`,
+      `Stock insuficiente para ${producto?.siigo_code || productoId}. ` +
+      `Disponible neto: ${summary.disponible_neto}, Requerido: ${cantidadRequerida}`,
       409
     );
   }
@@ -48,39 +49,38 @@ async function assertStock(productId, qtyRequired, t) {
 }
 
 /**
- * Consume unidades de lotes disponibles usando FIFO (ORDER BY created_at ASC).
- * Retorna el detalle de lotes consumidos.
+ * Consume unidades de stock disponibles usando FIFO (ORDER BY creado_en ASC).
  */
-async function consumeFIFO({ productId, qtyNeeded, reference, userId, action }, t) {
-  const availableLots = await Lot.findAll({
-    where: { product_id: productId, status: 'DISPONIBLE', qty_current: { [Op.gt]: 0 } },
-    order: [['created_at', 'ASC']],
+async function consumeFIFO({ productoId, cantidadNecesaria, referenciaCodigo, usuarioId, tipo }, t) {
+  const stockRows = await Stock.findAll({
+    where: { producto_id: productoId, estado: 'disponible', cantidad: { [Op.gt]: 0 } },
+    order: [['creado_en', 'ASC']],
     lock: t ? t.LOCK.UPDATE : undefined,
     transaction: t
   });
 
-  let remaining = qtyNeeded;
-  const consumed = [];
+  let restante = cantidadNecesaria;
+  const consumido = [];
 
-  for (const lot of availableLots) {
-    if (remaining <= 0) break;
-    const take = Math.min(parseFloat(lot.qty_current), remaining);
-    const newQty = parseFloat(lot.qty_current) - take;
+  for (const stock of stockRows) {
+    if (restante <= 0) break;
+    const tomar   = Math.min(parseFloat(stock.cantidad), restante);
+    const nuevaCant = parseFloat(stock.cantidad) - tomar;
 
-    await lot.update(
-      { qty_current: newQty, status: newQty === 0 ? 'AGOTADO' : 'DISPONIBLE' },
+    await stock.update(
+      { cantidad: nuevaCant, estado: nuevaCant === 0 ? 'agotado' : 'disponible' },
       { transaction: t }
     );
 
-    consumed.push({ lotId: lot.id, lpn: lot.lpn, qtyTaken: take, qtyRemaining: newQty });
-    remaining -= take;
+    consumido.push({ stockId: stock.id, lote: stock.lote, cantidadTomada: tomar, cantidadRestante: nuevaCant });
+    restante -= tomar;
   }
 
-  if (remaining > 0) {
-    throw new AppError(`Stock insuficiente durante FIFO. Faltan ${remaining} unidades.`, 409);
+  if (restante > 0) {
+    throw new AppError(`Stock insuficiente durante FIFO. Faltan ${restante} unidades.`, 409);
   }
 
-  return consumed;
+  return consumido;
 }
 
 module.exports = { getStockSummary, assertStock, consumeFIFO };

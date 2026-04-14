@@ -1,53 +1,74 @@
-const { sequelize, Lot, WasteRecord, Product } = require('../../models');
+const { sequelize, Stock, Merma, Producto } = require('../../models');
 const { generateWasteCode } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
 
-exports.report = async ({ type, product_id, qty, lot_id, production_order_id, reason }, user) => {
+exports.report = async ({ type, product_id, qty, lot_id, production_order_id, reason }, usuario) => {
   return sequelize.transaction({ isolationLevel: 'SERIALIZABLE' }, async (t) => {
-    // Si hay lote, descontar del lote
-    let balanceAfter = null;
+    let saldoDespues = null;
     if (lot_id) {
-      const lot = await Lot.findByPk(lot_id, { lock: t.LOCK.UPDATE, transaction: t });
-      if (!lot) throw new AppError('Lote no encontrado', 404);
-      if (parseFloat(lot.qty_current) < qty) throw new AppError(`El lote solo tiene ${lot.qty_current} unidades`, 409);
-      const newQty = parseFloat(lot.qty_current) - qty;
-      await lot.update({ qty_current: newQty, status: newQty === 0 ? 'AGOTADO' : lot.status }, { transaction: t });
-      balanceAfter = newQty;
+      const stock = await Stock.findByPk(lot_id, { lock: t.LOCK.UPDATE, transaction: t });
+      if (!stock) throw new AppError('Lote no encontrado', 404);
+      if (parseFloat(stock.cantidad) < qty) throw new AppError(`El lote solo tiene ${stock.cantidad} unidades`, 409);
+      const nuevaCant = parseFloat(stock.cantidad) - qty;
+      await stock.update({
+        cantidad: nuevaCant,
+        estado:   nuevaCant === 0 ? 'agotado' : stock.estado
+      }, { transaction: t });
+      saldoDespues = nuevaCant;
     }
 
-    const wasteCode = generateWasteCode();
-    const record = await WasteRecord.create({
-      waste_code: wasteCode, type, product_id, lot_id: lot_id || null,
-      production_order_id: production_order_id || null,
-      qty, reason, reported_by: user.id, approved_by: user.id, status: 'APROBADO'
+    const codigo = generateWasteCode();
+    const registro = await Merma.create({
+      codigo,
+      tipo:        type,
+      producto_id: product_id,
+      lote_id:     lot_id || null,
+      orden_id:    production_order_id || null,
+      cantidad:    qty,
+      motivo:      reason,
+      reportado_por: usuario.id,
+      aprobado_por:  usuario.id,
+      estado:      'APROBADO'
     }, { transaction: t });
 
-    const actionMap = {
-      MERMA_EN_MAQUINA:    'MERMA_PROCESO',
-      MERMA_EN_ESTANTERIA: 'MERMA_BODEGA',
-      MERMA_CIERRE_WIP:    'MERMA_CIERRE_WIP',
-      RECHAZO_PROVEEDOR:   'INGRESO_NOVEDAD',
-      VENCIMIENTO:         'MERMA_BODEGA',
-      AJUSTE_MANUAL:       'AJUSTE_MANUAL'
+    const tipoMovMap = {
+      MERMA_EN_MAQUINA:    'consumo',
+      MERMA_EN_ESTANTERIA: 'salida',
+      MERMA_CIERRE_WIP:    'salida',
+      RECHAZO_PROVEEDOR:   'entrada',
+      VENCIMIENTO:         'salida',
+      AJUSTE_MANUAL:       'ajuste'
     };
 
     await logKardex({
-      lotId: lot_id, productId: product_id, userId: user.id,
-      action: actionMap[type] || 'MERMA_BODEGA', qty, balanceAfter,
-      reference: wasteCode, notes: reason || type, approvedBy: user.id
+      loteId:          lot_id,
+      productoId:      product_id,
+      usuarioId:       usuario.id,
+      tipo:            tipoMovMap[type] || 'salida',
+      cantidad:        qty,
+      saldoDespues,
+      referenciaTipo:  'merma',
+      referenciaCodigo: codigo,
+      notas:           reason || type,
+      aprobadoPor:     usuario.id
     }, t);
 
-    return record;
+    // Alias para compatibilidad con builderbot
+    registro.waste_code = codigo;
+    return registro;
   });
 };
 
 exports.list = ({ product_id, type, page = 1, limit = 30 }) => {
   const where = {};
-  if (product_id) where.product_id = product_id;
-  if (type) where.type = type;
-  return WasteRecord.findAndCountAll({
-    where, include: [{ model: Product, as: 'product', attributes: ['sku','name'] }],
-    order: [['created_at','DESC']], limit: parseInt(limit), offset: (parseInt(page)-1)*parseInt(limit)
+  if (product_id) where.producto_id = product_id;
+  if (type)       where.tipo = type;
+  return Merma.findAndCountAll({
+    where,
+    include: [{ model: Producto, as: 'producto', attributes: ['siigo_code','nombre'] }],
+    order: [['creado_en','DESC']],
+    limit:  parseInt(limit),
+    offset: (parseInt(page)-1) * parseInt(limit)
   });
 };

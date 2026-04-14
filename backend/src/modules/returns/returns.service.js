@@ -1,24 +1,35 @@
-const { Lot } = require('../../models');
+const { Stock } = require('../../models');
 const { generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
 
-exports.processReturn = async ({ product_id, qty, customer_origin, condition, notes }, user) => {
-  const status = condition === 'RECUPERABLE' ? 'DISPONIBLE' : 'CUARENTENA';
-  const lpn = generateLPN('DEV');
+exports.processReturn = async ({ product_id, qty, customer_origin, condition, notas }, usuario) => {
+  const estado = condition === 'RECUPERABLE' ? 'disponible' : 'cuarentena';
+  const lote   = generateLPN('DEV');
 
-  const lot = await Lot.create({
-    lpn, product_id, qty_initial: qty, qty_current: qty,
-    supplier: customer_origin || 'Devolución cliente',
-    origin: 'DEVOLUCION', status,
-    received_by: user.id, notes
+  const stock = await Stock.create({
+    lote,
+    producto_id:  product_id,
+    cantidad:     qty,
+    reservada:    0,
+    proveedor:    customer_origin || 'Devolución cliente',
+    origen:       'devolucion',
+    estado,
+    recibido_por: usuario.id,
+    notas
   });
 
   await logKardex({
-    lotId: lot.id, productId: product_id, userId: user.id,
-    action: 'DEVOLUCION', qty, balanceAfter: qty,
-    reference: lpn, notes: `Devolución ${condition} de ${customer_origin || 'cliente'}`
+    loteId:          stock.id,
+    productoId:      product_id,
+    usuarioId:       usuario.id,
+    tipo:            'entrada',
+    cantidad:        qty,
+    saldoDespues:    qty,
+    referenciaTipo:  'devolucion',
+    referenciaCodigo: lote,
+    notas:           `Devolución ${condition} de ${customer_origin || 'cliente'}`
   });
 
-  return { lpn, status, qty, condition };
+  return { lpn: lote, status: estado, qty, condition };
 };

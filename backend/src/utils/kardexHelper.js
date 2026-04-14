@@ -1,21 +1,23 @@
-const { Kardex } = require('../models');
-const { generateTxId } = require('./generateCodes');
+const { Movimiento } = require('../models');
+const { v4: uuidv4 } = require('uuid');
 
 /**
- * Registra un movimiento en el Kardex dentro de una transacción.
+ * Registra un movimiento en la tabla movimientos.
+ * Campos alineados con el esquema real de BD.
  */
-async function logKardex({ lotId, productId, userId, action, qty, balanceAfter, reference, notes, approvedBy }, t) {
-  return Kardex.create({
-    tx_id:        generateTxId(),
-    lot_id:       lotId || null,
-    product_id:   productId || null,
-    user_id:      userId || null,
-    action,
-    qty,
-    balance_after: balanceAfter || null,
-    reference:    reference || null,
-    notes:        notes || null,
-    approved_by:  approvedBy || null
+async function logKardex({ loteId, productoId, usuarioId, tipo, cantidad, saldoDespues, referenciaTipo, referenciaCodigo, notas, aprobadoPor }, t) {
+  return Movimiento.create({
+    uuid:             uuidv4(),
+    lote_id:          loteId    || null,
+    producto_id:      productoId || null,
+    usuario_id:       usuarioId  || null,
+    tipo,
+    cantidad,
+    saldo_despues:    saldoDespues    || null,
+    referencia_tipo:  referenciaTipo  || null,
+    referencia_codigo: referenciaCodigo || null,
+    notas:            notas      || null,
+    aprobado_por:     aprobadoPor || null
   }, t ? { transaction: t } : {});
 }
 

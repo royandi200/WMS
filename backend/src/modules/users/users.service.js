@@ -1,33 +1,33 @@
 const bcrypt = require('bcryptjs');
-const { User, Role } = require('../../models');
+const { Usuario, Rol } = require('../../models');
 const AppError = require('../../utils/AppError');
 
-exports.list = () => User.findAll({
-  include: [{ model: Role, as: 'role', attributes: ['id','name'] }],
+exports.list = () => Usuario.findAll({
+  include: [{ model: Rol, as: 'rol', attributes: ['id','nombre'] }],
   attributes: { exclude: ['password_hash'] }
 });
 
-exports.create = async ({ name, phone, email, password, role_id }) => {
+exports.create = async ({ nombre, email, password, rol_id }) => {
   const hash = await bcrypt.hash(password, 12);
-  const user = await User.create({ name, phone, email, password_hash: hash, role_id });
-  return User.findByPk(user.id, { include: [{ model: Role, as: 'role' }], attributes: { exclude: ['password_hash'] } });
+  const usuario = await Usuario.create({ nombre, email, password_hash: hash, rol_id });
+  return Usuario.findByPk(usuario.id, { include: [{ model: Rol, as: 'rol' }], attributes: { exclude: ['password_hash'] } });
 };
 
 exports.getOne = async (id) => {
-  const u = await User.findByPk(id, { include: [{ model: Role, as: 'role' }], attributes: { exclude: ['password_hash'] } });
+  const u = await Usuario.findByPk(id, { include: [{ model: Rol, as: 'rol' }], attributes: { exclude: ['password_hash'] } });
   if (!u) throw new AppError('Usuario no encontrado', 404);
   return u;
 };
 
 exports.update = async (id, data) => {
-  const u = await User.findByPk(id);
+  const u = await Usuario.findByPk(id);
   if (!u) throw new AppError('Usuario no encontrado', 404);
   await u.update(data);
   return exports.getOne(id);
 };
 
 exports.remove = async (id) => {
-  const u = await User.findByPk(id);
+  const u = await Usuario.findByPk(id);
   if (!u) throw new AppError('Usuario no encontrado', 404);
-  await u.update({ active: false });
+  await u.update({ activo: false });
 };

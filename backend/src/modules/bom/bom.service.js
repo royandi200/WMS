@@ -1,12 +1,12 @@
-const { BOM, Product } = require('../../models');
+const { BOM, Producto } = require('../../models');
 const AppError = require('../../utils/AppError');
 
-exports.getByProduct = async (product_id) => {
+exports.getByProduct = async (producto_final_id) => {
   const bom = await BOM.findAll({
-    where: { product_id },
+    where: { producto_final_id },
     include: [
-      { model: Product, as: 'final_product', attributes: ['sku','name','unit'] },
-      { model: Product, as: 'input_product', attributes: ['sku','name','unit'] }
+      { model: Producto, as: 'producto_final', attributes: ['siigo_code','nombre','unidad'] },
+      { model: Producto, as: 'insumo',         attributes: ['siigo_code','nombre','unidad'] }
     ]
   });
   if (!bom.length) throw new AppError('No se encontró BOM para este producto', 404);
@@ -15,7 +15,7 @@ exports.getByProduct = async (product_id) => {
 
 exports.upsert = async (data) => {
   const [record, created] = await BOM.findOrCreate({
-    where: { product_id: data.product_id, input_product_id: data.input_product_id },
+    where: { producto_final_id: data.producto_final_id, insumo_id: data.insumo_id },
     defaults: data
   });
   if (!created) await record.update(data);

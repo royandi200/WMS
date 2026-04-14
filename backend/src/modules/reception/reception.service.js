@@ -1,67 +1,94 @@
-const { sequelize, Product, Lot } = require('../../models');
-const { generateLPN, generateWasteCode } = require('../../utils/generateCodes');
+const { sequelize, Producto, Stock, Recepcion, RecepcionItem } = require('../../models');
+const { generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
 
-exports.receive = async ({ product_id, qty_total, qty_damaged = 0, supplier, expiry_date, notes }, user) => {
-  const product = await Product.findByPk(product_id);
-  if (!product) throw new AppError('Producto no encontrado', 404);
+exports.receive = async ({ producto_id, qty_total, qty_damaged = 0, proveedor, fecha_vencimiento, notas }, usuario) => {
+  const producto = await Producto.findByPk(producto_id);
+  if (!producto) throw new AppError('Producto no encontrado', 404);
 
   const qty_good = qty_total - qty_damaged;
   if (qty_good < 0) throw new AppError('La cantidad dañada no puede superar el total', 400);
 
-  const result = { product: { id: product.id, sku: product.sku }, lots: [] };
+  // Mantener compatibilidad con llamadas desde webhook que usan product_id
+  const result = { producto: { id: producto.id, siigo_code: producto.siigo_code }, stocks: [] };
 
   await sequelize.transaction(async (t) => {
-    // --- Lote DISPONIBLE (unidades buenas) ---
+    // Crear cabecera de recepción
+    const recepcion = await Recepcion.create({
+      producto_id,
+      cantidad_total:   qty_total,
+      cantidad_buena:   qty_good,
+      cantidad_danada:  qty_damaged,
+      proveedor:        proveedor || null,
+      fecha_vencimiento: fecha_vencimiento || null,
+      recibido_por:     usuario.id,
+      notas
+    }, { transaction: t });
+
+    // --- Stock DISPONIBLE (unidades buenas) ---
     if (qty_good > 0) {
-      const lpn = generateLPN('L');
-      const lot = await Lot.create({
-        lpn,
-        product_id,
-        qty_initial:  qty_good,
-        qty_current:  qty_good,
-        supplier:     supplier || null,
-        expiry_date:  expiry_date || null,
-        origin:       'RECEPCION',
-        status:       'DISPONIBLE',
-        received_by:  user.id,
-        notes
+      const lote = generateLPN('L');
+      const stock = await Stock.create({
+        lote,
+        producto_id,
+        cantidad:         qty_good,
+        reservada:        0,
+        proveedor:        proveedor || null,
+        fecha_vencimiento: fecha_vencimiento || null,
+        origen:           'recepcion',
+        estado:           'disponible',
+        recibido_por:     usuario.id,
+        notas
       }, { transaction: t });
 
       await logKardex({
-        lotId: lot.id, productId: product_id, userId: user.id,
-        action: 'INGRESO_RECEPCION', qty: qty_good, balanceAfter: qty_good,
-        reference: lpn, notes: `Recepción de ${supplier || 'proveedor'}`
+        loteId:          stock.id,
+        productoId:      producto_id,
+        usuarioId:       usuario.id,
+        tipo:            'entrada',
+        cantidad:        qty_good,
+        saldoDespues:    qty_good,
+        referenciaTipo:  'recepcion',
+        referenciaCodigo: lote,
+        notas:           `Recepción de ${proveedor || 'proveedor'}`
       }, t);
 
-      result.lots.push({ lpn, status: 'DISPONIBLE', qty: qty_good });
+      result.stocks.push({ lote, estado: 'disponible', cantidad: qty_good });
     }
 
-    // --- Lote CUARENTENA (unidades dañadas) ---
+    // --- Stock CUARENTENA (unidades dañadas) ---
     if (qty_damaged > 0) {
-      const lpnNov = generateLPN('L') + '-NOV';
-      const lotNov = await Lot.create({
-        lpn:          lpnNov,
-        product_id,
-        qty_initial:  qty_damaged,
-        qty_current:  qty_damaged,
-        supplier:     supplier || null,
-        origin:       'RECEPCION',
-        status:       'CUARENTENA',
-        received_by:  user.id,
-        notes:        'Dañado en recepción'
+      const loteNov = generateLPN('L') + '-NOV';
+      const stockNov = await Stock.create({
+        lote:             loteNov,
+        producto_id,
+        cantidad:         qty_damaged,
+        reservada:        0,
+        proveedor:        proveedor || null,
+        origen:           'recepcion',
+        estado:           'cuarentena',
+        recibido_por:     usuario.id,
+        notas:            'Dañado en recepción'
       }, { transaction: t });
 
       await logKardex({
-        lotId: lotNov.id, productId: product_id, userId: user.id,
-        action: 'INGRESO_NOVEDAD', qty: qty_damaged, balanceAfter: qty_damaged,
-        reference: lpnNov, notes: 'Unidades dañadas enviadas a cuarentena'
+        loteId:          stockNov.id,
+        productoId:      producto_id,
+        usuarioId:       usuario.id,
+        tipo:            'entrada',
+        cantidad:        qty_damaged,
+        saldoDespues:    qty_damaged,
+        referenciaTipo:  'novedad',
+        referenciaCodigo: loteNov,
+        notas:           'Unidades dañadas enviadas a cuarentena'
       }, t);
 
-      result.lots.push({ lpn: lpnNov, status: 'CUARENTENA', qty: qty_damaged });
+      result.stocks.push({ lote: loteNov, estado: 'cuarentena', cantidad: qty_damaged });
     }
   });
 
+  // Compatibilidad con builderbot que espera `lots` (alias)
+  result.lots = result.stocks.map(s => ({ lpn: s.lote, status: s.estado === 'disponible' ? 'DISPONIBLE' : 'CUARENTENA', qty: s.cantidad }));
   return result;
 };
