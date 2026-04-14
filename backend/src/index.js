@@ -1,59 +1,85 @@
 require('dotenv').config();
-const express    = require('express');
-const cors       = require('cors');
-const helmet     = require('helmet');
-const morgan     = require('morgan');
+const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
+const compression = require('compression');
+const morgan = require('morgan');
+
 const { sequelize } = require('./config/database');
-const logger     = require('./utils/logger');
+const logger = require('./config/logger');
+const errorHandler = require('./middleware/errorHandler');
+const rateLimiter = require('./middleware/rateLimiter');
 
-// ── Rutas ────────────────────────────────────────────────
-const authRoutes       = require('./routes/auth.routes');
-const productosRoutes  = require('./routes/productos.routes');
-const bodegasRoutes    = require('./routes/bodegas.routes');
-const recepcionRoutes  = require('./routes/recepciones.routes');
-const despachoRoutes   = require('./routes/despachos.routes');
-const stockRoutes      = require('./routes/stock.routes');
-const siigoRoutes      = require('./routes/siigo.routes');
+// Routers
+const authRouter = require('./modules/auth/auth.routes');
+const usersRouter = require('./modules/users/users.routes');
+const inventoryRouter = require('./modules/inventory/inventory.routes');
+const receptionRouter = require('./modules/reception/reception.routes');
+const productionRouter = require('./modules/production/production.routes');
+const dispatchRouter = require('./modules/dispatch/dispatch.routes');
+const wasteRouter = require('./modules/waste/waste.routes');
+const returnsRouter = require('./modules/returns/returns.routes');
+const approvalsRouter = require('./modules/approvals/approvals.routes');
+const bomRouter = require('./modules/bom/bom.routes');
+const siigoRouter = require('./modules/siigo/siigo.routes');
+const webhookRouter = require('./modules/webhook/webhook.routes');
 
-const app  = express();
-const PORT = process.env.PORT || 4000;
+// Jobs
+require('./jobs/siigo.sync.job');
 
-// ── Middlewares ──────────────────────────────────────────
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// ── Seguridad y utilidades ──────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
-app.use(express.json());
-app.use(morgan('dev'));
+app.use(cors({
+  origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(compression());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('combined', { stream: { write: msg => logger.http(msg.trim()) } }));
+app.use(rateLimiter);
 
-// ── Health check ─────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date() }));
-
-// ── API Routes ───────────────────────────────────────────
-const v1 = express.Router();
-v1.use('/auth',        authRoutes);
-v1.use('/productos',   productosRoutes);
-v1.use('/bodegas',     bodegasRoutes);
-v1.use('/recepciones', recepcionRoutes);
-v1.use('/despachos',   despachoRoutes);
-v1.use('/stock',       stockRoutes);
-v1.use('/siigo',       siigoRoutes);
-app.use('/api/v1', v1);
-
-// ── Error handler ─────────────────────────────────────────
-app.use((err, _req, res, _next) => {
-  logger.error(err.message, { stack: err.stack });
-  res.status(err.status || 500).json({ error: err.message || 'Error interno del servidor' });
+// ── Health check ────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'WMS API' });
 });
 
-// ── Arranque ──────────────────────────────────────────────
-async function start() {
+// ── Rutas API ────────────────────────────────────────────────────────────────
+const API = '/api/v1';
+app.use(`${API}/auth`,       authRouter);
+app.use(`${API}/users`,      usersRouter);
+app.use(`${API}/inventory`,  inventoryRouter);
+app.use(`${API}/reception`,  receptionRouter);
+app.use(`${API}/production`, productionRouter);
+app.use(`${API}/dispatch`,   dispatchRouter);
+app.use(`${API}/waste`,      wasteRouter);
+app.use(`${API}/returns`,    returnsRouter);
+app.use(`${API}/approvals`,  approvalsRouter);
+app.use(`${API}/bom`,        bomRouter);
+app.use(`${API}/siigo`,      siigoRouter);
+app.use(`${API}/webhook`,    webhookRouter);
+
+// ── Error handler (siempre al final) ────────────────────────────────────────
+app.use(errorHandler);
+
+// ── Inicializar DB y levantar servidor ──────────────────────────────────────
+(async () => {
   try {
     await sequelize.authenticate();
-    logger.info('✅  Conexión a MySQL establecida correctamente');
-    app.listen(PORT, () => logger.info(`🚀  WMS Backend corriendo en el puerto ${PORT}`));
+    logger.info('✅ Conexión a MySQL establecida');
+    if (process.env.DB_SYNC === 'true') {
+      await sequelize.sync({ alter: true });
+      logger.info('✅ Modelos sincronizados con la base de datos');
+    }
+    app.listen(PORT, () => logger.info(`🚀 WMS API corriendo en puerto ${PORT}`));
   } catch (err) {
-    logger.error('❌  No se pudo conectar a la base de datos:', err);
+    logger.error('❌ Error al conectar la base de datos:', err);
     process.exit(1);
   }
-}
+})();
 
-start();
+module.exports = app;
