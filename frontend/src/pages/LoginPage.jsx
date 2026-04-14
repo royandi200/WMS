@@ -1,0 +1,221 @@
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react'
+import WmsLogo from '../components/WmsLogo'
+import { useAuthStore } from '../store/authStore'
+import { authApi } from '../api/auth.api'
+
+export default function LoginPage() {
+  const [showPassword, setShowPassword] = useState(false)
+  const [serverError, setServerError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const setAuth = useAuthStore((s) => s.setAuth)
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm()
+
+  async function onSubmit(data) {
+    setServerError('')
+    setIsLoading(true)
+    try {
+      const response = await authApi.login(data.email, data.password)
+      setAuth(response.token, response.usuario)
+    } catch (err) {
+      const msg =
+        err?.response?.data?.error ||
+        'Error al iniciar sesión. Verifique sus credenciales.'
+      setServerError(msg)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex">
+      {/* Left panel — form */}
+      <div className="flex flex-col justify-between w-full max-w-md bg-surface px-10 py-10 relative z-10">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-3 mb-12">
+            <WmsLogo size={36} />
+            <div>
+              <span className="text-foreground font-semibold text-lg leading-none tracking-wide">WMS</span>
+              <p className="text-muted text-xs mt-0.5 font-mono">v1.0.0</p>
+            </div>
+          </div>
+
+          <div className="mb-8">
+            <h1 className="text-foreground text-2xl font-semibold text-balance leading-snug">
+              Bienvenido de nuevo
+            </h1>
+            <p className="text-muted text-sm mt-2 leading-relaxed">
+              Ingrese sus credenciales para acceder al sistema de gestión de almacén.
+            </p>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+            {/* Email */}
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="block text-sm font-medium text-subtle">
+                Correo electrónico
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="usuario@empresa.com"
+                className={`input-field ${errors.email ? 'border-danger focus:border-danger focus:ring-danger' : ''}`}
+                {...register('email', {
+                  required: 'El correo es requerido',
+                  pattern: {
+                    value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                    message: 'Ingrese un correo válido',
+                  },
+                })}
+              />
+              {errors.email && (
+                <p className="flex items-center gap-1.5 text-danger text-xs mt-1">
+                  <AlertCircle size={12} />
+                  {errors.email.message}
+                </p>
+              )}
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="password" className="block text-sm font-medium text-subtle">
+                  Contraseña
+                </label>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:text-primary-hover transition-colors"
+                >
+                  ¿Olvidó su contraseña?
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className={`input-field pr-11 ${errors.password ? 'border-danger focus:border-danger focus:ring-danger' : ''}`}
+                  {...register('password', {
+                    required: 'La contraseña es requerida',
+                    minLength: {
+                      value: 6,
+                      message: 'Mínimo 6 caracteres',
+                    },
+                  })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-subtle transition-colors"
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {errors.password && (
+                <p className="flex items-center gap-1.5 text-danger text-xs mt-1">
+                  <AlertCircle size={12} />
+                  {errors.password.message}
+                </p>
+              )}
+            </div>
+
+            {/* Server error */}
+            {serverError && (
+              <div className="flex items-start gap-2.5 bg-danger/10 border border-danger/30 rounded-md px-4 py-3">
+                <AlertCircle size={15} className="text-danger mt-0.5 shrink-0" />
+                <p className="text-danger text-sm leading-relaxed">{serverError}</p>
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="btn-primary flex items-center justify-center gap-2 mt-2"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Ingresando...
+                </>
+              ) : (
+                'Ingresar al sistema'
+              )}
+            </button>
+          </form>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-10 pt-6 border-t border-border">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-muted text-xs">Integrado con SIIGO ERP</span>
+          </div>
+          <p className="text-muted text-xs leading-relaxed">
+            Acceso restringido. Solo personal autorizado.
+            <br />
+            Todos los accesos quedan registrados.
+          </p>
+        </div>
+      </div>
+
+      {/* Right panel — warehouse image */}
+      <div
+        className="hidden lg:flex flex-1 relative overflow-hidden"
+        aria-hidden="true"
+      >
+        <img
+          src="/warehouse-bg.jpg"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        {/* Dark overlay */}
+        <div className="absolute inset-0 bg-background/60" />
+
+        {/* Info card overlay */}
+        <div className="relative z-10 flex flex-col justify-end w-full p-12">
+          <div className="mb-6">
+            <div className="inline-flex items-center gap-2 bg-surface/80 backdrop-blur-sm border border-border rounded-full px-4 py-1.5 mb-6">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+              <span className="text-xs text-subtle font-mono">Sistema activo</span>
+            </div>
+            <h2 className="text-foreground text-3xl font-semibold text-balance leading-snug max-w-sm">
+              Gestión de almacén en tiempo real
+            </h2>
+            <p className="text-muted text-sm mt-3 leading-relaxed max-w-xs">
+              Recepciones, despachos e inventario sincronizados automáticamente con SIIGO.
+            </p>
+          </div>
+
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-4 max-w-sm">
+            {[
+              { label: 'Bodegas', value: '—' },
+              { label: 'Productos', value: '—' },
+              { label: 'Movimientos hoy', value: '—' },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="bg-surface/70 backdrop-blur-sm border border-border rounded-lg px-4 py-3"
+              >
+                <p className="text-foreground text-xl font-semibold font-mono">{stat.value}</p>
+                <p className="text-muted text-xs mt-0.5">{stat.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
