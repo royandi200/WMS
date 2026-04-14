@@ -1,55 +1,33 @@
-import { useAuthStore } from '../store/authStore'
-import { LogOut, Package, Warehouse, TruckIcon, BarChart3 } from 'lucide-react'
-import WmsLogo from '../components/WmsLogo'
-
-const NAV_ITEMS = [
-  { icon: BarChart3, label: 'Dashboard' },
-  { icon: Package, label: 'Inventario' },
-  { icon: Warehouse, label: 'Recepciones' },
-  { icon: TruckIcon, label: 'Despachos' },
-]
-
 export default function DashboardPage() {
-  const { usuario, logout } = useAuthStore()
+  const cards = [
+    { label: 'Stock total',       value: '—',  color: 'text-primary',  icon: '▦' },
+    { label: 'Recepciones hoy',   value: '—',  color: 'text-green-400', icon: '↓' },
+    { label: 'Despachos hoy',     value: '—',  color: 'text-blue-400',  icon: '↑' },
+    { label: 'Aprobaciones pend.', value: '—', color: 'text-yellow-400',icon: '✓' },
+  ]
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <header className="h-14 bg-surface border-b border-border flex items-center justify-between px-6">
-        <div className="flex items-center gap-3">
-          <WmsLogo size={28} />
-          <span className="text-foreground font-semibold text-sm">WMS</span>
-          <span className="text-border">|</span>
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.label}
-              className="flex items-center gap-1.5 text-muted hover:text-subtle text-sm px-2 py-1 rounded transition-colors"
-            >
-              <item.icon size={14} />
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-subtle text-sm">{usuario?.nombre || usuario?.email}</span>
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 text-muted hover:text-danger text-sm transition-colors"
-            aria-label="Cerrar sesión"
-          >
-            <LogOut size={15} />
-            Salir
-          </button>
-        </div>
-      </header>
-      <main className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <WmsLogo size={56} />
-          <h1 className="text-foreground text-2xl font-semibold mt-6 mb-2">
-            Bienvenido, {usuario?.nombre?.split(' ')[0] || 'usuario'}
-          </h1>
-          <p className="text-muted text-sm">El dashboard está en construcción.</p>
-        </div>
-      </main>
+    <div>
+      <h1 className="text-xl font-semibold text-foreground mb-6">Dashboard</h1>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {cards.map((c) => (
+          <div key={c.label} className="bg-surface border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-muted font-medium">{c.label}</p>
+              <span className={`text-lg ${c.color}`}>{c.icon}</span>
+            </div>
+            <p className={`text-2xl font-bold tabular-nums ${c.color}`}>{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Placeholder actividad reciente */}
+      <div className="bg-surface border border-border rounded-lg p-6">
+        <h2 className="text-sm font-semibold text-foreground mb-4">Actividad reciente</h2>
+        <p className="text-sm text-muted">Los módulos se están construyendo — aquí aparecerá el resumen de movimientos del día.</p>
+      </div>
     </div>
   )
 }
