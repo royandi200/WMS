@@ -2,17 +2,18 @@ const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
 const BOM = sequelize.define('BOM', {
-  id:               { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  product_id:       { type: DataTypes.UUID, allowNull: false },
-  input_product_id: { type: DataTypes.UUID, allowNull: false },
-  qty_per_unit:     { type: DataTypes.DECIMAL(12, 4), allowNull: false },
-  unit:             { type: DataTypes.STRING(20), defaultValue: 'und' },
-  notes:            { type: DataTypes.STRING(200) }
+  id:                 { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
+  producto_final_id:  { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+  insumo_id:          { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+  cantidad_por_unidad:{ type: DataTypes.DECIMAL(12, 4), allowNull: false },
+  unidad:             { type: DataTypes.STRING(20), defaultValue: 'und' },
+  notas:              { type: DataTypes.STRING(200) }
 }, {
   tableName: 'bom',
+  timestamps: false,
   indexes: [
-    { fields: ['product_id'] },
-    { unique: true, fields: ['product_id', 'input_product_id'] }
+    { fields: ['producto_final_id'] },
+    { unique: true, fields: ['producto_final_id', 'insumo_id'] }
   ]
 });
 

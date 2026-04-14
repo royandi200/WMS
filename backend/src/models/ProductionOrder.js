@@ -2,30 +2,32 @@ const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
 const ProductionOrder = sequelize.define('ProductionOrder', {
-  id:             { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  order_code:     { type: DataTypes.STRING(30), allowNull: false, unique: true },
-  product_id:     { type: DataTypes.UUID, allowNull: false },
-  phase:          {
+  id:              { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
+  codigo_orden:    { type: DataTypes.STRING(30), allowNull: false, unique: true },
+  producto_id:     { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+  fase:            {
     type: DataTypes.ENUM('F0','F1','F2','F3','F4','F5'),
     defaultValue: 'F0'
   },
-  status:         {
+  estado:          {
     type: DataTypes.ENUM('PLANEADA','EN_PROCESO','CERRADA','CANCELADA'),
     defaultValue: 'PLANEADA'
   },
-  qty_planned:    { type: DataTypes.DECIMAL(12, 3), allowNull: false },
-  qty_real:       { type: DataTypes.DECIMAL(12, 3), defaultValue: 0 },
-  materials_confirmed_at: { type: DataTypes.DATE },
-  closed_at:      { type: DataTypes.DATE },
-  created_by:     { type: DataTypes.UUID },
-  approved_by:    { type: DataTypes.UUID },
-  notes:          { type: DataTypes.TEXT }
+  cantidad_planeada: { type: DataTypes.DECIMAL(12, 3), allowNull: false },
+  cantidad_real:     { type: DataTypes.DECIMAL(12, 3), defaultValue: 0 },
+  materiales_conf_en: { type: DataTypes.DATE },
+  cerrado_en:        { type: DataTypes.DATE },
+  creado_por:        { type: DataTypes.INTEGER.UNSIGNED },
+  aprobado_por:      { type: DataTypes.INTEGER.UNSIGNED },
+  notas:             { type: DataTypes.TEXT },
+  creado_en:         { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 }, {
-  tableName: 'production_orders',
+  tableName: 'ordenes_produccion',
+  timestamps: false,
   indexes: [
-    { fields: ['status'] },
-    { fields: ['product_id'] },
-    { fields: ['order_code'] }
+    { fields: ['estado'] },
+    { fields: ['producto_id'] },
+    { fields: ['codigo_orden'] }
   ]
 });
 

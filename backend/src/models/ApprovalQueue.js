@@ -2,25 +2,27 @@ const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
 const ApprovalQueue = sequelize.define('ApprovalQueue', {
-  id:            { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  request_code:  { type: DataTypes.STRING(30), allowNull: false, unique: true },
-  action:        { type: DataTypes.STRING(80), allowNull: false },
-  payload:       { type: DataTypes.JSON, allowNull: false },
-  requested_by:  { type: DataTypes.UUID, allowNull: false },
-  processed_by:  { type: DataTypes.UUID },
-  status:        {
+  id:               { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
+  codigo_solicitud: { type: DataTypes.STRING(30), allowNull: false, unique: true },
+  accion:           { type: DataTypes.STRING(80), allowNull: false },
+  payload:          { type: DataTypes.JSON, allowNull: false },
+  solicitado_por:   { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+  procesado_por:    { type: DataTypes.INTEGER.UNSIGNED },
+  estado:           {
     type: DataTypes.ENUM('PENDIENTE','APROBADO','RECHAZADO','EXPIRADO'),
     defaultValue: 'PENDIENTE'
   },
-  reject_reason: { type: DataTypes.TEXT },
-  processed_at:  { type: DataTypes.DATE },
-  expires_at:    { type: DataTypes.DATE }
+  motivo_rechazo:   { type: DataTypes.TEXT },
+  procesado_en:     { type: DataTypes.DATE },
+  expira_en:        { type: DataTypes.DATE },
+  creado_en:        { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 }, {
-  tableName: 'approval_queue',
+  tableName: 'aprobaciones',
+  timestamps: false,
   indexes: [
-    { fields: ['status'] },
-    { fields: ['requested_by'] },
-    { fields: ['request_code'] }
+    { fields: ['estado'] },
+    { fields: ['solicitado_por'] },
+    { fields: ['codigo_solicitud'] }
   ]
 });
 
