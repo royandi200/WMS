@@ -44,8 +44,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: msg => logger.http(msg.trim()) } }));
 app.use(rateLimiter);
 
-// ── Health check ───────────────────────────────────────────────────────────
-app.get('/health', async (req, res) => {
+// ── Rutas API ───────────────────────────────────────────────────────────
+const API = '/api/v1';
+
+// Health check — SIN auth, bajo /api/v1/health para pasar el proxy de Vercel
+app.get(`${API}/health`, async (req, res) => {
   try {
     const result = await healthSvc.check();
     const code   = result.status === 'ok' ? 200 : result.status === 'degraded' ? 207 : 503;
@@ -55,8 +58,6 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ── Rutas API ───────────────────────────────────────────────────────────
-const API = '/api/v1';
 app.use(`${API}/auth`,       authRouter);
 app.use(`${API}/users`,      usersRouter);
 app.use(`${API}/inventory`,  inventoryRouter);
