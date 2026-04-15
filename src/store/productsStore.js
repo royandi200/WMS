@@ -27,7 +27,7 @@ export const useProductsStore = create((set, get) => ({
       const { data } = await api.getProducts(params)
       set({ list: toArray(data), loading: false })
     } catch (e) {
-      set({ error: e.response?.data?.message ?? 'Error al cargar productos', loading: false })
+      set({ list: [], error: e.response?.data?.message ?? 'Error al cargar productos', loading: false })
     }
   },
 
