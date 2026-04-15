@@ -4,10 +4,18 @@
  */
 const { query } = require('../_lib/db');
 
+// Nombres REALES de tablas en MySQL (según tableName en cada modelo)
 const TABLAS_CRITICAS = [
-  'lots', 'kardex', 'stock', 'productos',
-  'recepciones', 'despachos', 'waste_records',
-  'approval_queue', 'ordenes_produccion', 'bom'
+  'lots',             // Lot.js
+  'kardex',           // Kardex.js
+  'stock',            // Stock.js
+  'productos',        // Product.js
+  'recepciones',      // Recepcion.js
+  'despachos',        // Despacho.js
+  'mermas',           // WasteRecord.js  (≠ waste_records)
+  'aprobaciones',     // ApprovalQueue.js (≠ approval_queue)
+  'ordenes_produccion', // ProductionOrder.js
+  'bom'               // BOM.js
 ];
 
 module.exports = async (req, res) => {
@@ -32,7 +40,7 @@ module.exports = async (req, res) => {
     });
   }
 
-  // 2. Verificar tablas críticas
+  // 2. Verificar tablas
   for (const tabla of TABLAS_CRITICAS) {
     try {
       const rows = await query(
@@ -55,7 +63,7 @@ module.exports = async (req, res) => {
     }
   }
 
-  // 3. Smoke test — últimos registros en las tablas clave
+  // 3. Smoke test
   try {
     const lots   = await query('SELECT id FROM lots   ORDER BY created_at DESC LIMIT 1');
     const kardex = await query('SELECT id FROM kardex ORDER BY created_at DESC LIMIT 1');
