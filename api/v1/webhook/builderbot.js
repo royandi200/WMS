@@ -405,8 +405,6 @@ module.exports = async (req, res) => {
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
-      // BD: codigo_orden, producto_id, cantidad_planeada, estado(PLANEADA),
-      //     creado_por, notas  — SIN bodega_id, SIN updated_at
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p          = await findProductBySku(db, params.id_producto_final);
         const codigoOrden = await nextCodigoOrden(db);
@@ -437,7 +435,6 @@ module.exports = async (req, res) => {
       }
 
       // ── 3. AVANCE_FASES ───────────────────────────────────────
-      // BD: estado → EN_PROCESO (mayúsculas), notas (no observaciones, no updated_at)
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(
           `SELECT id, notas FROM ordenes_produccion
@@ -784,7 +781,6 @@ module.exports = async (req, res) => {
       }
 
       // ── Consulta estado de orden ──────────────────────────────
-      // BD: cantidad_planeada, cantidad_real (no cantidad_obj/cantidad_prod)
       case 'CONSULTAR_ESTADO_PRODUCCION': {
         const [rows] = await db.execute(
           `SELECT o.id, o.codigo_orden, o.estado, o.fase,
@@ -887,7 +883,6 @@ module.exports = async (req, res) => {
       }
 
       // ── Confirmar materiales / Excepción picking ──────────────
-      // BD: estado → EN_PROCESO (mayúsculas), materiales_conf_en — SIN updated_at
       case 'CONFIRMAR_MATERIALES_PRODUCCION':
       case 'EXCEPCION_PICKING': {
         const [rows] = await db.execute(
@@ -924,7 +919,10 @@ module.exports = async (req, res) => {
     }
 
     await saveLog(db, { from, action, priority, payload: rawBody, response: result, status: 'PROCESSED' });
-    return res.json({ ok: true, ...result });
+
+    // ── Respuesta final: incluir 'mensaje' para BuilderBot (BB espera ese campo)
+    //    y mantener 'message' para compatibilidad con otros consumidores
+    return res.json({ ok: true, mensaje: result.message ?? null, ...result });
 
   } catch (err) {
     const errMsg = err.message || 'Error interno';
