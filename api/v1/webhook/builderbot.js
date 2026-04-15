@@ -303,12 +303,17 @@ module.exports = async (req, res) => {
     const bodegaId = await getDefaultBodega(db);
 
     // ── RBAC: verificar permiso antes de ejecutar ──────────────
+    // Normalizar rol_nombre: primera letra mayúscula, resto minúsculas
+    // Esto protege contra inconsistencias en la BD (ej: 'operario' vs 'Operario')
+    const rolRaw  = user.rol_nombre || '';
+    const rolNorm = rolRaw.charAt(0).toUpperCase() + rolRaw.slice(1).toLowerCase();
+
     const rolesPermitidos = RBAC[action];
-    if (rolesPermitidos && !rolesPermitidos.includes(user.rol_nombre)) {
-      const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${user.rol_nombre}`;
+    if (rolesPermitidos && !rolesPermitidos.includes(rolNorm)) {
+      const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
       await sendBack(from, msg);
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'DENIED' });
-      return res.status(403).json({ ok: false, error: 'RBAC_DENIED', rol: user.rol_nombre });
+      return res.status(403).json({ ok: false, error: 'RBAC_DENIED', rol: rolRaw });
     }
 
     let result = {};
