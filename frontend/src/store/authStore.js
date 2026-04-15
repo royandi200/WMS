@@ -1,26 +1,37 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 
-export const useAuthStore = create(
-  persist(
-    (set) => ({
-      token: null,
-      user: null,
-      isAuthenticated: false,
+// sessionStorage funciona en Vercel; localStorage falla en iframes sandboxed
+const SS_KEY = 'wms-auth'
 
-      setAuth: (token, user) =>
-        set({ token, user, isAuthenticated: true }),
+const load = () => {
+  try {
+    const raw = sessionStorage.getItem(SS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
 
-      logout: () =>
-        set({ token: null, user: null, isAuthenticated: false }),
-    }),
-    {
-      name: 'wms-auth',
-      partialize: (state) => ({
-        token:           state.token,
-        user:            state.user,
-        isAuthenticated: state.isAuthenticated,
-      }),
-    }
-  )
-)
+const save = (token, user) => {
+  try { sessionStorage.setItem(SS_KEY, JSON.stringify({ token, user })) } catch {}
+}
+
+const clear = () => {
+  try { sessionStorage.removeItem(SS_KEY) } catch {}
+}
+
+const persisted = load()
+
+export const useAuthStore = create((set) => ({
+  token:           persisted.token   ?? null,
+  user:            persisted.user    ?? null,
+  isAuthenticated: !!persisted.token,
+
+  setAuth: (token, user) => {
+    save(token, user)
+    set({ token, user, isAuthenticated: true })
+  },
+
+  logout: () => {
+    clear()
+    set({ token: null, user: null, isAuthenticated: false })
+  },
+}))
