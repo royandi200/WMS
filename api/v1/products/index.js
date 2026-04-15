@@ -3,21 +3,35 @@
 const { query } = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
+// Mapea una fila de la tabla `productos` al contrato que espera el frontend.
+// Campos clave del frontend: id, sku, name, description, type, unit,
+//   min_stock, max_stock, active, siigo_id, siigo_code, createdAt
+// Nota: la tabla no tiene stock_minimo/max — se retorna 0 como valor por defecto
+// hasta que se agregue esa columna al schema.
 const toRow = (row) => ({
   id:           row.id,
+  // sku es el alias público de siigo_code
+  sku:          row.siigo_code,
   siigo_id:     row.siigo_id,
   siigo_code:   row.siigo_code,
   name:         row.nombre,
   description:  row.descripcion,
+  // type: frontend usa MATERIA_PRIMA/PRODUCTO_TERMINADO/INSUMO/EMPAQUE;
+  // BD usa Product/Service/Combo/ConsumerGood. Se conserva el valor real.
   type:         row.tipo_producto,
   unit_code:    row.unit_code,
-  unit_label:   row.unit_label,
+  unit:         row.unit_label ?? row.unit_code ?? 'und',
   barcode:      row.barcode,
   referencia:   row.referencia,
   marca:        row.marca,
   precio_venta: Number(row.precio_venta || 0),
   control_stock:row.control_stock === 1,
+  // min_stock / max_stock: columnas aún no existen en el schema.
+  // Se exponen como 0 para que el frontend no crashee con undefined.
+  min_stock:    Number(row.stock_minimo ?? row.min_stock ?? 0),
+  max_stock:    Number(row.stock_maximo ?? row.max_stock ?? 0),
   active:       row.activo === 1,
+  siigo_sync_at: row.siigo_synced_at,
   createdAt:    row.creado_en,
 });
 
@@ -45,14 +59,23 @@ module.exports = async (req, res) => {
       args.push(Number(limit), offset);
 
       const rows = await query(sql, args);
-      const countRows = await query(
-        `SELECT COUNT(*) AS total FROM productos WHERE 1=1` +
-        (active === 'true' ? ' AND activo=1' : active === 'false' ? ' AND activo=0' : '') +
-        (type ? ' AND tipo_producto=?' : '') +
-        (search ? ' AND (siigo_code LIKE ? OR nombre LIKE ? OR barcode LIKE ?)' : ''),
-        [...(type ? [type] : []), ...(search ? [`%${search}%`,`%${search}%`,`%${search}%`] : [])]
-      );
-      return res.status(200).json({ ok: true, data: { rows: rows.map(toRow), total: Number(countRows[0]?.total ?? 0) } });
+
+      // Count query paralela
+      let countSql = `SELECT COUNT(*) AS total FROM productos WHERE 1=1`;
+      const countArgs = [];
+      if (active === 'true')  countSql += ` AND activo = 1`;
+      if (active === 'false') countSql += ` AND activo = 0`;
+      if (type)   { countSql += ` AND tipo_producto = ?`; countArgs.push(type); }
+      if (search) {
+        countSql += ` AND (siigo_code LIKE ? OR nombre LIKE ? OR barcode LIKE ?)`;
+        countArgs.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      }
+      const countRows = await query(countSql, countArgs);
+
+      return res.status(200).json({
+        ok: true,
+        data: { rows: rows.map(toRow), total: Number(countRows[0]?.total ?? 0) }
+      });
     } catch (err) {
       console.error('[products GET]', err.message);
       return res.status(500).json({ ok: false, error: err.message });
@@ -62,20 +85,37 @@ module.exports = async (req, res) => {
   // ── POST ─────────────────────────────────────────────────────────────────
   if (req.method === 'POST') {
     try {
-      const { siigo_code, name, description, type = 'Product', unit_code = '94', barcode, referencia, marca, precio_venta } = req.body || {};
-      if (!siigo_code || !name)
-        return res.status(400).json({ ok: false, error: 'siigo_code y name son requeridos' });
+      // El frontend envía `sku` — lo aceptamos como alias de siigo_code
+      const {
+        sku, siigo_code,
+        name, description,
+        type = 'Product',
+        unit_code = '94',
+        unit,          // frontend manda `unit` (texto libre) → se guarda en unit_label
+        barcode, referencia, marca, precio_venta
+      } = req.body || {};
+
+      const code = siigo_code || sku;
+      if (!code || !name)
+        return res.status(400).json({ ok: false, error: 'sku/siigo_code y name son requeridos' });
 
       await query(
-        `INSERT INTO productos (siigo_code, nombre, descripcion, tipo_producto, unit_code, barcode, referencia, marca, precio_venta, activo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        [siigo_code, name, description || null, type, unit_code, barcode || null, referencia || null, marca || null, precio_venta || null]
+        `INSERT INTO productos
+           (siigo_code, nombre, descripcion, tipo_producto, unit_code, unit_label,
+            barcode, referencia, marca, precio_venta, activo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [
+          code, name, description || null, type,
+          unit_code,
+          unit || null,
+          barcode || null, referencia || null, marca || null, precio_venta || null
+        ]
       );
-      const [row] = await query(`SELECT * FROM productos WHERE siigo_code = ? LIMIT 1`, [siigo_code]);
+      const [row] = await query(`SELECT * FROM productos WHERE siigo_code = ? LIMIT 1`, [code]);
       return res.status(201).json({ ok: true, data: toRow(row) });
     } catch (err) {
       if (err.code === 'ER_DUP_ENTRY')
-        return res.status(409).json({ ok: false, error: 'El código SIIGO ya existe' });
+        return res.status(409).json({ ok: false, error: 'El código SKU ya existe' });
       console.error('[products POST]', err.message);
       return res.status(500).json({ ok: false, error: err.message });
     }

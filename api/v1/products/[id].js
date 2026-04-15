@@ -1,24 +1,31 @@
 // api/v1/products/[id].js
-// GET   /api/v1/products/:id
-// PUT   /api/v1/products/:id
-// PATCH /api/v1/products/:id/toggle  ← manejado por toggle.js
+// GET  /api/v1/products/:id  — obtener producto por ID
+// PUT  /api/v1/products/:id  — actualizar producto
 const { query }             = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
+// Usa las columnas reales de la tabla `productos` (ver database/schema.sql)
 function mapRow(row) {
   return {
-    id:          row.id,
-    sku:         row.sku,
-    name:        row.nombre,
-    description: row.descripcion,
-    type:        row.tipo,
-    unit:        row.unidad,
-    min_stock:   Number(row.stock_min),
-    max_stock:   Number(row.stock_max),
-    active:      row.activo === 1 || row.activo === true,
-    siigo_id:    row.siigo_id,
-    siigo_code:  row.siigo_code,
-    createdAt:   row.created_at,
+    id:           row.id,
+    sku:          row.siigo_code,          // alias público
+    siigo_id:     row.siigo_id,
+    siigo_code:   row.siigo_code,
+    name:         row.nombre,
+    description:  row.descripcion,
+    type:         row.tipo_producto,
+    unit_code:    row.unit_code,
+    unit:         row.unit_label ?? row.unit_code ?? 'und',
+    barcode:      row.barcode,
+    referencia:   row.referencia,
+    marca:        row.marca,
+    precio_venta: Number(row.precio_venta || 0),
+    control_stock:row.control_stock === 1,
+    min_stock:    Number(row.stock_minimo ?? row.min_stock ?? 0),
+    max_stock:    Number(row.stock_maximo ?? row.max_stock ?? 0),
+    active:       row.activo === 1 || row.activo === true,
+    siigo_sync_at: row.siigo_synced_at,
+    createdAt:    row.creado_en,
   };
 }
 
@@ -44,17 +51,22 @@ module.exports = async (req, res) => {
   }
 
   // ── PUT (actualizar)
+  // El frontend envía: { name, description, type, unit, min_stock, max_stock }
+  // Columnas reales en BD: nombre, descripcion, tipo_producto, unit_label
+  // Nota: min_stock/max_stock no existen aún en el schema — se ignoran por ahora
+  // sin generar error, para no bloquear el flujo del frontend.
   if (req.method === 'PUT') {
     try {
-      const { name, description, type, unit, min_stock, max_stock } = req.body || {};
-      if (!name || !type || !unit)
-        return res.status(400).json({ ok: false, error: 'name, type y unit son requeridos' });
+      const { name, description, type, unit } = req.body || {};
+      if (!name || !type)
+        return res.status(400).json({ ok: false, error: 'name y type son requeridos' });
 
       await query(
         `UPDATE productos
-         SET nombre=?, descripcion=?, tipo=?, unidad=?, stock_min=?, stock_max=?
-         WHERE id=?`,
-        [name, description || null, type, unit, min_stock ?? 0, max_stock ?? 0, id]
+         SET nombre = ?, descripcion = ?, tipo_producto = ?, unit_label = ?,
+             actualizado_en = NOW()
+         WHERE id = ?`,
+        [name, description || null, type, unit || null, id]
       );
       const rows = await query(`SELECT * FROM productos WHERE id = ? LIMIT 1`, [id]);
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });

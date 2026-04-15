@@ -1,21 +1,22 @@
 import { create } from 'zustand'
 
-// sessionStorage funciona en Vercel; localStorage falla en iframes sandboxed
-const SS_KEY = 'wms-auth'
+// localStorage persiste entre pestañas y F5 en Vercel (dominio propio).
+// sessionStorage solo se usa en iframes sandboxed (ej: embeds de terceros).
+const LS_KEY = 'wms-auth'
 
 const load = () => {
   try {
-    const raw = sessionStorage.getItem(SS_KEY)
+    const raw = localStorage.getItem(LS_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch { return {} }
 }
 
 const save = (token, user) => {
-  try { sessionStorage.setItem(SS_KEY, JSON.stringify({ token, user })) } catch {}
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ token, user })) } catch {}
 }
 
 const clear = () => {
-  try { sessionStorage.removeItem(SS_KEY) } catch {}
+  try { localStorage.removeItem(LS_KEY) } catch {}
 }
 
 const persisted = load()
