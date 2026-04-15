@@ -9,6 +9,7 @@ const { sequelize } = require('./config/database');
 const logger = require('./config/logger');
 const errorHandler = require('./middleware/errorHandler');
 const rateLimiter = require('./middleware/rateLimiter');
+const healthSvc = require('./modules/healthcheck/healthcheck.service');
 
 // Routers
 const authRouter = require('./modules/auth/auth.routes');
@@ -30,7 +31,7 @@ require('./jobs/siigo.sync.job');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ── Seguridad y utilidades ──────────────────────────────────────────────────
+// ── Seguridad y utilidades ──────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
   origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : '*',
@@ -43,12 +44,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: msg => logger.http(msg.trim()) } }));
 app.use(rateLimiter);
 
-// ── Health check ────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'WMS API' });
+// ── Health check ───────────────────────────────────────────────────────────
+app.get('/health', async (req, res) => {
+  try {
+    const result = await healthSvc.check();
+    const code   = result.status === 'ok' ? 200 : result.status === 'degraded' ? 207 : 503;
+    res.status(code).json(result);
+  } catch (e) {
+    res.status(503).json({ status: 'error', message: e.message });
+  }
 });
 
-// ── Rutas API ────────────────────────────────────────────────────────────────
+// ── Rutas API ───────────────────────────────────────────────────────────
 const API = '/api/v1';
 app.use(`${API}/auth`,       authRouter);
 app.use(`${API}/users`,      usersRouter);
@@ -66,7 +73,7 @@ app.use(`${API}/webhook`,    webhookRouter);
 // ── Error handler (siempre al final) ────────────────────────────────────────
 app.use(errorHandler);
 
-// ── Inicializar DB y levantar servidor ──────────────────────────────────────
+// ── Inicializar DB y levantar servidor ───────────────────────────────────────
 (async () => {
   try {
     await sequelize.authenticate();
