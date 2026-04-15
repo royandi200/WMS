@@ -79,13 +79,13 @@ export default function InventarioPage() {
           )}
           {lowStock.length > 0 && (
             <Table
-              cols={['SKU / ID', 'Producto', 'Stock actual', 'Mínimo', 'Diferencia']}
+              cols={['SKU', 'Producto', 'Stock actual', 'Mínimo', 'Diferencia']}
               rows={lowStock.map((r) => [
-                r.iditem || r.sku,
-                r.nombre || r.name || '—',
-                <span className="text-danger font-semibold tabular-nums">{r.stock_actual ?? r.qty}</span>,
-                r.stock_minimo ?? r.min_stock,
-                <span className="text-danger tabular-nums">{((r.stock_minimo ?? r.min_stock) - (r.stock_actual ?? r.qty))}</span>,
+                r.sku || r.id,
+                r.name || '—',
+                <span className="text-danger font-semibold tabular-nums">{r.stock ?? '—'}</span>,
+                r.min_stock ?? '—',
+                <span className="text-danger tabular-nums">{r.min_stock != null && r.stock != null ? r.min_stock - r.stock : '—'}</span>,
               ])}
             />
           )}
