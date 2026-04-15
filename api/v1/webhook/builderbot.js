@@ -7,6 +7,12 @@
 // builderbot.service.js (Express) fue eliminado — toda la lógica
 // vive aquí para evitar duplicación y conflictos de modelos.
 // =============================================================
+// Schema ordenes_produccion (real):
+//   id, codigo_orden, producto_id, fase(ENUM F0-F5),
+//   estado(ENUM PLANEADA|EN_PROCESO|CERRADA|CANCELADA),
+//   cantidad_planeada, cantidad_real, materiales_conf_en,
+//   cerrado_en, creado_por, aprobado_por, notas, creado_en
+// =============================================================
 const mysql  = require('mysql2/promise');
 const axios  = require('axios');
 const { randomUUID } = require('crypto');
@@ -24,7 +30,6 @@ const DB = () => mysql.createConnection({
 // RBAC — roles que pueden ejecutar cada acción
 // ─────────────────────────────────────────────────────────────
 const RBAC = {
-  // Operario puede reportar y consultar
   INGRESO_RECEPCION:               ['Operario','Supervisor','Admin'],
   SOLICITAR_INICIO_PRODUCCION:     ['Operario','Supervisor','Admin'],
   AVANCE_FASES:                    ['Operario','Supervisor','Admin'],
@@ -38,7 +43,6 @@ const RBAC = {
   CONSULTAR_TRAZABILIDAD_LOTE:     ['Operario','Supervisor','Admin'],
   CONSULTAR_CAPACIDAD_FABRICACION: ['Operario','Supervisor','Admin'],
   MODO_CHARLA:                     ['Operario','Supervisor','Admin'],
-  // Solo Supervisor/Admin pueden aprobar, rechazar, cerrar, despachar
   SOLICITAR_CIERRE_PRODUCCION:     ['Supervisor','Admin'],
   SOLICITAR_DESPACHO:              ['Supervisor','Admin'],
   APROBAR_SOLICITUD:               ['Supervisor','Admin'],
@@ -66,7 +70,7 @@ async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload 
      VALUES (?, ?, ?, ?, ?, NOW())`,
     [nivel || 'INFO', modulo || 'webhook', mensaje, usuario_id || null,
      payload ? JSON.stringify(payload) : null]
-  ).catch(() => {});  // nunca bloquea el flujo principal
+  ).catch(() => {});
 }
 
 async function sendBack(phone, text) {
@@ -78,7 +82,6 @@ async function sendBack(phone, text) {
   ).catch(() => {});
 }
 
-/** Crea registro en lots y devuelve UUID */
 async function createLot(db, { lpn, product_id, bodega_id, qty, supplier, origin, received_by, notes, expiry_date }) {
   const id = randomUUID();
   await db.execute(
@@ -92,7 +95,6 @@ async function createLot(db, { lpn, product_id, bodega_id, qty, supplier, origin
   return id;
 }
 
-/** Resuelve LPN → lot UUID. Null si no existe. */
 async function lotIdByLpn(db, lpn) {
   if (!lpn) return null;
   const [rows] = await db.execute(
@@ -101,7 +103,6 @@ async function lotIdByLpn(db, lpn) {
   return rows[0]?.id || null;
 }
 
-/** Escribe en kardex */
 async function logKardex(db, { product_id, user_id, action, qty,
                                lot_id, balance_after, reference, notes, approved_by }) {
   await db.execute(
@@ -114,7 +115,6 @@ async function logKardex(db, { product_id, user_id, action, qty,
   ).catch(e => console.error('[logKardex]', e.message, action, product_id));
 }
 
-/** Saldo actual en stock */
 async function getStockBalance(db, product_id, bodega_id) {
   const [rows] = await db.execute(
     `SELECT COALESCE(SUM(cantidad), 0) AS total FROM stock WHERE producto_id = ? AND bodega_id = ?`,
@@ -175,9 +175,7 @@ async function nextRecepcionNumero(db) {
 }
 
 async function nextSolicitudCodigo(db) {
-  const [rows] = await db.execute(
-    `SELECT COUNT(*) AS cnt FROM aprobaciones`
-  );
+  const [rows] = await db.execute(`SELECT COUNT(*) AS cnt FROM aprobaciones`);
   return `REQ-${String((rows[0].cnt || 0) + 1).padStart(6, '0')}`;
 }
 
@@ -188,9 +186,7 @@ async function upsertStock(db, { producto_id, bodega_id, lote, cantidad }) {
     [producto_id, bodega_id, lote, lote]
   );
   if (ex.length) {
-    await db.execute(
-      `UPDATE stock SET cantidad = cantidad + ? WHERE id = ?`, [cantidad, ex[0].id]
-    );
+    await db.execute(`UPDATE stock SET cantidad = cantidad + ? WHERE id = ?`, [cantidad, ex[0].id]);
   } else {
     await db.execute(
       `INSERT INTO stock (producto_id, bodega_id, lote, cantidad) VALUES (?,?,?,?)`,
@@ -199,10 +195,16 @@ async function upsertStock(db, { producto_id, bodega_id, lote, cantidad }) {
   }
 }
 
-/**
- * Ejecuta el payload de una solicitud aprobada.
- * Centraliza toda la lógica de aprobación en un solo lugar.
- */
+/** Genera codigo_orden único: OP-YYYYMMDD-NNNN */
+async function nextCodigoOrden(db) {
+  const d = new Date();
+  const prefix = `OP-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const [rows] = await db.execute(
+    `SELECT COUNT(*) AS cnt FROM ordenes_produccion WHERE codigo_orden LIKE ?`, [`${prefix}%`]
+  );
+  return `${prefix}-${String((rows[0].cnt || 0) + 1).padStart(4,'0')}`;
+}
+
 async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodegaId }) {
   switch (accion) {
 
@@ -211,10 +213,13 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
       );
       if (!rows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
-      const cantReal = payload.qty_real || rows[0].cantidad_obj;
+      // cantidad_real = lo que reportó el operario, o lo planeado si no vino
+      const cantReal = payload.qty_real || rows[0].cantidad_planeada;
       await db.execute(
-        `UPDATE ordenes_produccion SET estado='completada', cantidad_prod=?, updated_at=NOW() WHERE id=?`,
-        [cantReal, payload.order_id]
+        `UPDATE ordenes_produccion
+         SET estado='CERRADA', cantidad_real=?, aprobado_por=?, cerrado_en=NOW()
+         WHERE id=?`,
+        [cantReal, aprobador_id, payload.order_id]
       );
       const lpnOP = `L-OP${payload.order_id}-${Date.now()}`;
       const lotId = await createLot(db, {
@@ -243,7 +248,8 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       const lotIdDesp = await lotIdByLpn(db, payload.lpn);
       if (payload.lpn) {
         await db.execute(
-          `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
+          `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?)
+           WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
           [cantDesp, payload.product_id, bodegaId, payload.lpn]
         );
         await db.execute(
@@ -302,12 +308,9 @@ module.exports = async (req, res) => {
     const user     = await getOrCreateBotUser(db, from);
     const bodegaId = await getDefaultBodega(db);
 
-    // ── RBAC: verificar permiso antes de ejecutar ──────────────
-    // Normalizar rol_nombre: primera letra mayúscula, resto minúsculas
-    // Esto protege contra inconsistencias en la BD (ej: 'operario' vs 'Operario')
+    // ── RBAC: normalizar rol (case-insensitive) ────────────────
     const rolRaw  = user.rol_nombre || '';
     const rolNorm = rolRaw.charAt(0).toUpperCase() + rolRaw.slice(1).toLowerCase();
-
     const rolesPermitidos = RBAC[action];
     if (rolesPermitidos && !rolesPermitidos.includes(rolNorm)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
@@ -402,12 +405,16 @@ module.exports = async (req, res) => {
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
+      // BD: codigo_orden, producto_id, cantidad_planeada, estado(PLANEADA),
+      //     creado_por, notas  — SIN bodega_id, SIN updated_at
       case 'SOLICITAR_INICIO_PRODUCCION': {
-        const p = await findProductBySku(db, params.id_producto_final);
+        const p          = await findProductBySku(db, params.id_producto_final);
+        const codigoOrden = await nextCodigoOrden(db);
         const [ins] = await db.execute(
-          `INSERT INTO ordenes_produccion (producto_id, cantidad_obj, bodega_id, estado, usuario_id, observaciones)
-           VALUES (?,?,?,'borrador',?,?)`,
-          [p.id, params.cantidad_planificada, bodegaId, user.id, `Creada desde WhatsApp por ${from}`]
+          `INSERT INTO ordenes_produccion (codigo_orden, producto_id, cantidad_planeada, estado, creado_por, notas)
+           VALUES (?,?,?,'PLANEADA',?,?)`,
+          [codigoOrden, p.id, params.cantidad_planificada, user.id,
+           `Creada desde WhatsApp por ${from}`]
         );
         const orderId = ins.insertId;
         const [bom] = await db.execute(
@@ -419,27 +426,31 @@ module.exports = async (req, res) => {
           ? bom.map(b => `  • ${b.siigo_code}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} und`).join('\n')
           : '  (Sin BOM — verifica materiales manualmente)';
         const msg = [
-          `🏭 *Orden #${orderId} creada*`,
+          `🏭 *Orden ${codigoOrden} creada*`,
           `Producto: ${params.id_producto_final}`,
           `Cantidad: ${params.cantidad_planificada}`,
           ``, `📋 *Materiales necesarios:*`, picking
         ].join('\n');
         await sendBack(from, msg);
-        result = { message: msg, orden_id: orderId };
+        result = { message: msg, orden_id: orderId, codigo_orden: codigoOrden };
         break;
       }
 
       // ── 3. AVANCE_FASES ───────────────────────────────────────
+      // BD: estado → EN_PROCESO (mayúsculas), notas (no observaciones, no updated_at)
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(
-          `SELECT id FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
+          `SELECT id, notas FROM ordenes_produccion
+           WHERE id = ? OR codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         await db.execute(
-          `UPDATE ordenes_produccion SET estado='en_proceso',
-           observaciones=CONCAT(IFNULL(observaciones,''), ?), updated_at=NOW() WHERE id=?`,
-          [`\nFase: ${params.fase_destino} - ${new Date().toISOString()}`, rows[0].id]
+          `UPDATE ordenes_produccion
+           SET estado='EN_PROCESO',
+               notas=CONCAT(IFNULL(notas,''), ?)
+           WHERE id=?`,
+          [`\nFase: ${params.fase_destino} — ${new Date().toISOString()}`, rows[0].id]
         );
         const msg = `📦 *Avance registrado*\nOrden #${params.id_orden}\nFase: ${params.fase_destino}`;
         await sendBack(from, msg);
@@ -502,7 +513,6 @@ module.exports = async (req, res) => {
             operario_phone: from
           }), user.id]
         );
-        // Notificar supervisor
         const [supervisors] = await db.execute(
           `SELECT u.email FROM usuarios u JOIN roles r ON r.id=u.rol_id
            WHERE r.nombre IN ('Supervisor','Admin') AND u.activo=1 LIMIT 3`
@@ -615,21 +625,13 @@ module.exports = async (req, res) => {
         const solicitud = rows[0];
         const payload   = typeof solicitud.payload === 'string'
           ? JSON.parse(solicitud.payload) : solicitud.payload;
-
-        // Ejecutar la acción real
         const execResult = await executeApprovedPayload(db, {
-          accion:      solicitud.accion,
-          payload,
-          aprobador_id: user.id,
-          bodegaId,
+          accion: solicitud.accion, payload, aprobador_id: user.id, bodegaId,
         });
-
         await db.execute(
           `UPDATE aprobaciones SET estado='APROBADO', procesado_por=?, procesado_en=NOW() WHERE codigo_solicitud=?`,
           [user.id, params.id_solicitud]
         );
-
-        // Notificar al operario
         if (payload.operario_phone) {
           await sendBack(payload.operario_phone, [
             `✅ *Tu solicitud fue aprobada*`,
@@ -638,11 +640,9 @@ module.exports = async (req, res) => {
             `Aprobado por: ${user.nombre}`
           ].join('\n'));
         }
-
         await logSystemEvent(db, { modulo: 'aprobaciones', nivel: 'INFO',
           mensaje: `Solicitud ${params.id_solicitud} aprobada`,
           usuario_id: user.id, payload: execResult });
-
         const msg = [
           `✅ *${params.id_solicitud} Aprobada*`,
           `Acción: ${solicitud.accion.replace(/_/g,' ')}`,
@@ -663,13 +663,11 @@ module.exports = async (req, res) => {
         const solicitud = rows[0];
         const payload   = typeof solicitud.payload === 'string'
           ? JSON.parse(solicitud.payload) : solicitud.payload;
-
         await db.execute(
           `UPDATE aprobaciones SET estado='RECHAZADO', procesado_por=?, procesado_en=NOW(),
            motivo_rechazo=? WHERE codigo_solicitud=?`,
           [user.id, params.motivo || null, params.id_solicitud]
         );
-
         if (payload.operario_phone) {
           await sendBack(payload.operario_phone, [
             `❌ *Tu solicitud fue rechazada*`,
@@ -677,11 +675,9 @@ module.exports = async (req, res) => {
             params.motivo ? `Motivo: ${params.motivo}` : ''
           ].filter(Boolean).join('\n'));
         }
-
         await logSystemEvent(db, { modulo: 'aprobaciones', nivel: 'WARN',
           mensaje: `Solicitud ${params.id_solicitud} rechazada`,
           usuario_id: user.id, payload: { motivo: params.motivo } });
-
         const msg = [
           `❌ *${params.id_solicitud} Rechazada*`,
           params.motivo ? `Motivo: ${params.motivo}` : ''
@@ -694,7 +690,7 @@ module.exports = async (req, res) => {
       // ── 10. AJUSTE_INVENTARIO ─────────────────────────────────
       case 'AJUSTE_INVENTARIO': {
         const p    = await findProductBySku(db, params.id_item);
-        const diff = Number(params.cantidad);  // positivo = entrada, negativo = salida
+        const diff = Number(params.cantidad);
         const lotIdAjuste = await lotIdByLpn(db, params.id_lote);
         if (params.id_lote) {
           await db.execute(
@@ -756,7 +752,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── Consultas ─────────────────────────────────────────────
+      // ── Consultas de stock ────────────────────────────────────
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
         if (params.id_item) {
@@ -787,27 +783,35 @@ module.exports = async (req, res) => {
         break;
       }
 
+      // ── Consulta estado de orden ──────────────────────────────
+      // BD: cantidad_planeada, cantidad_real (no cantidad_obj/cantidad_prod)
       case 'CONSULTAR_ESTADO_PRODUCCION': {
         const [rows] = await db.execute(
-          `SELECT o.*, p.nombre AS producto, p.siigo_code
-           FROM ordenes_produccion o JOIN productos p ON p.id=o.producto_id
+          `SELECT o.id, o.codigo_orden, o.estado, o.fase,
+                  o.cantidad_planeada, o.cantidad_real,
+                  o.creado_en, o.cerrado_en,
+                  p.nombre AS producto, p.siigo_code
+           FROM ordenes_produccion o
+           JOIN productos p ON p.id = o.producto_id
            WHERE o.id = ? OR o.codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         const o = rows[0];
         const msg = [
-          `🔍 *Orden: ${params.id_orden}*`,
+          `🔍 *Orden: ${o.codigo_orden || o.id}*`,
           `Producto: ${o.producto} (${o.siigo_code})`,
-          `Estado: ${o.estado}`,
-          `Planificado: ${o.cantidad_obj}`,
-          `Producido: ${o.cantidad_prod || 'en proceso'}`
-        ].join('\n');
+          `Estado: ${o.estado}  |  Fase: ${o.fase}`,
+          `Planeado: ${o.cantidad_planeada} und`,
+          `Producido: ${o.cantidad_real > 0 ? o.cantidad_real + ' und' : 'En proceso'}`,
+          o.cerrado_en ? `Cerrado: ${new Date(o.cerrado_en).toLocaleDateString('es-CO')}` : ''
+        ].filter(Boolean).join('\n');
         await sendBack(from, msg);
         result = { message: msg };
         break;
       }
 
+      // ── Trazabilidad de lote ──────────────────────────────────
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
         const [lotRows] = await db.execute(
           `SELECT l.*, p.nombre, p.siigo_code
@@ -854,6 +858,7 @@ module.exports = async (req, res) => {
         break;
       }
 
+      // ── Capacidad de fabricación ──────────────────────────────
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [bom] = await db.execute(
@@ -881,6 +886,8 @@ module.exports = async (req, res) => {
         break;
       }
 
+      // ── Confirmar materiales / Excepción picking ──────────────
+      // BD: estado → EN_PROCESO (mayúsculas), materiales_conf_en — SIN updated_at
       case 'CONFIRMAR_MATERIALES_PRODUCCION':
       case 'EXCEPCION_PICKING': {
         const [rows] = await db.execute(
@@ -889,12 +896,14 @@ module.exports = async (req, res) => {
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         await db.execute(
-          `UPDATE ordenes_produccion SET estado='en_proceso', updated_at=NOW() WHERE id=?`,
+          `UPDATE ordenes_produccion
+           SET estado='EN_PROCESO', materiales_conf_en=NOW()
+           WHERE id=?`,
           [rows[0].id]
         );
         const msg = [
           `✅ *Materiales confirmados*`,
-          `Orden: ${params.id_orden} → En proceso`,
+          `Orden: ${params.id_orden} → EN_PROCESO`,
           action === 'EXCEPCION_PICKING' && params.lote_usado
             ? `Lote alternativo: ${params.lote_usado}` : ''
         ].filter(Boolean).join('\n');
