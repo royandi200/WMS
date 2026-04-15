@@ -86,17 +86,27 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
-  const { from, info } = req.body || {};
-  const action   = info?.['@ction'] || 'UNKNOWN';
-  const params   = info?.params || {};
-  const priority = info?.priority || 'baja';
+  const rawBody = req.body || {};
+
+  // BuilderBot puede mandar `info` como string JSON serializado o como objeto —
+  // igual que en bardj-ai webhook, siempre intentamos parsearlo si viene como string
+  let info = rawBody.info;
+  if (typeof info === 'string') {
+    try { info = JSON.parse(info); } catch { info = {}; }
+  }
+  if (!info || typeof info !== 'object') info = {};
+
+  const from     = rawBody.from;
+  const action   = info['@ction'] || info.action || 'UNKNOWN';
+  const params   = info.params || {};
+  const priority = info.priority || 'baja';
   // kw es la keyword interna de BuilderBot que activó el flujo (solo dato informativo)
-  const kw = info?.kw || null;
+  const kw = info.kw || null;
 
   const db = await DB();
   try {
     // Log de entrada
-    await saveLog(db, { from, action, priority, payload: req.body, response: null, status: 'RECEIVED' });
+    await saveLog(db, { from, action, priority, payload: rawBody, response: null, status: 'RECEIVED' });
 
     const user = await getOrCreateBotUser(db, from);
     let result = {};
@@ -335,12 +345,12 @@ module.exports = async (req, res) => {
     }
 
     // Log de respuesta exitosa
-    await saveLog(db, { from, action, priority, payload: req.body, response: result, status: 'PROCESSED' });
+    await saveLog(db, { from, action, priority, payload: rawBody, response: result, status: 'PROCESSED' });
     return res.json({ ok: true, ...result });
 
   } catch (err) {
     const errMsg = err.message || 'Error interno';
-    await saveLog(db, { from, action, priority, payload: req.body, response: { error: errMsg }, status: 'ERROR' }).catch(()=>{});
+    await saveLog(db, { from, action, priority, payload: rawBody, response: { error: errMsg }, status: 'ERROR' }).catch(()=>{});
     return res.status(err.status || 500).json({ ok: false, error: errMsg });
   } finally {
     await db.end().catch(()=>{});
