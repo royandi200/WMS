@@ -4,6 +4,8 @@ const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
 const { v4: uuidv4 } = require('uuid');
 
+const BODEGA = { PPAL: 1, CUARENTENA: 2 };
+
 exports.receive = async (
   { producto_id, qty_total, qty_damaged = 0, proveedor, fecha_vencimiento, notas },
   usuario
@@ -18,19 +20,18 @@ exports.receive = async (
 
   await sequelize.transaction(async (t) => {
 
-    // Cabecera de recepción
     await Recepcion.create({
       producto_id,
       cantidad_total:    qty_total,
       cantidad_buena:    qty_good,
       cantidad_danada:   qty_damaged,
-      proveedor:         proveedor || null,
+      proveedor:         proveedor         || null,
       fecha_vencimiento: fecha_vencimiento || null,
       recibido_por:      usuario.id,
-      notas,
+      notas:             notas             || null,
     }, { transaction: t });
 
-    // --- Lote DISPONIBLE (unidades buenas) ---
+    // --- Lote DISPONIBLE ---
     if (qty_good > 0) {
       const lpn = generateLPN('L');
 
@@ -38,14 +39,15 @@ exports.receive = async (
         id:          uuidv4(),
         lpn,
         product_id:  producto_id,
+        bodega_id:   BODEGA.PPAL,          // FIX: campo requerido
         qty_initial: qty_good,
         qty_current: qty_good,
-        supplier:    proveedor    || null,
-        expiry_date: fecha_vencimiento || null,
+        supplier:    proveedor            || null,
+        expiry_date: fecha_vencimiento    || null,
         origin:      'RECEPCION',
         status:      'DISPONIBLE',
         received_by: usuario.id,
-        notas,
+        notes:       notas                || null,  // FIX: era 'notas'
       }, { transaction: t });
 
       await logKardex({
@@ -60,10 +62,11 @@ exports.receive = async (
         notas:            `Recepción de ${proveedor || 'proveedor'}`,
       }, t);
 
-      result.lots.push({ lpn, status: 'DISPONIBLE', qty: qty_good });
+      // FIX: qty_current en vez de qty (alineado con builderbot.service)
+      result.lots.push({ lpn, status: 'DISPONIBLE', qty_current: qty_good });
     }
 
-    // --- Lote CUARENTENA (unidades dañadas) ---
+    // --- Lote CUARENTENA ---
     if (qty_damaged > 0) {
       const lpnNov = generateLPN('L') + '-NOV';
 
@@ -71,9 +74,10 @@ exports.receive = async (
         id:          uuidv4(),
         lpn:         lpnNov,
         product_id:  producto_id,
+        bodega_id:   BODEGA.CUARENTENA,    // FIX: campo requerido
         qty_initial: qty_damaged,
         qty_current: qty_damaged,
-        supplier:    proveedor || null,
+        supplier:    proveedor            || null,
         origin:      'RECEPCION',
         status:      'CUARENTENA',
         received_by: usuario.id,
@@ -92,15 +96,15 @@ exports.receive = async (
         notas:            'Unidades dañadas enviadas a cuarentena',
       }, t);
 
-      result.lots.push({ lpn: lpnNov, status: 'CUARENTENA', qty: qty_damaged });
+      result.lots.push({ lpn: lpnNov, status: 'CUARENTENA', qty_current: qty_damaged });
     }
   });
 
-  // Alias legacy para builderbot (espera `stocks`)
+  // Alias legacy para builderbot
   result.stocks = result.lots.map(l => ({
-    lote:    l.lpn,
-    estado:  l.status === 'DISPONIBLE' ? 'disponible' : 'cuarentena',
-    cantidad: l.qty,
+    lote:     l.lpn,
+    estado:   l.status === 'DISPONIBLE' ? 'disponible' : 'cuarentena',
+    cantidad: l.qty_current,
   }));
 
   return result;
