@@ -1,8 +1,28 @@
 import { create } from 'zustand'
 import * as api from '../api/products.api'
 
+// El backend retorna: { ok, data: { rows: [...], total: N } }
+// Axios envuelve en response.data, entonces:
+//   const { data } = await api.getProducts()  →  data = { ok, data: { rows, total } }
+//   data.data.rows  es el array correcto
+const extractRows = (axiosData) => {
+  // Soporta: { data: { rows } }, { rows }, o array directo
+  if (Array.isArray(axiosData))           return axiosData
+  if (Array.isArray(axiosData?.rows))     return axiosData.rows
+  if (Array.isArray(axiosData?.data?.rows)) return axiosData.data.rows
+  if (Array.isArray(axiosData?.data))     return axiosData.data
+  return []
+}
+
+const extractOne = (axiosData) => {
+  // Soporta: { data: {...} } o el objeto directo
+  if (axiosData?.data && !Array.isArray(axiosData.data)) return axiosData.data
+  return axiosData
+}
+
 export const useProductsStore = create((set, get) => ({
   list:    [],
+  total:   0,
   detail:  null,
   loading: false,
   error:   null,
@@ -16,9 +36,13 @@ export const useProductsStore = create((set, get) => ({
     try {
       const params = { ...get().filters, ...overrides }
       const { data } = await api.getProducts(params)
-      set({ list: data?.rows ?? data ?? [], loading: false })
+      set({
+        list:    extractRows(data),
+        total:   data?.data?.total ?? data?.total ?? 0,
+        loading: false,
+      })
     } catch (e) {
-      set({ error: e.response?.data?.message ?? 'Error al cargar productos', loading: false })
+      set({ error: e.response?.data?.error ?? e.response?.data?.message ?? 'Error al cargar productos', loading: false })
     }
   },
 
@@ -26,10 +50,11 @@ export const useProductsStore = create((set, get) => ({
     set({ loading: true, error: null, detail: null })
     try {
       const { data } = await api.getProduct(id)
-      set({ detail: data, loading: false })
-      return data
+      const item = extractOne(data)
+      set({ detail: item, loading: false })
+      return item
     } catch (e) {
-      set({ error: e.response?.data?.message ?? 'Producto no encontrado', loading: false })
+      set({ error: e.response?.data?.error ?? 'Producto no encontrado', loading: false })
       return null
     }
   },
@@ -38,10 +63,11 @@ export const useProductsStore = create((set, get) => ({
     set({ loading: true, error: null })
     try {
       const { data } = await api.createProduct(body)
-      set((s) => ({ list: [data, ...s.list], loading: false }))
-      return { ok: true, data }
+      const item = extractOne(data)
+      set((s) => ({ list: [item, ...s.list], loading: false }))
+      return { ok: true, data: item }
     } catch (e) {
-      const message = e.response?.data?.message ?? 'Error al crear producto'
+      const message = e.response?.data?.error ?? e.response?.data?.message ?? 'Error al crear producto'
       set({ error: message, loading: false })
       return { ok: false, message }
     }
@@ -51,10 +77,15 @@ export const useProductsStore = create((set, get) => ({
     set({ loading: true, error: null })
     try {
       const { data } = await api.updateProduct(id, body)
-      set((s) => ({ list: s.list.map((p) => p.id === id ? data : p), detail: data, loading: false }))
-      return { ok: true, data }
+      const item = extractOne(data)
+      set((s) => ({
+        list:    s.list.map((p) => p.id === id ? item : p),
+        detail:  item,
+        loading: false,
+      }))
+      return { ok: true, data: item }
     } catch (e) {
-      const message = e.response?.data?.message ?? 'Error al actualizar producto'
+      const message = e.response?.data?.error ?? e.response?.data?.message ?? 'Error al actualizar producto'
       set({ error: message, loading: false })
       return { ok: false, message }
     }
@@ -66,7 +97,7 @@ export const useProductsStore = create((set, get) => ({
       set((s) => ({ list: s.list.map((p) => p.id === id ? { ...p, active: !p.active } : p) }))
       return { ok: true }
     } catch (e) {
-      return { ok: false, message: e.response?.data?.message ?? 'Error' }
+      return { ok: false, message: e.response?.data?.error ?? 'Error' }
     }
   },
 }))
