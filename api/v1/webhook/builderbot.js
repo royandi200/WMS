@@ -23,6 +23,7 @@
 //   [4] CONSULTAR_STOCK_*     → filtra tipo_producto (MP / PT) en consulta general
 //   [5] GESTION_DEVOLUCION    → normaliza estado ENUM antes de guardar
 //   [6] CONSULTAR_STOCK_*     → usa v_stock_disponible, desglose FIFO por lote
+//   [7] BOM query             → corregido insumo_id y producto_final_id (era insumo_producto_id/producto_id)
 // =============================================================
 const mysql  = require('mysql2/promise');
 const { randomUUID } = require('crypto');
@@ -468,6 +469,7 @@ module.exports = async (req, res) => {
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
+      // [FIX 7] Corregido: insumo_id y producto_final_id (antes era insumo_producto_id/producto_id)
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p           = await findProductBySku(db, params.id_producto_final);
         const codigoOrden = await nextCodigoOrden(db);
@@ -480,11 +482,11 @@ module.exports = async (req, res) => {
         const orderId = ins.insertId;
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.nombre FROM bom b
-           JOIN productos pr ON pr.id = b.insumo_producto_id
-           WHERE b.producto_id = ?`, [p.id]
+           JOIN productos pr ON pr.id = b.insumo_id
+           WHERE b.producto_final_id = ?`, [p.id]
         ).catch(() => [[]]);
         const picking = bom.length
-          ? bom.map(b => `  • ${b.siigo_code}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} und`).join('\n')
+          ? bom.map(b => `  • ${b.siigo_code} — ${b.nombre}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} ${b.unidad}`).join('\n')
           : '  (Sin BOM — verifica materiales manualmente)';
         mensaje = [
           `🏭 *Orden ${codigoOrden} creada*`,
@@ -515,7 +517,6 @@ module.exports = async (req, res) => {
       }
 
       // ── 4. REPORTE_MERMA ──────────────────────────────────────
-      // [FIX 2] id_orden se propaga a las notes del kardex cuando viene del proceso
       case 'REPORTE_MERMA': {
         const p = await findProductBySku(db, params.id_item);
         const cantMerma  = Math.abs(Number(params.cantidad));
@@ -589,7 +590,6 @@ module.exports = async (req, res) => {
       }
 
       // ── 6. SOLICITAR_DESPACHO → encolar ──────────────────────
-      // [FIX 1] id_item ahora es obligatorio
       case 'SOLICITAR_DESPACHO': {
         if (!params.id_item) throw { status: 400, message: 'id_item es obligatorio para SOLICITAR_DESPACHO' };
         const p      = await findProductBySku(db, params.id_item);
@@ -615,7 +615,6 @@ module.exports = async (req, res) => {
       }
 
       // ── 7. GESTION_DEVOLUCION ─────────────────────────────────
-      // [FIX 5] Normaliza estado al ENUM válido
       case 'GESTION_DEVOLUCION': {
         const p           = await findProductBySku(db, params.id_item);
         const estadoNorm  = normalizarEstadoDevolucion(params.estado);
@@ -767,13 +766,11 @@ module.exports = async (req, res) => {
       }
 
       // ── Consultas de stock ────────────────────────────────────
-      // [FIX 4+6] Usa v_stock_disponible con desglose FIFO por lote
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
         const tipoFiltro = action === 'CONSULTAR_STOCK_MATERIA_PRIMA' ? 'MP' : 'PT';
         const label      = tipoFiltro === 'MP' ? 'Materia Prima' : 'Producto Terminado';
 
-        // Obtener el código de bodega para la vista (la vista usa b.codigo, no b.id)
         const [bodegaRow] = await db.execute(
           `SELECT codigo FROM bodegas WHERE id = ? LIMIT 1`, [bodegaId]
         );
@@ -786,7 +783,6 @@ module.exports = async (req, res) => {
         });
 
         if (params.id_item) {
-          // Desglose por lote del SKU consultado
           const totalDisp = result.rows.reduce((s, r) => s + parseFloat(r.disponible || 0), 0);
           if (!result.rows.length) {
             mensaje = `📊 *Stock: ${params.id_item}*\n  Sin stock disponible`;
@@ -808,7 +804,6 @@ module.exports = async (req, res) => {
             ].join('\n');
           }
         } else {
-          // Top 10 por tipo
           const lines = result.rows.length
             ? result.rows.map(r => `  • ${r.sku}: *${parseFloat(r.total)} und*`).join('\n')
             : '  (Sin stock registrado)';
@@ -886,11 +881,13 @@ module.exports = async (req, res) => {
       }
 
       // ── Capacidad de fabricación ──────────────────────────────
+      // [FIX 7] Corregido: insumo_id y producto_final_id
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.id AS insumo_id FROM bom b
-           JOIN productos pr ON pr.id=b.insumo_producto_id WHERE b.producto_id=?`, [p.id]
+           JOIN productos pr ON pr.id = b.insumo_id
+           WHERE b.producto_final_id = ?`, [p.id]
         ).catch(() => [[]]);
         let puedeProd = true;
         const checks  = [];
@@ -933,7 +930,6 @@ module.exports = async (req, res) => {
       }
 
       // ── Excepción picking ─────────────────────────────────────
-      // [FIX 3] Persiste lote_sugerido + lote_usado en system_logs
       case 'EXCEPCION_PICKING': {
         if (!params.lote_sugerido || !params.lote_usado) {
           throw { status: 400, message: 'EXCEPCION_PICKING requiere lote_sugerido y lote_usado' };
@@ -987,7 +983,6 @@ module.exports = async (req, res) => {
 
     await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje }, status: 'PROCESSED' });
 
-    // Devolver AMBOS campos: BB Cloud configurado espera {message} (inglés)
     return res.json({ ok: true, message: mensaje, mensaje });
 
   } catch (err) {
