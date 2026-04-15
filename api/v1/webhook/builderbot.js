@@ -90,11 +90,8 @@ module.exports = async (req, res) => {
   const action   = info?.['@ction'] || 'UNKNOWN';
   const params   = info?.params || {};
   const priority = info?.priority || 'baja';
-
-  // Validar kw
-  if (!info?.kw || info.kw !== process.env.BUILDERBOT_KW) {
-    return res.status(401).json({ ok: false, error: 'No autorizado' });
-  }
+  // kw es la keyword interna de BuilderBot que activó el flujo (solo dato informativo)
+  const kw = info?.kw || null;
 
   const db = await DB();
   try {
