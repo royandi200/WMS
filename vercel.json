@@ -3,8 +3,13 @@
   "installCommand": "cd frontend && npm install",
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/v1/**/*.js": {
+      "runtime": "@vercel/node@3"
+    }
+  },
   "rewrites": [
     { "source": "/api/v1/:path*", "destination": "/api/v1/:path*" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/(.*)",           "destination": "/index.html" }
   ]
 }
