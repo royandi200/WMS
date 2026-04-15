@@ -1,8 +1,9 @@
 // Vercel Serverless Function
 // POST /api/v1/webhook/builderbot
-// Schema real: recepciones, recepcion_items, stock, ordenes_produccion, movimientos
+// Schema real: recepciones, recepcion_items, stock, kardex, ordenes_produccion, movimientos
 const mysql = require('mysql2/promise');
 const axios = require('axios');
+const { v4: uuidv4 } = require('uuid');
 
 const DB = () => mysql.createConnection({
   host:     process.env.DB_HOST,
@@ -32,15 +33,58 @@ async function sendBack(phone, text) {
   ).catch(() => {});
 }
 
+/**
+ * Escribe un movimiento en la tabla kardex (nueva, nativa).
+ * @param {object} db       - conexión mysql2
+ * @param {object} params
+ *   product_id       INT   requerido
+ *   user_id          INT   requerido
+ *   action           ENUM  requerido  (INGRESO_RECEPCION | DESPACHO | MERMA_BODEGA | CIERRE_PRODUCCION | DEVOLUCION | AJUSTE_MANUAL)
+ *   qty              DECIMAL  requerido
+ *   lot_id           CHAR(36) opcional — UUID del lote en tabla lots
+ *   balance_after    DECIMAL  opcional
+ *   reference        STRING   opcional  (ej: 'recepcion:REC-20260415-0001')
+ *   notes            TEXT     opcional
+ *   approved_by      INT      opcional
+ */
+async function logKardex(db, { product_id, user_id, action, qty,
+                               lot_id, balance_after, reference, notes, approved_by }) {
+  await db.execute(
+    `INSERT INTO kardex
+       (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after, reference, notes, approved_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      uuidv4(),
+      uuidv4(),
+      lot_id        || null,
+      product_id,
+      user_id,
+      action,
+      qty,
+      balance_after != null ? balance_after : null,
+      reference     || null,
+      notes         || null,
+      approved_by   || null,
+    ]
+  ).catch(e => console.error('[logKardex] ERROR:', e.message, '| action:', action, '| product_id:', product_id));
+}
+
+/** Obtiene el saldo actual de un producto en stock (para balance_after). */
+async function getStockBalance(db, product_id, bodega_id) {
+  const [rows] = await db.execute(
+    `SELECT COALESCE(SUM(cantidad), 0) AS total FROM stock WHERE producto_id = ? AND bodega_id = ?`,
+    [product_id, bodega_id]
+  );
+  return parseFloat(rows[0]?.total || 0);
+}
+
 async function findProductBySku(db, sku) {
-  // Busca por SKU en tabla skus primero
   const [rows] = await db.execute(
     `SELECT p.* FROM productos p
      INNER JOIN skus s ON s.producto_id = p.id
      WHERE s.sku = ? AND p.activo = 1 LIMIT 1`, [sku]
   );
   if (rows.length) return rows[0];
-  // Fallback: siigo_code directo
   const [rows2] = await db.execute(
     `SELECT * FROM productos WHERE siigo_code = ? AND activo = 1 LIMIT 1`, [sku]
   );
@@ -49,7 +93,6 @@ async function findProductBySku(db, sku) {
 }
 
 async function getDefaultBodega(db) {
-  // bodegas usa columna "activa" (no "activo")
   const [rows] = await db.execute(`SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
   if (!rows.length) throw { status: 500, message: 'No hay bodegas configuradas' };
   return rows[0].id;
@@ -121,6 +164,7 @@ module.exports = async (req, res) => {
 
     switch (action) {
 
+      // ── 1. INGRESO_RECEPCION ─────────────────────────────────────────────
       case 'INGRESO_RECEPCION': {
         const p = await findProductBySku(db, params.id_item);
         const numero = await nextRecepcionNumero(db);
@@ -148,6 +192,17 @@ module.exports = async (req, res) => {
              VALUES ('entrada',?,?,?,?,?,'recepcion',?)`,
             [p.id, bodegaId, loteCode, cantBuena, recepcionId, user.id]
           );
+          // ✅ kardex nativa
+          const balance = await getStockBalance(db, p.id, bodegaId);
+          await logKardex(db, {
+            product_id:    p.id,
+            user_id:       user.id,
+            action:        'INGRESO_RECEPCION',
+            qty:           cantBuena,
+            balance_after: balance,
+            reference:     `recepcion:${numero}`,
+            notes:         params.proveedor ? `Proveedor: ${params.proveedor}` : null,
+          });
         }
 
         let msgMala = '';
@@ -158,6 +213,15 @@ module.exports = async (req, res) => {
              VALUES (?,?,?,?,?)`,
             [recepcionId, p.id, loteNov, cantMala, cantMala]
           );
+          // ✅ kardex nativa — novedad (cantidad_mala entra como INGRESO_NOVEDAD)
+          await logKardex(db, {
+            product_id: p.id,
+            user_id:    user.id,
+            action:     'INGRESO_NOVEDAD',
+            qty:        cantMala,
+            reference:  `recepcion:${numero}`,
+            notes:      `Cantidad con novedad — lote ${loteNov}`,
+          });
           msgMala = `\n⚠️ Novedad: ${cantMala} und → Lote ${loteNov}`;
         }
 
@@ -167,6 +231,7 @@ module.exports = async (req, res) => {
         break;
       }
 
+      // ── 2. SOLICITAR_INICIO_PRODUCCION ──────────────────────────────────
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [ins] = await db.execute(
@@ -189,6 +254,7 @@ module.exports = async (req, res) => {
         break;
       }
 
+      // ── 3. AVANCE_FASES ─────────────────────────────────────────────────
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(`SELECT id FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]);
         if (!rows.length) throw { status: 404, message: `Orden #${params.id_orden} no encontrada` };
@@ -203,25 +269,39 @@ module.exports = async (req, res) => {
         break;
       }
 
+      // ── 4. REPORTE_MERMA ─────────────────────────────────────────────────
       case 'REPORTE_MERMA': {
         const p = await findProductBySku(db, params.id_item);
+        const cantMerma = Math.abs(params.cantidad);
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
            VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
-          [p.id, bodegaId, params.id_lote || null, -Math.abs(params.cantidad), user.id]
+          [p.id, bodegaId, params.id_lote || null, -cantMerma, user.id]
         );
         if (params.id_lote) {
           await db.execute(
             `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND lote=?`,
-            [Math.abs(params.cantidad), p.id, params.id_lote]
+            [cantMerma, p.id, params.id_lote]
           );
         }
-        const msg = `⚠️ *Merma registrada*\nProducto: ${params.id_item}\nCantidad: ${params.cantidad}\nMotivo: ${params.motivo || 'No especificado'}`;
+        // ✅ kardex nativa
+        const balance = await getStockBalance(db, p.id, bodegaId);
+        await logKardex(db, {
+          product_id:    p.id,
+          user_id:       user.id,
+          action:        'MERMA_BODEGA',
+          qty:           -cantMerma,
+          balance_after: balance,
+          reference:     params.id_lote ? `lote:${params.id_lote}` : null,
+          notes:         params.motivo || null,
+        });
+        const msg = `⚠️ *Merma registrada*\nProducto: ${params.id_item}\nCantidad: ${cantMerma}\nMotivo: ${params.motivo || 'No especificado'}`;
         await sendBack(from, msg);
         result = { message: msg };
         break;
       }
 
+      // ── 5. SOLICITAR_CIERRE_PRODUCCION ───────────────────────────────────
       case 'SOLICITAR_CIERRE_PRODUCCION': {
         const [rows] = await db.execute(`SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]);
         if (!rows.length) throw { status: 404, message: `Orden #${params.id_orden} no encontrada` };
@@ -237,12 +317,24 @@ module.exports = async (req, res) => {
            VALUES ('entrada',?,?,?,?,?,'orden_produccion',?)`,
           [rows[0].producto_id, bodegaId, loteOP, cantReal, params.id_orden, user.id]
         );
+        // ✅ kardex nativa
+        const balance = await getStockBalance(db, rows[0].producto_id, bodegaId);
+        await logKardex(db, {
+          product_id:    rows[0].producto_id,
+          user_id:       user.id,
+          action:        'CIERRE_PRODUCCION',
+          qty:           cantReal,
+          balance_after: balance,
+          reference:     `orden_produccion:${params.id_orden}`,
+          notes:         `Lote generado: ${loteOP}`,
+        });
         const msg = `✅ *Orden #${params.id_orden} cerrada*\nCantidad producida: ${cantReal}\nLote generado: ${loteOP}`;
         await sendBack(from, msg);
         result = { message: msg, lote: loteOP };
         break;
       }
 
+      // ── 6. SOLICITAR_DESPACHO ────────────────────────────────────────────
       case 'SOLICITAR_DESPACHO': {
         const p = await findProductBySku(db, params.id_item || params.id_lote);
         const cantDesp = Number(params.cantidad) || 0;
@@ -262,12 +354,57 @@ module.exports = async (req, res) => {
            VALUES ('salida',?,?,?,?,'despacho_wa',?)`,
           [p.id, bodegaId, params.id_lote || null, cantDesp, user.id]
         );
+        // ✅ kardex nativa
+        const balance = await getStockBalance(db, p.id, bodegaId);
+        await logKardex(db, {
+          product_id:    p.id,
+          user_id:       user.id,
+          action:        'DESPACHO',
+          qty:           -cantDesp,
+          balance_after: balance,
+          reference:     params.id_lote ? `lote:${params.id_lote}` : null,
+          notes:         params.cliente_destino ? `Cliente: ${params.cliente_destino}` : null,
+        });
         const msg = `🚚 *Despacho registrado*\nProducto: ${params.id_item || params.id_lote}\nCantidad: ${cantDesp}${params.cliente_destino ? '\nCliente: '+params.cliente_destino : ''}`;
         await sendBack(from, msg);
         result = { message: msg };
         break;
       }
 
+      // ── 7. GESTION_DEVOLUCION ─────────────────────────────────────────────
+      case 'GESTION_DEVOLUCION': {
+        const p = await findProductBySku(db, params.id_item);
+        const loteDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
+        const numero = await nextRecepcionNumero(db);
+        const [recIns] = await db.execute(
+          `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
+           VALUES (?,?,?,'completada',?,?)`,
+          [numero, bodegaId, params.cliente_origen || null, user.id, `Devolución - ${params.estado || 'CUARENTENA'}`]
+        );
+        await db.execute(
+          `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
+           VALUES (?,?,?,?,?)`,
+          [recIns.insertId, p.id, loteDev, params.cantidad, params.cantidad]
+        );
+        await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: loteDev, cantidad: params.cantidad });
+        // ✅ kardex nativa
+        const balance = await getStockBalance(db, p.id, bodegaId);
+        await logKardex(db, {
+          product_id:    p.id,
+          user_id:       user.id,
+          action:        'DEVOLUCION',
+          qty:           params.cantidad,
+          balance_after: balance,
+          reference:     `recepcion:${numero}`,
+          notes:         `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${params.estado || 'CUARENTENA'}`,
+        });
+        const msg = `🔄 *Devolución registrada*\nProducto: ${params.id_item}\nCantidad: ${params.cantidad}\nLote: ${loteDev}`;
+        await sendBack(from, msg);
+        result = { message: msg, lote: loteDev };
+        break;
+      }
+
+      // ── Consultas (sin escritura en kardex) ───────────────────────────────
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
         if (params.id_item) {
@@ -280,7 +417,6 @@ module.exports = async (req, res) => {
           await sendBack(from, msg);
           result = { message: msg };
         } else {
-          // productos.activo sí existe ✅
           const [rows] = await db.execute(
             `SELECT p.siigo_code, p.nombre, COALESCE(SUM(s.cantidad),0) AS stock
              FROM productos p LEFT JOIN stock s ON s.producto_id=p.id AND s.bodega_id=?
@@ -355,27 +491,6 @@ module.exports = async (req, res) => {
         const msg = `✅ *Materiales confirmados*\nOrden #${params.id_orden} → En proceso`;
         await sendBack(from, msg);
         result = { message: msg };
-        break;
-      }
-
-      case 'GESTION_DEVOLUCION': {
-        const p = await findProductBySku(db, params.id_item);
-        const loteDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
-        const numero = await nextRecepcionNumero(db);
-        const [recIns] = await db.execute(
-          `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
-           VALUES (?,?,?,'completada',?,?)`,
-          [numero, bodegaId, params.cliente_origen || null, user.id, `Devolución - ${params.estado || 'CUARENTENA'}`]
-        );
-        await db.execute(
-          `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
-           VALUES (?,?,?,?,?)`,
-          [recIns.insertId, p.id, loteDev, params.cantidad, params.cantidad]
-        );
-        await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: loteDev, cantidad: params.cantidad });
-        const msg = `🔄 *Devolución registrada*\nProducto: ${params.id_item}\nCantidad: ${params.cantidad}\nLote: ${loteDev}`;
-        await sendBack(from, msg);
-        result = { message: msg, lote: loteDev };
         break;
       }
 
