@@ -18,7 +18,7 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       const response = await authApi.login(data.email, data.password)
-      setAuth(response.token, response.usuario)
+      setAuth(response.access_token, response.usuario)
     } catch (err) {
       setServerError(err?.response?.data?.error || 'Error al iniciar sesión.')
     } finally {
