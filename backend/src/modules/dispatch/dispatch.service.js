@@ -1,56 +1,59 @@
-const { sequelize, Stock, Producto, Despacho } = require('../../models');
+const { sequelize, Lot, Producto, Despacho } = require('../../models');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
 
 exports.dispatch = async ({ lot_id, qty, customer, siigo_order_id, notas }, usuario) => {
   return sequelize.transaction({ isolationLevel: 'SERIALIZABLE' }, async (t) => {
-    const stock = await Stock.findByPk(lot_id, {
-      include: [{ model: Producto, as: 'producto' }],
-      lock: t.LOCK.UPDATE, transaction: t
-    });
-    if (!stock) throw new AppError('Lote/Stock no encontrado', 404);
-    if (stock.estado !== 'disponible') throw new AppError(`El lote está en estado ${stock.estado}, no se puede despachar`, 409);
-    if (parseFloat(stock.cantidad) < qty) {
-      throw new AppError(`Stock insuficiente: Lote tiene ${stock.cantidad}, solicitas ${qty}`, 409);
-    }
 
-    const nuevaCant = parseFloat(stock.cantidad) - qty;
-    await stock.update({
-      cantidad: nuevaCant,
-      estado: nuevaCant === 0 ? 'despachado' : 'disponible'
+    const lot = await Lot.findByPk(lot_id, {
+      include: [{ model: Producto, as: 'producto' }],
+      lock: t.LOCK.UPDATE,
+      transaction: t,
+    });
+
+    if (!lot) throw new AppError('Lote no encontrado', 404);
+    if (lot.status !== 'DISPONIBLE')
+      throw new AppError(`El lote está en estado ${lot.status}, no se puede despachar`, 409);
+    if (parseFloat(lot.qty_current) < qty)
+      throw new AppError(`Stock insuficiente: lote tiene ${lot.qty_current}, solicitas ${qty}`, 409);
+
+    const qty_remaining = parseFloat(lot.qty_current) - qty;
+
+    await lot.update({
+      qty_current: qty_remaining,
+      status:      qty_remaining === 0 ? 'DESPACHADO' : 'DISPONIBLE',
     }, { transaction: t });
 
-    // Registrar despacho
     await Despacho.create({
-      stock_id:     stock.id,
-      producto_id:  stock.producto_id,
-      cantidad:     qty,
-      cliente:      customer,
-      orden_siigo:  siigo_order_id || null,
+      lot_id:         lot.id,
+      producto_id:    lot.product_id,
+      cantidad:       qty,
+      cliente:        customer,
+      orden_siigo:    siigo_order_id || null,
       despachado_por: usuario.id,
-      notas
+      notas,
     }, { transaction: t });
 
     await logKardex({
-      loteId:          stock.id,
-      productoId:      stock.producto_id,
-      usuarioId:       usuario.id,
-      tipo:            'salida',
-      cantidad:        qty,
-      saldoDespues:    nuevaCant,
-      referenciaTipo:  'despacho',
-      referenciaCodigo: siigo_order_id || stock.lote,
-      notas:           `Despacho a ${customer}. ${notas || ''}`.trim(),
-      aprobadoPor:     usuario.id
+      loteId:           lot.id,
+      productoId:       lot.product_id,
+      usuarioId:        usuario.id,
+      tipo:             'despacho',
+      cantidad:         qty,
+      saldoDespues:     qty_remaining,
+      referenciaTipo:   'despacho',
+      referenciaCodigo: siigo_order_id || lot.lpn,
+      notas:            `Despacho a ${customer}. ${notas || ''}`.trim(),
+      aprobadoPor:      usuario.id,
     }, t);
 
     return {
-      lpn:           stock.lote,
-      sku:           stock.producto.siigo_code,
+      lpn:            lot.lpn,
+      sku:            lot.producto.siigo_code,
       qty_dispatched: qty,
-      qty_remaining:  nuevaCant,
+      qty_remaining,
       customer,
-      status: nuevaCant === 0 ? 'despachado' : 'disponible'
+      status: qty_remaining === 0 ? 'DESPACHADO' : 'DISPONIBLE',
     };
   });
 };
