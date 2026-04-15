@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import * as api from '../api/products.api'
 
+// Garantiza que el resultado siempre sea un array,
+// sin importar si la respuesta viene como { rows, total } o como array directo.
+const toArray = (data) => {
+  if (Array.isArray(data))        return data
+  if (Array.isArray(data?.rows))  return data.rows
+  if (Array.isArray(data?.data))  return data.data
+  return []
+}
+
 export const useProductsStore = create((set, get) => ({
   list:    [],
   detail:  null,
@@ -16,7 +25,7 @@ export const useProductsStore = create((set, get) => ({
     try {
       const params = { ...get().filters, ...overrides }
       const { data } = await api.getProducts(params)
-      set({ list: data?.rows ?? data ?? [], loading: false })
+      set({ list: toArray(data), loading: false })
     } catch (e) {
       set({ error: e.response?.data?.message ?? 'Error al cargar productos', loading: false })
     }
