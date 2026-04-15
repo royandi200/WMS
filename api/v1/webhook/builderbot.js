@@ -1,9 +1,8 @@
 // Vercel Serverless Function
 // POST /api/v1/webhook/builderbot
-// Schema real: recepciones, recepcion_items, stock, kardex, ordenes_produccion, movimientos
-const mysql = require('mysql2/promise');
-const axios = require('axios');
-// crypto es built-in de Node.js — no requiere instalación
+// Schema real: recepciones, recepcion_items, stock, kardex, lots, ordenes_produccion, movimientos
+const mysql  = require('mysql2/promise');
+const axios  = require('axios');
 const { randomUUID } = require('crypto');
 
 const DB = () => mysql.createConnection({
@@ -35,7 +34,43 @@ async function sendBack(phone, text) {
 }
 
 /**
- * Escribe un movimiento en la tabla kardex (nativa).
+ * Crea un registro en la tabla `lots` y devuelve su UUID.
+ * Esto es el puente lots ↔ kardex: cada movimiento tiene un lot_id real.
+ */
+async function createLot(db, { lpn, product_id, bodega_id, qty, supplier, origin, received_by, notes, expiry_date }) {
+  const id = randomUUID();
+  await db.execute(
+    `INSERT INTO lots
+       (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier, origin, status, received_by, notes, expiry_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DISPONIBLE', ?, ?, ?)`,
+    [
+      id,
+      lpn,
+      product_id,
+      bodega_id,
+      qty,
+      qty,
+      supplier  || null,
+      origin    || 'RECEPCION',
+      received_by || null,
+      notes     || null,
+      expiry_date || null,
+    ]
+  ).catch(e => console.error('[createLot] ERROR:', e.message, '| lpn:', lpn));
+  return id;
+}
+
+/** Resuelve LPN → lot_id (UUID) desde la tabla lots. Devuelve null si no existe. */
+async function lotIdByLpn(db, lpn) {
+  if (!lpn) return null;
+  const [rows] = await db.execute(
+    `SELECT id FROM lots WHERE lpn = ? LIMIT 1`, [lpn]
+  ).catch(() => [[]]);
+  return rows[0]?.id || null;
+}
+
+/**
+ * Escribe un movimiento en la tabla kardex.
  * Usa crypto.randomUUID() — built-in Node.js, sin dependencias externas.
  */
 async function logKardex(db, { product_id, user_id, action, qty,
@@ -60,7 +95,7 @@ async function logKardex(db, { product_id, user_id, action, qty,
   ).catch(e => console.error('[logKardex] ERROR:', e.message, '| action:', action, '| product_id:', product_id));
 }
 
-/** Saldo actual del producto en stock (para balance_after). */
+/** Saldo actual del producto en stock. */
 async function getStockBalance(db, product_id, bodega_id) {
   const [rows] = await db.execute(
     `SELECT COALESCE(SUM(cantidad), 0) AS total FROM stock WHERE producto_id = ? AND bodega_id = ?`,
@@ -158,11 +193,11 @@ module.exports = async (req, res) => {
       // ── 1. INGRESO_RECEPCION ──
       case 'INGRESO_RECEPCION': {
         const p = await findProductBySku(db, params.id_item);
-        const numero = await nextRecepcionNumero(db);
+        const numero    = await nextRecepcionNumero(db);
         const cantTotal = Number(params.cantidad) || 0;
         const cantMala  = Number(params.cantidad_mala) || 0;
         const cantBuena = cantTotal - cantMala;
-        const loteCode  = `L-${p.siigo_code}-${Date.now()}`;
+        const lpnBuena  = `L-${p.siigo_code}-${Date.now()}`;
 
         const [recIns] = await db.execute(
           `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id)
@@ -171,17 +206,29 @@ module.exports = async (req, res) => {
         );
         const recepcionId = recIns.insertId;
 
+        let lotIdBuena = null;
         if (cantBuena > 0) {
+          // ── Puente: crear lot real ──
+          lotIdBuena = await createLot(db, {
+            lpn:         lpnBuena,
+            product_id:  p.id,
+            bodega_id:   bodegaId,
+            qty:         cantBuena,
+            supplier:    params.proveedor || null,
+            origin:      'RECEPCION',
+            received_by: user.id,
+          });
+
           await db.execute(
             `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
              VALUES (?,?,?,?,?)`,
-            [recepcionId, p.id, loteCode, cantBuena, cantBuena]
+            [recepcionId, p.id, lpnBuena, cantBuena, cantBuena]
           );
-          await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: loteCode, cantidad: cantBuena });
+          await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: lpnBuena, cantidad: cantBuena });
           await db.execute(
             `INSERT INTO movimientos (tipo, producto_id, bodega_dest, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
              VALUES ('entrada',?,?,?,?,?,'recepcion',?)`,
-            [p.id, bodegaId, loteCode, cantBuena, recepcionId, user.id]
+            [p.id, bodegaId, lpnBuena, cantBuena, recepcionId, user.id]
           );
           const balance = await getStockBalance(db, p.id, bodegaId);
           await logKardex(db, {
@@ -189,6 +236,7 @@ module.exports = async (req, res) => {
             user_id:       user.id,
             action:        'INGRESO_RECEPCION',
             qty:           cantBuena,
+            lot_id:        lotIdBuena,          // ← FK real a lots.id
             balance_after: balance,
             reference:     `recepcion:${numero}`,
             notes:         params.proveedor ? `Proveedor: ${params.proveedor}` : null,
@@ -197,26 +245,37 @@ module.exports = async (req, res) => {
 
         let msgMala = '';
         if (cantMala > 0) {
-          const loteNov = `L-NOV-${p.siigo_code}-${Date.now()}`;
+          const lpnNov = `L-NOV-${p.siigo_code}-${Date.now()}`;
+          const lotIdNov = await createLot(db, {
+            lpn:         lpnNov,
+            product_id:  p.id,
+            bodega_id:   bodegaId,
+            qty:         cantMala,
+            supplier:    params.proveedor || null,
+            origin:      'RECEPCION',
+            received_by: user.id,
+            notes:       'Novedad en recepción',
+          });
           await db.execute(
             `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
              VALUES (?,?,?,?,?)`,
-            [recepcionId, p.id, loteNov, cantMala, cantMala]
+            [recepcionId, p.id, lpnNov, cantMala, cantMala]
           );
           await logKardex(db, {
             product_id: p.id,
             user_id:    user.id,
             action:     'INGRESO_NOVEDAD',
             qty:        cantMala,
+            lot_id:     lotIdNov,               // ← FK real a lots.id
             reference:  `recepcion:${numero}`,
-            notes:      `Cantidad con novedad — lote ${loteNov}`,
+            notes:      `Cantidad con novedad — lote ${lpnNov}`,
           });
-          msgMala = `\n⚠️ Novedad: ${cantMala} und → Lote ${loteNov}`;
+          msgMala = `\n⚠️ Novedad: ${cantMala} und → Lote ${lpnNov}`;
         }
 
-        const msg = `✅ *Recepción registrada: ${numero}*\nProducto: ${params.id_item}\nBuenos: ${cantBuena} und → Lote ${loteCode}${msgMala}${params.proveedor ? '\nProveedor: '+params.proveedor : ''}`;
+        const msg = `✅ *Recepción registrada: ${numero}*\nProducto: ${params.id_item}\nBuenos: ${cantBuena} und → Lote ${lpnBuena}${msgMala}${params.proveedor ? '\nProveedor: '+params.proveedor : ''}`;
         await sendBack(from, msg);
-        result = { message: msg, numero, lote: loteCode };
+        result = { message: msg, numero, lote: lpnBuena, lot_id: lotIdBuena };
         break;
       }
 
@@ -262,6 +321,8 @@ module.exports = async (req, res) => {
       case 'REPORTE_MERMA': {
         const p = await findProductBySku(db, params.id_item);
         const cantMerma = Math.abs(params.cantidad);
+        // Resolver lot_id desde LPN si viene en params
+        const lotIdMerma = await lotIdByLpn(db, params.id_lote);
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
            VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
@@ -272,6 +333,12 @@ module.exports = async (req, res) => {
             `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND lote=?`,
             [cantMerma, p.id, params.id_lote]
           );
+          // Actualizar qty_current en lots
+          await db.execute(
+            `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?), status = IF(qty_current - ? <= 0, 'AGOTADO', status)
+             WHERE lpn = ?`,
+            [cantMerma, cantMerma, params.id_lote]
+          ).catch(() => {});
         }
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
@@ -279,6 +346,7 @@ module.exports = async (req, res) => {
           user_id:       user.id,
           action:        'MERMA_BODEGA',
           qty:           -cantMerma,
+          lot_id:        lotIdMerma,             // ← FK real a lots.id
           balance_after: balance,
           reference:     params.id_lote ? `lote:${params.id_lote}` : null,
           notes:         params.motivo || null,
@@ -298,12 +366,24 @@ module.exports = async (req, res) => {
           `UPDATE ordenes_produccion SET estado='completada', cantidad_prod=?, updated_at=NOW() WHERE id=?`,
           [cantReal, params.id_orden]
         );
-        const loteOP = `L-OP${params.id_orden}-${Date.now()}`;
-        await upsertStock(db, { producto_id: rows[0].producto_id, bodega_id: bodegaId, lote: loteOP, cantidad: cantReal });
+        const lpnOP = `L-OP${params.id_orden}-${Date.now()}`;
+
+        // ── Puente: crear lot real para producción ──
+        const lotIdOP = await createLot(db, {
+          lpn:                lpnOP,
+          product_id:         rows[0].producto_id,
+          bodega_id:          bodegaId,
+          qty:                cantReal,
+          origin:             'PRODUCCION',
+          received_by:        user.id,
+          notes:              `Orden de producción #${params.id_orden}`,
+        });
+
+        await upsertStock(db, { producto_id: rows[0].producto_id, bodega_id: bodegaId, lote: lpnOP, cantidad: cantReal });
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_dest, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
            VALUES ('entrada',?,?,?,?,?,'orden_produccion',?)`,
-          [rows[0].producto_id, bodegaId, loteOP, cantReal, params.id_orden, user.id]
+          [rows[0].producto_id, bodegaId, lpnOP, cantReal, params.id_orden, user.id]
         );
         const balance = await getStockBalance(db, rows[0].producto_id, bodegaId);
         await logKardex(db, {
@@ -311,25 +391,34 @@ module.exports = async (req, res) => {
           user_id:       user.id,
           action:        'CIERRE_PRODUCCION',
           qty:           cantReal,
+          lot_id:        lotIdOP,               // ← FK real a lots.id
           balance_after: balance,
           reference:     `orden_produccion:${params.id_orden}`,
-          notes:         `Lote generado: ${loteOP}`,
+          notes:         `Lote generado: ${lpnOP}`,
         });
-        const msg = `✅ *Orden #${params.id_orden} cerrada*\nCantidad producida: ${cantReal}\nLote generado: ${loteOP}`;
+        const msg = `✅ *Orden #${params.id_orden} cerrada*\nCantidad producida: ${cantReal}\nLote generado: ${lpnOP}`;
         await sendBack(from, msg);
-        result = { message: msg, lote: loteOP };
+        result = { message: msg, lote: lpnOP, lot_id: lotIdOP };
         break;
       }
 
       // ── 6. SOLICITAR_DESPACHO ──
       case 'SOLICITAR_DESPACHO': {
         const p = await findProductBySku(db, params.id_item || params.id_lote);
-        const cantDesp = Number(params.cantidad) || 0;
+        const cantDesp   = Number(params.cantidad) || 0;
+        const lotIdDesp  = await lotIdByLpn(db, params.id_lote);  // ← resolver LPN → UUID
+
         if (params.id_lote) {
           await db.execute(
             `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
             [cantDesp, p.id, bodegaId, params.id_lote]
           );
+          // Actualizar qty_current en lots
+          await db.execute(
+            `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?),
+             status = IF(qty_current - ? <= 0, 'DESPACHADO', status) WHERE lpn = ?`,
+            [cantDesp, cantDesp, params.id_lote]
+          ).catch(() => {});
         } else {
           await db.execute(
             `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND bodega_id=? LIMIT 1`,
@@ -347,6 +436,7 @@ module.exports = async (req, res) => {
           user_id:       user.id,
           action:        'DESPACHO',
           qty:           -cantDesp,
+          lot_id:        lotIdDesp,              // ← FK real a lots.id
           balance_after: balance,
           reference:     params.id_lote ? `lote:${params.id_lote}` : null,
           notes:         params.cliente_destino ? `Cliente: ${params.cliente_destino}` : null,
@@ -360,8 +450,8 @@ module.exports = async (req, res) => {
       // ── 7. GESTION_DEVOLUCION ──
       case 'GESTION_DEVOLUCION': {
         const p = await findProductBySku(db, params.id_item);
-        const loteDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
-        const numero = await nextRecepcionNumero(db);
+        const lpnDev  = `L-DEV-${p.siigo_code}-${Date.now()}`;
+        const numero  = await nextRecepcionNumero(db);
         const [recIns] = await db.execute(
           `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
            VALUES (?,?,?,'completada',?,?)`,
@@ -370,22 +460,35 @@ module.exports = async (req, res) => {
         await db.execute(
           `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
            VALUES (?,?,?,?,?)`,
-          [recIns.insertId, p.id, loteDev, params.cantidad, params.cantidad]
+          [recIns.insertId, p.id, lpnDev, params.cantidad, params.cantidad]
         );
-        await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: loteDev, cantidad: params.cantidad });
+        await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: lpnDev, cantidad: params.cantidad });
+
+        // ── Puente: crear lot real para devolución ──
+        const lotIdDev = await createLot(db, {
+          lpn:         lpnDev,
+          product_id:  p.id,
+          bodega_id:   bodegaId,
+          qty:         params.cantidad,
+          origin:      'DEVOLUCION',
+          received_by: user.id,
+          notes:       `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${params.estado || 'CUARENTENA'}`,
+        });
+
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
           product_id:    p.id,
           user_id:       user.id,
           action:        'DEVOLUCION',
           qty:           params.cantidad,
+          lot_id:        lotIdDev,               // ← FK real a lots.id
           balance_after: balance,
           reference:     `recepcion:${numero}`,
           notes:         `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${params.estado || 'CUARENTENA'}`,
         });
-        const msg = `🔄 *Devolución registrada*\nProducto: ${params.id_item}\nCantidad: ${params.cantidad}\nLote: ${loteDev}`;
+        const msg = `🔄 *Devolución registrada*\nProducto: ${params.id_item}\nCantidad: ${params.cantidad}\nLote: ${lpnDev}`;
         await sendBack(from, msg);
-        result = { message: msg, lote: loteDev };
+        result = { message: msg, lote: lpnDev, lot_id: lotIdDev };
         break;
       }
 
@@ -430,16 +533,37 @@ module.exports = async (req, res) => {
       }
 
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
-        const [rows] = await db.execute(
-          `SELECT s.*, p.nombre, p.siigo_code FROM stock s
-           JOIN productos p ON p.id=s.producto_id
-           WHERE s.lote = ? LIMIT 1`, [params.id_lote]
-        );
-        if (!rows.length) throw { status: 404, message: `Lote "${params.id_lote}" no encontrado` };
-        const s = rows[0];
-        const msg = `🔎 *Lote: ${params.id_lote}*\nProducto: ${s.nombre} (${s.siigo_code})\nCantidad: ${s.cantidad} und\nReservado: ${s.reservada} und\nVence: ${s.fecha_venc || 'N/A'}`;
-        await sendBack(from, msg);
-        result = { message: msg };
+        // Busca primero en lots (tabla maestra), luego fallback a stock
+        const [lotRows] = await db.execute(
+          `SELECT l.*, p.nombre, p.siigo_code
+           FROM lots l JOIN productos p ON p.id = l.product_id
+           WHERE l.lpn = ? LIMIT 1`, [params.id_lote]
+        ).catch(() => [[]]);
+        if (lotRows.length) {
+          const l = lotRows[0];
+          const [kRows] = await db.execute(
+            `SELECT action, qty, balance_after, created_at FROM kardex WHERE lot_id = ? ORDER BY created_at ASC`,
+            [l.id]
+          ).catch(() => [[]]);
+          const history = kRows.length
+            ? kRows.map(k => `  ${k.action}: ${k.qty > 0 ? '+' : ''}${k.qty} (saldo: ${k.balance_after})`).join('\n')
+            : '  (Sin movimientos en kardex)';
+          const msg = `🔎 *Lote: ${params.id_lote}*\nProducto: ${l.nombre} (${l.siigo_code})\nInicial: ${l.qty_initial} und\nActual: ${l.qty_current} und\nEstado: ${l.status}\nOrigen: ${l.origin}\nVence: ${l.expiry_date || 'N/A'}\n\n📋 *Historial kardex:*\n${history}`;
+          await sendBack(from, msg);
+          result = { message: msg };
+        } else {
+          // Fallback a stock si el lot no existe en lots (lotes legacy)
+          const [rows] = await db.execute(
+            `SELECT s.*, p.nombre, p.siigo_code FROM stock s
+             JOIN productos p ON p.id=s.producto_id
+             WHERE s.lote = ? LIMIT 1`, [params.id_lote]
+          );
+          if (!rows.length) throw { status: 404, message: `Lote "${params.id_lote}" no encontrado` };
+          const s = rows[0];
+          const msg = `🔎 *Lote: ${params.id_lote}*\nProducto: ${s.nombre} (${s.siigo_code})\nCantidad: ${s.cantidad} und\nReservado: ${s.reservada} und\nVence: ${s.fecha_venc || 'N/A'}`;
+          await sendBack(from, msg);
+          result = { message: msg };
+        }
         break;
       }
 
