@@ -4,10 +4,11 @@
 // =============================================================
 // Flujo BB Cloud:
 //   BB Cloud → POST { info: "{aiResponse}", from: "{from}" }
-//   Vercel procesa → responde 200 { ok:true, mensaje:"..." }
-//   BB Cloud lee {mensaje} del HTTP response — NO hay callback.
-//   sendBack (axios) fue eliminado: causaba timeout al apuntar
-//   a BUILDERBOT_SEND_URL indefinida, bloqueando la respuesta.
+//   Vercel procesa → responde 200 { ok:true, message:"...", mensaje:"..." }
+//   BB Cloud lee {message} del HTTP response (compatible AppScripts).
+//   Se devuelven AMBOS campos para máxima compatibilidad:
+//     - message  → lo que BB Cloud configurado originalmente espera
+//     - mensaje  → alias en español (por si se reconfigura)
 // =============================================================
 // Schema ordenes_produccion (real):
 //   id, codigo_orden, producto_id, fase(ENUM F0-F5),
@@ -305,7 +306,7 @@ module.exports = async (req, res) => {
     if (rolesPermitidos && !rolesPermitidos.includes(rolNorm)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'DENIED' });
-      return res.status(403).json({ ok: false, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
+      return res.status(403).json({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
     }
 
     let mensaje = '';
@@ -828,16 +829,16 @@ module.exports = async (req, res) => {
         throw { status: 400, message: `Acción desconocida: ${action}` };
     }
 
-    await saveLog(db, { from, action, priority, payload: rawBody, response: { mensaje }, status: 'PROCESSED' });
+    await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje }, status: 'PROCESSED' });
 
-    // BB Cloud lee {mensaje} directamente del HTTP response body
-    return res.json({ ok: true, mensaje });
+    // Devolver AMBOS campos: BB Cloud configurado espera {message} (inglés)
+    return res.json({ ok: true, message: mensaje, mensaje });
 
   } catch (err) {
     const errMsg = err.message || 'Error interno';
     await saveLog(db, { from, action, priority, payload: rawBody,
       response: { error: errMsg }, status: 'ERROR' }).catch(() => {});
-    return res.status(err.status || 500).json({ ok: false, mensaje: `❌ ${errMsg}`, error: errMsg });
+    return res.status(err.status || 500).json({ ok: false, message: `❌ ${errMsg}`, mensaje: `❌ ${errMsg}`, error: errMsg });
   } finally {
     await db.end().catch(() => {});
   }
