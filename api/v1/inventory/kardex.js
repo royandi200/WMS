@@ -12,14 +12,15 @@ module.exports = async (req, res) => {
     const { producto_id, page = 1, limit = 50, desde, hasta } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
+    // v_kardex expone el campo como 'fecha' (alias de m.creado_en)
     let where = 'WHERE 1=1';
     const args = [];
     if (producto_id) { where += ' AND producto_id = ?'; args.push(producto_id); }
-    if (desde)       { where += ' AND creado_en >= ?';  args.push(desde); }
-    if (hasta)       { where += ' AND creado_en <= ?';  args.push(hasta); }
+    if (desde)       { where += ' AND fecha >= ?';      args.push(desde); }
+    if (hasta)       { where += ' AND fecha <= ?';      args.push(hasta); }
 
     const rows = await query(
-      `SELECT * FROM v_kardex ${where} ORDER BY creado_en DESC LIMIT ? OFFSET ?`,
+      `SELECT * FROM v_kardex ${where} ORDER BY fecha DESC LIMIT ? OFFSET ?`,
       [...args, Number(limit), offset]
     );
 
@@ -27,9 +28,8 @@ module.exports = async (req, res) => {
       `SELECT COUNT(*) AS total FROM v_kardex ${where}`,
       args
     );
-    const total = countRows[0]?.total ?? 0;
 
-    return res.status(200).json({ ok: true, data: { rows, total: Number(total) } });
+    return res.status(200).json({ ok: true, data: { rows, total: Number(countRows[0]?.total ?? 0) } });
   } catch (err) {
     console.error('[inventory/kardex]', err.message);
     return res.status(500).json({ ok: false, error: err.message });
