@@ -21,7 +21,7 @@ async function saveLog(db, { from, action, priority, payload, response, status }
      VALUES (?, ?, ?, ?, ?, ?)`,
     [from || null, action, priority || 'baja',
      JSON.stringify(payload), JSON.stringify(response || {}), status]
-  ).catch(() => {}); // log nunca debe romper el flujo
+  ).catch(() => {});
 }
 
 async function sendBack(phone, text) {
@@ -49,7 +49,8 @@ async function findProductBySku(db, sku) {
 }
 
 async function getDefaultBodega(db) {
-  const [rows] = await db.execute(`SELECT id FROM bodegas WHERE activo = 1 ORDER BY id ASC LIMIT 1`);
+  // bodegas usa columna "activa" (no "activo")
+  const [rows] = await db.execute(`SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
   if (!rows.length) throw { status: 500, message: 'No hay bodegas configuradas' };
   return rows[0].id;
 }
@@ -67,7 +68,6 @@ async function getOrCreateBotUser(db, phone) {
   return { id: ins.insertId, nombre: `WA-${phone}`, email: botEmail };
 }
 
-// Genera número de recepción secuencial: REC-YYYYMMDD-XXXX
 async function nextRecepcionNumero(db) {
   const d = new Date();
   const prefix = `REC-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
@@ -78,27 +78,13 @@ async function nextRecepcionNumero(db) {
   return `${prefix}-${seq}`;
 }
 
-// Genera número de orden: OP-YYYYMMDD-XXXX
-async function nextOrdenNumero(db) {
-  const d = new Date();
-  const prefix = `OP-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
-  const [rows] = await db.execute(
-    `SELECT COUNT(*) AS cnt FROM ordenes_produccion WHERE id > 0`
-  );
-  return `${prefix}-${String((rows[0].cnt || 0) + 1).padStart(4, '0')}`;
-}
-
-// Actualiza o inserta stock
 async function upsertStock(db, { producto_id, bodega_id, lote, cantidad }) {
   const [ex] = await db.execute(
-    `SELECT id, cantidad FROM stock WHERE producto_id=? AND bodega_id=? AND (lote=? OR (lote IS NULL AND ? IS NULL)) LIMIT 1`,
+    `SELECT id FROM stock WHERE producto_id=? AND bodega_id=? AND (lote=? OR (lote IS NULL AND ? IS NULL)) LIMIT 1`,
     [producto_id, bodega_id, lote, lote]
   );
   if (ex.length) {
-    await db.execute(
-      `UPDATE stock SET cantidad = cantidad + ? WHERE id = ?`,
-      [cantidad, ex[0].id]
-    );
+    await db.execute(`UPDATE stock SET cantidad = cantidad + ? WHERE id = ?`, [cantidad, ex[0].id]);
   } else {
     await db.execute(
       `INSERT INTO stock (producto_id, bodega_id, lote, cantidad) VALUES (?,?,?,?)`,
@@ -135,16 +121,14 @@ module.exports = async (req, res) => {
 
     switch (action) {
 
-      // ─────────────────────────────────────────────
       case 'INGRESO_RECEPCION': {
         const p = await findProductBySku(db, params.id_item);
         const numero = await nextRecepcionNumero(db);
-        const cantTotal  = Number(params.cantidad) || 0;
-        const cantMala   = Number(params.cantidad_mala) || 0;
-        const cantBuena  = cantTotal - cantMala;
-        const loteCode   = `L-${p.siigo_code}-${Date.now()}`;
+        const cantTotal = Number(params.cantidad) || 0;
+        const cantMala  = Number(params.cantidad_mala) || 0;
+        const cantBuena = cantTotal - cantMala;
+        const loteCode  = `L-${p.siigo_code}-${Date.now()}`;
 
-        // Crear recepción
         const [recIns] = await db.execute(
           `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id)
            VALUES (?,?,?,'completada',?)`,
@@ -152,7 +136,6 @@ module.exports = async (req, res) => {
         );
         const recepcionId = recIns.insertId;
 
-        // Item bueno
         if (cantBuena > 0) {
           await db.execute(
             `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
@@ -167,7 +150,6 @@ module.exports = async (req, res) => {
           );
         }
 
-        // Item malo (lote separado, nota de novedad)
         let msgMala = '';
         if (cantMala > 0) {
           const loteNov = `L-NOV-${p.siigo_code}-${Date.now()}`;
@@ -185,42 +167,35 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [ins] = await db.execute(
           `INSERT INTO ordenes_produccion (producto_id, cantidad_obj, bodega_id, estado, usuario_id, observaciones)
            VALUES (?,?,?,'borrador',?,?)`,
-          [p.id, params.cantidad_planificada, bodegaId, user.id,
-           `Creada desde WhatsApp por ${from}`]
+          [p.id, params.cantidad_planificada, bodegaId, user.id, `Creada desde WhatsApp por ${from}`]
         );
         const orderId = ins.insertId;
-
-        // Verificar stock de insumos via BOM si existe
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.nombre
            FROM bom b JOIN productos pr ON pr.id = b.insumo_producto_id
            WHERE b.producto_id = ?`, [p.id]
-        );
+        ).catch(() => [[]]);
         const picking = bom.length
-          ? bom.map(b => `  • ${b.siigo_code}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} ${b.unidad || 'und'}`).join('\n')
+          ? bom.map(b => `  • ${b.siigo_code}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} und`).join('\n')
           : '  (Sin BOM — verifica materiales manualmente)';
-
-        const msg = `🏭 *Orden #${orderId} creada*\nProducto: ${params.id_producto_final}\nCantidad: ${params.cantidad_planificada}\n\n📋 *Materiales necesarios:*\n${picking}\n\nResponde cuando tengas todo listo.`;
+        const msg = `🏭 *Orden #${orderId} creada*\nProducto: ${params.id_producto_final}\nCantidad: ${params.cantidad_planificada}\n\n📋 *Materiales necesarios:*\n${picking}`;
         await sendBack(from, msg);
         result = { message: msg, orden_id: orderId };
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'AVANCE_FASES': {
-        const [rows] = await db.execute(
-          `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]
-        );
+        const [rows] = await db.execute(`SELECT id FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]);
         if (!rows.length) throw { status: 404, message: `Orden #${params.id_orden} no encontrada` };
         await db.execute(
-          `UPDATE ordenes_produccion SET estado='en_proceso', observaciones=CONCAT(IFNULL(observaciones,''),'\nFase: ${params.fase_destino} - ', NOW()), updated_at=NOW() WHERE id=?`,
-          [params.id_orden]
+          `UPDATE ordenes_produccion SET estado='en_proceso',
+           observaciones=CONCAT(IFNULL(observaciones,''), ?), updated_at=NOW() WHERE id=?`,
+          [`\nFase: ${params.fase_destino} - ${new Date().toISOString()}`, params.id_orden]
         );
         const msg = `📦 *Avance registrado*\nOrden #${params.id_orden}\nFase: ${params.fase_destino}`;
         await sendBack(from, msg);
@@ -228,16 +203,13 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'REPORTE_MERMA': {
         const p = await findProductBySku(db, params.id_item);
-        // Registra como movimiento de ajuste negativo
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
            VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
           [p.id, bodegaId, params.id_lote || null, -Math.abs(params.cantidad), user.id]
         );
-        // Descuenta del stock
         if (params.id_lote) {
           await db.execute(
             `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND lote=?`,
@@ -250,42 +222,41 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'SOLICITAR_CIERRE_PRODUCCION': {
-        const [rows] = await db.execute(
-          `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]
-        );
+        const [rows] = await db.execute(`SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]);
         if (!rows.length) throw { status: 404, message: `Orden #${params.id_orden} no encontrada` };
+        const cantReal = params.cantidad_real || rows[0].cantidad_obj;
         await db.execute(
           `UPDATE ordenes_produccion SET estado='completada', cantidad_prod=?, updated_at=NOW() WHERE id=?`,
-          [params.cantidad_real || rows[0].cantidad_obj, params.id_orden]
+          [cantReal, params.id_orden]
         );
-        // Registrar entrada de producto terminado al stock
         const loteOP = `L-OP${params.id_orden}-${Date.now()}`;
-        await upsertStock(db, { producto_id: rows[0].producto_id, bodega_id: bodegaId, lote: loteOP, cantidad: params.cantidad_real || rows[0].cantidad_obj });
+        await upsertStock(db, { producto_id: rows[0].producto_id, bodega_id: bodegaId, lote: loteOP, cantidad: cantReal });
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_dest, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
            VALUES ('entrada',?,?,?,?,?,'orden_produccion',?)`,
-          [rows[0].producto_id, bodegaId, loteOP, params.cantidad_real || rows[0].cantidad_obj, params.id_orden, user.id]
+          [rows[0].producto_id, bodegaId, loteOP, cantReal, params.id_orden, user.id]
         );
-        const msg = `✅ *Orden #${params.id_orden} cerrada*\nCantidad producida: ${params.cantidad_real || rows[0].cantidad_obj}\nLote generado: ${loteOP}`;
+        const msg = `✅ *Orden #${params.id_orden} cerrada*\nCantidad producida: ${cantReal}\nLote generado: ${loteOP}`;
         await sendBack(from, msg);
         result = { message: msg, lote: loteOP };
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'SOLICITAR_DESPACHO': {
-        // Registra salida de stock
         const p = await findProductBySku(db, params.id_item || params.id_lote);
         const cantDesp = Number(params.cantidad) || 0;
-        await db.execute(
-          `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?)
-           WHERE producto_id=? AND bodega_id=? ${params.id_lote ? 'AND lote=?' : ''} LIMIT 1`,
-          params.id_lote
-            ? [cantDesp, p.id, bodegaId, params.id_lote]
-            : [cantDesp, p.id, bodegaId]
-        );
+        if (params.id_lote) {
+          await db.execute(
+            `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
+            [cantDesp, p.id, bodegaId, params.id_lote]
+          );
+        } else {
+          await db.execute(
+            `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND bodega_id=? LIMIT 1`,
+            [cantDesp, p.id, bodegaId]
+          );
+        }
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
            VALUES ('salida',?,?,?,?,'despacho_wa',?)`,
@@ -297,7 +268,6 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
         if (params.id_item) {
@@ -310,20 +280,20 @@ module.exports = async (req, res) => {
           await sendBack(from, msg);
           result = { message: msg };
         } else {
+          // productos.activo sí existe ✅
           const [rows] = await db.execute(
             `SELECT p.siigo_code, p.nombre, COALESCE(SUM(s.cantidad),0) AS stock
              FROM productos p LEFT JOIN stock s ON s.producto_id=p.id AND s.bodega_id=?
              WHERE p.activo=1 GROUP BY p.id ORDER BY stock DESC LIMIT 10`, [bodegaId]
           );
           const lines = rows.map(r => `  • ${r.siigo_code}: ${r.stock} und`).join('\n');
-          const msg = `📦 *Stock top 10:*\n${lines}`;
+          const msg = `📦 *Stock top 10:*\n${lines || '  (Sin stock registrado)'}`;
           await sendBack(from, msg);
           result = { message: msg };
         }
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'CONSULTAR_ESTADO_PRODUCCION': {
         const [rows] = await db.execute(
           `SELECT o.*, p.nombre AS producto, p.siigo_code
@@ -338,7 +308,6 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
         const [rows] = await db.execute(
           `SELECT s.*, p.nombre, p.siigo_code FROM stock s
@@ -353,13 +322,12 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.id AS insumo_id FROM bom b
            JOIN productos pr ON pr.id=b.insumo_producto_id WHERE b.producto_id=?`, [p.id]
-        );
+        ).catch(() => [[]]);
         let canProduce = true;
         const checks = [];
         for (const item of bom) {
@@ -368,7 +336,7 @@ module.exports = async (req, res) => {
             `SELECT COALESCE(SUM(cantidad),0) AS stock FROM stock WHERE producto_id=? AND bodega_id=?`,
             [item.insumo_id, bodegaId]
           );
-          const ok = st[0].stock >= needed;
+          const ok = parseFloat(st[0].stock) >= needed;
           if (!ok) canProduce = false;
           checks.push(`  ${ok?'✅':'❌'} ${item.siigo_code}: necesita ${needed}, tiene ${st[0].stock}`);
         }
@@ -378,7 +346,6 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'CONFIRMAR_MATERIALES_PRODUCCION':
       case 'EXCEPCION_PICKING': {
         await db.execute(
@@ -391,7 +358,6 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'GESTION_DEVOLUCION': {
         const p = await findProductBySku(db, params.id_item);
         const loteDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
@@ -413,7 +379,6 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ─────────────────────────────────────────────
       case 'MODO_CHARLA': {
         const msg = params.texto || 'No entendí tu mensaje. ¿Puedes ser más específico?';
         await sendBack(from, msg);
