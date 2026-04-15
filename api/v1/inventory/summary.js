@@ -9,17 +9,19 @@ module.exports = async (req, res) => {
   try { verifyToken(req); } catch (e) { return res.status(401).json({ ok: false, error: e.message }); }
 
   try {
-    const [[totals]] = await query(
+    const totalsRows = await query(
       `SELECT
-         COUNT(DISTINCT s.producto_id)                          AS total_productos,
-         SUM(s.cantidad)                                        AS total_unidades,
-         SUM(CASE WHEN p.activo = 1 THEN 1 ELSE 0 END)         AS productos_activos,
-         SUM(s.cantidad - s.reservada)                          AS disponible,
-         SUM(s.reservada)                                       AS reservado
+         COUNT(DISTINCT s.producto_id)              AS total_productos,
+         SUM(s.cantidad)                            AS total_unidades,
+         SUM(CASE WHEN p.activo=1 THEN 1 ELSE 0 END) AS productos_activos,
+         SUM(s.cantidad - s.reservada)              AS disponible,
+         SUM(s.reservada)                           AS reservado
        FROM stock s
        LEFT JOIN productos p ON p.id = s.producto_id`
     );
-    const [[{ cnt: bajo_stock }]] = await query(
+    const totals = totalsRows[0];
+
+    const bajoRows = await query(
       `SELECT COUNT(*) AS cnt
        FROM (
          SELECT s.producto_id
@@ -30,20 +32,22 @@ module.exports = async (req, res) => {
          HAVING SUM(s.cantidad) <= MAX(p.stock_minimo)
        ) sub`
     );
-    const [[{ cnt: alertas }]] = await query(`SELECT COUNT(*) AS cnt FROM v_alertas_stock`);
-    const [[{ cnt: vencimientos }]] = await query(`SELECT COUNT(*) AS cnt FROM v_vencimientos_proximos`);
+    const bajo_stock = bajoRows[0]?.cnt ?? 0;
+
+    const alertasRows = await query(`SELECT COUNT(*) AS cnt FROM v_alertas_stock`);
+    const vencRows    = await query(`SELECT COUNT(*) AS cnt FROM v_vencimientos_proximos`);
 
     return res.status(200).json({
       ok: true,
       data: {
-        total_productos:   Number(totals.total_productos)   || 0,
-        total_unidades:    Number(totals.total_unidades)    || 0,
-        productos_activos: Number(totals.productos_activos) || 0,
-        disponible:        Number(totals.disponible)        || 0,
-        reservado:         Number(totals.reservado)         || 0,
-        bajo_stock:        Number(bajo_stock)               || 0,
-        alertas_stock:     Number(alertas)                  || 0,
-        vencimientos_proximos: Number(vencimientos)         || 0,
+        total_productos:      Number(totals.total_productos)   || 0,
+        total_unidades:       Number(totals.total_unidades)    || 0,
+        productos_activos:    Number(totals.productos_activos) || 0,
+        disponible:           Number(totals.disponible)        || 0,
+        reservado:            Number(totals.reservado)         || 0,
+        bajo_stock:           Number(bajo_stock),
+        alertas_stock:        Number(alertasRows[0]?.cnt)      || 0,
+        vencimientos_proximos:Number(vencRows[0]?.cnt)         || 0,
       }
     });
   } catch (err) {
