@@ -16,6 +16,13 @@
 //   cantidad_planeada, cantidad_real, materiales_conf_en,
 //   cerrado_en, creado_por, aprobado_por, notas, creado_en
 // =============================================================
+// Fixes aplicados (prompt vs webhook):
+//   [1] SOLICITAR_DESPACHO    → id_item ahora obligatorio (findProductBySku antes de encolar)
+//   [2] REPORTE_MERMA         → id_orden se propaga a notes del kardex
+//   [3] EXCEPCION_PICKING     → lote_sugerido + lote_usado se persisten en system_logs
+//   [4] CONSULTAR_STOCK_*     → filtra tipo_producto (MP / PT) en consulta general
+//   [5] GESTION_DEVOLUCION    → normaliza estado ENUM antes de guardar
+// =============================================================
 const mysql  = require('mysql2/promise');
 const { randomUUID } = require('crypto');
 
@@ -195,6 +202,17 @@ async function nextCodigoOrden(db) {
     `SELECT COUNT(*) AS cnt FROM ordenes_produccion WHERE codigo_orden LIKE ?`, [`${prefix}%`]
   );
   return `${prefix}-${String((rows[0].cnt || 0) + 1).padStart(4,'0')}`;
+}
+
+// [FIX 5] Normaliza el estado de devolución a ENUM válido
+function normalizarEstadoDevolucion(estado) {
+  const map = {
+    'recuperable': 'RECUPERABLE',
+    'destruccion': 'DESTRUCCION',
+    'destrucción': 'DESTRUCCION',
+    'cuarentena':  'CUARENTENA',
+  };
+  return map[(estado || '').toLowerCase()] || 'CUARENTENA';
 }
 
 async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodegaId }) {
@@ -440,10 +458,19 @@ module.exports = async (req, res) => {
       }
 
       // ── 4. REPORTE_MERMA ──────────────────────────────────────
+      // [FIX 2] id_orden se propaga a las notes del kardex cuando viene del proceso
       case 'REPORTE_MERMA': {
         const p = await findProductBySku(db, params.id_item);
         const cantMerma  = Math.abs(Number(params.cantidad));
         const lotIdMerma = await lotIdByLpn(db, params.id_lote);
+
+        // Construir notes enriquecidas con id_orden si aplica
+        const mermaNoteParts = [];
+        if (params.motivo)   mermaNoteParts.push(`Motivo: ${params.motivo}`);
+        if (params.id_orden) mermaNoteParts.push(`Orden: ${params.id_orden}`);
+        if (params.id_lote)  mermaNoteParts.push(`Lote: ${params.id_lote}`);
+        const mermaNote = mermaNoteParts.join(' | ') || null;
+
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
            VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
@@ -462,17 +489,22 @@ module.exports = async (req, res) => {
         }
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
-          product_id: p.id, user_id: user.id, action: 'MERMA_BODEGA',
+          product_id: p.id, user_id: user.id,
+          // Distingue origen: merma de proceso vs. merma de bodega
+          action: params.id_orden ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
           qty: -cantMerma, lot_id: lotIdMerma, balance_after: balance,
-          reference: params.id_lote ? `lote:${params.id_lote}` : null,
-          notes: params.motivo || null,
+          reference: params.id_orden
+            ? `orden_produccion:${params.id_orden}`
+            : (params.id_lote ? `lote:${params.id_lote}` : null),
+          notes: mermaNote,
         });
         mensaje = [
           `⚠️ *Merma registrada*`,
           `Producto: ${params.id_item}`,
           `Cantidad: ${cantMerma}`,
-          `Motivo: ${params.motivo || 'No especificado'}`
-        ].join('\n');
+          `Motivo: ${params.motivo || 'No especificado'}`,
+          params.id_orden ? `Orden: ${params.id_orden}` : ''
+        ].filter(Boolean).join('\n');
         break;
       }
 
@@ -502,9 +534,11 @@ module.exports = async (req, res) => {
       }
 
       // ── 6. SOLICITAR_DESPACHO → encolar ──────────────────────
+      // [FIX 1] id_item ahora es obligatorio — findProductBySku antes de encolar
       case 'SOLICITAR_DESPACHO': {
-        const lot = await lotIdByLpn(db, params.id_lote);
-        const p   = await findProductBySku(db, params.id_item);
+        if (!params.id_item) throw { status: 400, message: 'id_item es obligatorio para SOLICITAR_DESPACHO' };
+        const p      = await findProductBySku(db, params.id_item);
+        const lot    = await lotIdByLpn(db, params.id_lote);
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
@@ -517,6 +551,7 @@ module.exports = async (req, res) => {
         );
         mensaje = [
           `⏳ *Solicitud de despacho: ${codigo}*`,
+          `Producto: ${params.id_item}`,
           `Lote: ${params.id_lote}`,
           `Cantidad: ${params.cantidad}`,
           `Esperando aprobación.`
@@ -525,15 +560,17 @@ module.exports = async (req, res) => {
       }
 
       // ── 7. GESTION_DEVOLUCION ─────────────────────────────────
+      // [FIX 5] Normaliza estado al ENUM válido antes de guardar
       case 'GESTION_DEVOLUCION': {
-        const p      = await findProductBySku(db, params.id_item);
-        const lpnDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
-        const numero = await nextRecepcionNumero(db);
+        const p           = await findProductBySku(db, params.id_item);
+        const estadoNorm  = normalizarEstadoDevolucion(params.estado);
+        const lpnDev      = `L-DEV-${p.siigo_code}-${Date.now()}`;
+        const numero      = await nextRecepcionNumero(db);
         const [recIns] = await db.execute(
           `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
            VALUES (?,?,?,'completada',?,?)`,
           [numero, bodegaId, params.cliente_origen || null, user.id,
-           `Devolución - ${params.estado || 'CUARENTENA'}`]
+           `Devolución - ${estadoNorm}`]
         );
         await db.execute(
           `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
@@ -544,19 +581,20 @@ module.exports = async (req, res) => {
         const lotIdDev = await createLot(db, {
           lpn: lpnDev, product_id: p.id, bodega_id: bodegaId,
           qty: params.cantidad, origin: 'DEVOLUCION', received_by: user.id,
-          notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${params.estado || 'CUARENTENA'}`,
+          notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${estadoNorm}`,
         });
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
           product_id: p.id, user_id: user.id, action: 'DEVOLUCION',
           qty: params.cantidad, lot_id: lotIdDev, balance_after: balance,
           reference: `recepcion:${numero}`,
-          notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${params.estado || 'CUARENTENA'}`,
+          notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${estadoNorm}`,
         });
         mensaje = [
           `🔄 *Devolución registrada*`,
           `Producto: ${params.id_item}`,
           `Cantidad: ${params.cantidad}`,
+          `Estado: ${estadoNorm}`,
           `Lote: ${lpnDev}`
         ].join('\n');
         break;
@@ -597,9 +635,6 @@ module.exports = async (req, res) => {
           [params.id_solicitud]
         );
         if (!rows.length) throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada o ya procesada` };
-        const solicitud = rows[0];
-        const payload   = typeof solicitud.payload === 'string'
-          ? JSON.parse(solicitud.payload) : solicitud.payload;
         await db.execute(
           `UPDATE aprobaciones SET estado='RECHAZADO', procesado_por=?, procesado_en=NOW(),
            motivo_rechazo=? WHERE codigo_solicitud=?`,
@@ -677,8 +712,10 @@ module.exports = async (req, res) => {
       }
 
       // ── Consultas de stock ────────────────────────────────────
+      // [FIX 4] Cuando no hay id_item, filtra por tipo_producto según la acción
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
+        const tipoFiltro = action === 'CONSULTAR_STOCK_MATERIA_PRIMA' ? 'MP' : 'PT';
         if (params.id_item) {
           const p = await findProductBySku(db, params.id_item);
           const [rows] = await db.execute(
@@ -695,10 +732,13 @@ module.exports = async (req, res) => {
           const [rows] = await db.execute(
             `SELECT p.siigo_code, p.nombre, COALESCE(SUM(s.cantidad),0) AS stock
              FROM productos p LEFT JOIN stock s ON s.producto_id=p.id AND s.bodega_id=?
-             WHERE p.activo=1 GROUP BY p.id ORDER BY stock DESC LIMIT 10`, [bodegaId]
+             WHERE p.activo=1 AND p.tipo_producto=?
+             GROUP BY p.id ORDER BY stock DESC LIMIT 10`,
+            [bodegaId, tipoFiltro]
           );
+          const label = tipoFiltro === 'MP' ? 'Materias Primas' : 'Producto Terminado';
           const lines = rows.map(r => `  • ${r.siigo_code}: ${r.stock} und`).join('\n');
-          mensaje = `📦 *Stock top 10:*\n${lines || '  (Sin stock registrado)'}`;
+          mensaje = `📦 *Stock ${label} top 10:*\n${lines || '  (Sin stock registrado)'}`;
         }
         break;
       }
@@ -797,9 +837,8 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── Confirmar materiales / Excepción picking ──────────────
-      case 'CONFIRMAR_MATERIALES_PRODUCCION':
-      case 'EXCEPCION_PICKING': {
+      // ── Confirmar materiales ──────────────────────────────────
+      case 'CONFIRMAR_MATERIALES_PRODUCCION': {
         const [rows] = await db.execute(
           `SELECT id FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
@@ -814,8 +853,51 @@ module.exports = async (req, res) => {
         mensaje = [
           `✅ *Materiales confirmados*`,
           `Orden: ${params.id_orden} → EN_PROCESO`,
-          action === 'EXCEPCION_PICKING' && params.lote_usado
-            ? `Lote alternativo: ${params.lote_usado}` : ''
+          params.lote_usado ? `Lote utilizado: ${params.lote_usado}` : ''
+        ].filter(Boolean).join('\n');
+        break;
+      }
+
+      // ── Excepción picking ─────────────────────────────────────
+      // [FIX 3] Persiste lote_sugerido + lote_usado en system_logs
+      case 'EXCEPCION_PICKING': {
+        if (!params.lote_sugerido || !params.lote_usado) {
+          throw { status: 400, message: 'EXCEPCION_PICKING requiere lote_sugerido y lote_usado' };
+        }
+        const ordenRows = params.id_orden
+          ? await db.execute(
+              `SELECT id FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
+              [params.id_orden, params.id_orden]
+            ).then(([r]) => r).catch(() => [])
+          : [];
+
+        if (ordenRows.length) {
+          await db.execute(
+            `UPDATE ordenes_produccion
+             SET estado='EN_PROCESO', materiales_conf_en=NOW()
+             WHERE id=?`,
+            [ordenRows[0].id]
+          );
+        }
+
+        await logSystemEvent(db, {
+          modulo: 'picking', nivel: 'WARN',
+          mensaje: `Excepción picking: lote ${params.lote_sugerido} reemplazado por ${params.lote_usado}`,
+          usuario_id: user.id,
+          payload: {
+            lote_sugerido: params.lote_sugerido,
+            lote_usado:    params.lote_usado,
+            id_orden:      params.id_orden  || null,
+            id_item:       params.id_item   || null,
+          },
+        });
+
+        mensaje = [
+          `⚠️ *Excepción de picking registrada*`,
+          `Lote sugerido: ${params.lote_sugerido}`,
+          `Lote usado:    ${params.lote_usado}`,
+          params.id_orden ? `Orden: ${params.id_orden} → EN_PROCESO` : '',
+          params.id_item  ? `Producto: ${params.id_item}` : ''
         ].filter(Boolean).join('\n');
         break;
       }
