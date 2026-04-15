@@ -1,7 +1,6 @@
 // GET /api/v1/webhook/logs
-// Lee de webhook_logs — tabla donde builderbot.js escribe cada evento
-// Columnas conocidas: id, from_phone, action, priority, payload, response, status
-// La columna de fecha se llama created_at o timestamp (definida con DEFAULT en BD)
+// Columnas reales de webhook_logs:
+//   id, from_phone, action, priority, payload, response, status, created_at
 const { query } = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
@@ -12,22 +11,21 @@ module.exports = async (req, res) => {
   try { verifyToken(req); } catch (e) { return res.status(401).json({ ok: false, error: e.message }); }
 
   try {
-    const { page = 1, limit = 50, status } = req.query;
+    const { page = 1, limit = 50, status, desde, hasta } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let where = 'WHERE 1=1';
     const args = [];
-    if (status) { where += ' AND status = ?'; args.push(status); }
+    if (status) { where += ' AND status = ?';       args.push(status); }
+    if (desde)  { where += ' AND created_at >= ?';  args.push(desde); }
+    if (hasta)  { where += ' AND created_at <= ?';  args.push(hasta); }
 
-    // Usamos SELECT * para no asumir el nombre exacto de la columna de fecha
-    // El frontend normaliza cualquier campo de fecha con fallbacks
     const rows = await query(
-      `SELECT id, from_phone, action, priority, status,
-              LEFT(payload,  400) AS payload_preview,
-              LEFT(response, 400) AS response_preview,
-              created_at, timestamp, creado_en
+      `SELECT id, from_phone, action, priority, status, created_at,
+              LEFT(CAST(payload  AS CHAR), 400) AS payload_preview,
+              LEFT(CAST(response AS CHAR), 400) AS response_preview
        FROM webhook_logs ${where}
-       ORDER BY id DESC LIMIT ? OFFSET ?`,
+       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...args, Number(limit), offset]
     );
 
