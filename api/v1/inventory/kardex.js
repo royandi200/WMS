@@ -23,10 +23,11 @@ module.exports = async (req, res) => {
       [...args, Number(limit), offset]
     );
 
-    const [[{ total }]] = await query(
+    const countRows = await query(
       `SELECT COUNT(*) AS total FROM v_kardex ${where}`,
       args
     );
+    const total = countRows[0]?.total ?? 0;
 
     return res.status(200).json({ ok: true, data: { rows, total: Number(total) } });
   } catch (err) {
