@@ -62,16 +62,18 @@ async function resolveOrderId(db, orderCode) {
   return rows[0].id;
 }
 
+// Usa email como identificador del usuario bot (formato: 573001234567@wa.bot)
 async function getOrCreateBotUser(db, phone) {
-  const [rows] = await db.execute(`SELECT * FROM usuarios WHERE phone = ? LIMIT 1`, [phone]);
+  const botEmail = `${phone}@wa.bot`;
+  const [rows] = await db.execute(`SELECT * FROM usuarios WHERE email = ? LIMIT 1`, [botEmail]);
   if (rows.length) return rows[0];
   const [roles] = await db.execute(`SELECT id FROM roles WHERE nombre = 'Operario' LIMIT 1`);
   const roleId = roles[0]?.id || 1;
   const [ins] = await db.execute(
-    `INSERT INTO usuarios (nombre, phone, rol_id, activo, password_hash) VALUES (?,?,?,1,'bot-user')`,
-    [`WA-${phone}`, phone, roleId]
+    `INSERT INTO usuarios (nombre, email, rol_id, activo, password_hash) VALUES (?,?,?,1,'bot-user')`,
+    [`WA-${phone}`, botEmail, roleId]
   );
-  return { id: ins.insertId, nombre: `WA-${phone}`, phone };
+  return { id: ins.insertId, nombre: `WA-${phone}`, email: botEmail };
 }
 
 // ─────────────────────────────────────────────
@@ -96,7 +98,6 @@ module.exports = async (req, res) => {
   const action   = info['@ction'] || info.action || 'UNKNOWN';
   const params   = info.params || {};
   const priority = info.priority || 'baja';
-  const kw       = info.kw || null;
 
   const db = await DB();
   try {
@@ -223,8 +224,10 @@ module.exports = async (req, res) => {
         );
         const msg = `✅ *${params.id_solicitud} Aprobada*\nAcción: ${rows[0].accion?.replace(/_/g,' ')}\nAprobado por: ${user.nombre}`;
         await sendBack(from, msg);
-        const [sol] = await db.execute(`SELECT phone FROM usuarios WHERE id=? LIMIT 1`, [rows[0].solicitado_por]);
-        if (sol[0]?.phone && sol[0].phone !== from) await sendBack(sol[0].phone, msg);
+        // Notificar al solicitante — extraer número de su email bot
+        const [sol] = await db.execute(`SELECT email FROM usuarios WHERE id=? LIMIT 1`, [rows[0].solicitado_por]);
+        const solPhone = sol[0]?.email?.replace('@wa.bot','');
+        if (solPhone && solPhone !== from) await sendBack(solPhone, msg);
         result = { message: msg };
         break;
       }
