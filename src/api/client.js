@@ -18,7 +18,16 @@ client.interceptors.request.use((config) => {
 })
 
 client.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // El API siempre responde { ok: true, data: <payload> }
+    // Extraemos .data para que los stores reciban el payload limpio
+    // y no el objeto Axios ni el wrapper { ok, data }
+    const body = response.data
+    if (body && typeof body === 'object' && 'ok' in body) {
+      return body.data ?? body
+    }
+    return body
+  },
   (error) => {
     if (error.response?.status === 401) {
       useAuthStore.getState().logout()
