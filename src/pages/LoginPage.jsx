@@ -22,10 +22,15 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       const response = await authApi.login(data.email, data.password)
-      setAuth(response.token, response.usuario)
+      // El servidor devuelve { ok, access_token, refresh_token, usuario }
+      const token = response?.access_token || response?.token
+      const user  = response?.usuario      || response?.user
+      if (!token) throw new Error('No se recibió token del servidor')
+      setAuth(token, user)
     } catch (err) {
       const msg =
         err?.response?.data?.error ||
+        err?.message ||
         'Error al iniciar sesión. Verifique sus credenciales.'
       setServerError(msg)
     } finally {
