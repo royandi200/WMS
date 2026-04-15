@@ -9,16 +9,21 @@ module.exports = async (req, res) => {
   try { verifyToken(req); } catch (e) { return res.status(401).json({ ok: false, error: e.message }); }
 
   try {
-    const { producto_id, cantidad, lote, fecha_inicio, notas } = req.body || {};
-    if (!producto_id || !cantidad)
-      return res.status(400).json({ ok: false, error: 'producto_id y cantidad son requeridos' });
+    const { producto_id, cantidad_obj, bodega_id, usuario_id, observaciones } = req.body || {};
+    if (!producto_id || !cantidad_obj || !bodega_id || !usuario_id)
+      return res.status(400).json({ ok: false, error: 'producto_id, cantidad_obj, bodega_id y usuario_id son requeridos' });
 
     const result = await query(
-      `INSERT INTO ordenes_produccion (producto_id, cantidad, lote, fecha_inicio, notas, estado)
-       VALUES (?, ?, ?, ?, ?, 'INICIADA')`,
-      [producto_id, cantidad, lote || null, fecha_inicio || new Date(), notas || null]
+      `INSERT INTO ordenes_produccion (producto_id, cantidad_obj, bodega_id, usuario_id, observaciones, estado)
+       VALUES (?, ?, ?, ?, ?, 'borrador')`,
+      [producto_id, cantidad_obj, bodega_id, usuario_id, observaciones || null]
     );
-    const rows = await query(`SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [result.insertId]);
+    const rows = await query(
+      `SELECT op.*, p.siigo_code AS sku, p.nombre AS product_name
+       FROM ordenes_produccion op
+       LEFT JOIN productos p ON p.id = op.producto_id
+       WHERE op.id = ? LIMIT 1`, [result.insertId]
+    );
     return res.status(201).json({ ok: true, data: rows[0] });
   } catch (err) {
     console.error('[production/start]', err.message);

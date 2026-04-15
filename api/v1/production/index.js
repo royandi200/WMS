@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
   try {
     const { estado, page = 1, limit = 50 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-    let sql = `SELECT op.*, p.sku, p.nombre as product_name
+    let sql = `SELECT op.*, p.siigo_code AS sku, p.nombre AS product_name
                FROM ordenes_produccion op
                LEFT JOIN productos p ON p.id = op.producto_id
                WHERE 1=1`;

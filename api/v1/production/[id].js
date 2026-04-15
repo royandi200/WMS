@@ -11,19 +11,13 @@ module.exports = async (req, res) => {
   const { id } = req.query;
   try {
     const rows = await query(
-      `SELECT op.*, p.sku, p.nombre as product_name
+      `SELECT op.*, p.siigo_code AS sku, p.nombre AS product_name
        FROM ordenes_produccion op
        LEFT JOIN productos p ON p.id = op.producto_id
        WHERE op.id = ? LIMIT 1`, [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
-    const materiales = await query(
-      `SELECT om.*, pr.sku, pr.nombre as name, pr.unidad as unit
-       FROM orden_materiales om
-       JOIN productos pr ON pr.id = om.producto_id
-       WHERE om.orden_id = ?`, [id]
-    );
-    return res.status(200).json({ ok: true, data: { ...rows[0], materiales } });
+    return res.status(200).json({ ok: true, data: rows[0] });
   } catch (err) {
     console.error('[production/:id]', err.message);
     return res.status(500).json({ ok: false, error: 'Error al obtener orden' });
