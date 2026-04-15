@@ -22,6 +22,7 @@
 //   [3] EXCEPCION_PICKING     → lote_sugerido + lote_usado se persisten en system_logs
 //   [4] CONSULTAR_STOCK_*     → filtra tipo_producto (MP / PT) en consulta general
 //   [5] GESTION_DEVOLUCION    → normaliza estado ENUM antes de guardar
+//   [6] CONSULTAR_STOCK_*     → usa v_stock_disponible, desglose FIFO por lote
 // =============================================================
 const mysql  = require('mysql2/promise');
 const { randomUUID } = require('crypto');
@@ -213,6 +214,62 @@ function normalizarEstadoDevolucion(estado) {
     'cuarentena':  'CUARENTENA',
   };
   return map[(estado || '').toLowerCase()] || 'CUARENTENA';
+}
+
+// [FIX 6] Consulta stock usando v_stock_disponible con desglose FIFO
+// Si la vista no existe, hace fallback a la consulta directa sobre stock+productos
+async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
+  // Intento con vista v_stock_disponible
+  try {
+    if (sku) {
+      const [rows] = await db.execute(
+        `SELECT lote, disponible, vence, estado_lote
+         FROM v_stock_disponible
+         WHERE sku = ? AND bodega = ?
+         ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC`,
+        [sku, bodega]
+      );
+      return { modo: 'vista', rows };
+    } else {
+      const [rows] = await db.execute(
+        `SELECT sku, nombre, SUM(disponible) AS total
+         FROM v_stock_disponible
+         WHERE tipo_producto = ? AND bodega = ?
+         GROUP BY sku, nombre
+         ORDER BY total DESC LIMIT 10`,
+        [tipoFiltro, bodega]
+      );
+      return { modo: 'vista_resumen', rows };
+    }
+  } catch (_) {
+    // Fallback: consulta directa sin la vista
+    if (sku) {
+      const [rows] = await db.execute(
+        `SELECT s.lote,
+                (s.cantidad - s.reservada) AS disponible,
+                l.expiry_date AS vence,
+                l.status AS estado_lote
+         FROM stock s
+         JOIN productos p ON p.id = s.producto_id
+         LEFT JOIN lots l ON l.lpn = s.lote
+         WHERE p.siigo_code = ?
+         ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END, l.expiry_date ASC, s.id ASC`,
+        [sku]
+      );
+      return { modo: 'fallback', rows };
+    } else {
+      const [rows] = await db.execute(
+        `SELECT p.siigo_code AS sku, p.nombre,
+                COALESCE(SUM(s.cantidad - s.reservada), 0) AS total
+         FROM productos p
+         LEFT JOIN stock s ON s.producto_id = p.id
+         WHERE p.activo = 1 AND p.tipo_producto = ?
+         GROUP BY p.id ORDER BY total DESC LIMIT 10`,
+        [tipoFiltro]
+      );
+      return { modo: 'fallback_resumen', rows };
+    }
+  }
 }
 
 async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodegaId }) {
@@ -464,7 +521,6 @@ module.exports = async (req, res) => {
         const cantMerma  = Math.abs(Number(params.cantidad));
         const lotIdMerma = await lotIdByLpn(db, params.id_lote);
 
-        // Construir notes enriquecidas con id_orden si aplica
         const mermaNoteParts = [];
         if (params.motivo)   mermaNoteParts.push(`Motivo: ${params.motivo}`);
         if (params.id_orden) mermaNoteParts.push(`Orden: ${params.id_orden}`);
@@ -490,7 +546,6 @@ module.exports = async (req, res) => {
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
           product_id: p.id, user_id: user.id,
-          // Distingue origen: merma de proceso vs. merma de bodega
           action: params.id_orden ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
           qty: -cantMerma, lot_id: lotIdMerma, balance_after: balance,
           reference: params.id_orden
@@ -534,7 +589,7 @@ module.exports = async (req, res) => {
       }
 
       // ── 6. SOLICITAR_DESPACHO → encolar ──────────────────────
-      // [FIX 1] id_item ahora es obligatorio — findProductBySku antes de encolar
+      // [FIX 1] id_item ahora es obligatorio
       case 'SOLICITAR_DESPACHO': {
         if (!params.id_item) throw { status: 400, message: 'id_item es obligatorio para SOLICITAR_DESPACHO' };
         const p      = await findProductBySku(db, params.id_item);
@@ -560,7 +615,7 @@ module.exports = async (req, res) => {
       }
 
       // ── 7. GESTION_DEVOLUCION ─────────────────────────────────
-      // [FIX 5] Normaliza estado al ENUM válido antes de guardar
+      // [FIX 5] Normaliza estado al ENUM válido
       case 'GESTION_DEVOLUCION': {
         const p           = await findProductBySku(db, params.id_item);
         const estadoNorm  = normalizarEstadoDevolucion(params.estado);
@@ -712,33 +767,52 @@ module.exports = async (req, res) => {
       }
 
       // ── Consultas de stock ────────────────────────────────────
-      // [FIX 4] Cuando no hay id_item, filtra por tipo_producto según la acción
+      // [FIX 4+6] Usa v_stock_disponible con desglose FIFO por lote
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
         const tipoFiltro = action === 'CONSULTAR_STOCK_MATERIA_PRIMA' ? 'MP' : 'PT';
+        const label      = tipoFiltro === 'MP' ? 'Materia Prima' : 'Producto Terminado';
+
+        // Obtener el código de bodega para la vista (la vista usa b.codigo, no b.id)
+        const [bodegaRow] = await db.execute(
+          `SELECT codigo FROM bodegas WHERE id = ? LIMIT 1`, [bodegaId]
+        );
+        const bodegaCodigo = bodegaRow[0]?.codigo || 'BG-PPAL';
+
+        const result = await queryStockDisponible(db, {
+          sku: params.id_item || null,
+          bodega: bodegaCodigo,
+          tipoFiltro,
+        });
+
         if (params.id_item) {
-          const p = await findProductBySku(db, params.id_item);
-          const [rows] = await db.execute(
-            `SELECT COALESCE(SUM(cantidad),0) AS disp, COALESCE(SUM(reservada),0) AS res, COUNT(*) AS lotes
-             FROM stock WHERE producto_id=? AND bodega_id=?`, [p.id, bodegaId]
-          );
-          mensaje = [
-            `📊 *Stock: ${params.id_item}*`,
-            `Disponible: ${rows[0].disp} und`,
-            `Reservado: ${rows[0].res} und`,
-            `Lotes: ${rows[0].lotes}`
-          ].join('\n');
+          // Desglose por lote del SKU consultado
+          const totalDisp = result.rows.reduce((s, r) => s + parseFloat(r.disponible || 0), 0);
+          if (!result.rows.length) {
+            mensaje = `📊 *Stock: ${params.id_item}*\n  Sin stock disponible`;
+          } else {
+            const lotesLines = result.rows
+              .map(r => {
+                const disp  = parseFloat(r.disponible || 0);
+                const vence = r.vence ? ` (vence ${new Date(r.vence).toLocaleDateString('es-CO')})` : '';
+                const lpnCorto = r.lote && r.lote.length > 24 ? r.lote.slice(0, 24) + '…' : (r.lote || 'sin lote');
+                return `  • ${lpnCorto}: *${disp} und*${vence}`;
+              })
+              .join('\n');
+            mensaje = [
+              `📊 *Stock ${label}: ${params.id_item}*`,
+              `Total disponible: *${totalDisp} und* (${result.rows.length} lote${result.rows.length > 1 ? 's' : ''})`,
+              ``,
+              `📦 *Lotes FIFO:*`,
+              lotesLines
+            ].join('\n');
+          }
         } else {
-          const [rows] = await db.execute(
-            `SELECT p.siigo_code, p.nombre, COALESCE(SUM(s.cantidad),0) AS stock
-             FROM productos p LEFT JOIN stock s ON s.producto_id=p.id AND s.bodega_id=?
-             WHERE p.activo=1 AND p.tipo_producto=?
-             GROUP BY p.id ORDER BY stock DESC LIMIT 10`,
-            [bodegaId, tipoFiltro]
-          );
-          const label = tipoFiltro === 'MP' ? 'Materias Primas' : 'Producto Terminado';
-          const lines = rows.map(r => `  • ${r.siigo_code}: ${r.stock} und`).join('\n');
-          mensaje = `📦 *Stock ${label} top 10:*\n${lines || '  (Sin stock registrado)'}`;
+          // Top 10 por tipo
+          const lines = result.rows.length
+            ? result.rows.map(r => `  • ${r.sku}: *${parseFloat(r.total)} und*`).join('\n')
+            : '  (Sin stock registrado)';
+          mensaje = `📦 *Stock ${label} — Top 10:*\n${lines}`;
         }
         break;
       }
