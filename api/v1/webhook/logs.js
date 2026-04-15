@@ -1,4 +1,4 @@
-// GET /api/v1/webhook/logs
+// GET /api/v1/webhook/logs  — usa siigo_sync_log como fuente de logs
 const { query } = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
@@ -14,16 +14,19 @@ module.exports = async (req, res) => {
 
     let where = 'WHERE 1=1';
     const args = [];
-    if (status) { where += ' AND status = ?';       args.push(status); }
-    if (desde)  { where += ' AND creado_en >= ?';   args.push(desde); }
-    if (hasta)  { where += ' AND creado_en <= ?';   args.push(hasta); }
+    if (status) { where += ' AND status_code = ?'; args.push(Number(status)); }
+    if (desde)  { where += ' AND creado_en >= ?';  args.push(desde); }
+    if (hasta)  { where += ' AND creado_en <= ?';  args.push(hasta); }
 
     const rows = await query(
-      `SELECT * FROM webhook_logs ${where} ORDER BY creado_en DESC LIMIT ? OFFSET ?`,
+      `SELECT id, entidad, entidad_id, operacion, endpoint, metodo_http,
+              siigo_id, status_code, error_msg, duracion_ms, creado_en
+       FROM siigo_sync_log ${where}
+       ORDER BY creado_en DESC LIMIT ? OFFSET ?`,
       [...args, Number(limit), offset]
     );
     const countRows = await query(
-      `SELECT COUNT(*) AS total FROM webhook_logs ${where}`, args
+      `SELECT COUNT(*) AS total FROM siigo_sync_log ${where}`, args
     );
     return res.status(200).json({ ok: true, data: { rows, total: Number(countRows[0]?.total ?? 0) } });
   } catch (err) {
