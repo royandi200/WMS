@@ -1,5 +1,5 @@
 // GET /api/v1/approvals/pending
-// Lee solicitudes pendientes de cola_aprobaciones — tabla que escribe builderbot.js
+// Muestra movimientos de ajuste pendientes de revisión (sin voucher SIIGO)
 const { query } = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
@@ -11,15 +11,18 @@ module.exports = async (req, res) => {
 
   try {
     const rows = await query(
-      `SELECT ca.id, ca.request_code, ca.accion AS tipo,
-              ca.payload, ca.estado, ca.prioridad,
-              ca.creado_en,
-              u.nombre  AS usuario_nombre,
-              u.phone   AS from_phone
-       FROM cola_aprobaciones ca
-       LEFT JOIN usuarios u ON u.id = ca.solicitado_por
-       WHERE ca.estado = 'PENDIENTE'
-       ORDER BY ca.prioridad DESC, ca.creado_en ASC
+      `SELECT m.id, m.tipo, m.cantidad, m.lote, m.creado_en,
+              p.nombre AS producto_nombre, p.siigo_code,
+              bo.nombre AS bodega_orig_nombre,
+              bd.nombre AS bodega_dest_nombre,
+              u.nombre  AS usuario_nombre
+       FROM movimientos m
+       LEFT JOIN productos p   ON p.id = m.producto_id
+       LEFT JOIN bodegas   bo  ON bo.id = m.bodega_orig
+       LEFT JOIN bodegas   bd  ON bd.id = m.bodega_dest
+       LEFT JOIN usuarios  u   ON u.id  = m.usuario_id
+       WHERE m.tipo = 'ajuste' AND m.siigo_sync = 0
+       ORDER BY m.creado_en DESC
        LIMIT 100`
     );
     return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
