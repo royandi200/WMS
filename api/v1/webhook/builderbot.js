@@ -16,14 +16,15 @@
 //   cantidad_planeada, cantidad_real, materiales_conf_en,
 //   cerrado_en, creado_por, aprobado_por, notas, creado_en
 // =============================================================
-// Fixes aplicados (prompt vs webhook):
-//   [1] SOLICITAR_DESPACHO    → id_item ahora obligatorio (findProductBySku antes de encolar)
+// Fixes aplicados:
+//   [1] SOLICITAR_DESPACHO    → id_item ahora obligatorio
 //   [2] REPORTE_MERMA         → id_orden se propaga a notes del kardex
-//   [3] EXCEPCION_PICKING     → lote_sugerido + lote_usado se persisten en system_logs
-//   [4] CONSULTAR_STOCK_*     → filtra tipo_producto (MP / PT) en consulta general
-//   [5] GESTION_DEVOLUCION    → normaliza estado ENUM antes de guardar
-//   [6] CONSULTAR_STOCK_*     → usa v_stock_disponible, desglose FIFO por lote
-//   [7] BOM query             → corregido insumo_id y producto_final_id (era insumo_producto_id/producto_id)
+//   [3] EXCEPCION_PICKING     → lote_sugerido + lote_usado persisten en system_logs
+//   [4] CONSULTAR_STOCK_*     → filtra tipo_producto (MP / PT)
+//   [5] GESTION_DEVOLUCION    → normaliza estado ENUM
+//   [6] CONSULTAR_STOCK_*     → usa v_stock_disponible, desglose FIFO
+//   [7] BOM query             → insumo_id y producto_final_id correctos
+//   [8] SOLICITAR_INICIO_PRODUCCION → descuenta stock+kardex por BOM; corrige floating point
 // =============================================================
 const mysql  = require('mysql2/promise');
 const { randomUUID } = require('crypto');
@@ -38,7 +39,7 @@ const DB = () => mysql.createConnection({
 });
 
 // ─────────────────────────────────────────────────────────────
-// RBAC — roles que pueden ejecutar cada acción
+// RBAC
 // ─────────────────────────────────────────────────────────────
 const RBAC = {
   INGRESO_RECEPCION:               ['Operario','Supervisor','Admin'],
@@ -217,10 +218,13 @@ function normalizarEstadoDevolucion(estado) {
   return map[(estado || '').toLowerCase()] || 'CUARENTENA';
 }
 
+// [FIX 8] Redondea cantidades de BOM a 4 decimales para evitar floating point
+function roundQty(n) {
+  return parseFloat(parseFloat(n).toFixed(4));
+}
+
 // [FIX 6] Consulta stock usando v_stock_disponible con desglose FIFO
-// Si la vista no existe, hace fallback a la consulta directa sobre stock+productos
 async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
-  // Intento con vista v_stock_disponible
   try {
     if (sku) {
       const [rows] = await db.execute(
@@ -243,7 +247,6 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
       return { modo: 'vista_resumen', rows };
     }
   } catch (_) {
-    // Fallback: consulta directa sin la vista
     if (sku) {
       const [rows] = await db.execute(
         `SELECT s.lote,
@@ -469,30 +472,77 @@ module.exports = async (req, res) => {
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
-      // [FIX 7] Corregido: insumo_id y producto_final_id (antes era insumo_producto_id/producto_id)
+      // [FIX 7] BOM: insumo_id y producto_final_id correctos
+      // [FIX 8] Descuenta stock+kardex por cada insumo; corrige floating point con roundQty()
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p           = await findProductBySku(db, params.id_producto_final);
+        const cantPlan    = Number(params.cantidad_planificada) || 0;
         const codigoOrden = await nextCodigoOrden(db);
+
         const [ins] = await db.execute(
-          `INSERT INTO ordenes_produccion (codigo_orden, producto_id, cantidad_planeada, estado, creado_por, notas)
+          `INSERT INTO ordenes_produccion
+             (codigo_orden, producto_id, cantidad_planeada, estado, creado_por, notas)
            VALUES (?,?,?,'PLANEADA',?,?)`,
-          [codigoOrden, p.id, params.cantidad_planificada, user.id,
+          [codigoOrden, p.id, cantPlan, user.id,
            `Creada desde WhatsApp por ${from}`]
         );
         const orderId = ins.insertId;
+
+        // Obtener BOM
         const [bom] = await db.execute(
-          `SELECT b.*, pr.siigo_code, pr.nombre FROM bom b
+          `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
+                  pr.siigo_code, pr.nombre
+           FROM bom b
            JOIN productos pr ON pr.id = b.insumo_id
            WHERE b.producto_final_id = ?`, [p.id]
         ).catch(() => [[]]);
+
+        // [FIX 8] Descontar stock y registrar kardex por cada insumo
+        for (const item of bom) {
+          const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * cantPlan);
+          if (cantInsumo <= 0) continue;
+
+          // Descontar del primer lote FIFO disponible (o sin lote)
+          await db.execute(
+            `UPDATE stock
+             SET cantidad = GREATEST(0, cantidad - ?)
+             WHERE producto_id = ? AND bodega_id = ?
+             ORDER BY id ASC LIMIT 1`,
+            [cantInsumo, item.insumo_id, bodegaId]
+          ).catch(() => {});
+
+          await db.execute(
+            `INSERT INTO movimientos
+               (tipo, producto_id, bodega_orig, cantidad, referencia_id, referencia_tipo, usuario_id)
+             VALUES ('salida', ?, ?, ?, ?, 'orden_produccion', ?)`,
+            [item.insumo_id, bodegaId, cantInsumo, orderId, user.id]
+          ).catch(() => {});
+
+          const balInsumo = await getStockBalance(db, item.insumo_id, bodegaId);
+          await logKardex(db, {
+            product_id:   item.insumo_id,
+            user_id:      user.id,
+            action:       'CONSUMO_PRODUCCION',
+            qty:          -cantInsumo,
+            balance_after: balInsumo,
+            reference:    `orden_produccion:${codigoOrden}`,
+            notes:        `Orden ${codigoOrden} — ${cantPlan} uds de ${params.id_producto_final}`,
+          });
+        }
+
+        // Construir líneas de picking con cantidades redondeadas
         const picking = bom.length
-          ? bom.map(b => `  • ${b.siigo_code} — ${b.nombre}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} ${b.unidad}`).join('\n')
+          ? bom.map(b => {
+              const cant = roundQty(parseFloat(b.cantidad_por_unidad) * cantPlan);
+              return `  • ${b.siigo_code} — ${b.nombre}: ${cant} ${b.unidad}`;
+            }).join('\n')
           : '  (Sin BOM — verifica materiales manualmente)';
+
         mensaje = [
           `🏭 *Orden ${codigoOrden} creada*`,
           `Producto: ${params.id_producto_final}`,
-          `Cantidad: ${params.cantidad_planificada}`,
-          ``, `📋 *Materiales necesarios:*`, picking
+          `Cantidad: ${cantPlan}`,
+          ``, `📋 *Materiales descontados:*`, picking
         ].join('\n');
         break;
       }
@@ -881,7 +931,7 @@ module.exports = async (req, res) => {
       }
 
       // ── Capacidad de fabricación ──────────────────────────────
-      // [FIX 7] Corregido: insumo_id y producto_final_id
+      // [FIX 7] insumo_id y producto_final_id correctos
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [bom] = await db.execute(
@@ -892,7 +942,7 @@ module.exports = async (req, res) => {
         let puedeProd = true;
         const checks  = [];
         for (const item of bom) {
-          const needed = parseFloat(item.cantidad_por_unidad) * params.cantidad_deseada;
+          const needed = roundQty(parseFloat(item.cantidad_por_unidad) * params.cantidad_deseada);
           const [st]   = await db.execute(
             `SELECT COALESCE(SUM(cantidad),0) AS stock FROM stock WHERE producto_id=? AND bodega_id=?`,
             [item.insumo_id, bodegaId]
