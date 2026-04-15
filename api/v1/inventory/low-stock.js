@@ -10,17 +10,25 @@ module.exports = async (req, res) => {
 
   try {
     const rows = await query(
-      `SELECT i.producto_id as id, p.sku, p.nombre as name, p.unidad as unit,
-              i.cantidad as stock, p.stock_min as min_stock, p.stock_max as max_stock
-       FROM inventario i
-       JOIN productos p ON p.id = i.producto_id
-       WHERE i.cantidad <= p.stock_min AND p.activo = 1
-       ORDER BY (i.cantidad / GREATEST(p.stock_min,1)) ASC
+      `SELECT
+         s.producto_id  AS id,
+         p.siigo_code   AS sku,
+         p.nombre       AS name,
+         p.unit_label   AS unit,
+         SUM(s.cantidad)           AS stock,
+         SUM(s.cantidad - s.reservada) AS disponible,
+         p.stock_minimo AS min_stock
+       FROM stock s
+       JOIN productos p ON p.id = s.producto_id
+       WHERE p.activo = 1
+       GROUP BY s.producto_id, p.siigo_code, p.nombre, p.unit_label, p.stock_minimo
+       HAVING SUM(s.cantidad) <= p.stock_minimo
+       ORDER BY (SUM(s.cantidad) / GREATEST(p.stock_minimo, 1)) ASC
        LIMIT 50`
     );
     return res.status(200).json({ ok: true, data: rows });
   } catch (err) {
     console.error('[inventory/low-stock]', err.message);
-    return res.status(500).json({ ok: false, error: 'Error al obtener bajo stock' });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 };
