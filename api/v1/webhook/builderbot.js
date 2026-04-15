@@ -6,10 +6,11 @@ const axios = require('axios');
 // ─────────────────────────────────────────────
 const DB = () => mysql.createConnection({
   host:     process.env.DB_HOST,
-  port:     process.env.DB_PORT || 3306,
+  port:     parseInt(process.env.DB_PORT || '3306'),
   user:     process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME || 'kainotomia_WMS'
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME || 'kainotomia_WMS',
+  connectTimeout: 10000,
 });
 
 // ─────────────────────────────────────────────
@@ -33,7 +34,6 @@ async function sendBack(phone, text) {
 
 // ─────────────────────────────────────────────
 async function findProductBySku(db, sku) {
-  // Busca en skus primero
   const [rows] = await db.execute(
     `SELECT p.* FROM productos p
      INNER JOIN skus s ON s.producto_id = p.id
@@ -41,7 +41,6 @@ async function findProductBySku(db, sku) {
      LIMIT 1`, [sku]
   );
   if (rows.length) return rows[0];
-  // Fallback: siigo_code directo
   const [rows2] = await db.execute(
     `SELECT * FROM productos WHERE siigo_code = ? AND activo = 1 LIMIT 1`, [sku]
   );
@@ -79,7 +78,6 @@ async function getOrCreateBotUser(db, phone) {
 // HANDLER PRINCIPAL
 // ─────────────────────────────────────────────
 module.exports = async (req, res) => {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -88,8 +86,6 @@ module.exports = async (req, res) => {
 
   const rawBody = req.body || {};
 
-  // BuilderBot puede mandar `info` como string JSON serializado o como objeto —
-  // igual que en bardj-ai webhook, siempre intentamos parsearlo si viene como string
   let info = rawBody.info;
   if (typeof info === 'string') {
     try { info = JSON.parse(info); } catch { info = {}; }
@@ -100,12 +96,10 @@ module.exports = async (req, res) => {
   const action   = info['@ction'] || info.action || 'UNKNOWN';
   const params   = info.params || {};
   const priority = info.priority || 'baja';
-  // kw es la keyword interna de BuilderBot que activó el flujo (solo dato informativo)
-  const kw = info.kw || null;
+  const kw       = info.kw || null;
 
   const db = await DB();
   try {
-    // Log de entrada
     await saveLog(db, { from, action, priority, payload: rawBody, response: null, status: 'RECEIVED' });
 
     const user = await getOrCreateBotUser(db, from);
@@ -144,7 +138,6 @@ module.exports = async (req, res) => {
            VALUES (?,?,?,'PENDIENTE_MATERIALES','F0',?)`,
           [orderCode, p.id, params.cantidad_planificada, user.id]
         );
-        // Obtener BOM
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.nombre
            FROM bom b JOIN productos pr ON pr.id = b.insumo_producto_id
@@ -230,7 +223,6 @@ module.exports = async (req, res) => {
         );
         const msg = `✅ *${params.id_solicitud} Aprobada*\nAcción: ${rows[0].accion?.replace(/_/g,' ')}\nAprobado por: ${user.nombre}`;
         await sendBack(from, msg);
-        // Notificar al solicitante original
         const [sol] = await db.execute(`SELECT phone FROM usuarios WHERE id=? LIMIT 1`, [rows[0].solicitado_por]);
         if (sol[0]?.phone && sol[0].phone !== from) await sendBack(sol[0].phone, msg);
         result = { message: msg };
@@ -344,7 +336,6 @@ module.exports = async (req, res) => {
         throw { status: 400, message: `Acción desconocida: ${action}` };
     }
 
-    // Log de respuesta exitosa
     await saveLog(db, { from, action, priority, payload: rawBody, response: result, status: 'PROCESSED' });
     return res.json({ ok: true, ...result });
 
