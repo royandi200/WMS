@@ -10,7 +10,7 @@ const NAV_ITEMS = [
 ]
 
 export default function DashboardPage() {
-  const { usuario, logout } = useAuthStore()
+  const { user, logout } = useAuthStore()
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <header className="h-14 bg-surface border-b border-border flex items-center justify-between px-6">
@@ -25,7 +25,7 @@ export default function DashboardPage() {
           ))}
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-subtle text-sm">{usuario?.nombre || usuario?.email}</span>
+          <span className="text-subtle text-sm">{user?.nombre || user?.email}</span>
           <button onClick={logout} className="flex items-center gap-1.5 text-muted hover:text-danger text-sm transition-colors" aria-label="Cerrar sesión">
             <LogOut size={15} />Salir
           </button>
@@ -34,7 +34,7 @@ export default function DashboardPage() {
       <main className="flex-1 flex items-center justify-center">
         <div className="text-center">
           <WmsLogo size={56} />
-          <h1 className="text-foreground text-2xl font-semibold mt-6 mb-2">Bienvenido, {usuario?.nombre?.split(' ')[0] || 'usuario'}</h1>
+          <h1 className="text-foreground text-2xl font-semibold mt-6 mb-2">Bienvenido, {user?.nombre?.split(' ')[0] || 'usuario'}</h1>
           <p className="text-muted text-sm">El dashboard está en construcción.</p>
         </div>
       </main>
