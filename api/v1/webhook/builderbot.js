@@ -2,10 +2,12 @@
 // api/v1/webhook/builderbot.js — ÚNICO stack WMS × WhatsApp
 // POST /api/v1/webhook/builderbot
 // =============================================================
-// Stack: Vercel Serverless + mysql2 (sin Express, sin Sequelize)
-// Este es el ÚNICO archivo que procesa webhooks de BuilderBot.
-// builderbot.service.js (Express) fue eliminado — toda la lógica
-// vive aquí para evitar duplicación y conflictos de modelos.
+// Flujo BB Cloud:
+//   BB Cloud → POST { info: "{aiResponse}", from: "{from}" }
+//   Vercel procesa → responde 200 { ok:true, mensaje:"..." }
+//   BB Cloud lee {mensaje} del HTTP response — NO hay callback.
+//   sendBack (axios) fue eliminado: causaba timeout al apuntar
+//   a BUILDERBOT_SEND_URL indefinida, bloqueando la respuesta.
 // =============================================================
 // Schema ordenes_produccion (real):
 //   id, codigo_orden, producto_id, fase(ENUM F0-F5),
@@ -14,7 +16,6 @@
 //   cerrado_en, creado_por, aprobado_por, notas, creado_en
 // =============================================================
 const mysql  = require('mysql2/promise');
-const axios  = require('axios');
 const { randomUUID } = require('crypto');
 
 const DB = () => mysql.createConnection({
@@ -70,15 +71,6 @@ async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload 
      VALUES (?, ?, ?, ?, ?, NOW())`,
     [nivel || 'INFO', modulo || 'webhook', mensaje, usuario_id || null,
      payload ? JSON.stringify(payload) : null]
-  ).catch(() => {});
-}
-
-async function sendBack(phone, text) {
-  if (!process.env.BUILDERBOT_SEND_URL) return;
-  await axios.post(
-    process.env.BUILDERBOT_SEND_URL,
-    { phone, message: text },
-    { headers: { 'x-api-key': process.env.BUILDERBOT_API_KEY || '' }, timeout: 8000 }
   ).catch(() => {});
 }
 
@@ -195,7 +187,6 @@ async function upsertStock(db, { producto_id, bodega_id, lote, cantidad }) {
   }
 }
 
-/** Genera codigo_orden único: OP-YYYYMMDD-NNNN */
 async function nextCodigoOrden(db) {
   const d = new Date();
   const prefix = `OP-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
@@ -213,7 +204,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
       );
       if (!rows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
-      // cantidad_real = lo que reportó el operario, o lo planeado si no vino
       const cantReal = payload.qty_real || rows[0].cantidad_planeada;
       await db.execute(
         `UPDATE ordenes_produccion
@@ -308,18 +298,17 @@ module.exports = async (req, res) => {
     const user     = await getOrCreateBotUser(db, from);
     const bodegaId = await getDefaultBodega(db);
 
-    // ── RBAC: normalizar rol (case-insensitive) ────────────────
+    // ── RBAC ──────────────────────────────────────────────────
     const rolRaw  = user.rol_nombre || '';
     const rolNorm = rolRaw.charAt(0).toUpperCase() + rolRaw.slice(1).toLowerCase();
     const rolesPermitidos = RBAC[action];
     if (rolesPermitidos && !rolesPermitidos.includes(rolNorm)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
-      await sendBack(from, msg);
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'DENIED' });
-      return res.status(403).json({ ok: false, error: 'RBAC_DENIED', rol: rolRaw });
+      return res.status(403).json({ ok: false, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
     }
 
-    let result = {};
+    let mensaje = '';
 
     switch (action) {
 
@@ -392,21 +381,19 @@ module.exports = async (req, res) => {
           mensaje: `Recepción ${numero} — ${cantBuena} buenas, ${cantMala} novedad`,
           usuario_id: user.id, payload: { numero, producto: params.id_item } });
 
-        const msg = [
+        mensaje = [
           `✅ *Recepción registrada: ${numero}*`,
           `Producto: ${params.id_item}`,
           `Buenos: ${cantBuena} und → Lote ${lpnBuena}`,
           msgMala,
           params.proveedor ? `Proveedor: ${params.proveedor}` : ''
         ].filter(Boolean).join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, numero, lote: lpnBuena, lot_id: lotIdBuena };
         break;
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
       case 'SOLICITAR_INICIO_PRODUCCION': {
-        const p          = await findProductBySku(db, params.id_producto_final);
+        const p           = await findProductBySku(db, params.id_producto_final);
         const codigoOrden = await nextCodigoOrden(db);
         const [ins] = await db.execute(
           `INSERT INTO ordenes_produccion (codigo_orden, producto_id, cantidad_planeada, estado, creado_por, notas)
@@ -423,21 +410,19 @@ module.exports = async (req, res) => {
         const picking = bom.length
           ? bom.map(b => `  • ${b.siigo_code}: ${parseFloat(b.cantidad_por_unidad) * params.cantidad_planificada} und`).join('\n')
           : '  (Sin BOM — verifica materiales manualmente)';
-        const msg = [
+        mensaje = [
           `🏭 *Orden ${codigoOrden} creada*`,
           `Producto: ${params.id_producto_final}`,
           `Cantidad: ${params.cantidad_planificada}`,
           ``, `📋 *Materiales necesarios:*`, picking
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, orden_id: orderId, codigo_orden: codigoOrden };
         break;
       }
 
       // ── 3. AVANCE_FASES ───────────────────────────────────────
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(
-          `SELECT id, notas FROM ordenes_produccion
+          `SELECT id FROM ordenes_produccion
            WHERE id = ? OR codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
         );
@@ -449,9 +434,7 @@ module.exports = async (req, res) => {
            WHERE id=?`,
           [`\nFase: ${params.fase_destino} — ${new Date().toISOString()}`, rows[0].id]
         );
-        const msg = `📦 *Avance registrado*\nOrden #${params.id_orden}\nFase: ${params.fase_destino}`;
-        await sendBack(from, msg);
-        result = { message: msg };
+        mensaje = `📦 *Avance registrado*\nOrden #${params.id_orden}\nFase: ${params.fase_destino}`;
         break;
       }
 
@@ -483,14 +466,12 @@ module.exports = async (req, res) => {
           reference: params.id_lote ? `lote:${params.id_lote}` : null,
           notes: params.motivo || null,
         });
-        const msg = [
+        mensaje = [
           `⚠️ *Merma registrada*`,
           `Producto: ${params.id_item}`,
           `Cantidad: ${cantMerma}`,
           `Motivo: ${params.motivo || 'No especificado'}`
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg };
         break;
       }
 
@@ -510,27 +491,12 @@ module.exports = async (req, res) => {
             operario_phone: from
           }), user.id]
         );
-        const [supervisors] = await db.execute(
-          `SELECT u.email FROM usuarios u JOIN roles r ON r.id=u.rol_id
-           WHERE r.nombre IN ('Supervisor','Admin') AND u.activo=1 LIMIT 3`
-        ).catch(() => [[]]);
-        for (const s of supervisors) {
-          await sendBack(s.email.replace('@wa.bot',''), [
-            `🔔 *Solicitud pendiente: ${codigo}*`,
-            `Acción: Cierre de producción`,
-            `Orden: ${params.id_orden}`,
-            `Operario: ${user.nombre}`,
-            `Para aprobar: _APROBAR ${codigo}_`
-          ].join('\n'));
-        }
-        const msg = [
+        mensaje = [
           `⏳ *Solicitud enviada: ${codigo}*`,
           `Orden: ${params.id_orden}`,
           `Cantidad real: ${params.cantidad_real}`,
           `Esperando aprobación del supervisor.`
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, codigo_solicitud: codigo };
         break;
       }
 
@@ -548,35 +514,20 @@ module.exports = async (req, res) => {
             operario_phone: from
           }), user.id]
         );
-        const [supervisors] = await db.execute(
-          `SELECT u.email FROM usuarios u JOIN roles r ON r.id=u.rol_id
-           WHERE r.nombre IN ('Supervisor','Admin') AND u.activo=1 LIMIT 3`
-        ).catch(() => [[]]);
-        for (const s of supervisors) {
-          await sendBack(s.email.replace('@wa.bot',''), [
-            `🔔 *Solicitud pendiente: ${codigo}*`,
-            `Acción: Despacho`,
-            `Lote: ${params.id_lote}  |  Cant: ${params.cantidad}`,
-            `Cliente: ${params.cliente_destino || 'N/A'}`,
-            `Para aprobar: _APROBAR ${codigo}_`
-          ].join('\n'));
-        }
-        const msg = [
+        mensaje = [
           `⏳ *Solicitud de despacho: ${codigo}*`,
           `Lote: ${params.id_lote}`,
           `Cantidad: ${params.cantidad}`,
           `Esperando aprobación.`
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, codigo_solicitud: codigo };
         break;
       }
 
       // ── 7. GESTION_DEVOLUCION ─────────────────────────────────
       case 'GESTION_DEVOLUCION': {
-        const p       = await findProductBySku(db, params.id_item);
-        const lpnDev  = `L-DEV-${p.siigo_code}-${Date.now()}`;
-        const numero  = await nextRecepcionNumero(db);
+        const p      = await findProductBySku(db, params.id_item);
+        const lpnDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
+        const numero = await nextRecepcionNumero(db);
         const [recIns] = await db.execute(
           `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
            VALUES (?,?,?,'completada',?,?)`,
@@ -601,14 +552,12 @@ module.exports = async (req, res) => {
           reference: `recepcion:${numero}`,
           notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${params.estado || 'CUARENTENA'}`,
         });
-        const msg = [
+        mensaje = [
           `🔄 *Devolución registrada*`,
           `Producto: ${params.id_item}`,
           `Cantidad: ${params.cantidad}`,
           `Lote: ${lpnDev}`
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, lote: lpnDev, lot_id: lotIdDev };
         break;
       }
 
@@ -629,24 +578,14 @@ module.exports = async (req, res) => {
           `UPDATE aprobaciones SET estado='APROBADO', procesado_por=?, procesado_en=NOW() WHERE codigo_solicitud=?`,
           [user.id, params.id_solicitud]
         );
-        if (payload.operario_phone) {
-          await sendBack(payload.operario_phone, [
-            `✅ *Tu solicitud fue aprobada*`,
-            `ID: ${params.id_solicitud}`,
-            `Acción: ${solicitud.accion.replace(/_/g,' ')}`,
-            `Aprobado por: ${user.nombre}`
-          ].join('\n'));
-        }
         await logSystemEvent(db, { modulo: 'aprobaciones', nivel: 'INFO',
           mensaje: `Solicitud ${params.id_solicitud} aprobada`,
           usuario_id: user.id, payload: execResult });
-        const msg = [
+        mensaje = [
           `✅ *${params.id_solicitud} Aprobada*`,
           `Acción: ${solicitud.accion.replace(/_/g,' ')}`,
           JSON.stringify(execResult)
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, ...execResult };
         break;
       }
 
@@ -665,22 +604,13 @@ module.exports = async (req, res) => {
            motivo_rechazo=? WHERE codigo_solicitud=?`,
           [user.id, params.motivo || null, params.id_solicitud]
         );
-        if (payload.operario_phone) {
-          await sendBack(payload.operario_phone, [
-            `❌ *Tu solicitud fue rechazada*`,
-            `ID: ${params.id_solicitud}`,
-            params.motivo ? `Motivo: ${params.motivo}` : ''
-          ].filter(Boolean).join('\n'));
-        }
         await logSystemEvent(db, { modulo: 'aprobaciones', nivel: 'WARN',
           mensaje: `Solicitud ${params.id_solicitud} rechazada`,
           usuario_id: user.id, payload: { motivo: params.motivo } });
-        const msg = [
+        mensaje = [
           `❌ *${params.id_solicitud} Rechazada*`,
           params.motivo ? `Motivo: ${params.motivo}` : ''
         ].filter(Boolean).join('\n');
-        await sendBack(from, msg);
-        result = { message: msg };
         break;
       }
 
@@ -719,15 +649,13 @@ module.exports = async (req, res) => {
         await logSystemEvent(db, { modulo: 'inventario', nivel: 'WARN',
           mensaje: `Ajuste manual: ${diff > 0 ? '+' : ''}${diff} und de ${params.id_item}`,
           usuario_id: user.id, payload: { producto: params.id_item, diff, lote: params.id_lote } });
-        const msg = [
+        mensaje = [
           `🔧 *Ajuste registrado*`,
           `Producto: ${params.id_item}`,
           `Ajuste: ${diff > 0 ? '+' : ''}${diff} und`,
           `Saldo nuevo: ${balance} und`,
           params.motivo ? `Motivo: ${params.motivo}` : ''
         ].filter(Boolean).join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, balance };
         break;
       }
 
@@ -743,9 +671,7 @@ module.exports = async (req, res) => {
         const lines = rows.length
           ? rows.map(r => `  • ${r.codigo_solicitud} — ${r.accion.replace(/_/g,' ')} (${r.operario || 'N/A'})`).join('\n')
           : '  (No hay solicitudes pendientes)';
-        const msg = `📋 *Solicitudes pendientes:*\n${lines}`;
-        await sendBack(from, msg);
-        result = { message: msg, pendientes: rows.length };
+        mensaje = `📋 *Solicitudes pendientes:*\n${lines}`;
         break;
       }
 
@@ -758,14 +684,12 @@ module.exports = async (req, res) => {
             `SELECT COALESCE(SUM(cantidad),0) AS disp, COALESCE(SUM(reservada),0) AS res, COUNT(*) AS lotes
              FROM stock WHERE producto_id=? AND bodega_id=?`, [p.id, bodegaId]
           );
-          const msg = [
+          mensaje = [
             `📊 *Stock: ${params.id_item}*`,
             `Disponible: ${rows[0].disp} und`,
             `Reservado: ${rows[0].res} und`,
             `Lotes: ${rows[0].lotes}`
           ].join('\n');
-          await sendBack(from, msg);
-          result = { message: msg };
         } else {
           const [rows] = await db.execute(
             `SELECT p.siigo_code, p.nombre, COALESCE(SUM(s.cantidad),0) AS stock
@@ -773,9 +697,7 @@ module.exports = async (req, res) => {
              WHERE p.activo=1 GROUP BY p.id ORDER BY stock DESC LIMIT 10`, [bodegaId]
           );
           const lines = rows.map(r => `  • ${r.siigo_code}: ${r.stock} und`).join('\n');
-          const msg   = `📦 *Stock top 10:*\n${lines || '  (Sin stock registrado)'}`;
-          await sendBack(from, msg);
-          result = { message: msg };
+          mensaje = `📦 *Stock top 10:*\n${lines || '  (Sin stock registrado)'}`;
         }
         break;
       }
@@ -794,7 +716,7 @@ module.exports = async (req, res) => {
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         const o = rows[0];
-        const msg = [
+        mensaje = [
           `🔍 *Orden: ${o.codigo_orden || o.id}*`,
           `Producto: ${o.producto} (${o.siigo_code})`,
           `Estado: ${o.estado}  |  Fase: ${o.fase}`,
@@ -802,8 +724,6 @@ module.exports = async (req, res) => {
           `Producido: ${o.cantidad_real > 0 ? o.cantidad_real + ' und' : 'En proceso'}`,
           o.cerrado_en ? `Cerrado: ${new Date(o.cerrado_en).toLocaleDateString('es-CO')}` : ''
         ].filter(Boolean).join('\n');
-        await sendBack(from, msg);
-        result = { message: msg };
         break;
       }
 
@@ -823,7 +743,7 @@ module.exports = async (req, res) => {
           const history = kRows.length
             ? kRows.map(k => `  ${k.action}: ${k.qty > 0 ? '+' : ''}${k.qty} (saldo: ${k.balance_after})`).join('\n')
             : '  (Sin movimientos en kardex)';
-          const msg = [
+          mensaje = [
             `🔎 *Lote: ${params.id_lote}*`,
             `Producto: ${l.nombre} (${l.siigo_code})`,
             `Inicial: ${l.qty_initial} und`,
@@ -832,8 +752,6 @@ module.exports = async (req, res) => {
             `Vence: ${l.expiry_date || 'N/A'}`,
             ``, `📋 *Historial:*`, history
           ].join('\n');
-          await sendBack(from, msg);
-          result = { message: msg };
         } else {
           const [rows] = await db.execute(
             `SELECT s.*, p.nombre, p.siigo_code FROM stock s
@@ -841,15 +759,13 @@ module.exports = async (req, res) => {
             [params.id_lote]
           );
           if (!rows.length) throw { status: 404, message: `Lote "${params.id_lote}" no encontrado` };
-          const s   = rows[0];
-          const msg = [
+          const s = rows[0];
+          mensaje = [
             `🔎 *Lote: ${params.id_lote}*`,
             `Producto: ${s.nombre} (${s.siigo_code})`,
             `Cantidad: ${s.cantidad} und`,
             `Vence: ${s.fecha_venc || 'N/A'}`
           ].join('\n');
-          await sendBack(from, msg);
-          result = { message: msg };
         }
         break;
       }
@@ -873,12 +789,10 @@ module.exports = async (req, res) => {
           if (!ok) puedeProd = false;
           checks.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code}: necesita ${needed}, tiene ${st[0].stock}`);
         }
-        const msg = [
+        mensaje = [
           `${puedeProd ? '✅' : '❌'} *Capacidad para ${params.cantidad_deseada} uds de ${params.id_producto_final}:*`,
           ...checks
         ].join('\n');
-        await sendBack(from, msg);
-        result = { message: msg, can_produce: puedeProd };
         break;
       }
 
@@ -896,21 +810,17 @@ module.exports = async (req, res) => {
            WHERE id=?`,
           [rows[0].id]
         );
-        const msg = [
+        mensaje = [
           `✅ *Materiales confirmados*`,
           `Orden: ${params.id_orden} → EN_PROCESO`,
           action === 'EXCEPCION_PICKING' && params.lote_usado
             ? `Lote alternativo: ${params.lote_usado}` : ''
         ].filter(Boolean).join('\n');
-        await sendBack(from, msg);
-        result = { message: msg };
         break;
       }
 
       case 'MODO_CHARLA': {
-        const msg = params.texto || 'No entendí tu mensaje. ¿Puedes ser más específico?';
-        await sendBack(from, msg);
-        result = { message: msg };
+        mensaje = params.texto || 'No entendí tu mensaje. ¿Puedes ser más específico?';
         break;
       }
 
@@ -918,17 +828,16 @@ module.exports = async (req, res) => {
         throw { status: 400, message: `Acción desconocida: ${action}` };
     }
 
-    await saveLog(db, { from, action, priority, payload: rawBody, response: result, status: 'PROCESSED' });
+    await saveLog(db, { from, action, priority, payload: rawBody, response: { mensaje }, status: 'PROCESSED' });
 
-    // ── Respuesta final: incluir 'mensaje' para BuilderBot (BB espera ese campo)
-    //    y mantener 'message' para compatibilidad con otros consumidores
-    return res.json({ ok: true, mensaje: result.message ?? null, ...result });
+    // BB Cloud lee {mensaje} directamente del HTTP response body
+    return res.json({ ok: true, mensaje });
 
   } catch (err) {
     const errMsg = err.message || 'Error interno';
     await saveLog(db, { from, action, priority, payload: rawBody,
       response: { error: errMsg }, status: 'ERROR' }).catch(() => {});
-    return res.status(err.status || 500).json({ ok: false, error: errMsg });
+    return res.status(err.status || 500).json({ ok: false, mensaje: `❌ ${errMsg}`, error: errMsg });
   } finally {
     await db.end().catch(() => {});
   }
