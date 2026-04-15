@@ -5,28 +5,28 @@
 // Flujo BB Cloud:
 //   BB Cloud → POST { info: "{aiResponse}", from: "{from}" }
 //   Vercel procesa → responde 200 { ok:true, message:"...", mensaje:"..." }
-//   BB Cloud lee {message} del HTTP response (compatible AppScripts).
-//   Se devuelven AMBOS campos para máxima compatibilidad:
-//     - message  → lo que BB Cloud configurado originalmente espera
-//     - mensaje  → alias en español (por si se reconfigura)
+//   BB Cloud lee {message} del HTTP response.
+//   Se devuelven AMBOS campos para máxima compatibilidad.
 // =============================================================
-// Schema ordenes_produccion (real):
-//   id, codigo_orden, producto_id, fase(ENUM F0-F5),
-//   estado(ENUM PLANEADA|EN_PROCESO|CERRADA|CANCELADA),
-//   cantidad_planeada, cantidad_real, materiales_conf_en,
-//   cerrado_en, creado_por, aprobado_por, notas, creado_en
+// Schema ordenes_produccion:
+//   estado ENUM('PLANEADA','APROBADA','EN_PROCESO','CERRADA','CANCELADA')
 // =============================================================
 // Fixes aplicados:
-//   [1] SOLICITAR_DESPACHO    → id_item ahora obligatorio
-//   [2] REPORTE_MERMA         → id_orden se propaga a notes del kardex
-//   [3] EXCEPCION_PICKING     → lote_sugerido + lote_usado persisten en system_logs
-//   [4] CONSULTAR_STOCK_*     → filtra tipo_producto (MP / PT)
-//   [5] GESTION_DEVOLUCION    → normaliza estado ENUM
-//   [6] CONSULTAR_STOCK_*     → usa v_stock_disponible, desglose FIFO
-//   [7] BOM query             → insumo_id y producto_final_id correctos
-//   [8] SOLICITAR_INICIO_PRODUCCION → descuenta stock+kardex por BOM; corrige floating point
+//   [1] SOLICITAR_DESPACHO         → id_item obligatorio
+//   [2] REPORTE_MERMA              → id_orden en notes kardex
+//   [3] EXCEPCION_PICKING          → lote_sugerido+lote_usado en system_logs
+//   [4] CONSULTAR_STOCK_*          → filtra tipo_producto MP/PT
+//   [5] GESTION_DEVOLUCION         → normaliza estado ENUM
+//   [6] CONSULTAR_STOCK_*          → v_stock_disponible, desglose FIFO
+//   [7] BOM query                  → insumo_id y producto_final_id correctos
+//   [8] roundQty()                 → corrige floating point en BOM
+//   [9] FLUJO PRODUCCIÓN 3 PASOS:
+//       SOLICITAR_INICIO → verifica FIFO, encola, push WA supervisor
+//       APROBAR          → reserva stock, push WA operario
+//       CONFIRMAR        → descuenta stock + kardex CONSUMO_PRODUCCION
 // =============================================================
 const mysql  = require('mysql2/promise');
+const https  = require('https');
 const { randomUUID } = require('crypto');
 
 const DB = () => mysql.createConnection({
@@ -37,6 +37,9 @@ const DB = () => mysql.createConnection({
   database:       process.env.DB_NAME || 'kainotomia_WMS',
   connectTimeout: 10000,
 });
+
+// BB Cloud API token
+const BB_TOKEN = 'bb-78e67fdf-098a-499a-805d-68bb23e897bb';
 
 // ─────────────────────────────────────────────────────────────
 // RBAC
@@ -207,7 +210,6 @@ async function nextCodigoOrden(db) {
   return `${prefix}-${String((rows[0].cnt || 0) + 1).padStart(4,'0')}`;
 }
 
-// [FIX 5] Normaliza el estado de devolución a ENUM válido
 function normalizarEstadoDevolucion(estado) {
   const map = {
     'recuperable': 'RECUPERABLE',
@@ -218,12 +220,50 @@ function normalizarEstadoDevolucion(estado) {
   return map[(estado || '').toLowerCase()] || 'CUARENTENA';
 }
 
-// [FIX 8] Redondea cantidades de BOM a 4 decimales para evitar floating point
+// Redondea cantidades BOM a 4 decimales para evitar floating point
 function roundQty(n) {
   return parseFloat(parseFloat(n).toFixed(4));
 }
 
-// [FIX 6] Consulta stock usando v_stock_disponible con desglose FIFO
+// Push WA via BuilderBot Cloud (fire-and-forget, nunca bloquea el flujo)
+function pushWA(phone, text) {
+  try {
+    const body = JSON.stringify({ phone, message: text });
+    const req  = https.request({
+      hostname: 'api.builderbot.cloud',
+      path:     `/api/v2/messages/send-text`,
+      method:   'POST',
+      headers:  {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${BB_TOKEN}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, res => {
+      res.on('data', () => {});
+      res.on('end',  () => {});
+    });
+    req.on('error', e => console.error('[pushWA]', e.message));
+    req.write(body);
+    req.end();
+  } catch (e) {
+    console.error('[pushWA]', e.message);
+  }
+}
+
+// Obtiene el teléfono de un supervisor/admin activo (primer resultado)
+async function getSupervisorPhone(db) {
+  const [rows] = await db.execute(
+    `SELECT u.telefono FROM usuarios u
+     JOIN roles r ON r.id = u.rol_id
+     WHERE r.nombre IN ('Supervisor','Admin','supervisor','admin')
+       AND u.activo = 1
+       AND u.telefono IS NOT NULL
+     ORDER BY u.id ASC LIMIT 1`
+  ).catch(() => [[]]);
+  return rows[0]?.telefono || null;
+}
+
+// Consulta stock usando v_stock_disponible con desglose FIFO
 async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
   try {
     if (sku) {
@@ -276,8 +316,70 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// executeApprovedPayload — acciones que requieren aprobación
+// ─────────────────────────────────────────────────────────────
 async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodegaId }) {
   switch (accion) {
+
+    // [FIX 9] SOLICITAR_INICIO_PRODUCCION aprobada:
+    //   → orden APROBADA + reserva stock por BOM + push WA al operario
+    case 'SOLICITAR_INICIO_PRODUCCION': {
+      const [ordenRows] = await db.execute(
+        `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
+      );
+      if (!ordenRows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
+      const orden = ordenRows[0];
+
+      // Obtener BOM
+      const [bom] = await db.execute(
+        `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
+                pr.siigo_code, pr.nombre
+         FROM bom b
+         JOIN productos pr ON pr.id = b.insumo_id
+         WHERE b.producto_final_id = ?`, [orden.producto_id]
+      ).catch(() => [[]]);
+
+      // Reservar stock FIFO por cada insumo
+      const reservados = [];
+      for (const item of bom) {
+        const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
+        if (cantInsumo <= 0) continue;
+        await db.execute(
+          `UPDATE stock
+           SET reservada = reservada + ?
+           WHERE producto_id = ? AND bodega_id = ?
+             AND (cantidad - reservada) >= 0
+           ORDER BY id ASC LIMIT 1`,
+          [cantInsumo, item.insumo_id, bodegaId]
+        ).catch(() => {});
+        reservados.push(`  • ${item.siigo_code}: ${cantInsumo} ${item.unidad}`);
+      }
+
+      // Orden → APROBADA
+      await db.execute(
+        `UPDATE ordenes_produccion
+         SET estado = 'APROBADA', aprobado_por = ?
+         WHERE id = ?`,
+        [aprobador_id, orden.id]
+      );
+
+      // Push WA al operario
+      if (payload.operario_phone) {
+        pushWA(
+          payload.operario_phone,
+          [
+            `✅ *Orden ${orden.codigo_orden} APROBADA*`,
+            `Tu solicitud fue validada. Los materiales están reservados.`,
+            `Cuando tengas los insumos físicamente, confirma con CONFIRMAR_MATERIALES_PRODUCCION.`,
+            ``, `📦 *Materiales reservados:*`,
+            ...reservados
+          ].join('\n')
+        );
+      }
+
+      return { orden: orden.codigo_orden, estado: 'APROBADA', reservados: reservados.length };
+    }
 
     case 'SOLICITAR_CIERRE_PRODUCCION': {
       const [rows] = await db.execute(
@@ -310,6 +412,12 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         balance_after: balance, reference: `orden_produccion:${payload.order_id}`,
         approved_by: aprobador_id,
       });
+      if (payload.operario_phone) {
+        pushWA(
+          payload.operario_phone,
+          `✅ *Cierre de orden ${payload.order_id} aprobado*\nPT ingresado: ${cantReal} und — Lote ${lpnOP}`
+        );
+      }
       return { lote: lpnOP, cantidad: cantReal };
     }
 
@@ -342,6 +450,12 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         notes: payload.customer ? `Cliente: ${payload.customer}` : null,
         approved_by: aprobador_id,
       });
+      if (payload.operario_phone) {
+        pushWA(
+          payload.operario_phone,
+          `✅ *Despacho aprobado*\nProducto despachado: ${cantDesp} und`
+        );
+      }
       return { despachado: cantDesp };
     }
 
@@ -472,21 +586,11 @@ module.exports = async (req, res) => {
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
-      // [FIX 7] BOM: insumo_id y producto_final_id correctos
-      // [FIX 8] Descuenta stock+kardex por cada insumo; corrige floating point con roundQty()
+      // [FIX 9] Solo crea orden PLANEADA + verifica FIFO + encola + push WA supervisor
+      // NO descuenta ni reserva stock aquí.
       case 'SOLICITAR_INICIO_PRODUCCION': {
-        const p           = await findProductBySku(db, params.id_producto_final);
-        const cantPlan    = Number(params.cantidad_planificada) || 0;
-        const codigoOrden = await nextCodigoOrden(db);
-
-        const [ins] = await db.execute(
-          `INSERT INTO ordenes_produccion
-             (codigo_orden, producto_id, cantidad_planeada, estado, creado_por, notas)
-           VALUES (?,?,?,'PLANEADA',?,?)`,
-          [codigoOrden, p.id, cantPlan, user.id,
-           `Creada desde WhatsApp por ${from}`]
-        );
-        const orderId = ins.insertId;
+        const p        = await findProductBySku(db, params.id_producto_final);
+        const cantPlan = Number(params.cantidad_planificada) || 0;
 
         // Obtener BOM
         const [bom] = await db.execute(
@@ -497,52 +601,85 @@ module.exports = async (req, res) => {
            WHERE b.producto_final_id = ?`, [p.id]
         ).catch(() => [[]]);
 
-        // [FIX 8] Descontar stock y registrar kardex por cada insumo
+        // Verificar disponibilidad FIFO (disponible = cantidad - reservada)
+        const faltantes = [];
+        const picking   = [];
         for (const item of bom) {
-          const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * cantPlan);
-          if (cantInsumo <= 0) continue;
-
-          // Descontar del primer lote FIFO disponible (o sin lote)
-          await db.execute(
-            `UPDATE stock
-             SET cantidad = GREATEST(0, cantidad - ?)
-             WHERE producto_id = ? AND bodega_id = ?
-             ORDER BY id ASC LIMIT 1`,
-            [cantInsumo, item.insumo_id, bodegaId]
-          ).catch(() => {});
-
-          await db.execute(
-            `INSERT INTO movimientos
-               (tipo, producto_id, bodega_orig, cantidad, referencia_id, referencia_tipo, usuario_id)
-             VALUES ('salida', ?, ?, ?, ?, 'orden_produccion', ?)`,
-            [item.insumo_id, bodegaId, cantInsumo, orderId, user.id]
-          ).catch(() => {});
-
-          const balInsumo = await getStockBalance(db, item.insumo_id, bodegaId);
-          await logKardex(db, {
-            product_id:   item.insumo_id,
-            user_id:      user.id,
-            action:       'CONSUMO_PRODUCCION',
-            qty:          -cantInsumo,
-            balance_after: balInsumo,
-            reference:    `orden_produccion:${codigoOrden}`,
-            notes:        `Orden ${codigoOrden} — ${cantPlan} uds de ${params.id_producto_final}`,
-          });
+          const needed = roundQty(parseFloat(item.cantidad_por_unidad) * cantPlan);
+          if (needed <= 0) continue;
+          const [st] = await db.execute(
+            `SELECT COALESCE(SUM(cantidad - reservada), 0) AS disponible
+             FROM stock WHERE producto_id = ? AND bodega_id = ?`,
+            [item.insumo_id, bodegaId]
+          );
+          const disponible = parseFloat(st[0]?.disponible || 0);
+          const ok = disponible >= needed;
+          picking.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code} — ${item.nombre}: necesita ${needed}, disponible ${disponible} ${item.unidad}`);
+          if (!ok) faltantes.push(`${item.siigo_code} (falta ${roundQty(needed - disponible)} ${item.unidad})`);
         }
 
-        // Construir líneas de picking con cantidades redondeadas
-        const picking = bom.length
-          ? bom.map(b => {
-              const cant = roundQty(parseFloat(b.cantidad_por_unidad) * cantPlan);
-              return `  • ${b.siigo_code} — ${b.nombre}: ${cant} ${b.unidad}`;
-            }).join('\n')
-          : '  (Sin BOM — verifica materiales manualmente)';
+        // Si hay faltantes, NO encolar — responder al operario con el detalle
+        if (faltantes.length) {
+          mensaje = [
+            `❌ *No se puede iniciar producción de ${params.id_producto_final}*`,
+            `Cantidad: ${cantPlan}`,
+            ``, `📋 *Verificación de materiales:*`,
+            ...picking,
+            ``, `⚠️ *Faltantes:* ${faltantes.join(', ')}`
+          ].join('\n');
+          break;
+        }
+
+        // Hay stock suficiente → crear orden PLANEADA
+        const codigoOrden = await nextCodigoOrden(db);
+        const [ins] = await db.execute(
+          `INSERT INTO ordenes_produccion
+             (codigo_orden, producto_id, cantidad_planeada, estado, creado_por, notas)
+           VALUES (?,?,?,'PLANEADA',?,?)`,
+          [codigoOrden, p.id, cantPlan, user.id,
+           `Creada desde WhatsApp por ${from}`]
+        );
+        const orderId = ins.insertId;
+
+        // Encolar en aprobaciones
+        const codigo = await nextSolicitudCodigo(db);
+        await db.execute(
+          `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
+           VALUES (?, 'SOLICITAR_INICIO_PRODUCCION', ?, ?, 'PENDIENTE', NOW())`,
+          [codigo, JSON.stringify({
+            order_id:       orderId,
+            operario_phone: from,
+          }), user.id]
+        );
+
+        // Push WA al supervisor
+        const supPhone = await getSupervisorPhone(db);
+        if (supPhone) {
+          pushWA(
+            supPhone,
+            [
+              `🏭 *Solicitud de inicio de producción: ${codigo}*`,
+              `Orden: ${codigoOrden}`,
+              `Producto: ${params.id_producto_final} — ${cantPlan} uds`,
+              `Solicitado por: ${user.nombre}`,
+              ``, `📋 *Disponibilidad de materiales:*`,
+              ...picking,
+              ``, `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
+            ].join('\n')
+          );
+        }
+
+        await logSystemEvent(db, { modulo: 'produccion', nivel: 'INFO',
+          mensaje: `Solicitud ${codigo} — inicio producción ${codigoOrden}`,
+          usuario_id: user.id, payload: { codigo, codigoOrden, producto: params.id_producto_final } });
 
         mensaje = [
-          `🏭 *Orden ${codigoOrden} creada*`,
-          `Producto: ${params.id_producto_final}`,
-          `Cantidad: ${cantPlan}`,
-          ``, `📋 *Materiales descontados:*`, picking
+          `⏳ *Solicitud enviada: ${codigo}*`,
+          `Orden creada: ${codigoOrden}`,
+          `Producto: ${params.id_producto_final} — ${cantPlan} uds`,
+          ``, `📋 *Disponibilidad verificada:*`,
+          ...picking,
+          ``, `El supervisor fue notificado. Espera su aprobación.`
         ].join('\n');
         break;
       }
@@ -557,8 +694,7 @@ module.exports = async (req, res) => {
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         await db.execute(
           `UPDATE ordenes_produccion
-           SET estado='EN_PROCESO',
-               notas=CONCAT(IFNULL(notas,''), ?)
+           SET notas=CONCAT(IFNULL(notas,''), ?)
            WHERE id=?`,
           [`\nFase: ${params.fase_destino} — ${new Date().toISOString()}`, rows[0].id]
         );
@@ -626,15 +762,29 @@ module.exports = async (req, res) => {
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
            VALUES (?, 'SOLICITAR_CIERRE_PRODUCCION', ?, ?, 'PENDIENTE', NOW())`,
           [codigo, JSON.stringify({
-            order_id: rows[0].id, qty_real: params.cantidad_real,
-            operario_phone: from
+            order_id:       rows[0].id,
+            qty_real:       params.cantidad_real,
+            operario_phone: from,
           }), user.id]
         );
+        const supPhone = await getSupervisorPhone(db);
+        if (supPhone) {
+          pushWA(
+            supPhone,
+            [
+              `🏭 *Solicitud cierre de producción: ${codigo}*`,
+              `Orden: ${params.id_orden}`,
+              `Cantidad real: ${params.cantidad_real}`,
+              `Operario: ${user.nombre}`,
+              `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
+            ].join('\n')
+          );
+        }
         mensaje = [
           `⏳ *Solicitud enviada: ${codigo}*`,
           `Orden: ${params.id_orden}`,
           `Cantidad real: ${params.cantidad_real}`,
-          `Esperando aprobación del supervisor.`
+          `El supervisor fue notificado.`
         ].join('\n');
         break;
       }
@@ -649,17 +799,33 @@ module.exports = async (req, res) => {
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
            VALUES (?, 'SOLICITAR_DESPACHO', ?, ?, 'PENDIENTE', NOW())`,
           [codigo, JSON.stringify({
-            lot_id: lot, lpn: params.id_lote, product_id: p.id,
-            qty: params.cantidad, customer: params.cliente_destino,
-            operario_phone: from
+            lot_id:         lot,
+            lpn:            params.id_lote,
+            product_id:     p.id,
+            qty:            params.cantidad,
+            customer:       params.cliente_destino,
+            operario_phone: from,
           }), user.id]
         );
+        const supPhone = await getSupervisorPhone(db);
+        if (supPhone) {
+          pushWA(
+            supPhone,
+            [
+              `📦 *Solicitud de despacho: ${codigo}*`,
+              `Producto: ${params.id_item}`,
+              `Lote: ${params.id_lote} — Cantidad: ${params.cantidad}`,
+              `Cliente: ${params.cliente_destino || 'N/A'}`,
+              `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
+            ].join('\n')
+          );
+        }
         mensaje = [
           `⏳ *Solicitud de despacho: ${codigo}*`,
           `Producto: ${params.id_item}`,
           `Lote: ${params.id_lote}`,
           `Cantidad: ${params.cantidad}`,
-          `Esperando aprobación.`
+          `El supervisor fue notificado.`
         ].join('\n');
         break;
       }
@@ -739,11 +905,23 @@ module.exports = async (req, res) => {
           [params.id_solicitud]
         );
         if (!rows.length) throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada o ya procesada` };
+        const payload = typeof rows[0].payload === 'string'
+          ? JSON.parse(rows[0].payload) : rows[0].payload;
         await db.execute(
           `UPDATE aprobaciones SET estado='RECHAZADO', procesado_por=?, procesado_en=NOW(),
            motivo_rechazo=? WHERE codigo_solicitud=?`,
           [user.id, params.motivo || null, params.id_solicitud]
         );
+        // Push WA al operario si el payload tiene su teléfono
+        if (payload?.operario_phone) {
+          pushWA(
+            payload.operario_phone,
+            [
+              `❌ *Solicitud ${params.id_solicitud} RECHAZADA*`,
+              params.motivo ? `Motivo: ${params.motivo}` : ''
+            ].filter(Boolean).join('\n')
+          );
+        }
         await logSystemEvent(db, { modulo: 'aprobaciones', nivel: 'WARN',
           mensaje: `Solicitud ${params.id_solicitud} rechazada`,
           usuario_id: user.id, payload: { motivo: params.motivo } });
@@ -931,7 +1109,6 @@ module.exports = async (req, res) => {
       }
 
       // ── Capacidad de fabricación ──────────────────────────────
-      // [FIX 7] insumo_id y producto_final_id correctos
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [bom] = await db.execute(
@@ -944,12 +1121,14 @@ module.exports = async (req, res) => {
         for (const item of bom) {
           const needed = roundQty(parseFloat(item.cantidad_por_unidad) * params.cantidad_deseada);
           const [st]   = await db.execute(
-            `SELECT COALESCE(SUM(cantidad),0) AS stock FROM stock WHERE producto_id=? AND bodega_id=?`,
+            `SELECT COALESCE(SUM(cantidad - reservada), 0) AS disponible
+             FROM stock WHERE producto_id=? AND bodega_id=?`,
             [item.insumo_id, bodegaId]
           );
-          const ok = parseFloat(st[0].stock) >= needed;
+          const disp = parseFloat(st[0].disponible || 0);
+          const ok   = disp >= needed;
           if (!ok) puedeProd = false;
-          checks.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code}: necesita ${needed}, tiene ${st[0].stock}`);
+          checks.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code}: necesita ${needed}, disponible ${disp}`);
         }
         mensaje = [
           `${puedeProd ? '✅' : '❌'} *Capacidad para ${params.cantidad_deseada} uds de ${params.id_producto_final}:*`,
@@ -958,22 +1137,79 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── Confirmar materiales ──────────────────────────────────
+      // ── CONFIRMAR_MATERIALES_PRODUCCION ──────────────────────
+      // [FIX 9] Aquí sí descuenta stock + kardex CONSUMO_PRODUCCION
       case 'CONFIRMAR_MATERIALES_PRODUCCION': {
-        const [rows] = await db.execute(
-          `SELECT id FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
+        const [ordenRows] = await db.execute(
+          `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
         );
-        if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
+        if (!ordenRows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
+        const orden = ordenRows[0];
+
+        if (!['APROBADA','PLANEADA'].includes(orden.estado)) {
+          throw { status: 409, message: `La orden ${params.id_orden} está en estado ${orden.estado} y no puede confirmarse` };
+        }
+
+        // Obtener BOM
+        const [bom] = await db.execute(
+          `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
+                  pr.siigo_code, pr.nombre
+           FROM bom b
+           JOIN productos pr ON pr.id = b.insumo_id
+           WHERE b.producto_final_id = ?`, [orden.producto_id]
+        ).catch(() => [[]]);
+
+        // Descontar stock (cantidad - cant, reservada - cant) + kardex
+        for (const item of bom) {
+          const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
+          if (cantInsumo <= 0) continue;
+
+          // Descontar cantidad física y liberar reserva en el mismo UPDATE
+          await db.execute(
+            `UPDATE stock
+             SET cantidad  = GREATEST(0, cantidad  - ?),
+                 reservada = GREATEST(0, reservada - ?)
+             WHERE producto_id = ? AND bodega_id = ?
+             ORDER BY id ASC LIMIT 1`,
+            [cantInsumo, cantInsumo, item.insumo_id, bodegaId]
+          ).catch(() => {});
+
+          await db.execute(
+            `INSERT INTO movimientos
+               (tipo, producto_id, bodega_orig, cantidad, referencia_id, referencia_tipo, usuario_id)
+             VALUES ('salida', ?, ?, ?, ?, 'orden_produccion', ?)`,
+            [item.insumo_id, bodegaId, cantInsumo, orden.id, user.id]
+          ).catch(() => {});
+
+          const balInsumo = await getStockBalance(db, item.insumo_id, bodegaId);
+          await logKardex(db, {
+            product_id:    item.insumo_id,
+            user_id:       user.id,
+            action:        'CONSUMO_PRODUCCION',
+            qty:           -cantInsumo,
+            balance_after: balInsumo,
+            reference:     `orden_produccion:${orden.codigo_orden}`,
+            notes:         `Orden ${orden.codigo_orden} — ${orden.cantidad_planeada} uds confirmadas`,
+          });
+        }
+
+        // Orden → EN_PROCESO
         await db.execute(
           `UPDATE ordenes_produccion
-           SET estado='EN_PROCESO', materiales_conf_en=NOW()
-           WHERE id=?`,
-          [rows[0].id]
+           SET estado = 'EN_PROCESO', materiales_conf_en = NOW()
+           WHERE id = ?`,
+          [orden.id]
         );
+
+        await logSystemEvent(db, { modulo: 'produccion', nivel: 'INFO',
+          mensaje: `Materiales confirmados — orden ${orden.codigo_orden} EN_PROCESO`,
+          usuario_id: user.id, payload: { orden: orden.codigo_orden } });
+
         mensaje = [
           `✅ *Materiales confirmados*`,
-          `Orden: ${params.id_orden} → EN_PROCESO`,
+          `Orden: ${orden.codigo_orden} → EN_PROCESO`,
+          `Insumos descontados del stock.`,
           params.lote_usado ? `Lote utilizado: ${params.lote_usado}` : ''
         ].filter(Boolean).join('\n');
         break;
@@ -991,15 +1227,6 @@ module.exports = async (req, res) => {
             ).then(([r]) => r).catch(() => [])
           : [];
 
-        if (ordenRows.length) {
-          await db.execute(
-            `UPDATE ordenes_produccion
-             SET estado='EN_PROCESO', materiales_conf_en=NOW()
-             WHERE id=?`,
-            [ordenRows[0].id]
-          );
-        }
-
         await logSystemEvent(db, {
           modulo: 'picking', nivel: 'WARN',
           mensaje: `Excepción picking: lote ${params.lote_sugerido} reemplazado por ${params.lote_usado}`,
@@ -1016,7 +1243,7 @@ module.exports = async (req, res) => {
           `⚠️ *Excepción de picking registrada*`,
           `Lote sugerido: ${params.lote_sugerido}`,
           `Lote usado:    ${params.lote_usado}`,
-          params.id_orden ? `Orden: ${params.id_orden} → EN_PROCESO` : '',
+          params.id_orden ? `Orden: ${params.id_orden}` : '',
           params.id_item  ? `Producto: ${params.id_item}` : ''
         ].filter(Boolean).join('\n');
         break;
@@ -1032,7 +1259,6 @@ module.exports = async (req, res) => {
     }
 
     await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje }, status: 'PROCESSED' });
-
     return res.json({ ok: true, message: mensaje, mensaje });
 
   } catch (err) {
