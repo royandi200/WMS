@@ -3,7 +3,8 @@
 // Schema real: recepciones, recepcion_items, stock, kardex, ordenes_produccion, movimientos
 const mysql = require('mysql2/promise');
 const axios = require('axios');
-const { v4: uuidv4 } = require('uuid');
+// crypto es built-in de Node.js — no requiere instalación
+const { randomUUID } = require('crypto');
 
 const DB = () => mysql.createConnection({
   host:     process.env.DB_HOST,
@@ -34,18 +35,8 @@ async function sendBack(phone, text) {
 }
 
 /**
- * Escribe un movimiento en la tabla kardex (nueva, nativa).
- * @param {object} db       - conexión mysql2
- * @param {object} params
- *   product_id       INT   requerido
- *   user_id          INT   requerido
- *   action           ENUM  requerido  (INGRESO_RECEPCION | DESPACHO | MERMA_BODEGA | CIERRE_PRODUCCION | DEVOLUCION | AJUSTE_MANUAL)
- *   qty              DECIMAL  requerido
- *   lot_id           CHAR(36) opcional — UUID del lote en tabla lots
- *   balance_after    DECIMAL  opcional
- *   reference        STRING   opcional  (ej: 'recepcion:REC-20260415-0001')
- *   notes            TEXT     opcional
- *   approved_by      INT      opcional
+ * Escribe un movimiento en la tabla kardex (nativa).
+ * Usa crypto.randomUUID() — built-in Node.js, sin dependencias externas.
  */
 async function logKardex(db, { product_id, user_id, action, qty,
                                lot_id, balance_after, reference, notes, approved_by }) {
@@ -54,8 +45,8 @@ async function logKardex(db, { product_id, user_id, action, qty,
        (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after, reference, notes, approved_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     [
-      uuidv4(),
-      uuidv4(),
+      randomUUID(),
+      randomUUID(),
       lot_id        || null,
       product_id,
       user_id,
@@ -69,7 +60,7 @@ async function logKardex(db, { product_id, user_id, action, qty,
   ).catch(e => console.error('[logKardex] ERROR:', e.message, '| action:', action, '| product_id:', product_id));
 }
 
-/** Obtiene el saldo actual de un producto en stock (para balance_after). */
+/** Saldo actual del producto en stock (para balance_after). */
 async function getStockBalance(db, product_id, bodega_id) {
   const [rows] = await db.execute(
     `SELECT COALESCE(SUM(cantidad), 0) AS total FROM stock WHERE producto_id = ? AND bodega_id = ?`,
@@ -164,7 +155,7 @@ module.exports = async (req, res) => {
 
     switch (action) {
 
-      // ── 1. INGRESO_RECEPCION ─────────────────────────────────────────────
+      // ── 1. INGRESO_RECEPCION ──
       case 'INGRESO_RECEPCION': {
         const p = await findProductBySku(db, params.id_item);
         const numero = await nextRecepcionNumero(db);
@@ -192,7 +183,6 @@ module.exports = async (req, res) => {
              VALUES ('entrada',?,?,?,?,?,'recepcion',?)`,
             [p.id, bodegaId, loteCode, cantBuena, recepcionId, user.id]
           );
-          // ✅ kardex nativa
           const balance = await getStockBalance(db, p.id, bodegaId);
           await logKardex(db, {
             product_id:    p.id,
@@ -213,7 +203,6 @@ module.exports = async (req, res) => {
              VALUES (?,?,?,?,?)`,
             [recepcionId, p.id, loteNov, cantMala, cantMala]
           );
-          // ✅ kardex nativa — novedad (cantidad_mala entra como INGRESO_NOVEDAD)
           await logKardex(db, {
             product_id: p.id,
             user_id:    user.id,
@@ -231,7 +220,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 2. SOLICITAR_INICIO_PRODUCCION ──────────────────────────────────
+      // ── 2. SOLICITAR_INICIO_PRODUCCION ──
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p = await findProductBySku(db, params.id_producto_final);
         const [ins] = await db.execute(
@@ -254,7 +243,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 3. AVANCE_FASES ─────────────────────────────────────────────────
+      // ── 3. AVANCE_FASES ──
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(`SELECT id FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]);
         if (!rows.length) throw { status: 404, message: `Orden #${params.id_orden} no encontrada` };
@@ -269,7 +258,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 4. REPORTE_MERMA ─────────────────────────────────────────────────
+      // ── 4. REPORTE_MERMA ──
       case 'REPORTE_MERMA': {
         const p = await findProductBySku(db, params.id_item);
         const cantMerma = Math.abs(params.cantidad);
@@ -284,7 +273,6 @@ module.exports = async (req, res) => {
             [cantMerma, p.id, params.id_lote]
           );
         }
-        // ✅ kardex nativa
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
           product_id:    p.id,
@@ -301,7 +289,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 5. SOLICITAR_CIERRE_PRODUCCION ───────────────────────────────────
+      // ── 5. SOLICITAR_CIERRE_PRODUCCION ──
       case 'SOLICITAR_CIERRE_PRODUCCION': {
         const [rows] = await db.execute(`SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [params.id_orden]);
         if (!rows.length) throw { status: 404, message: `Orden #${params.id_orden} no encontrada` };
@@ -317,7 +305,6 @@ module.exports = async (req, res) => {
            VALUES ('entrada',?,?,?,?,?,'orden_produccion',?)`,
           [rows[0].producto_id, bodegaId, loteOP, cantReal, params.id_orden, user.id]
         );
-        // ✅ kardex nativa
         const balance = await getStockBalance(db, rows[0].producto_id, bodegaId);
         await logKardex(db, {
           product_id:    rows[0].producto_id,
@@ -334,7 +321,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 6. SOLICITAR_DESPACHO ────────────────────────────────────────────
+      // ── 6. SOLICITAR_DESPACHO ──
       case 'SOLICITAR_DESPACHO': {
         const p = await findProductBySku(db, params.id_item || params.id_lote);
         const cantDesp = Number(params.cantidad) || 0;
@@ -354,7 +341,6 @@ module.exports = async (req, res) => {
            VALUES ('salida',?,?,?,?,'despacho_wa',?)`,
           [p.id, bodegaId, params.id_lote || null, cantDesp, user.id]
         );
-        // ✅ kardex nativa
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
           product_id:    p.id,
@@ -371,7 +357,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 7. GESTION_DEVOLUCION ─────────────────────────────────────────────
+      // ── 7. GESTION_DEVOLUCION ──
       case 'GESTION_DEVOLUCION': {
         const p = await findProductBySku(db, params.id_item);
         const loteDev = `L-DEV-${p.siigo_code}-${Date.now()}`;
@@ -387,7 +373,6 @@ module.exports = async (req, res) => {
           [recIns.insertId, p.id, loteDev, params.cantidad, params.cantidad]
         );
         await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: loteDev, cantidad: params.cantidad });
-        // ✅ kardex nativa
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
           product_id:    p.id,
@@ -404,7 +389,7 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── Consultas (sin escritura en kardex) ───────────────────────────────
+      // ── Consultas (sin escritura en kardex) ──
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
         if (params.id_item) {
