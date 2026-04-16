@@ -12,41 +12,47 @@
 //   estado ENUM('PLANEADA','APROBADA','EN_PROCESO','CERRADA','CANCELADA')
 // =============================================================
 // Fixes aplicados:
-//   [1] SOLICITAR_DESPACHO         → id_item obligatorio
-//   [2] REPORTE_MERMA              → id_orden en notes kardex
-//   [3] EXCEPCION_PICKING          → lote_sugerido+lote_usado en system_logs
-//   [4] CONSULTAR_STOCK_*          → filtra tipo_producto MP/PT
-//   [5] GESTION_DEVOLUCION         → normaliza estado ENUM
-//   [6] CONSULTAR_STOCK_*          → v_stock_disponible, desglose FIFO
-//   [7] BOM query                  → insumo_id y producto_final_id correctos
-//   [8] roundQty()                 → corrige floating point en BOM
-//   [9] FLUJO PRODUCCIÓN 3 PASOS:
-//       SOLICITAR_INICIO → verifica FIFO, encola, push WA supervisor
-//       APROBAR          → reserva stock, push WA operario
-//       CONFIRMAR        → descuenta stock + kardex CONSUMO_PRODUCCION
-//  [10] AVANCE_FASES               → ahora actualiza columna `fase` + appends notas
-//  [11] SOLICITAR_CIERRE_PRODUCCION → valida estado EN_PROCESO antes de cerrar;
-//                                     cantReal con Number() para evitar '0' falsy;
-//                                     guarda codigo_orden en payload para WA
-//  [12] AVANCE_FASES               → valida estado EN_PROCESO; logSystemEvent;
-//                                     mensaje incluye codigo_orden
-//  [13] pushWA                     → corrige hostname, path, header y body según
-//                                     API real de BuilderBot Cloud v2:
-//                                     hostname: app.builderbot.cloud
-//                                     path: /api/v2/{BOT_ID}/messages
-//                                     header: x-api-builderbot
-//                                     body: { number, messages: { content } }
-//  [14] getSupervisorPhone         → excluye usuarios bot (@wa.bot) para que nunca
-//                                     se elija un bot como supervisor;
-//                                     prioriza rol Supervisor sobre Admin;
-//       pushWA                     → sanitiza número: elimina +, espacios y guiones
-//                                     antes de enviar a BB Cloud
-//  [15] LOGGING DETALLADO:
-//       getSupervisorPhone → loguea todos los candidatos encontrados en BD y el
-//                            teléfono final seleccionado (o null si no hay ninguno)
-//       pushWA             → loguea número sanitizado, URL destino, body enviado
-//                            y respuesta completa de BB Cloud (status + body)
-//       Flujos de solicitud → loguea supPhone antes del if para ver si es null
+//   [1]  SOLICITAR_DESPACHO         → id_item obligatorio
+//   [2]  REPORTE_MERMA              → id_orden en notes kardex
+//   [3]  EXCEPCION_PICKING          → lote_sugerido+lote_usado en system_logs
+//   [4]  CONSULTAR_STOCK_*          → filtra tipo_producto MP/PT
+//   [5]  GESTION_DEVOLUCION         → normaliza estado ENUM
+//   [6]  CONSULTAR_STOCK_*          → v_stock_disponible, desglose FIFO
+//   [7]  BOM query                  → insumo_id y producto_final_id correctos
+//   [8]  roundQty()                 → corrige floating point en BOM
+//   [9]  FLUJO PRODUCCIÓN 3 PASOS:
+//        SOLICITAR_INICIO → verifica FIFO, encola, push WA supervisor
+//        APROBAR          → reserva stock, push WA operario
+//        CONFIRMAR        → descuenta stock + kardex CONSUMO_PRODUCCION
+//  [10]  AVANCE_FASES               → ahora actualiza columna `fase` + appends notas
+//  [11]  SOLICITAR_CIERRE_PRODUCCION → valida estado EN_PROCESO antes de cerrar;
+//                                      cantReal con Number() para evitar '0' falsy;
+//                                      guarda codigo_orden en payload para WA
+//  [12]  AVANCE_FASES               → valida estado EN_PROCESO; logSystemEvent;
+//                                      mensaje incluye codigo_orden
+//  [13]  pushWA                     → corrige hostname, path, header y body según
+//                                      API real de BuilderBot Cloud v2:
+//                                      hostname: app.builderbot.cloud
+//                                      path: /api/v2/{BOT_ID}/messages
+//                                      header: x-api-builderbot
+//                                      body: { number, messages: { content } }
+//  [14]  getSupervisorPhone         → excluye usuarios bot (@wa.bot) para que nunca
+//                                      se elija un bot como supervisor;
+//                                      prioriza rol Supervisor sobre Admin;
+//        pushWA                     → sanitiza número: elimina +, espacios y guiones
+//                                      antes de enviar a BB Cloud
+//  [15]  LOGGING DETALLADO:
+//        getSupervisorPhone → loguea todos los candidatos encontrados en BD y el
+//                             teléfono final seleccionado (o null si no hay ninguno)
+//        pushWA             → loguea número sanitizado, URL destino, body enviado
+//                             y respuesta completa de BB Cloud (status + body)
+//        Flujos de solicitud → loguea supPhone antes del if para ver si es null
+//  [16]  pushWA ASYNC:
+//        Convertida a async con Promise — ya no es fire-and-forget.
+//        Todos los pushWA en handlers usan await para que Vercel espere
+//        la respuesta de BB Cloud antes de cerrar la función.
+//        Esto corrige el bug donde Vercel mataba el proceso antes de que
+//        la petición HTTP a BB Cloud terminara.
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -244,77 +250,82 @@ function normalizarEstadoDevolucion(estado) {
   return map[(estado || '').toLowerCase()] || 'CUARENTENA';
 }
 
-// Redondea cantidades BOM a 4 decimales para evitar floating point
 function roundQty(n) {
   return parseFloat(parseFloat(n).toFixed(4));
 }
 
 // ─────────────────────────────────────────────────────────────
-// [FIX 15] pushWA — logging detallado para diagnóstico
-//   Loguea: número original → sanitizado, URL destino, body,
-//   y la respuesta completa de BB Cloud (status + body).
+// [FIX 16] pushWA — ahora es async y retorna una Promise.
+//   Ya NO es fire-and-forget. Los handlers hacen `await pushWA(...)`
+//   para que Vercel mantenga la función viva hasta recibir respuesta
+//   de BB Cloud. Esto corrige el bug donde el proceso moría antes
+//   de completar la petición HTTP saliente.
 // ─────────────────────────────────────────────────────────────
-function pushWA(phone, text) {
-  try {
-    const rawPhone = String(phone);
-    // Sanitizar: solo dígitos. Ej: "+57 315 338-0207" → "573153380207"
-    const number = rawPhone.replace(/[^\d]/g, '');
+async function pushWA(phone, text) {
+  return new Promise((resolve) => {
+    try {
+      const rawPhone = String(phone);
+      const number   = rawPhone.replace(/[^\d]/g, '');
 
-    console.log(`[pushWA] Intentando enviar WA`);
-    console.log(`[pushWA]   phone original  : "${rawPhone}"`);
-    console.log(`[pushWA]   number sanitizado: "${number}"`);
-    console.log(`[pushWA]   destino URL     : app.builderbot.cloud/api/v2/${BB_BOT_ID}/messages`);
-    console.log(`[pushWA]   texto (primeros 120 chars): ${String(text).slice(0, 120)}`);
+      console.log(`[pushWA] Intentando enviar WA`);
+      console.log(`[pushWA]   phone original  : "${rawPhone}"`);
+      console.log(`[pushWA]   number sanitizado: "${number}"`);
+      console.log(`[pushWA]   destino URL     : app.builderbot.cloud/api/v2/${BB_BOT_ID}/messages`);
+      console.log(`[pushWA]   texto (primeros 120 chars): ${String(text).slice(0, 120)}`);
 
-    if (!number) {
-      console.warn('[pushWA] ⚠️  Número vacío tras sanitizar — se omite envío. Registra el teléfono del supervisor en la BD.');
-      return;
-    }
+      if (!number) {
+        console.warn('[pushWA] ⚠️  Número vacío tras sanitizar — se omite envío.');
+        return resolve(null);
+      }
 
-    const body = JSON.stringify({
-      number,
-      messages: { content: text },
-    });
-
-    console.log(`[pushWA]   body JSON: ${body.slice(0, 300)}`);
-
-    const req = https.request({
-      hostname: 'app.builderbot.cloud',
-      path:     `/api/v2/${BB_BOT_ID}/messages`,
-      method:   'POST',
-      headers:  {
-        'Content-Type':     'application/json',
-        'x-api-builderbot': BB_TOKEN,
-        'Content-Length':   Buffer.byteLength(body),
-      },
-    }, res => {
-      let raw = '';
-      res.on('data', chunk => { raw += chunk; });
-      res.on('end', () => {
-        if (res.statusCode >= 400) {
-          console.error(`[pushWA] ❌ BB Cloud respondió ${res.statusCode} para número "${number}":`, raw.slice(0, 400));
-        } else {
-          console.log(`[pushWA] ✅ BB Cloud respondió ${res.statusCode} para número "${number}":`, raw.slice(0, 200));
-        }
+      const body = JSON.stringify({
+        number,
+        messages: { content: text },
       });
-    });
-    req.on('error', e => console.error('[pushWA] ❌ Error de red:', e.message));
-    req.write(body);
-    req.end();
-  } catch (e) {
-    console.error('[pushWA] ❌ Excepción:', e.message);
-  }
+
+      console.log(`[pushWA]   body JSON: ${body.slice(0, 300)}`);
+
+      const req = https.request({
+        hostname: 'app.builderbot.cloud',
+        path:     `/api/v2/${BB_BOT_ID}/messages`,
+        method:   'POST',
+        headers:  {
+          'Content-Type':     'application/json',
+          'x-api-builderbot': BB_TOKEN,
+          'Content-Length':   Buffer.byteLength(body),
+        },
+      }, res => {
+        let raw = '';
+        res.on('data', chunk => { raw += chunk; });
+        res.on('end', () => {
+          if (res.statusCode >= 400) {
+            console.error(`[pushWA] ❌ BB Cloud respondió ${res.statusCode} para "${number}":`, raw.slice(0, 400));
+          } else {
+            console.log(`[pushWA] ✅ BB Cloud respondió ${res.statusCode} para "${number}":`, raw.slice(0, 200));
+          }
+          resolve({ status: res.statusCode, body: raw.slice(0, 400) });
+        });
+      });
+
+      req.on('error', e => {
+        console.error('[pushWA] ❌ Error de red:', e.message);
+        resolve(null);
+      });
+
+      req.write(body);
+      req.end();
+
+    } catch (e) {
+      console.error('[pushWA] ❌ Excepción:', e.message);
+      resolve(null);
+    }
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
-// [FIX 15] getSupervisorPhone — logging detallado
-//   Loguea TODOS los candidatos encontrados en BD antes de
-//   retornar, incluyendo email, rol, activo y teléfono.
-//   Así se puede verificar desde Vercel Logs si la query
-//   retorna filas y cuál teléfono se selecciona (o si es null).
+// getSupervisorPhone — logging detallado
 // ─────────────────────────────────────────────────────────────
 async function getSupervisorPhone(db) {
-  // Primero loguear todos los candidatos potenciales para diagnóstico
   const [candidates] = await db.execute(
     `SELECT u.id, u.nombre, u.email, u.telefono, u.activo, LOWER(r.nombre) AS rol
      FROM usuarios u
@@ -337,7 +348,6 @@ async function getSupervisorPhone(db) {
     );
   }
 
-  // Query real que selecciona el supervisor
   const [rows] = await db.execute(
     `SELECT u.telefono FROM usuarios u
      JOIN roles r ON r.id = u.rol_id
@@ -354,15 +364,11 @@ async function getSupervisorPhone(db) {
   if (phone) {
     console.log(`[getSupervisorPhone] ✅ Teléfono seleccionado: "${phone}"`);
   } else {
-    console.warn(
-      '[getSupervisorPhone] ⚠️  No se encontró ningún supervisor/admin activo con teléfono registrado.' +
-      ' Verifica que la columna `telefono` esté completa y que el email NO termine en @wa.bot.'
-    );
+    console.warn('[getSupervisorPhone] ⚠️  No se encontró ningún supervisor/admin activo con teléfono registrado.');
   }
   return phone;
 }
 
-// Consulta stock usando v_stock_disponible con desglose FIFO
 async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
   try {
     if (sku) {
@@ -421,8 +427,6 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
 async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodegaId }) {
   switch (accion) {
 
-    // [FIX 9] SOLICITAR_INICIO_PRODUCCION aprobada:
-    //   → orden APROBADA + reserva stock por BOM + push WA al operario
     case 'SOLICITAR_INICIO_PRODUCCION': {
       const [ordenRows] = await db.execute(
         `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
@@ -430,7 +434,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       if (!ordenRows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
       const orden = ordenRows[0];
 
-      // Obtener BOM
       const [bom] = await db.execute(
         `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
                 pr.siigo_code, pr.nombre
@@ -439,7 +442,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
          WHERE b.producto_final_id = ?`, [orden.producto_id]
       ).catch(() => [[]]);
 
-      // Reservar stock FIFO por cada insumo
       const reservados = [];
       for (const item of bom) {
         const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
@@ -455,7 +457,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         reservados.push(`  • ${item.siigo_code}: ${cantInsumo} ${item.unidad}`);
       }
 
-      // Orden → APROBADA
       await db.execute(
         `UPDATE ordenes_produccion
          SET estado = 'APROBADA', aprobado_por = ?
@@ -463,10 +464,9 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         [aprobador_id, orden.id]
       );
 
-      // Push WA al operario
       if (payload.operario_phone) {
         console.log(`[APROBAR_SOLICITUD] Enviando WA confirmación al operario: "${payload.operario_phone}"`);
-        pushWA(
+        await pushWA(
           payload.operario_phone,
           [
             `✅ *Orden ${orden.codigo_orden} APROBADA*`,
@@ -483,7 +483,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       return { orden: orden.codigo_orden, estado: 'APROBADA', reservados: reservados.length };
     }
 
-    // [FIX 11] SOLICITAR_CIERRE_PRODUCCION:
     case 'SOLICITAR_CIERRE_PRODUCCION': {
       const [rows] = await db.execute(
         `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
@@ -535,7 +534,7 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       });
       if (payload.operario_phone) {
         console.log(`[CIERRE_PRODUCCION] Enviando WA confirmación al operario: "${payload.operario_phone}"`);
-        pushWA(
+        await pushWA(
           payload.operario_phone,
           `✅ *Cierre de orden ${orden.codigo_orden} aprobado*\nPT ingresado: ${cantReal} und — Lote ${lpnOP}`
         );
@@ -575,7 +574,7 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         approved_by: aprobador_id,
       });
       if (payload.operario_phone) {
-        pushWA(
+        await pushWA(
           payload.operario_phone,
           `✅ *Despacho aprobado*\nProducto despachado: ${cantDesp} und`
         );
@@ -609,7 +608,6 @@ module.exports = async (req, res) => {
   const params   = info.params || {};
   const priority = info.priority || 'baja';
 
-  // [FIX 15] Log de entrada para correlacionar con Vercel Runtime Logs
   console.log(`[webhook] ▶ action="${action}" from="${from}" priority="${priority}"`);
 
   const db = await DB();
@@ -619,7 +617,6 @@ module.exports = async (req, res) => {
     const user     = await getOrCreateBotUser(db, from);
     const bodegaId = await getDefaultBodega(db);
 
-    // ── RBAC ──────────────────────────────────────────────────
     const rolRaw  = user.rol_nombre || '';
     const rolNorm = rolRaw.charAt(0).toUpperCase() + rolRaw.slice(1).toLowerCase();
     const rolesPermitidos = RBAC[action];
@@ -772,11 +769,10 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        // [FIX 15] Loguear supPhone antes del if para ver si es null
         const supPhone = await getSupervisorPhone(db);
         console.log(`[SOLICITAR_INICIO_PRODUCCION] supPhone="${supPhone}" | solicitud="${codigo}" | orden="${codigoOrden}"`);
         if (supPhone) {
-          pushWA(
+          await pushWA(
             supPhone,
             [
               `🏭 *Solicitud de inicio de producción: ${codigo}*`,
@@ -789,7 +785,7 @@ module.exports = async (req, res) => {
             ].join('\n')
           );
         } else {
-          console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor. Revisa tabla usuarios.`);
+          console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor.`);
         }
 
         await logSystemEvent(db, { modulo: 'produccion', nivel: 'INFO',
@@ -921,11 +917,10 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        // [FIX 15] Loguear supPhone antes del if
         const supPhone = await getSupervisorPhone(db);
         console.log(`[SOLICITAR_CIERRE_PRODUCCION] supPhone="${supPhone}" | solicitud="${codigo}" | orden="${orden.codigo_orden}"`);
         if (supPhone) {
-          pushWA(
+          await pushWA(
             supPhone,
             [
               `🏭 *Solicitud cierre de producción: ${codigo}*`,
@@ -937,7 +932,7 @@ module.exports = async (req, res) => {
             ].join('\n')
           );
         } else {
-          console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor. Revisa tabla usuarios.`);
+          console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor.`);
         }
 
         mensaje = [
@@ -968,11 +963,10 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        // [FIX 15] Loguear supPhone antes del if
         const supPhone = await getSupervisorPhone(db);
         console.log(`[SOLICITAR_DESPACHO] supPhone="${supPhone}" | solicitud="${codigo}"`);
         if (supPhone) {
-          pushWA(
+          await pushWA(
             supPhone,
             [
               `📦 *Solicitud de despacho: ${codigo}*`,
@@ -1080,7 +1074,7 @@ module.exports = async (req, res) => {
           [user.id, params.motivo || null, params.id_solicitud]
         );
         if (payload?.operario_phone) {
-          pushWA(
+          await pushWA(
             payload.operario_phone,
             [
               `❌ *Solicitud ${params.id_solicitud} RECHAZADA*`,
