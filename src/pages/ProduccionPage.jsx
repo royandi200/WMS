@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProductionStore } from '../store/productionStore'
 
-const PHASES = ['F1','F2','F3','F4','F5']
+const PHASES = ['F0','F1','F2','F3','F4','F5']
 const STATUS_LABEL = {
   PLANEADA:   { label: 'Planeada',   css: 'text-yellow-400 bg-yellow-400/10' },
   APROBADA:   { label: 'Aprobada',   css: 'text-blue-400   bg-blue-400/10'   },
@@ -100,6 +100,8 @@ function StartForm({ loading, onSubmit, onDone }) {
 }
 
 function AdvanceForm({ loading, onSubmit }) {
+  // F0 excluido del selector: una orden ya existe en F0, solo se puede avanzar hacia F1+
+  const ADVANCE_PHASES = PHASES.filter((p) => p !== 'F0')
   const [form, setForm] = useState({ order_id: '', phase: 'F1' })
   const [toast, setToast] = useState(null)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
@@ -112,10 +114,10 @@ function AdvanceForm({ loading, onSubmit }) {
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="ID de la orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="UUID" className="input-field" required /></Field>
+      <Field label="ID o código de la orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="UUID o OP-XXXXXX" className="input-field" required /></Field>
       <Field label="Fase destino *">
         <select value={form.phase} onChange={set('phase')} className="input-field">
-          {PHASES.map((p) => <option key={p}>{p}</option>)}
+          {ADVANCE_PHASES.map((p) => <option key={p}>{p}</option>)}
         </select>
       </Field>
       <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Avanzando...' : 'Avanzar fase'}</button>
