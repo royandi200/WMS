@@ -121,10 +121,12 @@ function KardexRow({ row, index }) {
   useEffect(()=>{ const t=setTimeout(()=>setVis(true),55*index); return()=>clearTimeout(t) },[index])
   const tipo  = (row.tipo || '').toLowerCase()
   const meta  = TIPO_META[tipo] || { label: row.tipo, color:'#8b949e', bg:'#8b949e18' }
-  const fecha = row.creado_en
-    ? new Date(row.creado_en).toLocaleDateString('es-CO',{day:'2-digit',month:'short'})
+  // campo real: row.fecha  (no creado_en)
+  const fecha = row.fecha
+    ? new Date(row.fecha).toLocaleDateString('es-CO',{day:'2-digit',month:'short'})
     : '--'
-  const label = row.producto?.siigo_code || row.producto?.nombre || row.producto_id || '—'
+  // campo real: row.producto (string directo) + row.sku
+  const label = row.sku || row.producto || row.producto_id || '—'
   return (
     <div className="flex items-center gap-3 py-2.5 border-b border-border/40 last:border-0"
       style={{opacity:vis?1:0,transform:vis?'translateX(0)':'translateX(-8px)',
@@ -145,9 +147,10 @@ function KardexRow({ row, index }) {
 function StockAlert({ item, index }) {
   const [vis, setVis] = useState(false)
   useEffect(()=>{ const t=setTimeout(()=>setVis(true),75*index); return()=>clearTimeout(t) },[index])
-  const nombre   = item.producto?.nombre || item.producto?.siigo_code || '—'
-  const stockMin = parseFloat(item.stock_minimo    || 0)
-  const stockAct = parseFloat(item.disponible_neto || 0)
+  // campos reales: item.name, item.min_stock, item.disponible (o item.stock)
+  const nombre   = item.name || item.sku || '—'
+  const stockMin = parseFloat(item.min_stock   || 0)
+  const stockAct = parseFloat(item.disponible  || item.stock || 0)
   const pct      = stockMin > 0 ? Math.min((stockAct/stockMin)*100, 100) : 0
   const critical = pct < 30
   return (
@@ -198,9 +201,9 @@ function ApprovalRow({ item, index, onNavigate }) {
 }
 
 function ActivityChart({ data=[], loading }) {
-  const tipos   = ['entrada','salida','merma']
-  const colores = { entrada:'#3fb950', salida:'#f0883e', merma:'#f85149' }
-  const labels  = { entrada:'Entrada', salida:'Salida',  merma:'Merma'   }
+  const tipos   = ['entrada','salida','ajuste']
+  const colores = { entrada:'#3fb950', salida:'#f0883e', ajuste:'#d2a8ff' }
+  const labels  = { entrada:'Entrada', salida:'Salida',  ajuste:'Ajuste'  }
   const [anim, setAnim] = useState(false)
   useEffect(()=>{
     setAnim(false)
@@ -209,13 +212,14 @@ function ActivityChart({ data=[], loading }) {
   const days = Array.from({length:7},(_,i)=>{
     const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().split('T')[0]
   })
+  // campo real de fecha: row.fecha
   const grouped = days.map(day=>{
-    const rows = data.filter(r=>(r.creado_en||'').startsWith(day))
+    const rows = data.filter(r=>(r.fecha||'').startsWith(day))
     return {
       day: day.slice(5),
       entrada: rows.filter(r=>r.tipo==='entrada').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
       salida:  rows.filter(r=>r.tipo==='salida') .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
-      merma:   rows.filter(r=>r.tipo==='merma')  .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
+      ajuste:  rows.filter(r=>r.tipo==='ajuste') .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
     }
   })
   const maxVal = Math.max(...grouped.flatMap(g=>tipos.map(t=>g[t])),1)
@@ -291,23 +295,22 @@ export default function DashboardPage() {
 
   const handleRefresh = async () => { setRefreshing(true); await loadAll(); setRefreshing(false) }
 
+  // campo real de fecha en kardex: row.fecha
   const filteredKardex = useMemo(() => {
     if (!Array.isArray(kardex) || !kardex.length) return []
     const since = periodStart(period)
-    return kardex.filter(r => r.creado_en && new Date(r.creado_en) >= since)
+    return kardex.filter(r => r.fecha && new Date(r.fecha) >= since)
   }, [kardex, period])
 
+  // summary es objeto plano: { productos_activos, disponible, total_productos, ... }
   const totalProducts = useMemo(() => {
     if (!summary) return null
-    if (Array.isArray(summary)) return summary.length
-    return summary.totalProducts ?? summary.total_products ?? 0
+    return summary.productos_activos ?? summary.total_productos ?? 0
   }, [summary])
 
   const totalStock = useMemo(() => {
     if (!summary) return null
-    if (Array.isArray(summary))
-      return summary.reduce((acc, p) => acc + parseFloat(p.stock?.disponible_neto ?? p.stock?.fisico_total ?? 0), 0)
-    return summary.totalStock ?? summary.total_stock ?? 0
+    return summary.disponible ?? summary.total_unidades ?? 0
   }, [summary])
 
   const totalEntradas = useMemo(() =>
@@ -320,32 +323,15 @@ export default function DashboardPage() {
 
   const sparkEntrada = useMemo(() => Array.from({length:7},(_,i)=>{
     const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]
-    return (kardex||[]).filter(r=>r.tipo==='entrada'&&(r.creado_en||'').startsWith(day))
+    return (kardex||[]).filter(r=>r.tipo==='entrada'&&(r.fecha||'').startsWith(day))
       .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0)
   }),[kardex])
 
   const sparkSalida = useMemo(() => Array.from({length:7},(_,i)=>{
     const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]
-    return (kardex||[]).filter(r=>r.tipo==='salida'&&(r.creado_en||'').startsWith(day))
+    return (kardex||[]).filter(r=>r.tipo==='salida'&&(r.fecha||'').startsWith(day))
       .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0)
   }),[kardex])
-
-  // ── DEBUG: log cada vez que cambian los valores derivados ──────────────────
-  useEffect(() => {
-    console.group('[DASHBOARD] valores derivados')
-    console.log('summary (tipo):', Array.isArray(summary) ? `Array[${summary?.length}]` : typeof summary, summary)
-    console.log('totalProducts:', totalProducts)
-    console.log('totalStock:', totalStock)
-    console.log('kardex.length:', kardex?.length, '| filteredKardex.length:', filteredKardex.length)
-    console.log('totalEntradas:', totalEntradas, '| totalSalidas:', totalSalidas)
-    console.log('lowStock:', lowStock)
-    if (filteredKardex.length) {
-      console.log('sample filteredKardex[0]:', filteredKardex[0])
-      console.log('tipos en filteredKardex:', [...new Set(filteredKardex.map(r=>r.tipo))])
-    }
-    if (lowStock.length) console.log('lowStock[0]:', lowStock[0])
-    console.groupEnd()
-  }, [summary, totalProducts, totalStock, kardex, filteredKardex, totalEntradas, totalSalidas, lowStock])
 
   const periodLabel = PERIODS.find(p=>p.key===period)?.label
   const hora   = new Date().getHours()
@@ -386,13 +372,15 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-6 pb-8 space-y-6">
+        {/* KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard icon={Package}     label="Productos activos" value={totalProducts}                        sub="en catálogo"      color="#f0883e"  delay={0}   loading={loadingSummary  && totalProducts===null}/>
-          <KpiCard icon={Warehouse}   label="Unidades en stock" value={totalStock!==null?Math.round(totalStock):null} sub="disponible neto" color="#3fb950"  delay={80}  loading={loadingSummary  && totalStock===null}   sparkData={sparkEntrada}/>
-          <KpiCard icon={TrendingUp}  label="Entradas"          value={Math.round(totalEntradas)}            sub={`en ${periodLabel}`} trend="up"   color="#79c0ff"  delay={160} loading={loadingKardex   && !kardex?.length}     sparkData={sparkEntrada}/>
-          <KpiCard icon={TrendingDown}label="Salidas"           value={Math.round(totalSalidas)}             sub={`en ${periodLabel}`} trend="down" color="#d2a8ff"  delay={240} loading={loadingKardex   && !kardex?.length}     sparkData={sparkSalida}/>
+          <KpiCard icon={Package}      label="Productos activos" value={totalProducts}                              sub="en catálogo"      color="#f0883e"  delay={0}   loading={loadingSummary  && totalProducts===null}/>
+          <KpiCard icon={Warehouse}    label="Unidades en stock" value={totalStock!==null?Math.round(totalStock):null} sub="disponible neto" color="#3fb950"  delay={80}  loading={loadingSummary  && totalStock===null}/>
+          <KpiCard icon={TrendingUp}   label="Entradas"          value={Math.round(totalEntradas)}                    sub={`en ${periodLabel}`} trend="up"   color="#79c0ff"  delay={160} loading={loadingKardex && !kardex?.length} sparkData={sparkEntrada}/>
+          <KpiCard icon={TrendingDown} label="Salidas"           value={Math.round(totalSalidas)}                     sub={`en ${periodLabel}`} trend="down" color="#d2a8ff"  delay={240} loading={loadingKardex && !kardex?.length} sparkData={sparkSalida}/>
         </div>
 
+        {/* Gráfico + Aprobaciones */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 bg-surface border border-border rounded-xl p-5"
             style={{animation:'fadeSlideUp .5s ease .3s both'}}>
@@ -440,6 +428,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Movimientos + Stock bajo */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-surface border border-border rounded-xl p-5"
             style={{animation:'fadeSlideUp .5s ease .5s both'}}>
@@ -455,7 +444,7 @@ export default function DashboardPage() {
             ) : filteredKardex.length===0 ? (
               <div className="text-center text-muted text-xs py-6">Sin movimientos en el período</div>
             ) : filteredKardex.slice(0,8).map((row,i)=>(
-              <KardexRow key={row.id||i} row={row} index={i}/>
+              <KardexRow key={row.movimiento_id||i} row={row} index={i}/>
             ))}
           </div>
 
@@ -480,7 +469,7 @@ export default function DashboardPage() {
                 <span className="text-muted text-xs">Todo el stock en niveles normales</span>
               </div>
             ) : lowStock.slice(0,6).map((item,i)=>(
-              <StockAlert key={item.producto?.id||i} item={item} index={i}/>
+              <StockAlert key={item.id||i} item={item} index={i}/>
             ))}
             {lowStock.length>0 && (
               <button onClick={()=>navigate('/inventario')}
@@ -491,6 +480,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Accesos rápidos */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2"
           style={{animation:'fadeSlideUp .5s ease .7s both'}}>
           {[
