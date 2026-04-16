@@ -10,7 +10,6 @@ import {
   Activity, ChevronRight, Zap
 } from 'lucide-react'
 
-// ─── Filtro cliente por período ───────────────────────────────────────────────
 function periodStart(period) {
   const d = new Date()
   if (period === 'today') { d.setHours(0, 0, 0, 0); return d }
@@ -19,7 +18,6 @@ function periodStart(period) {
   return d
 }
 
-// ─── AnimatedNumber ───────────────────────────────────────────────────────────
 function AnimatedNumber({ value, duration = 1000 }) {
   const [display, setDisplay] = useState(0)
   const rafRef  = useRef(null)
@@ -42,7 +40,6 @@ function AnimatedNumber({ value, duration = 1000 }) {
   return <span>{display.toLocaleString('es-CO')}</span>
 }
 
-// ─── Sparkline ────────────────────────────────────────────────────────────────
 function Sparkline({ data = [], color = '#f0883e', height = 36 }) {
   if (!data.length || data.every(v => v === 0)) return null
   const w = 120, h = height
@@ -69,36 +66,27 @@ function Sparkline({ data = [], color = '#f0883e', height = 36 }) {
   )
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
 function Sk({ className='', style={} }) {
   return <div className={`animate-pulse bg-surface-offset rounded-md ${className}`} style={style}/>
 }
 
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
 function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay=0, loading }) {
   const [vis, setVis] = useState(false)
   useEffect(() => { const t = setTimeout(()=>setVis(true), delay); return ()=>clearTimeout(t) }, [delay])
-
   if (loading) return (
     <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
-      <Sk className="h-3 w-20"/>
-      <Sk className="h-7 w-14"/>
-      <Sk className="h-3 w-28"/>
+      <Sk className="h-3 w-20"/><Sk className="h-7 w-14"/><Sk className="h-3 w-28"/>
     </div>
   )
   return (
     <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-3"
-      style={{
-        opacity: vis?1:0, transform: vis?'translateY(0)':'translateY(14px)',
-        transition:`opacity .5s ease ${delay}ms,transform .5s ease ${delay}ms,box-shadow .2s`,
-      }}
+      style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(14px)',
+        transition:`opacity .5s ease ${delay}ms,transform .5s ease ${delay}ms,box-shadow .2s`}}
       onMouseEnter={e=>e.currentTarget.style.boxShadow=`0 0 0 1px ${color}40,0 8px 24px ${color}15`}
       onMouseLeave={e=>e.currentTarget.style.boxShadow=''}>
       <div className="flex items-center justify-between">
         <span className="text-muted text-xs font-medium uppercase tracking-wider">{label}</span>
-        <div className="p-1.5 rounded-lg" style={{background:`${color}18`}}>
-          <Icon size={14} style={{color}}/>
-        </div>
+        <div className="p-1.5 rounded-lg" style={{background:`${color}18`}}><Icon size={14} style={{color}}/></div>
       </div>
       <div className="flex items-end justify-between gap-2">
         <div>
@@ -107,8 +95,7 @@ function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay
           </div>
           {sub && (
             <div className={`flex items-center gap-1 mt-1 text-xs ${
-              trend==='up'?'text-emerald-400':trend==='down'?'text-red-400':'text-muted'
-            }`}>
+              trend==='up'?'text-emerald-400':trend==='down'?'text-red-400':'text-muted'}`}>
               {trend==='up'   && <TrendingUp   size={11}/>}
               {trend==='down' && <TrendingDown size={11}/>}
               {sub}
@@ -121,7 +108,6 @@ function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay
   )
 }
 
-// ─── Tipos de movimiento ──────────────────────────────────────────────────────
 const TIPO_META = {
   entrada:  { label:'Entrada',  color:'#3fb950', bg:'#3fb95018' },
   salida:   { label:'Salida',   color:'#f0883e', bg:'#f0883e18' },
@@ -130,9 +116,6 @@ const TIPO_META = {
   ajuste:   { label:'Ajuste',   color:'#d2a8ff', bg:'#d2a8ff18' },
 }
 
-// ─── Fila Kardex ──────────────────────────────────────────────────────────────
-// Backend: Movimiento con include Producto as 'producto' → row.producto.siigo_code
-// Campo fecha: creado_en | tipo: minúsculas ('entrada','salida',...)
 function KardexRow({ row, index }) {
   const [vis, setVis] = useState(false)
   useEffect(()=>{ const t=setTimeout(()=>setVis(true),55*index); return()=>clearTimeout(t) },[index])
@@ -159,13 +142,11 @@ function KardexRow({ row, index }) {
   )
 }
 
-// ─── Alerta stock bajo ────────────────────────────────────────────────────────
-// Backend lowStock: { producto:{id,siigo_code,nombre,unidad}, stock_minimo, disponible_neto, deficit }
 function StockAlert({ item, index }) {
   const [vis, setVis] = useState(false)
   useEffect(()=>{ const t=setTimeout(()=>setVis(true),75*index); return()=>clearTimeout(t) },[index])
   const nombre   = item.producto?.nombre || item.producto?.siigo_code || '—'
-  const stockMin = parseFloat(item.stock_minimo   || 0)
+  const stockMin = parseFloat(item.stock_minimo    || 0)
   const stockAct = parseFloat(item.disponible_neto || 0)
   const pct      = stockMin > 0 ? Math.min((stockAct/stockMin)*100, 100) : 0
   const critical = pct < 30
@@ -191,10 +172,9 @@ function StockAlert({ item, index }) {
   )
 }
 
-// ─── Fila Aprobación ──────────────────────────────────────────────────────────
 const ACCION_META = {
-  DESPACHO:   {color:'#f0883e'}, RECEPCION:  {color:'#3fb950'},
-  MERMA:      {color:'#f85149'}, PRODUCCION: {color:'#79c0ff'},
+  DESPACHO:{color:'#f0883e'}, RECEPCION:{color:'#3fb950'},
+  MERMA:{color:'#f85149'},    PRODUCCION:{color:'#79c0ff'},
 }
 function ApprovalRow({ item, index, onNavigate }) {
   const [vis, setVis] = useState(false)
@@ -217,17 +197,15 @@ function ApprovalRow({ item, index, onNavigate }) {
   )
 }
 
-// ─── Gráfico actividad 7 días ─────────────────────────────────────────────────
 function ActivityChart({ data=[], loading }) {
   const tipos   = ['entrada','salida','merma']
   const colores = { entrada:'#3fb950', salida:'#f0883e', merma:'#f85149' }
-  const labels  = { entrada:'Entrada', salida:'Salida', merma:'Merma' }
+  const labels  = { entrada:'Entrada', salida:'Salida',  merma:'Merma'   }
   const [anim, setAnim] = useState(false)
   useEffect(()=>{
     setAnim(false)
     if (!loading && data.length) { const t=setTimeout(()=>setAnim(true),150); return()=>clearTimeout(t) }
   },[loading, data])
-
   const days = Array.from({length:7},(_,i)=>{
     const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().split('T')[0]
   })
@@ -241,12 +219,9 @@ function ActivityChart({ data=[], loading }) {
     }
   })
   const maxVal = Math.max(...grouped.flatMap(g=>tipos.map(t=>g[t])),1)
-
   if (loading) return (
     <div className="flex items-end gap-2 h-24">
-      {[40,70,55,80,45,65,90].map((h,i)=>(
-        <Sk key={i} className="flex-1" style={{height:`${h}%`}}/>
-      ))}
+      {[40,70,55,80,45,65,90].map((h,i)=><Sk key={i} className="flex-1" style={{height:`${h}%`}}/>)}
     </div>
   )
   return (
@@ -258,12 +233,10 @@ function ActivityChart({ data=[], loading }) {
               {tipos.map(tipo=>(
                 <div key={tipo} title={`${labels[tipo]}: ${g[tipo]}`}
                   className="w-full rounded-sm transition-all duration-700"
-                  style={{
-                    height: anim ? `${Math.max((g[tipo]/maxVal)*88, g[tipo]>0?2:0)}px` : '0px',
-                    background: colores[tipo], opacity: g[tipo]>0?.85:0,
+                  style={{height:anim?`${Math.max((g[tipo]/maxVal)*88,g[tipo]>0?2:0)}px`:'0px',
+                    background:colores[tipo],opacity:g[tipo]>0?.85:0,
                     transitionDelay:`${gi*55}ms`,
-                    boxShadow: g[tipo]>0?`0 0 4px ${colores[tipo]}60`:'none',
-                  }}/>
+                    boxShadow:g[tipo]>0?`0 0 4px ${colores[tipo]}60`:'none'}}/>
               ))}
             </div>
             <span className="text-muted text-xs mt-1.5">{g.day}</span>
@@ -282,14 +255,12 @@ function ActivityChart({ data=[], loading }) {
   )
 }
 
-// ─── Períodos ─────────────────────────────────────────────────────────────────
 const PERIODS = [
   {key:'today',label:'Hoy'},
   {key:'week', label:'7 días'},
   {key:'month',label:'30 días'},
 ]
 
-// ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
@@ -305,7 +276,6 @@ export default function DashboardPage() {
   const [headerVis,  setHeaderVis] = useState(false)
 
   const loadAll = useCallback(async () => {
-    // Llamadas independientes — cada una maneja su propio loading flag
     await Promise.all([
       fetchSummary(),
       fetchLowStock(),
@@ -319,22 +289,14 @@ export default function DashboardPage() {
     setTimeout(() => setHeaderVis(true), 50)
   }, []) // eslint-disable-line
 
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    await loadAll()
-    setRefreshing(false)
-  }
+  const handleRefresh = async () => { setRefreshing(true); await loadAll(); setRefreshing(false) }
 
-  // Filtrar kardex por período en cliente (backend no acepta since/until)
   const filteredKardex = useMemo(() => {
     if (!Array.isArray(kardex) || !kardex.length) return []
     const since = periodStart(period)
     return kardex.filter(r => r.creado_en && new Date(r.creado_en) >= since)
   }, [kardex, period])
 
-  // ── KPI 1 & 2: summary = array de productos activos con .stock ──────────────
-  // Backend: globalSummary → Producto[] cada uno con stock = getStockSummary()
-  // getStockSummary devuelve: { fisico_total, reservado, disponible_neto, ... }
   const totalProducts = useMemo(() => {
     if (!summary) return null
     if (Array.isArray(summary)) return summary.length
@@ -348,8 +310,6 @@ export default function DashboardPage() {
     return summary.totalStock ?? summary.total_stock ?? 0
   }, [summary])
 
-  // ── KPI 3 & 4: entradas/salidas del período ─────────────────────────────────
-  // tipo en minúsculas exactamente como lo guarda Sequelize
   const totalEntradas = useMemo(() =>
     filteredKardex.filter(r=>r.tipo==='entrada').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0)
   ,[filteredKardex])
@@ -358,7 +318,6 @@ export default function DashboardPage() {
     filteredKardex.filter(r=>r.tipo==='salida').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0)
   ,[filteredKardex])
 
-  // Sparklines fijos 7 días
   const sparkEntrada = useMemo(() => Array.from({length:7},(_,i)=>{
     const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]
     return (kardex||[]).filter(r=>r.tipo==='entrada'&&(r.creado_en||'').startsWith(day))
@@ -371,14 +330,29 @@ export default function DashboardPage() {
       .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0)
   }),[kardex])
 
+  // ── DEBUG: log cada vez que cambian los valores derivados ──────────────────
+  useEffect(() => {
+    console.group('[DASHBOARD] valores derivados')
+    console.log('summary (tipo):', Array.isArray(summary) ? `Array[${summary?.length}]` : typeof summary, summary)
+    console.log('totalProducts:', totalProducts)
+    console.log('totalStock:', totalStock)
+    console.log('kardex.length:', kardex?.length, '| filteredKardex.length:', filteredKardex.length)
+    console.log('totalEntradas:', totalEntradas, '| totalSalidas:', totalSalidas)
+    console.log('lowStock:', lowStock)
+    if (filteredKardex.length) {
+      console.log('sample filteredKardex[0]:', filteredKardex[0])
+      console.log('tipos en filteredKardex:', [...new Set(filteredKardex.map(r=>r.tipo))])
+    }
+    if (lowStock.length) console.log('lowStock[0]:', lowStock[0])
+    console.groupEnd()
+  }, [summary, totalProducts, totalStock, kardex, filteredKardex, totalEntradas, totalSalidas, lowStock])
+
   const periodLabel = PERIODS.find(p=>p.key===period)?.label
   const hora   = new Date().getHours()
   const saludo = hora<12?'Buenos días':hora<18?'Buenas tardes':'Buenas noches'
 
   return (
     <div className="flex-1 overflow-y-auto">
-
-      {/* Header */}
       <div className="px-6 pt-6 pb-4 flex items-center justify-between"
         style={{opacity:headerVis?1:0,transform:headerVis?'translateY(0)':'translateY(-10px)',
           transition:'opacity .4s ease,transform .4s ease'}}>
@@ -398,32 +372,27 @@ export default function DashboardPage() {
             {PERIODS.map(p=>(
               <button key={p.key} onClick={()=>setPeriod(p.key)}
                 className="text-xs px-3 py-1 rounded-md transition-all duration-200"
-                style={{
-                  background: period===p.key?'#f0883e18':'transparent',
-                  color:      period===p.key?'#f0883e':'#8b949e',
-                  fontWeight: period===p.key?600:400,
-                }}>{p.label}</button>
+                style={{background:period===p.key?'#f0883e18':'transparent',
+                  color:period===p.key?'#f0883e':'#8b949e',fontWeight:period===p.key?600:400}}>
+                {p.label}
+              </button>
             ))}
           </div>
           <button onClick={handleRefresh}
-            className="p-2 rounded-lg bg-surface border border-border text-muted hover:text-foreground transition-all"
-            title="Actualizar">
+            className="p-2 rounded-lg bg-surface border border-border text-muted hover:text-foreground transition-all">
             <RefreshCw size={13} className={refreshing?'animate-spin':''}/>
           </button>
         </div>
       </div>
 
       <div className="px-6 pb-8 space-y-6">
-
-        {/* KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard icon={Package}    label="Productos activos"  value={totalProducts}           sub="en catálogo"         color="#f0883e"  delay={0}   loading={loadingSummary  && totalProducts===null}/>
-          <KpiCard icon={Warehouse}  label="Unidades en stock"  value={totalStock!==null?Math.round(totalStock):null}  sub="disponible neto"     color="#3fb950"  delay={80}  loading={loadingSummary  && totalStock===null} sparkData={sparkEntrada}/>
-          <KpiCard icon={TrendingUp} label="Entradas"           value={Math.round(totalEntradas)} sub={`en ${periodLabel}`} trend="up"    color="#79c0ff"  delay={160} loading={loadingKardex   && !kardex?.length} sparkData={sparkEntrada}/>
-          <KpiCard icon={TrendingDown} label="Salidas"          value={Math.round(totalSalidas)}  sub={`en ${periodLabel}`} trend="down"  color="#d2a8ff"  delay={240} loading={loadingKardex   && !kardex?.length} sparkData={sparkSalida}/>
+          <KpiCard icon={Package}     label="Productos activos" value={totalProducts}                        sub="en catálogo"      color="#f0883e"  delay={0}   loading={loadingSummary  && totalProducts===null}/>
+          <KpiCard icon={Warehouse}   label="Unidades en stock" value={totalStock!==null?Math.round(totalStock):null} sub="disponible neto" color="#3fb950"  delay={80}  loading={loadingSummary  && totalStock===null}   sparkData={sparkEntrada}/>
+          <KpiCard icon={TrendingUp}  label="Entradas"          value={Math.round(totalEntradas)}            sub={`en ${periodLabel}`} trend="up"   color="#79c0ff"  delay={160} loading={loadingKardex   && !kardex?.length}     sparkData={sparkEntrada}/>
+          <KpiCard icon={TrendingDown}label="Salidas"           value={Math.round(totalSalidas)}             sub={`en ${periodLabel}`} trend="down" color="#d2a8ff"  delay={240} loading={loadingKardex   && !kardex?.length}     sparkData={sparkSalida}/>
         </div>
 
-        {/* Gráfico + Aprobaciones */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 bg-surface border border-border rounded-xl p-5"
             style={{animation:'fadeSlideUp .5s ease .3s both'}}>
@@ -471,7 +440,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Movimientos + Stock bajo */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-surface border border-border rounded-xl p-5"
             style={{animation:'fadeSlideUp .5s ease .5s both'}}>
@@ -523,7 +491,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Accesos rápidos */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2"
           style={{animation:'fadeSlideUp .5s ease .7s both'}}>
           {[
@@ -549,7 +516,6 @@ export default function DashboardPage() {
             </button>
           ))}
         </div>
-
       </div>
 
       <style>{`
