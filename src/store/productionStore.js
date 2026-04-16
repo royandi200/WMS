@@ -8,10 +8,28 @@ import {
   closeOrder,
 } from '../api/production.api'
 
-// client.js tiene un interceptor que extrae body.data del wrapper { ok, data }.
-// Por eso `res` ya ES el payload — no hay que hacer res.data.
-// GET /production devuelve { ok, data: { rows, total } }  → interceptor → { rows, total }
-// POST endpoints devuelven { ok, data: { ... } }          → interceptor → { ... }
+// client.js intercepta { ok, data: <payload> } y devuelve <payload> directamente.
+// El backend Express usa Sequelize findAndCountAll → { count, rows: [OrdenProduccion] }
+// donde cada fila tiene el producto anidado en r.producto.{ siigo_code, nombre }
+
+const normalizeOrden = (r) => ({
+  ...r,
+  // IDs y códigos
+  id:            r.id,
+  codigo_orden:  r.codigo_orden,
+  // Producto — Sequelize anida el include como r.producto
+  product_id:    r.producto_id          ?? r.product_id,
+  product_name:  r.producto?.nombre     ?? r.product_name ?? r.nombre,
+  sku:           r.producto?.siigo_code ?? r.sku          ?? r.siigo_code,
+  // Cantidades
+  qty_planned:   r.cantidad_planeada    ?? r.qty_planned,
+  qty_real:      r.cantidad_real        ?? r.qty_real,
+  // Estado y fase
+  current_phase: r.fase                 ?? r.current_phase,
+  status:        r.estado               ?? r.status,
+  // Fechas
+  created_at:    r.creado_en            ?? r.created_at,
+})
 
 export const useProductionStore = create((set) => ({
   list:    [],
@@ -22,22 +40,10 @@ export const useProductionStore = create((set) => ({
   fetchList: async (params = {}) => {
     set({ loading: true, error: null })
     try {
-      // res = { rows: [...], total: N }  (interceptor ya extrajo .data)
+      // interceptor extrae .data → res = { count, rows } (Sequelize findAndCountAll)
       const res  = await getProductions(params)
-      const rows = res?.rows ?? res ?? []
-      const normalized = rows.map((r) => ({
-        ...r,
-        product_id:    r.producto_id        ?? r.product_id,
-        product_name:  r.product_name       ?? r.nombre,
-        sku:           r.sku                ?? r.siigo_code,
-        qty_planned:   r.cantidad_planeada  ?? r.qty_planned,
-        qty_real:      r.cantidad_real      ?? r.qty_real,
-        current_phase: r.fase               ?? r.current_phase,
-        status:        r.estado             ?? r.status,
-        created_at:    r.creado_en          ?? r.created_at,
-        codigo_orden:  r.codigo_orden,
-      }))
-      set({ list: normalized, loading: false })
+      const rows = res?.rows ?? (Array.isArray(res) ? res : [])
+      set({ list: rows.map(normalizeOrden), loading: false })
     } catch (e) {
       set({
         error: e.response?.data?.error || e.response?.data?.message || 'Error al cargar producciones',
@@ -50,9 +56,9 @@ export const useProductionStore = create((set) => ({
     set({ loading: true, error: null })
     try {
       const res = await getProduction(id)
-      // GET /production/:id → { ok, data: <orden> } → interceptor → <orden>
-      set({ current: res, loading: false })
-      return res
+      const normalized = normalizeOrden(res)
+      set({ current: normalized, loading: false })
+      return normalized
     } catch (e) {
       set({
         error: e.response?.data?.error || e.response?.data?.message || 'Orden no encontrada',
@@ -91,8 +97,8 @@ export const useProductionStore = create((set) => ({
   advance: async (body) => {
     set({ loading: true, error: null })
     try {
-      // res = { order_code, phase }  (interceptor extrajo .data del wrapper)
       const res = await advanceOrder(body)
+      // res = { order_code, phase }
       const { phase, order_code } = res ?? {}
       if (phase) {
         set((state) => ({
