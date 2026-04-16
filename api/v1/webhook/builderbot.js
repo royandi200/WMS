@@ -63,6 +63,15 @@
 //        "Responde *apruebo REQ-xxx* o *rechazo REQ-xxx*"
 //        en los tres flujos: SOLICITAR_INICIO_PRODUCCION,
 //        SOLICITAR_CIERRE_PRODUCCION y SOLICITAR_DESPACHO.
+//  [18]  MENSAJE POST-APROBACIÓN AL OPERARIO (lenguaje natural):
+//        En executeApprovedPayload → SOLICITAR_INICIO_PRODUCCION,
+//        reemplaza la instrucción técnica cruda:
+//          "CONFIRMAR_MATERIALES_PRODUCCION con id_orden: X"
+//        por lenguaje natural que el LLM del operario puede procesar:
+//          "Cuando tengas los insumos listos, responde:
+//           confirmo materiales orden X"
+//        Esto evita que el operario tenga que recordar el nombre exacto
+//        del comando y permite que BB Cloud lo interprete correctamente.
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -543,6 +552,8 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         [aprobador_id, orden.id]
       );
 
+      // [FIX 18] Mensaje al operario en lenguaje natural para que BB Cloud
+      // lo procese correctamente sin necesidad de comando técnico exacto.
       if (payload.operario_phone) {
         console.log(`[APROBAR_SOLICITUD] Enviando WA confirmación al operario: "${payload.operario_phone}"`);
         await pushWA(
@@ -550,8 +561,8 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
           [
             `✅ *Orden ${orden.codigo_orden} APROBADA*`,
             `Tu solicitud fue validada. Los materiales están reservados.`,
-            `Cuando tengas los insumos físicamente, confirma con:`,
-            `CONFIRMAR_MATERIALES_PRODUCCION con id_orden: ${orden.codigo_orden}`,
+            `Cuando tengas los insumos listos físicamente, responde:`,
+            `*confirmo materiales orden ${orden.codigo_orden}*`,
             ``, `📦 *Materiales reservados:*`,
             ...reservados
           ].join('\n')
