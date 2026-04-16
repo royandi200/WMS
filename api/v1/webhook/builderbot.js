@@ -36,6 +36,11 @@
 //                                     path: /api/v2/{BOT_ID}/messages
 //                                     header: x-api-builderbot
 //                                     body: { number, messages: { content } }
+//  [14] getSupervisorPhone         → excluye usuarios bot (@wa.bot) para que nunca
+//                                     se elija un bot como supervisor;
+//                                     prioriza rol Supervisor sobre Admin;
+//       pushWA                     → sanitiza número: elimina +, espacios y guiones
+//                                     antes de enviar a BB Cloud
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -239,13 +244,18 @@ function roundQty(n) {
 }
 
 // [FIX 13] Push WA via BuilderBot Cloud (fire-and-forget, nunca bloquea el flujo)
-// API correcta: POST https://app.builderbot.cloud/api/v2/{BOT_ID}/messages
-// Header: x-api-builderbot
-// Body: { number, messages: { content } }
+// [FIX 14] Sanitiza el número: elimina +, espacios y guiones antes de enviarlo.
+//          BB Cloud rechaza silenciosamente números con formato incorrecto.
 function pushWA(phone, text) {
   try {
+    // Sanitizar: solo dígitos. Ej: "+57 315 338-0207" → "573153380207"
+    const number = String(phone).replace(/[^\d]/g, '');
+    if (!number) {
+      console.warn('[pushWA] Número vacío tras sanitizar, se omite envío.');
+      return;
+    }
     const body = JSON.stringify({
-      number:   phone,
+      number,
       messages: { content: text },
     });
     const req = https.request({
@@ -258,8 +268,13 @@ function pushWA(phone, text) {
         'Content-Length':   Buffer.byteLength(body),
       },
     }, res => {
-      res.on('data', () => {});
-      res.on('end',  () => {});
+      let raw = '';
+      res.on('data', chunk => { raw += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          console.error(`[pushWA] BB Cloud respondió ${res.statusCode}:`, raw.slice(0, 200));
+        }
+      });
     });
     req.on('error', e => console.error('[pushWA]', e.message));
     req.write(body);
@@ -269,15 +284,23 @@ function pushWA(phone, text) {
   }
 }
 
-// Obtiene el teléfono de un supervisor/admin activo (primer resultado)
+// [FIX 14] Obtiene el teléfono de un supervisor/admin activo.
+//   - Excluye usuarios bot (email termina en @wa.bot) — antes podía seleccionar
+//     "WA-573009876543" (admin bot sin teléfono) o "Admin WMS" (número de prueba)
+//     dependiendo del ORDER BY id ASC.
+//   - Prioriza rol Supervisor sobre Admin (FIELD order).
+//   - Toma el primer resultado con teléfono real.
 async function getSupervisorPhone(db) {
   const [rows] = await db.execute(
     `SELECT u.telefono FROM usuarios u
      JOIN roles r ON r.id = u.rol_id
-     WHERE r.nombre IN ('Supervisor','Admin','supervisor','admin')
+     WHERE LOWER(r.nombre) IN ('supervisor','admin')
        AND u.activo = 1
        AND u.telefono IS NOT NULL
-     ORDER BY u.id ASC LIMIT 1`
+       AND u.email NOT LIKE '%@wa.bot'
+     ORDER BY FIELD(LOWER(r.nombre), 'supervisor', 'admin') ASC,
+              u.id ASC
+     LIMIT 1`
   ).catch(() => [[]]);
   return rows[0]?.telefono || null;
 }
