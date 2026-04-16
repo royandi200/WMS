@@ -25,6 +25,11 @@
 //       APROBAR          → reserva stock, push WA operario
 //       CONFIRMAR        → descuenta stock + kardex CONSUMO_PRODUCCION
 //  [10] AVANCE_FASES               → ahora actualiza columna `fase` + appends notas
+//  [11] SOLICITAR_CIERRE_PRODUCCION → valida estado EN_PROCESO antes de cerrar;
+//                                     cantReal con Number() para evitar '0' falsy;
+//                                     guarda codigo_orden en payload para WA
+//  [12] AVANCE_FASES               → valida estado EN_PROCESO; logSystemEvent;
+//                                     mensaje incluye codigo_orden
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -382,44 +387,68 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       return { orden: orden.codigo_orden, estado: 'APROBADA', reservados: reservados.length };
     }
 
+    // [FIX 11] SOLICITAR_CIERRE_PRODUCCION:
+    //   - Valida que la orden esté en EN_PROCESO antes de cerrar
+    //   - Number() en cantReal para evitar que qty_real='0' (string falsy) use cantidad_planeada
+    //   - codigo_orden guardado en payload para el mensaje WA
     case 'SOLICITAR_CIERRE_PRODUCCION': {
       const [rows] = await db.execute(
         `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
       );
       if (!rows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
-      const cantReal = payload.qty_real || rows[0].cantidad_planeada;
+      const orden = rows[0];
+
+      // Validar estado previo: solo se puede cerrar si está EN_PROCESO
+      if (orden.estado !== 'EN_PROCESO') {
+        throw {
+          status: 409,
+          message: `La orden ${orden.codigo_orden} está en estado "${orden.estado}" y no puede cerrarse. Debe estar EN_PROCESO.`,
+        };
+      }
+
+      // Usar Number() para que qty_real='0' no caiga al valor planeado
+      const cantReal = payload.qty_real != null
+        ? Number(payload.qty_real)
+        : Number(orden.cantidad_planeada);
+
       await db.execute(
         `UPDATE ordenes_produccion
          SET estado='CERRADA', cantidad_real=?, aprobado_por=?, cerrado_en=NOW()
          WHERE id=?`,
-        [cantReal, aprobador_id, payload.order_id]
+        [cantReal, aprobador_id, orden.id]
       );
-      const lpnOP = `L-OP${payload.order_id}-${Date.now()}`;
+      const lpnOP = `L-OP${orden.id}-${Date.now()}`;
       const lotId = await createLot(db, {
-        lpn: lpnOP, product_id: rows[0].producto_id, bodega_id: bodegaId,
+        lpn: lpnOP, product_id: orden.producto_id, bodega_id: bodegaId,
         qty: cantReal, origin: 'PRODUCCION', received_by: aprobador_id,
-        notes: `Orden de producción #${payload.order_id}`,
+        notes: `Orden de producción ${orden.codigo_orden}`,
       });
-      await upsertStock(db, { producto_id: rows[0].producto_id, bodega_id: bodegaId, lote: lpnOP, cantidad: cantReal });
+      await upsertStock(db, { producto_id: orden.producto_id, bodega_id: bodegaId, lote: lpnOP, cantidad: cantReal });
       await db.execute(
         `INSERT INTO movimientos (tipo, producto_id, bodega_dest, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
          VALUES ('entrada',?,?,?,?,?,'orden_produccion',?)`,
-        [rows[0].producto_id, bodegaId, lpnOP, cantReal, payload.order_id, aprobador_id]
+        [orden.producto_id, bodegaId, lpnOP, cantReal, orden.id, aprobador_id]
       );
-      const balance = await getStockBalance(db, rows[0].producto_id, bodegaId);
+      const balance = await getStockBalance(db, orden.producto_id, bodegaId);
       await logKardex(db, {
-        product_id: rows[0].producto_id, user_id: aprobador_id,
+        product_id: orden.producto_id, user_id: aprobador_id,
         action: 'CIERRE_PRODUCCION', qty: cantReal, lot_id: lotId,
-        balance_after: balance, reference: `orden_produccion:${payload.order_id}`,
+        balance_after: balance, reference: `orden_produccion:${orden.id}`,
         approved_by: aprobador_id,
+      });
+      await logSystemEvent(db, {
+        modulo: 'produccion', nivel: 'INFO',
+        mensaje: `Orden ${orden.codigo_orden} CERRADA — ${cantReal} und producidas`,
+        usuario_id: aprobador_id,
+        payload: { orden_id: orden.id, codigo_orden: orden.codigo_orden, cantReal, lote: lpnOP },
       });
       if (payload.operario_phone) {
         pushWA(
           payload.operario_phone,
-          `✅ *Cierre de orden ${payload.order_id} aprobado*\nPT ingresado: ${cantReal} und — Lote ${lpnOP}`
+          `✅ *Cierre de orden ${orden.codigo_orden} aprobado*\nPT ingresado: ${cantReal} und — Lote ${lpnOP}`
         );
       }
-      return { lote: lpnOP, cantidad: cantReal };
+      return { orden: orden.codigo_orden, lote: lpnOP, cantidad: cantReal };
     }
 
     case 'SOLICITAR_DESPACHO': {
@@ -686,15 +715,26 @@ module.exports = async (req, res) => {
       }
 
       // ── 3. AVANCE_FASES ───────────────────────────────────────
-      // [FIX 10] Actualiza columna `fase` + appends a notas
+      // [FIX 10/12] Actualiza columna `fase` + appends notas
+      //             Valida que la orden esté EN_PROCESO antes de avanzar
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(
-          `SELECT id, fase FROM ordenes_produccion
+          `SELECT id, codigo_orden, estado, fase FROM ordenes_produccion
            WHERE id = ? OR codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
-        const faseAnterior = rows[0].fase || 'F0';
+        const orden = rows[0];
+
+        // [FIX 12] Solo avanzar fases si la orden está activa
+        if (orden.estado !== 'EN_PROCESO') {
+          throw {
+            status: 409,
+            message: `La orden ${orden.codigo_orden} está en estado "${orden.estado}". Solo se pueden registrar avances de fase en órdenes EN_PROCESO.`,
+          };
+        }
+
+        const faseAnterior = orden.fase || 'F0';
         await db.execute(
           `UPDATE ordenes_produccion
            SET fase  = ?,
@@ -703,10 +743,18 @@ module.exports = async (req, res) => {
           [
             params.fase_destino,
             `\nAvance ${faseAnterior} → ${params.fase_destino} — ${new Date().toISOString()}`,
-            rows[0].id,
+            orden.id,
           ]
         );
-        mensaje = `📦 *Avance registrado*\nOrden: ${params.id_orden}\n${faseAnterior} → ${params.fase_destino}`;
+
+        await logSystemEvent(db, {
+          modulo: 'produccion', nivel: 'INFO',
+          mensaje: `Orden ${orden.codigo_orden}: avance de fase ${faseAnterior} → ${params.fase_destino}`,
+          usuario_id: user.id,
+          payload: { orden_id: orden.id, codigo_orden: orden.codigo_orden, faseAnterior, faseDestino: params.fase_destino },
+        });
+
+        mensaje = `📦 *Avance registrado*\nOrden: ${orden.codigo_orden}\nFase: ${faseAnterior} → ${params.fase_destino}`;
         break;
       }
 
@@ -765,13 +813,21 @@ module.exports = async (req, res) => {
           [params.id_orden, params.id_orden]
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
+        const orden = rows[0];
+
+        // Validación temprana: evitar encolar si ya está cerrada/cancelada
+        if (['CERRADA','CANCELADA'].includes(orden.estado)) {
+          throw { status: 409, message: `La orden ${orden.codigo_orden} ya está en estado "${orden.estado}" y no puede cerrarse nuevamente.` };
+        }
+
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
            VALUES (?, 'SOLICITAR_CIERRE_PRODUCCION', ?, ?, 'PENDIENTE', NOW())`,
           [codigo, JSON.stringify({
-            order_id:       rows[0].id,
-            qty_real:       params.cantidad_real,
+            order_id:       orden.id,
+            codigo_orden:   orden.codigo_orden,
+            qty_real:       params.cantidad_real != null ? params.cantidad_real : null,
             operario_phone: from,
           }), user.id]
         );
@@ -781,8 +837,9 @@ module.exports = async (req, res) => {
             supPhone,
             [
               `🏭 *Solicitud cierre de producción: ${codigo}*`,
-              `Orden: ${params.id_orden}`,
-              `Cantidad real: ${params.cantidad_real}`,
+              `Orden: ${orden.codigo_orden}`,
+              `Estado actual: ${orden.estado}`,
+              `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
               `Operario: ${user.nombre}`,
               `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
             ].join('\n')
@@ -790,8 +847,8 @@ module.exports = async (req, res) => {
         }
         mensaje = [
           `⏳ *Solicitud enviada: ${codigo}*`,
-          `Orden: ${params.id_orden}`,
-          `Cantidad real: ${params.cantidad_real}`,
+          `Orden: ${orden.codigo_orden}`,
+          `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
           `El supervisor fue notificado.`
         ].join('\n');
         break;
@@ -920,7 +977,6 @@ module.exports = async (req, res) => {
            motivo_rechazo=? WHERE codigo_solicitud=?`,
           [user.id, params.motivo || null, params.id_solicitud]
         );
-        // Push WA al operario si el payload tiene su teléfono
         if (payload?.operario_phone) {
           pushWA(
             payload.operario_phone,
@@ -1173,7 +1229,6 @@ module.exports = async (req, res) => {
           const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
           if (cantInsumo <= 0) continue;
 
-          // Descontar cantidad física y liberar reserva en el mismo UPDATE
           await db.execute(
             `UPDATE stock
              SET cantidad  = GREATEST(0, cantidad  - ?),
