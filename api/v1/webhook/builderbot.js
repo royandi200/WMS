@@ -41,6 +41,12 @@
 //                                     prioriza rol Supervisor sobre Admin;
 //       pushWA                     → sanitiza número: elimina +, espacios y guiones
 //                                     antes de enviar a BB Cloud
+//  [15] LOGGING DETALLADO:
+//       getSupervisorPhone → loguea todos los candidatos encontrados en BD y el
+//                            teléfono final seleccionado (o null si no hay ninguno)
+//       pushWA             → loguea número sanitizado, URL destino, body enviado
+//                            y respuesta completa de BB Cloud (status + body)
+//       Flujos de solicitud → loguea supPhone antes del if para ver si es null
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -243,21 +249,35 @@ function roundQty(n) {
   return parseFloat(parseFloat(n).toFixed(4));
 }
 
-// [FIX 13] Push WA via BuilderBot Cloud (fire-and-forget, nunca bloquea el flujo)
-// [FIX 14] Sanitiza el número: elimina +, espacios y guiones antes de enviarlo.
-//          BB Cloud rechaza silenciosamente números con formato incorrecto.
+// ─────────────────────────────────────────────────────────────
+// [FIX 15] pushWA — logging detallado para diagnóstico
+//   Loguea: número original → sanitizado, URL destino, body,
+//   y la respuesta completa de BB Cloud (status + body).
+// ─────────────────────────────────────────────────────────────
 function pushWA(phone, text) {
   try {
+    const rawPhone = String(phone);
     // Sanitizar: solo dígitos. Ej: "+57 315 338-0207" → "573153380207"
-    const number = String(phone).replace(/[^\d]/g, '');
+    const number = rawPhone.replace(/[^\d]/g, '');
+
+    console.log(`[pushWA] Intentando enviar WA`);
+    console.log(`[pushWA]   phone original  : "${rawPhone}"`);
+    console.log(`[pushWA]   number sanitizado: "${number}"`);
+    console.log(`[pushWA]   destino URL     : app.builderbot.cloud/api/v2/${BB_BOT_ID}/messages`);
+    console.log(`[pushWA]   texto (primeros 120 chars): ${String(text).slice(0, 120)}`);
+
     if (!number) {
-      console.warn('[pushWA] Número vacío tras sanitizar, se omite envío.');
+      console.warn('[pushWA] ⚠️  Número vacío tras sanitizar — se omite envío. Registra el teléfono del supervisor en la BD.');
       return;
     }
+
     const body = JSON.stringify({
       number,
       messages: { content: text },
     });
+
+    console.log(`[pushWA]   body JSON: ${body.slice(0, 300)}`);
+
     const req = https.request({
       hostname: 'app.builderbot.cloud',
       path:     `/api/v2/${BB_BOT_ID}/messages`,
@@ -272,25 +292,52 @@ function pushWA(phone, text) {
       res.on('data', chunk => { raw += chunk; });
       res.on('end', () => {
         if (res.statusCode >= 400) {
-          console.error(`[pushWA] BB Cloud respondió ${res.statusCode}:`, raw.slice(0, 200));
+          console.error(`[pushWA] ❌ BB Cloud respondió ${res.statusCode} para número "${number}":`, raw.slice(0, 400));
+        } else {
+          console.log(`[pushWA] ✅ BB Cloud respondió ${res.statusCode} para número "${number}":`, raw.slice(0, 200));
         }
       });
     });
-    req.on('error', e => console.error('[pushWA]', e.message));
+    req.on('error', e => console.error('[pushWA] ❌ Error de red:', e.message));
     req.write(body);
     req.end();
   } catch (e) {
-    console.error('[pushWA]', e.message);
+    console.error('[pushWA] ❌ Excepción:', e.message);
   }
 }
 
-// [FIX 14] Obtiene el teléfono de un supervisor/admin activo.
-//   - Excluye usuarios bot (email termina en @wa.bot) — antes podía seleccionar
-//     "WA-573009876543" (admin bot sin teléfono) o "Admin WMS" (número de prueba)
-//     dependiendo del ORDER BY id ASC.
-//   - Prioriza rol Supervisor sobre Admin (FIELD order).
-//   - Toma el primer resultado con teléfono real.
+// ─────────────────────────────────────────────────────────────
+// [FIX 15] getSupervisorPhone — logging detallado
+//   Loguea TODOS los candidatos encontrados en BD antes de
+//   retornar, incluyendo email, rol, activo y teléfono.
+//   Así se puede verificar desde Vercel Logs si la query
+//   retorna filas y cuál teléfono se selecciona (o si es null).
+// ─────────────────────────────────────────────────────────────
 async function getSupervisorPhone(db) {
+  // Primero loguear todos los candidatos potenciales para diagnóstico
+  const [candidates] = await db.execute(
+    `SELECT u.id, u.nombre, u.email, u.telefono, u.activo, LOWER(r.nombre) AS rol
+     FROM usuarios u
+     JOIN roles r ON r.id = u.rol_id
+     WHERE LOWER(r.nombre) IN ('supervisor','admin')
+     ORDER BY FIELD(LOWER(r.nombre), 'supervisor', 'admin') ASC, u.id ASC
+     LIMIT 20`
+  ).catch(() => [[]]);
+
+  console.log(`[getSupervisorPhone] Candidatos supervisor/admin en BD (${candidates.length} total):`);
+  for (const c of candidates) {
+    const esBot    = c.email && c.email.endsWith('@wa.bot');
+    const tienetel = c.telefono != null && String(c.telefono).trim() !== '';
+    console.log(
+      `[getSupervisorPhone]   id=${c.id} | rol=${c.rol} | activo=${c.activo}` +
+      ` | telefono=${c.telefono === null ? 'NULL' : `"${c.telefono}"`}` +
+      ` | email=${c.email}` +
+      ` | esBot=${esBot} | tienetel=${tienetel}` +
+      ` | APTO=${!esBot && tienetel && c.activo == 1}`
+    );
+  }
+
+  // Query real que selecciona el supervisor
   const [rows] = await db.execute(
     `SELECT u.telefono FROM usuarios u
      JOIN roles r ON r.id = u.rol_id
@@ -302,7 +349,17 @@ async function getSupervisorPhone(db) {
               u.id ASC
      LIMIT 1`
   ).catch(() => [[]]);
-  return rows[0]?.telefono || null;
+
+  const phone = rows[0]?.telefono || null;
+  if (phone) {
+    console.log(`[getSupervisorPhone] ✅ Teléfono seleccionado: "${phone}"`);
+  } else {
+    console.warn(
+      '[getSupervisorPhone] ⚠️  No se encontró ningún supervisor/admin activo con teléfono registrado.' +
+      ' Verifica que la columna `telefono` esté completa y que el email NO termine en @wa.bot.'
+    );
+  }
+  return phone;
 }
 
 // Consulta stock usando v_stock_disponible con desglose FIFO
@@ -408,6 +465,7 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
 
       // Push WA al operario
       if (payload.operario_phone) {
+        console.log(`[APROBAR_SOLICITUD] Enviando WA confirmación al operario: "${payload.operario_phone}"`);
         pushWA(
           payload.operario_phone,
           [
@@ -418,15 +476,14 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
             ...reservados
           ].join('\n')
         );
+      } else {
+        console.warn(`[APROBAR_SOLICITUD] operario_phone no está en el payload — no se notificará al operario.`);
       }
 
       return { orden: orden.codigo_orden, estado: 'APROBADA', reservados: reservados.length };
     }
 
     // [FIX 11] SOLICITAR_CIERRE_PRODUCCION:
-    //   - Valida que la orden esté en EN_PROCESO antes de cerrar
-    //   - Number() en cantReal para evitar que qty_real='0' (string falsy) use cantidad_planeada
-    //   - codigo_orden guardado en payload para el mensaje WA
     case 'SOLICITAR_CIERRE_PRODUCCION': {
       const [rows] = await db.execute(
         `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
@@ -434,7 +491,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       if (!rows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
       const orden = rows[0];
 
-      // Validar estado previo: solo se puede cerrar si está EN_PROCESO
       if (orden.estado !== 'EN_PROCESO') {
         throw {
           status: 409,
@@ -442,7 +498,6 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         };
       }
 
-      // Usar Number() para que qty_real='0' no caiga al valor planeado
       const cantReal = payload.qty_real != null
         ? Number(payload.qty_real)
         : Number(orden.cantidad_planeada);
@@ -479,10 +534,13 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         payload: { orden_id: orden.id, codigo_orden: orden.codigo_orden, cantReal, lote: lpnOP },
       });
       if (payload.operario_phone) {
+        console.log(`[CIERRE_PRODUCCION] Enviando WA confirmación al operario: "${payload.operario_phone}"`);
         pushWA(
           payload.operario_phone,
           `✅ *Cierre de orden ${orden.codigo_orden} aprobado*\nPT ingresado: ${cantReal} und — Lote ${lpnOP}`
         );
+      } else {
+        console.warn(`[CIERRE_PRODUCCION] operario_phone no está en el payload — no se notificará al operario.`);
       }
       return { orden: orden.codigo_orden, lote: lpnOP, cantidad: cantReal };
     }
@@ -550,6 +608,9 @@ module.exports = async (req, res) => {
   const action   = info['@ction'] || info.action || 'UNKNOWN';
   const params   = info.params || {};
   const priority = info.priority || 'baja';
+
+  // [FIX 15] Log de entrada para correlacionar con Vercel Runtime Logs
+  console.log(`[webhook] ▶ action="${action}" from="${from}" priority="${priority}"`);
 
   const db = await DB();
   try {
@@ -652,13 +713,10 @@ module.exports = async (req, res) => {
       }
 
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
-      // [FIX 9] Solo crea orden PLANEADA + verifica FIFO + encola + push WA supervisor
-      // NO descuenta ni reserva stock aquí.
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p        = await findProductBySku(db, params.id_producto_final);
         const cantPlan = Number(params.cantidad_planificada) || 0;
 
-        // Obtener BOM
         const [bom] = await db.execute(
           `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
                   pr.siigo_code, pr.nombre
@@ -667,7 +725,6 @@ module.exports = async (req, res) => {
            WHERE b.producto_final_id = ?`, [p.id]
         ).catch(() => [[]]);
 
-        // Verificar disponibilidad FIFO (disponible = cantidad - reservada)
         const faltantes = [];
         const picking   = [];
         for (const item of bom) {
@@ -684,7 +741,6 @@ module.exports = async (req, res) => {
           if (!ok) faltantes.push(`${item.siigo_code} (falta ${roundQty(needed - disponible)} ${item.unidad})`);
         }
 
-        // Si hay faltantes, NO encolar — responder al operario con el detalle
         if (faltantes.length) {
           mensaje = [
             `❌ *No se puede iniciar producción de ${params.id_producto_final}*`,
@@ -696,7 +752,6 @@ module.exports = async (req, res) => {
           break;
         }
 
-        // Hay stock suficiente → crear orden PLANEADA
         const codigoOrden = await nextCodigoOrden(db);
         const [ins] = await db.execute(
           `INSERT INTO ordenes_produccion
@@ -707,7 +762,6 @@ module.exports = async (req, res) => {
         );
         const orderId = ins.insertId;
 
-        // Encolar en aprobaciones
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
@@ -718,8 +772,9 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        // Push WA al supervisor
+        // [FIX 15] Loguear supPhone antes del if para ver si es null
         const supPhone = await getSupervisorPhone(db);
+        console.log(`[SOLICITAR_INICIO_PRODUCCION] supPhone="${supPhone}" | solicitud="${codigo}" | orden="${codigoOrden}"`);
         if (supPhone) {
           pushWA(
             supPhone,
@@ -733,6 +788,8 @@ module.exports = async (req, res) => {
               ``, `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
             ].join('\n')
           );
+        } else {
+          console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor. Revisa tabla usuarios.`);
         }
 
         await logSystemEvent(db, { modulo: 'produccion', nivel: 'INFO',
@@ -751,8 +808,6 @@ module.exports = async (req, res) => {
       }
 
       // ── 3. AVANCE_FASES ───────────────────────────────────────
-      // [FIX 10/12] Actualiza columna `fase` + appends notas
-      //             Valida que la orden esté EN_PROCESO antes de avanzar
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(
           `SELECT id, codigo_orden, estado, fase FROM ordenes_produccion
@@ -762,7 +817,6 @@ module.exports = async (req, res) => {
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         const orden = rows[0];
 
-        // [FIX 12] Solo avanzar fases si la orden está activa
         if (orden.estado !== 'EN_PROCESO') {
           throw {
             status: 409,
@@ -851,7 +905,6 @@ module.exports = async (req, res) => {
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         const orden = rows[0];
 
-        // Validación temprana: evitar encolar si ya está cerrada/cancelada
         if (['CERRADA','CANCELADA'].includes(orden.estado)) {
           throw { status: 409, message: `La orden ${orden.codigo_orden} ya está en estado "${orden.estado}" y no puede cerrarse nuevamente.` };
         }
@@ -867,7 +920,10 @@ module.exports = async (req, res) => {
             operario_phone: from,
           }), user.id]
         );
+
+        // [FIX 15] Loguear supPhone antes del if
         const supPhone = await getSupervisorPhone(db);
+        console.log(`[SOLICITAR_CIERRE_PRODUCCION] supPhone="${supPhone}" | solicitud="${codigo}" | orden="${orden.codigo_orden}"`);
         if (supPhone) {
           pushWA(
             supPhone,
@@ -880,7 +936,10 @@ module.exports = async (req, res) => {
               `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
             ].join('\n')
           );
+        } else {
+          console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor. Revisa tabla usuarios.`);
         }
+
         mensaje = [
           `⏳ *Solicitud enviada: ${codigo}*`,
           `Orden: ${orden.codigo_orden}`,
@@ -908,7 +967,10 @@ module.exports = async (req, res) => {
             operario_phone: from,
           }), user.id]
         );
+
+        // [FIX 15] Loguear supPhone antes del if
         const supPhone = await getSupervisorPhone(db);
+        console.log(`[SOLICITAR_DESPACHO] supPhone="${supPhone}" | solicitud="${codigo}"`);
         if (supPhone) {
           pushWA(
             supPhone,
@@ -920,7 +982,10 @@ module.exports = async (req, res) => {
               `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
             ].join('\n')
           );
+        } else {
+          console.warn(`[SOLICITAR_DESPACHO] ⚠️  supPhone es null — no se enviará WA al supervisor.`);
         }
+
         mensaje = [
           `⏳ *Solicitud de despacho: ${codigo}*`,
           `Producto: ${params.id_item}`,
@@ -981,6 +1046,7 @@ module.exports = async (req, res) => {
         const solicitud = rows[0];
         const payload   = typeof solicitud.payload === 'string'
           ? JSON.parse(solicitud.payload) : solicitud.payload;
+        console.log(`[APROBAR_SOLICITUD] Procesando solicitud="${params.id_solicitud}" accion="${solicitud.accion}"`);
         const execResult = await executeApprovedPayload(db, {
           accion: solicitud.accion, payload, aprobador_id: user.id, bodegaId,
         });
@@ -1238,7 +1304,6 @@ module.exports = async (req, res) => {
       }
 
       // ── CONFIRMAR_MATERIALES_PRODUCCION ──────────────────────
-      // [FIX 9] Aquí sí descuenta stock + kardex CONSUMO_PRODUCCION
       case 'CONFIRMAR_MATERIALES_PRODUCCION': {
         const [ordenRows] = await db.execute(
           `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
@@ -1251,7 +1316,6 @@ module.exports = async (req, res) => {
           throw { status: 409, message: `La orden ${params.id_orden} está en estado ${orden.estado} y no puede confirmarse` };
         }
 
-        // Obtener BOM
         const [bom] = await db.execute(
           `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
                   pr.siigo_code, pr.nombre
@@ -1260,7 +1324,6 @@ module.exports = async (req, res) => {
            WHERE b.producto_final_id = ?`, [orden.producto_id]
         ).catch(() => [[]]);
 
-        // Descontar stock (cantidad - cant, reservada - cant) + kardex
         for (const item of bom) {
           const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
           if (cantInsumo <= 0) continue;
@@ -1293,7 +1356,6 @@ module.exports = async (req, res) => {
           });
         }
 
-        // Orden → EN_PROCESO
         await db.execute(
           `UPDATE ordenes_produccion
            SET estado = 'EN_PROCESO', materiales_conf_en = NOW()
@@ -1319,13 +1381,6 @@ module.exports = async (req, res) => {
         if (!params.lote_sugerido || !params.lote_usado) {
           throw { status: 400, message: 'EXCEPCION_PICKING requiere lote_sugerido y lote_usado' };
         }
-        const ordenRows = params.id_orden
-          ? await db.execute(
-              `SELECT id FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
-              [params.id_orden, params.id_orden]
-            ).then(([r]) => r).catch(() => [])
-          : [];
-
         await logSystemEvent(db, {
           modulo: 'picking', nivel: 'WARN',
           mensaje: `Excepción picking: lote ${params.lote_sugerido} reemplazado por ${params.lote_usado}`,
@@ -1358,10 +1413,12 @@ module.exports = async (req, res) => {
     }
 
     await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje }, status: 'PROCESSED' });
+    console.log(`[webhook] ✅ action="${action}" completado OK`);
     return res.json({ ok: true, message: mensaje, mensaje });
 
   } catch (err) {
     const errMsg = err.message || 'Error interno';
+    console.error(`[webhook] ❌ action="${action}" error:`, errMsg);
     await saveLog(db, { from, action, priority, payload: rawBody,
       response: { error: errMsg }, status: 'ERROR' }).catch(() => {});
     return res.status(err.status || 500).json({ ok: false, message: `❌ ${errMsg}`, mensaje: `❌ ${errMsg}`, error: errMsg });
