@@ -24,6 +24,7 @@
 //       SOLICITAR_INICIO → verifica FIFO, encola, push WA supervisor
 //       APROBAR          → reserva stock, push WA operario
 //       CONFIRMAR        → descuenta stock + kardex CONSUMO_PRODUCCION
+//  [10] AVANCE_FASES               → ahora actualiza columna `fase` + appends notas
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -685,20 +686,27 @@ module.exports = async (req, res) => {
       }
 
       // ── 3. AVANCE_FASES ───────────────────────────────────────
+      // [FIX 10] Actualiza columna `fase` + appends a notas
       case 'AVANCE_FASES': {
         const [rows] = await db.execute(
-          `SELECT id FROM ordenes_produccion
+          `SELECT id, fase FROM ordenes_produccion
            WHERE id = ? OR codigo_orden = ? LIMIT 1`,
           [params.id_orden, params.id_orden]
         );
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
+        const faseAnterior = rows[0].fase || 'F0';
         await db.execute(
           `UPDATE ordenes_produccion
-           SET notas=CONCAT(IFNULL(notas,''), ?)
-           WHERE id=?`,
-          [`\nFase: ${params.fase_destino} — ${new Date().toISOString()}`, rows[0].id]
+           SET fase  = ?,
+               notas = CONCAT(IFNULL(notas,''), ?)
+           WHERE id  = ?`,
+          [
+            params.fase_destino,
+            `\nAvance ${faseAnterior} → ${params.fase_destino} — ${new Date().toISOString()}`,
+            rows[0].id,
+          ]
         );
-        mensaje = `📦 *Avance registrado*\nOrden #${params.id_orden}\nFase: ${params.fase_destino}`;
+        mensaje = `📦 *Avance registrado*\nOrden: ${params.id_orden}\n${faseAnterior} → ${params.fase_destino}`;
         break;
       }
 
@@ -1057,7 +1065,7 @@ module.exports = async (req, res) => {
         mensaje = [
           `🔍 *Orden: ${o.codigo_orden || o.id}*`,
           `Producto: ${o.producto} (${o.siigo_code})`,
-          `Estado: ${o.estado}  |  Fase: ${o.fase}`,
+          `Estado: ${o.estado}  |  Fase: ${o.fase || 'F0'}`,
           `Planeado: ${o.cantidad_planeada} und`,
           `Producido: ${o.cantidad_real > 0 ? o.cantidad_real + ' und' : 'En proceso'}`,
           o.cerrado_en ? `Cerrado: ${new Date(o.cerrado_en).toLocaleDateString('es-CO')}` : ''
