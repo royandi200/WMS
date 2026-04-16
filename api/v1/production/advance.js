@@ -14,8 +14,8 @@ module.exports = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'orden_id y nueva_fase son requeridos' });
 
     await query(
-      `UPDATE ordenes_produccion SET estado=?, notas=CONCAT(IFNULL(notas,''), ' | ', ?) WHERE id=?`,
-      [nueva_fase, notas || '', orden_id]
+      `UPDATE ordenes_produccion SET fase=?, notas=CONCAT(IFNULL(notas,''), ' | ', ?) WHERE id=?`,
+      [nueva_fase, notas || `Avance a ${nueva_fase}`, orden_id]
     );
     const rows = await query(`SELECT * FROM ordenes_produccion WHERE id=? LIMIT 1`, [orden_id]);
     return res.status(200).json({ ok: true, data: rows[0] });
