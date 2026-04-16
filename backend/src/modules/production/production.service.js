@@ -8,6 +8,16 @@ const { v4: uuidv4 } = require('uuid');
 // Bodegas por convención
 const BODEGA = { PPAL: 1, CUARENTENA: 2, DEVOL: 3, PROD: 4 };
 
+// Helper: busca una orden por PK numérico o por codigo_orden
+async function findOrden(order_id, options = {}) {
+  const byPk = await OrdenProduccion.findByPk(order_id, options);
+  if (byPk) return byPk;
+  return OrdenProduccion.findOne({
+    where: { codigo_orden: String(order_id) },
+    ...options,
+  });
+}
+
 // ─── Inicia orden de producción ────────────────────────────────────────────────
 exports.start = async ({ product_id, qty_planned, notas }, usuario) => {
   const producto = await Producto.findByPk(product_id);
@@ -68,7 +78,7 @@ exports.start = async ({ product_id, qty_planned, notas }, usuario) => {
 // ─── Confirma materiales: descuenta insumos FIFO desde lots ─────────────────────
 exports.confirmMaterials = async ({ order_id, exception_lot_id }, usuario) => {
   return sequelize.transaction({ isolationLevel: 'SERIALIZABLE' }, async (t) => {
-    const orden = await OrdenProduccion.findByPk(order_id, { transaction: t, lock: t.LOCK.UPDATE });
+    const orden = await findOrden(order_id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!orden) throw new AppError('Orden no encontrada', 404);
     if (orden.fase !== 'F0') throw new AppError(`La orden ya pasó la fase F0 (actual: ${orden.fase})`, 409);
 
@@ -128,12 +138,22 @@ exports.confirmMaterials = async ({ order_id, exception_lot_id }, usuario) => {
 };
 
 // ─── Avanza fase ────────────────────────────────────────────────────────────────
+// FIX: busca por id numérico O por codigo_orden; valida que esté EN_PROCESO
 exports.advancePhase = async ({ order_id, phase }, usuario) => {
-  const orden = await OrdenProduccion.findByPk(order_id);
-  if (!orden)                    throw new AppError('Orden no encontrada', 404);
-  if (orden.estado === 'CERRADA') throw new AppError('La orden ya está cerrada', 409);
+  const orden = await findOrden(order_id);
+  if (!orden) throw new AppError('Orden no encontrada', 404);
 
+  if (orden.estado !== 'EN_PROCESO') {
+    throw new AppError(
+      `La orden ${orden.codigo_orden} está en estado "${orden.estado}". ` +
+      'Solo se pueden registrar avances de fase en órdenes EN_PROCESO.',
+      409
+    );
+  }
+
+  const faseAnterior = orden.fase;
   await orden.update({ fase: phase });
+
   await logKardex({
     productoId:       orden.producto_id,
     usuarioId:        usuario.id,
@@ -141,15 +161,16 @@ exports.advancePhase = async ({ order_id, phase }, usuario) => {
     cantidad:         0,
     referenciaTipo:   'orden_produccion',
     referenciaCodigo: orden.codigo_orden,
-    notas:            `Avance a fase ${phase}`,
+    notas:            `Avance de fase ${faseAnterior} → ${phase}`,
   });
-  return { order_code: orden.codigo_orden, phase };
+
+  return { order_code: orden.codigo_orden, phase_from: faseAnterior, phase_to: phase };
 };
 
 // ─── Cierra producción: ingresa producto terminado a bodega principal ─────────
 exports.close = async ({ order_id, qty_real }, usuario) => {
   return sequelize.transaction({ isolationLevel: 'SERIALIZABLE' }, async (t) => {
-    const orden = await OrdenProduccion.findByPk(order_id, { transaction: t, lock: t.LOCK.UPDATE });
+    const orden = await findOrden(order_id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!orden)                    throw new AppError('Orden no encontrada', 404);
     if (orden.estado === 'CERRADA') throw new AppError('La orden ya está cerrada', 409);
     if (orden.fase === 'F0')        throw new AppError('Debes confirmar materiales antes de cerrar', 409);
@@ -220,7 +241,7 @@ exports.list = ({ status, page = 1, limit = 30 }) => {
 };
 
 exports.getOne = async (id) => {
-  const o = await OrdenProduccion.findByPk(id, {
+  const o = await findOrden(id, {
     include: [{ model: Producto, as: 'producto' }],
   });
   if (!o) throw new AppError('Orden no encontrada', 404);
