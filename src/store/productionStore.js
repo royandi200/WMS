@@ -8,7 +8,12 @@ import {
   closeOrder,
 } from '../api/production.api'
 
-export const useProductionStore = create((set, get) => ({
+// client.js tiene un interceptor que extrae body.data del wrapper { ok, data }.
+// Por eso `res` ya ES el payload — no hay que hacer res.data.
+// GET /production devuelve { ok, data: { rows, total } }  → interceptor → { rows, total }
+// POST endpoints devuelven { ok, data: { ... } }          → interceptor → { ... }
+
+export const useProductionStore = create((set) => ({
   list:    [],
   current: null,
   loading: false,
@@ -17,39 +22,42 @@ export const useProductionStore = create((set, get) => ({
   fetchList: async (params = {}) => {
     set({ loading: true, error: null })
     try {
+      // res = { rows: [...], total: N }  (interceptor ya extrajo .data)
       const res  = await getProductions(params)
-      const data = res.data
-      // API devuelve { ok, data: { rows, total } }
-      const rows = data?.data?.rows ?? data?.rows ?? data ?? []
-      // Normalizar nombres de campo: la BD usa codigo_orden, cantidad_planeada, etc.
+      const rows = res?.rows ?? res ?? []
       const normalized = rows.map((r) => ({
         ...r,
-        id:           r.id,
-        product_id:   r.producto_id   ?? r.product_id,
-        product_name: r.product_name  ?? r.nombre,
-        sku:          r.sku           ?? r.siigo_code,
-        qty_planned:  r.cantidad_planeada ?? r.qty_planned,
-        qty_real:     r.cantidad_real     ?? r.qty_real,
-        current_phase:r.fase              ?? r.current_phase,
-        status:       r.estado            ?? r.status,
-        created_at:   r.creado_en         ?? r.created_at,
-        codigo_orden: r.codigo_orden,
+        product_id:    r.producto_id        ?? r.product_id,
+        product_name:  r.product_name       ?? r.nombre,
+        sku:           r.sku                ?? r.siigo_code,
+        qty_planned:   r.cantidad_planeada  ?? r.qty_planned,
+        qty_real:      r.cantidad_real      ?? r.qty_real,
+        current_phase: r.fase               ?? r.current_phase,
+        status:        r.estado             ?? r.status,
+        created_at:    r.creado_en          ?? r.created_at,
+        codigo_orden:  r.codigo_orden,
       }))
       set({ list: normalized, loading: false })
     } catch (e) {
-      set({ error: e.response?.data?.error || e.response?.data?.message || 'Error al cargar producciones', loading: false })
+      set({
+        error: e.response?.data?.error || e.response?.data?.message || 'Error al cargar producciones',
+        loading: false,
+      })
     }
   },
 
   fetchOne: async (id) => {
     set({ loading: true, error: null })
     try {
-      const res  = await getProduction(id)
-      const data = res.data?.data ?? res.data
-      set({ current: data, loading: false })
-      return data
+      const res = await getProduction(id)
+      // GET /production/:id → { ok, data: <orden> } → interceptor → <orden>
+      set({ current: res, loading: false })
+      return res
     } catch (e) {
-      set({ error: e.response?.data?.error || e.response?.data?.message || 'Orden no encontrada', loading: false })
+      set({
+        error: e.response?.data?.error || e.response?.data?.message || 'Orden no encontrada',
+        loading: false,
+      })
       return null
     }
   },
@@ -59,7 +67,7 @@ export const useProductionStore = create((set, get) => ({
     try {
       const res = await startOrder(body)
       set({ loading: false })
-      return { ok: true, data: res.data }
+      return { ok: true, data: res }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al iniciar producción'
       set({ error: msg, loading: false })
@@ -72,7 +80,7 @@ export const useProductionStore = create((set, get) => ({
     try {
       const res = await confirmOrder(body)
       set({ loading: false })
-      return { ok: true, data: res.data }
+      return { ok: true, data: res }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al confirmar materiales'
       set({ error: msg, loading: false })
@@ -83,9 +91,9 @@ export const useProductionStore = create((set, get) => ({
   advance: async (body) => {
     set({ loading: true, error: null })
     try {
+      // res = { order_code, phase }  (interceptor extrajo .data del wrapper)
       const res = await advanceOrder(body)
-      // Actualizar la fase en la lista local sin recargar toda la lista
-      const { phase, order_code } = res.data?.data ?? {}
+      const { phase, order_code } = res ?? {}
       if (phase) {
         set((state) => ({
           list: state.list.map((o) =>
@@ -96,7 +104,7 @@ export const useProductionStore = create((set, get) => ({
         }))
       }
       set({ loading: false })
-      return { ok: true, data: res.data }
+      return { ok: true, data: res }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al avanzar fase'
       set({ error: msg, loading: false })
@@ -109,7 +117,7 @@ export const useProductionStore = create((set, get) => ({
     try {
       const res = await closeOrder(body)
       set({ loading: false })
-      return { ok: true, data: res.data }
+      return { ok: true, data: res }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cerrar producción'
       set({ error: msg, loading: false })
