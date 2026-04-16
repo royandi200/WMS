@@ -30,6 +30,12 @@
 //                                     guarda codigo_orden en payload para WA
 //  [12] AVANCE_FASES               → valida estado EN_PROCESO; logSystemEvent;
 //                                     mensaje incluye codigo_orden
+//  [13] pushWA                     → corrige hostname, path, header y body según
+//                                     API real de BuilderBot Cloud v2:
+//                                     hostname: app.builderbot.cloud
+//                                     path: /api/v2/{BOT_ID}/messages
+//                                     header: x-api-builderbot
+//                                     body: { number, messages: { content } }
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -44,8 +50,9 @@ const DB = () => mysql.createConnection({
   connectTimeout: 10000,
 });
 
-// BB Cloud API token
-const BB_TOKEN = 'bb-78e67fdf-098a-499a-805d-68bb23e897bb';
+// BB Cloud API token y Bot ID
+const BB_TOKEN  = 'bb-78e67fdf-098a-499a-805d-68bb23e897bb';
+const BB_BOT_ID = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
 
 // ─────────────────────────────────────────────────────────────
 // RBAC
@@ -231,18 +238,24 @@ function roundQty(n) {
   return parseFloat(parseFloat(n).toFixed(4));
 }
 
-// Push WA via BuilderBot Cloud (fire-and-forget, nunca bloquea el flujo)
+// [FIX 13] Push WA via BuilderBot Cloud (fire-and-forget, nunca bloquea el flujo)
+// API correcta: POST https://app.builderbot.cloud/api/v2/{BOT_ID}/messages
+// Header: x-api-builderbot
+// Body: { number, messages: { content } }
 function pushWA(phone, text) {
   try {
-    const body = JSON.stringify({ phone, message: text });
-    const req  = https.request({
-      hostname: 'api.builderbot.cloud',
-      path:     `/api/v2/messages/send-text`,
+    const body = JSON.stringify({
+      number:   phone,
+      messages: { content: text },
+    });
+    const req = https.request({
+      hostname: 'app.builderbot.cloud',
+      path:     `/api/v2/${BB_BOT_ID}/messages`,
       method:   'POST',
       headers:  {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${BB_TOKEN}`,
-        'Content-Length': Buffer.byteLength(body),
+        'Content-Type':     'application/json',
+        'x-api-builderbot': BB_TOKEN,
+        'Content-Length':   Buffer.byteLength(body),
       },
     }, res => {
       res.on('data', () => {});
