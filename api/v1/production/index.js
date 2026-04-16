@@ -23,7 +23,7 @@ module.exports = async (req, res) => {
         op.notas,
         op.creado_por,
         op.aprobado_por,
-        op.materiales_confirmados_en,
+        op.materiales_conf_en,
         op.cerrado_en,
         op.creado_en,
         p.siigo_code AS sku,
