@@ -2,13 +2,21 @@ import { useEffect, useState } from 'react'
 import { useProductionStore } from '../store/productionStore'
 
 const PHASES = ['F1','F2','F3','F4','F5']
-const STATUS_COLOR = {
-  PENDING:    'text-yellow-400 bg-yellow-400/10',
-  IN_PROGRESS:'text-blue-400  bg-blue-400/10',
-  CLOSED:     'text-green-400 bg-green-400/10',
-  CANCELLED:  'text-muted     bg-white/5',
+const STATUS_LABEL = {
+  PLANEADA:   { label: 'Planeada',   css: 'text-yellow-400 bg-yellow-400/10' },
+  EN_PROCESO: { label: 'En proceso', css: 'text-blue-400   bg-blue-400/10'   },
+  CERRADA:    { label: 'Cerrada',    css: 'text-green-400  bg-green-400/10'  },
+  CANCELADA:  { label: 'Cancelada',  css: 'text-muted      bg-white/5'       },
 }
 const TABS = ['Listado', 'Nueva orden', 'Avanzar fase', 'Cerrar orden']
+
+// Helpers seguros para valores que pueden ser number, string o Date
+const safeSlice = (val, len) => val != null ? String(val).slice(0, len) : '—'
+const safeDate  = (val)      => {
+  if (!val) return '—'
+  if (val instanceof Date) return val.toISOString().slice(0, 10)
+  return String(val).slice(0, 10)
+}
 
 export default function ProduccionPage() {
   const [tab, setTab] = useState(0)
@@ -40,27 +48,29 @@ export default function ProduccionPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['ID','Producto','Cant. plan.','Cant. real','Fase','Estado','Creado'].map((c) => (
+                    {['Código orden','Producto','SKU','Cant. plan.','Cant. real','Fase','Estado','Creado'].map((c) => (
                       <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((r) => (
-                    <tr key={r.id} className="border-b border-border/50 hover:bg-white/[0.02]">
-                      <td className="px-4 py-3 font-mono text-xs text-muted">{r.id?.slice(0,8)}…</td>
-                      <td className="px-4 py-3 text-foreground">{r.product_id?.slice(0,8)}…</td>
-                      <td className="px-4 py-3 tabular-nums">{r.qty_planned}</td>
-                      <td className="px-4 py-3 tabular-nums">{r.qty_real ?? '—'}</td>
-                      <td className="px-4 py-3">{r.current_phase ?? '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                          STATUS_COLOR[r.status] || 'text-muted bg-white/5'
-                        }`}>{r.status}</span>
-                      </td>
-                      <td className="px-4 py-3 text-muted text-xs">{r.created_at?.slice(0,10)}</td>
-                    </tr>
-                  ))}
+                  {list.map((r) => {
+                    const st = STATUS_LABEL[r.status] || { label: r.status ?? '—', css: 'text-muted bg-white/5' }
+                    return (
+                      <tr key={r.id} className="border-b border-border/50 hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">{r.codigo_orden ?? r.id}</td>
+                        <td className="px-4 py-3 text-foreground">{r.product_name ?? '—'}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted">{r.sku ?? '—'}</td>
+                        <td className="px-4 py-3 tabular-nums">{r.qty_planned ?? '—'}</td>
+                        <td className="px-4 py-3 tabular-nums">{r.qty_real ?? '—'}</td>
+                        <td className="px-4 py-3">{r.current_phase ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${st.css}`}>{st.label}</span>
+                        </td>
+                        <td className="px-4 py-3 text-muted text-xs">{safeDate(r.created_at)}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
