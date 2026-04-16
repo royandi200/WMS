@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
                WHERE 1=1`;
     const args = [];
     if (estado) { sql += ` AND op.estado = ?`; args.push(estado); }
-    sql += ` ORDER BY op.created_at DESC LIMIT ? OFFSET ?`;
+    sql += ` ORDER BY op.creado_en DESC LIMIT ? OFFSET ?`;
     args.push(Number(limit), offset);
     const rows = await query(sql, args);
     return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
