@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useInventoryStore } from '../store/inventoryStore'
 import { useApprovalsStore } from '../store/approvalsStore'
@@ -10,24 +10,38 @@ import {
   Activity, ChevronRight, Zap
 } from 'lucide-react'
 
+// ─── Helpers de fecha ─────────────────────────────────────────────────────────
+function periodStart(period) {
+  const d = new Date()
+  if (period === 'today') {
+    d.setHours(0, 0, 0, 0)
+  } else if (period === 'week') {
+    d.setDate(d.getDate() - 7)
+    d.setHours(0, 0, 0, 0)
+  } else {
+    d.setDate(d.getDate() - 30)
+    d.setHours(0, 0, 0, 0)
+  }
+  return d
+}
+
 // ─── Animación de número contando ────────────────────────────────────────────
-function AnimatedNumber({ value, duration = 1200, prefix = '', suffix = '' }) {
+function AnimatedNumber({ value, duration = 1200 }) {
   const [display, setDisplay] = useState(0)
-  const rafRef = useRef(null)
+  const rafRef  = useRef(null)
   const prevRef = useRef(0)
 
   useEffect(() => {
     if (value === null || value === undefined) return
-    const start = prevRef.current
-    const end = Number(value) || 0
+    const start     = prevRef.current
+    const end       = Number(value) || 0
     const startTime = performance.now()
-
-    const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+    const ease      = (t) => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2
 
     const tick = (now) => {
-      const elapsed = now - startTime
+      const elapsed  = now - startTime
       const progress = Math.min(elapsed / duration, 1)
-      const current = Math.round(start + (end - start) * ease(progress))
+      const current  = Math.round(start + (end - start) * ease(progress))
       setDisplay(current)
       if (progress < 1) rafRef.current = requestAnimationFrame(tick)
       else prevRef.current = end
@@ -36,50 +50,43 @@ function AnimatedNumber({ value, duration = 1200, prefix = '', suffix = '' }) {
     return () => cancelAnimationFrame(rafRef.current)
   }, [value, duration])
 
-  return <span>{prefix}{display.toLocaleString('es-CO')}{suffix}</span>
+  return <span>{display.toLocaleString('es-CO')}</span>
 }
 
-// ─── Sparkline SVG mini gráfico ───────────────────────────────────────────────
+// ─── Sparkline SVG ────────────────────────────────────────────────────────────
 function Sparkline({ data = [], color = '#f0883e', height = 36 }) {
-  if (!data.length) return null
+  if (!data.length || data.every(v => v === 0)) return null
   const w = 120, h = height
   const min = Math.min(...data)
   const max = Math.max(...data)
   const range = max - min || 1
   const pts = data.map((v, i) => {
     const x = (i / (data.length - 1)) * w
-    const y = h - ((v - min) / range) * h
+    const y = h - ((v - min) / range) * (h - 2) - 1
     return `${x},${y}`
   }).join(' ')
+  const gradId = `sg${color.replace('#', '')}`
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="opacity-70">
       <defs>
-        <linearGradient id={`sg-${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0"   />
         </linearGradient>
       </defs>
-      <polyline
-        fill="none" stroke={color} strokeWidth="1.5"
-        strokeLinejoin="round" strokeLinecap="round"
-        points={pts}
-      />
-      <polygon
-        fill={`url(#sg-${color.replace('#','')})`}
-        points={`0,${h} ${pts} ${w},${h}`}
-      />
+      <polyline fill="none" stroke={color} strokeWidth="1.5"
+        strokeLinejoin="round" strokeLinecap="round" points={pts} />
+      <polygon fill={`url(#${gradId})`} points={`0,${h} ${pts} ${w},${h}`} />
     </svg>
   )
 }
 
-// ─── Skeleton loader ──────────────────────────────────────────────────────────
-function Skeleton({ className = '' }) {
-  return (
-    <div className={`animate-pulse bg-surface rounded-md ${className}`} />
-  )
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+function Skeleton({ className = '', style = {} }) {
+  return <div className={`animate-pulse bg-surface rounded-md ${className}`} style={style} />
 }
 
-// ─── KPI Card con animación stagger ──────────────────────────────────────────
+// ─── KPI Card ────────────────────────────────────────────────────────────────
 function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay = 0, loading }) {
   const [visible, setVisible] = useState(false)
   useEffect(() => {
@@ -97,10 +104,10 @@ function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay
 
   return (
     <div
-      className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-3 transition-all duration-500"
+      className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-3"
       style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(16px)',
+        opacity:    visible ? 1 : 0,
+        transform:  visible ? 'translateY(0)' : 'translateY(16px)',
         transition: `opacity 0.5s ease ${delay}ms, transform 0.5s ease ${delay}ms, box-shadow 0.2s`,
       }}
       onMouseEnter={e => e.currentTarget.style.boxShadow = `0 0 0 1px ${color}40, 0 8px 24px ${color}15`}
@@ -115,13 +122,13 @@ function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay
       <div className="flex items-end justify-between gap-2">
         <div>
           <div className="text-foreground text-2xl font-bold tabular-nums">
-            <AnimatedNumber value={value} />
+            <AnimatedNumber value={value ?? 0} />
           </div>
           {sub && (
             <div className={`flex items-center gap-1 mt-1 text-xs ${
               trend === 'up' ? 'text-emerald-400' : trend === 'down' ? 'text-red-400' : 'text-muted'
             }`}>
-              {trend === 'up' && <TrendingUp size={11} />}
+              {trend === 'up'   && <TrendingUp   size={11} />}
               {trend === 'down' && <TrendingDown size={11} />}
               {sub}
             </div>
@@ -133,76 +140,94 @@ function KpiCard({ icon: Icon, label, value, sub, color, trend, sparkData, delay
   )
 }
 
-// ─── Mini Barra de actividad reciente ─────────────────────────────────────────
+// ─── Tipos de movimiento ──────────────────────────────────────────────────────
 const TIPO_META = {
-  ENTRADA:   { label: 'Entrada',   color: '#3fb950', bg: '#3fb95018' },
-  SALIDA:    { label: 'Salida',    color: '#f0883e', bg: '#f0883e18' },
-  MERMA:     { label: 'Merma',     color: '#f85149', bg: '#f8514918' },
-  TRASLADO:  { label: 'Traslado', color: '#79c0ff', bg: '#79c0ff18' },
-  AJUSTE:    { label: 'Ajuste',   color: '#d2a8ff', bg: '#d2a8ff18' },
+  ENTRADA:  { label: 'Entrada',  color: '#3fb950', bg: '#3fb95018' },
+  SALIDA:   { label: 'Salida',   color: '#f0883e', bg: '#f0883e18' },
+  MERMA:    { label: 'Merma',    color: '#f85149', bg: '#f8514918' },
+  TRASLADO: { label: 'Traslado', color: '#79c0ff', bg: '#79c0ff18' },
+  AJUSTE:   { label: 'Ajuste',   color: '#d2a8ff', bg: '#d2a8ff18' },
 }
 
+// ─── Fila Kardex ─────────────────────────────────────────────────────────────
+// FIX #3: campo creado_en (con guion bajo)
+// FIX #4: identificador via row.producto?.siigo_code o row.producto?.nombre
 function KardexRow({ row, index }) {
   const [vis, setVis] = useState(false)
   useEffect(() => {
     const t = setTimeout(() => setVis(true), 60 * index)
     return () => clearTimeout(t)
   }, [index])
-  const meta = TIPO_META[row.tipo?.toUpperCase()] || { label: row.tipo, color: '#8b949e', bg: '#8b949e18' }
-  const fecha = row.creadoen ? new Date(row.creadoen).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) : '--'
+
+  const meta  = TIPO_META[row.tipo?.toUpperCase()] || { label: row.tipo, color: '#8b949e', bg: '#8b949e18' }
+  // FIX #3: usar creado_en (campo real del modelo Movimiento)
+  const fecha = row.creado_en
+    ? new Date(row.creado_en).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+    : '--'
+  // FIX #4: el include trae row.producto.siigo_code / row.producto.nombre
+  const label = row.producto?.siigo_code || row.producto?.nombre || row.producto_id || '—'
+
   return (
     <div
       className="flex items-center gap-3 py-2.5 border-b border-border/40 last:border-0"
       style={{
-        opacity: vis ? 1 : 0,
-        transform: vis ? 'translateX(0)' : 'translateX(-10px)',
+        opacity:    vis ? 1 : 0,
+        transform:  vis ? 'translateX(0)' : 'translateX(-10px)',
         transition: `opacity 0.35s ease ${60 * index}ms, transform 0.35s ease ${60 * index}ms`,
       }}
     >
       <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: meta.color }} />
-      <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ color: meta.color, background: meta.bg }}>
+      <span className="text-xs px-1.5 py-0.5 rounded font-medium"
+        style={{ color: meta.color, background: meta.bg }}>
         {meta.label}
       </span>
-      <span className="text-subtle text-xs flex-1 truncate">{row.siigocode || row.productoid || '—'}</span>
+      <span className="text-subtle text-xs flex-1 truncate">{label}</span>
       <span className="text-muted text-xs tabular-nums">
-        {row.cantidad > 0 ? '+' : ''}{Number(row.cantidad || 0).toLocaleString('es-CO')}
+        {Number(row.cantidad) > 0 ? '+' : ''}{Number(row.cantidad || 0).toLocaleString('es-CO')}
       </span>
       <span className="text-muted text-xs w-14 text-right">{fecha}</span>
     </div>
   )
 }
 
-// ─── Alert de stock bajo ──────────────────────────────────────────────────────
+// ─── Alerta stock bajo ────────────────────────────────────────────────────────
+// FIX #6: estructura real = { producto:{siigo_code,nombre}, stock_minimo, disponible_neto, deficit }
 function StockAlert({ item, index }) {
   const [vis, setVis] = useState(false)
   useEffect(() => {
     const t = setTimeout(() => setVis(true), 80 * index)
     return () => clearTimeout(t)
   }, [index])
-  const pct = item.stockminimo > 0 ? Math.min((item.totalstock / item.stockminimo) * 100, 100) : 0
-  const critical = pct < 30
+
+  // FIX #6: acceder a campos reales del backend
+  const nombre    = item.producto?.nombre || item.producto?.siigo_code || '—'
+  const stockMin  = parseFloat(item.stock_minimo    || 0)
+  const stockAct  = parseFloat(item.disponible_neto || 0)
+  const pct       = stockMin > 0 ? Math.min((stockAct / stockMin) * 100, 100) : 0
+  const critical  = pct < 30
+
   return (
     <div
       className="flex items-center gap-3 py-2.5 border-b border-border/40 last:border-0"
       style={{
-        opacity: vis ? 1 : 0,
-        transform: vis ? 'translateY(0)' : 'translateY(8px)',
+        opacity:    vis ? 1 : 0,
+        transform:  vis ? 'translateY(0)' : 'translateY(8px)',
         transition: `opacity 0.4s ease ${80 * index}ms, transform 0.4s ease ${80 * index}ms`,
       }}
     >
       <AlertTriangle size={13} className={critical ? 'text-red-400' : 'text-amber-400'} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-subtle text-xs truncate font-medium">{item.nombre || item.siigocode}</span>
+          <span className="text-subtle text-xs truncate font-medium">{nombre}</span>
           <span className="text-muted text-xs tabular-nums">
-            {Number(item.totalstock || 0).toLocaleString('es-CO')} / {Number(item.stockminimo || 0).toLocaleString('es-CO')}
+            {stockAct.toLocaleString('es-CO')} / {stockMin.toLocaleString('es-CO')}
           </span>
         </div>
         <div className="h-1 bg-border rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-1000"
             style={{
-              width: `${pct}%`,
+              width:     `${pct}%`,
               background: critical ? '#f85149' : '#f0883e',
               boxShadow: `0 0 6px ${critical ? '#f85149' : '#f0883e'}60`,
             }}
@@ -213,13 +238,14 @@ function StockAlert({ item, index }) {
   )
 }
 
-// ─── Aprobación pendiente ─────────────────────────────────────────────────────
+// ─── Fila Aprobación ─────────────────────────────────────────────────────────
 const ACCION_META = {
   DESPACHO:   { color: '#f0883e' },
   RECEPCION:  { color: '#3fb950' },
   MERMA:      { color: '#f85149' },
   PRODUCCION: { color: '#79c0ff' },
 }
+
 function ApprovalRow({ item, index, onNavigate }) {
   const [vis, setVis] = useState(false)
   useEffect(() => {
@@ -227,19 +253,22 @@ function ApprovalRow({ item, index, onNavigate }) {
     return () => clearTimeout(t)
   }, [index])
   const meta = ACCION_META[item.accion?.toUpperCase()] || { color: '#8b949e' }
+
   return (
     <div
       className="flex items-center gap-3 py-2.5 border-b border-border/40 last:border-0 cursor-pointer group"
       style={{
-        opacity: vis ? 1 : 0,
-        transform: vis ? 'translateX(0)' : 'translateX(10px)',
+        opacity:    vis ? 1 : 0,
+        transform:  vis ? 'translateX(0)' : 'translateX(10px)',
         transition: `opacity 0.4s ease ${70 * index}ms, transform 0.4s ease ${70 * index}ms`,
       }}
       onClick={onNavigate}
     >
       <div className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse" style={{ background: meta.color }} />
       <div className="flex-1 min-w-0">
-        <div className="text-subtle text-xs font-medium truncate">{item.codigosolicitud || item.id}</div>
+        <div className="text-subtle text-xs font-medium truncate">
+          {item.codigosolicitud || item.codigo_solicitud || item.id}
+        </div>
         <div className="text-muted text-xs">{item.accion}</div>
       </div>
       <ChevronRight size={12} className="text-muted group-hover:text-primary transition-colors" />
@@ -247,34 +276,36 @@ function ApprovalRow({ item, index, onNavigate }) {
   )
 }
 
-// ─── Gráfico de barras tipo kardex por tipo ────────────────────────────────────
-function ActivityChart({ data = [], loading }) {
-  const tipos = ['ENTRADA', 'SALIDA', 'MERMA']
+// ─── Gráfico de actividad ─────────────────────────────────────────────────────
+// FIX #3 + #2: usa creado_en y filtra localmente por período
+function ActivityChart({ data = [], period, loading }) {
+  const tipos   = ['ENTRADA', 'SALIDA', 'MERMA']
   const colores = { ENTRADA: '#3fb950', SALIDA: '#f0883e', MERMA: '#f85149' }
   const [animated, setAnimated] = useState(false)
 
   useEffect(() => {
+    setAnimated(false)
     if (!loading && data.length) {
       const t = setTimeout(() => setAnimated(true), 200)
       return () => clearTimeout(t)
     }
   }, [loading, data])
 
-  // Agrupar por fecha los últimos 7 días
-  const days = []
-  for (let i = 6; i >= 0; i--) {
+  // Últimos 7 días siempre en el eje X
+  const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date()
-    d.setDate(d.getDate() - i)
-    days.push(d.toISOString().split('T')[0])
-  }
+    d.setDate(d.getDate() - (6 - i))
+    return d.toISOString().split('T')[0]
+  })
 
+  // FIX #3: campo real es creado_en
   const grouped = days.map(day => {
-    const rows = data.filter(r => (r.creadoen || '').startsWith(day))
+    const rows = data.filter(r => (r.creado_en || '').startsWith(day))
     return {
-      day: day.slice(5), // MM-DD
-      ENTRADA: rows.filter(r => r.tipo?.toUpperCase() === 'ENTRADA').reduce((s, r) => s + Number(r.cantidad || 0), 0),
-      SALIDA:  rows.filter(r => r.tipo?.toUpperCase() === 'SALIDA').reduce((s, r) => s + Number(r.cantidad || 0), 0),
-      MERMA:   rows.filter(r => r.tipo?.toUpperCase() === 'MERMA').reduce((s, r) => s + Number(r.cantidad || 0), 0),
+      day: day.slice(5),
+      ENTRADA: rows.filter(r => r.tipo === 'entrada').reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0),
+      SALIDA:  rows.filter(r => r.tipo === 'salida').reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0),
+      MERMA:   rows.filter(r => r.tipo === 'merma').reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0),
     }
   })
 
@@ -283,7 +314,7 @@ function ActivityChart({ data = [], loading }) {
   if (loading) return (
     <div className="flex items-end gap-2 h-24">
       {[40, 70, 55, 80, 45, 65, 90].map((h, i) => (
-        <Skeleton key={i} className={`flex-1`} style={{ height: `${h}%` }} />
+        <Skeleton key={i} className="flex-1" style={{ height: `${h}%` }} />
       ))}
     </div>
   )
@@ -292,28 +323,28 @@ function ActivityChart({ data = [], loading }) {
     <div className="space-y-3">
       <div className="flex items-end gap-1.5 h-24">
         {grouped.map((g, gi) => (
-          <div key={g.day} className="flex-1 flex flex-col items-center gap-0.5">
-            <div className="w-full flex flex-col gap-0.5">
+          <div key={g.day} className="flex-1 flex flex-col items-center">
+            <div className="w-full flex flex-col-reverse gap-0.5 flex-1 justify-end">
               {tipos.map((tipo) => (
                 <div
                   key={tipo}
                   title={`${tipo}: ${g[tipo]}`}
                   className="w-full rounded-sm transition-all duration-700"
                   style={{
-                    height: animated ? `${Math.max((g[tipo] / maxVal) * 60, g[tipo] > 0 ? 2 : 0)}px` : '0px',
-                    background: colores[tipo],
-                    opacity: g[tipo] > 0 ? 0.85 : 0,
+                    height:          animated ? `${Math.max((g[tipo] / maxVal) * 88, g[tipo] > 0 ? 2 : 0)}px` : '0px',
+                    background:      colores[tipo],
+                    opacity:         g[tipo] > 0 ? 0.85 : 0,
                     transitionDelay: `${gi * 60}ms`,
-                    boxShadow: g[tipo] > 0 ? `0 0 4px ${colores[tipo]}60` : 'none',
+                    boxShadow:       g[tipo] > 0 ? `0 0 4px ${colores[tipo]}60` : 'none',
                   }}
                 />
               ))}
             </div>
-            <span className="text-muted text-xs mt-1">{g.day}</span>
+            <span className="text-muted text-xs mt-1.5">{g.day}</span>
           </div>
         ))}
       </div>
-      <div className="flex gap-3">
+      <div className="flex gap-4">
         {tipos.map(t => (
           <div key={t} className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-sm" style={{ background: colores[t] }} />
@@ -325,19 +356,19 @@ function ActivityChart({ data = [], loading }) {
   )
 }
 
-// ─── FILTRO DE PERÍODO ────────────────────────────────────────────────────────
+// ─── Períodos ─────────────────────────────────────────────────────────────────
 const PERIODS = [
-  { key: 'today',  label: 'Hoy' },
-  { key: 'week',   label: '7 días' },
-  { key: 'month',  label: '30 días' },
+  { key: 'today', label: 'Hoy'     },
+  { key: 'week',  label: '7 días'  },
+  { key: 'month', label: '30 días' },
 ]
 
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const navigate   = useNavigate()
-  const { user }   = useAuthStore()
+  const navigate = useNavigate()
+  const { user } = useAuthStore()
   const {
-    summary, lowStock, kardex, kardexMeta,
+    summary, lowStock, kardex,
     loading: invLoading,
     fetchSummary, fetchLowStock, fetchKardex,
   } = useInventoryStore()
@@ -346,41 +377,25 @@ export default function DashboardPage() {
     fetchList: fetchApprovals,
   } = useApprovalsStore()
 
-  const [period, setPeriod]     = useState('week')
+  const [period,     setPeriod]     = useState('week')
   const [refreshing, setRefreshing] = useState(false)
-  const [headerVis, setHeaderVis]   = useState(false)
+  const [headerVis,  setHeaderVis]  = useState(false)
 
-  const kardexParams = useCallback(() => {
-    const d = new Date()
-    const until = d.toISOString().split('T')[0]
-    if (period === 'today') {
-      return { since: until, until, limit: 100 }
-    } else if (period === 'week') {
-      d.setDate(d.getDate() - 7)
-      return { since: d.toISOString().split('T')[0], until, limit: 100 }
-    } else {
-      d.setDate(d.getDate() - 30)
-      return { since: d.toISOString().split('T')[0], until, limit: 100 }
-    }
-  }, [period])
-
+  // FIX #2: el backend kardexList NO acepta since/until.
+  // Traemos los últimos 200 movimientos y filtramos en el cliente por período.
   const loadAll = useCallback(async () => {
     await Promise.all([
       fetchSummary(),
       fetchLowStock(),
-      fetchKardex(kardexParams()),
+      fetchKardex({ limit: 200, page: 1 }),
       fetchApprovals({ estado: 'PENDIENTE', limit: 10 }),
     ])
-  }, [fetchSummary, fetchLowStock, fetchKardex, fetchApprovals, kardexParams])
+  }, [fetchSummary, fetchLowStock, fetchKardex, fetchApprovals])
 
   useEffect(() => {
     loadAll()
     setTimeout(() => setHeaderVis(true), 50)
   }, []) // eslint-disable-line
-
-  useEffect(() => {
-    fetchKardex(kardexParams())
-  }, [period]) // eslint-disable-line
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -388,38 +403,69 @@ export default function DashboardPage() {
     setRefreshing(false)
   }
 
-  const loading = invLoading || appLoading
+  // FIX #2: Filtrar kardex por período en el cliente usando creado_en (FIX #3)
+  const filteredKardex = useMemo(() => {
+    if (!kardex?.length) return []
+    const since = periodStart(period)
+    return kardex.filter(r => {
+      if (!r.creado_en) return false
+      return new Date(r.creado_en) >= since
+    })
+  }, [kardex, period])
 
-  // Derivar sparklines de kardex (últimos 7 días por tipo)
-  const sparkEntrada = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - (6 - i))
+  // FIX #1: summary es un ARRAY de productos con su stock
+  // [ { id, nombre, activo, stock: { disponible, fisico_total, ... } }, ... ]
+  const totalProducts = useMemo(() => {
+    if (Array.isArray(summary)) return summary.length
+    return summary?.totalProducts ?? summary?.total_products ?? 0
+  }, [summary])
+
+  const totalStock = useMemo(() => {
+    if (Array.isArray(summary)) {
+      return summary.reduce((acc, p) => acc + (p.stock?.fisico_total ?? p.stock?.disponible ?? 0), 0)
+    }
+    return summary?.totalStock ?? summary?.total_stock ?? 0
+  }, [summary])
+
+  // FIX #5: tipo en minúsculas en BD, comparamos en minúsculas
+  const totalEntradas = useMemo(() =>
+    filteredKardex.filter(r => r.tipo === 'entrada')
+      .reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0),
+  [filteredKardex])
+
+  const totalSalidas = useMemo(() =>
+    filteredKardex.filter(r => r.tipo === 'salida')
+      .reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0),
+  [filteredKardex])
+
+  // Sparklines últimos 7 días (siempre fijos, sin importar el filtro de período)
+  const sparkEntrada = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i))
     const day = d.toISOString().split('T')[0]
-    return (kardex || []).filter(r => r.tipo?.toUpperCase() === 'ENTRADA' && (r.creadoen || '').startsWith(day))
-      .reduce((s, r) => s + Number(r.cantidad || 0), 0)
-  })
-  const sparkSalida = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - (6 - i))
+    return (kardex || []).filter(r => r.tipo === 'entrada' && (r.creado_en || '').startsWith(day))
+      .reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0)
+  }), [kardex])
+
+  const sparkSalida = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i))
     const day = d.toISOString().split('T')[0]
-    return (kardex || []).filter(r => r.tipo?.toUpperCase() === 'SALIDA' && (r.creadoen || '').startsWith(day))
-      .reduce((s, r) => s + Number(r.cantidad || 0), 0)
-  })
+    return (kardex || []).filter(r => r.tipo === 'salida' && (r.creado_en || '').startsWith(day))
+      .reduce((s, r) => s + Math.abs(Number(r.cantidad || 0)), 0)
+  }), [kardex])
 
-  const totalEntradas = (kardex || []).filter(r => r.tipo?.toUpperCase() === 'ENTRADA').reduce((s, r) => s + Number(r.cantidad || 0), 0)
-  const totalSalidas  = (kardex || []).filter(r => r.tipo?.toUpperCase() === 'SALIDA').reduce((s, r) => s + Number(r.cantidad || 0), 0)
-
-  const hora = new Date().getHours()
+  const periodLabel = PERIODS.find(p => p.key === period)?.label
+  const hora   = new Date().getHours()
   const saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches'
 
   return (
     <div className="flex-1 overflow-y-auto">
+
       {/* ── Header greeting ── */}
       <div
         className="px-6 pt-6 pb-4 flex items-center justify-between"
         style={{
-          opacity: headerVis ? 1 : 0,
-          transform: headerVis ? 'translateY(0)' : 'translateY(-12px)',
+          opacity:    headerVis ? 1 : 0,
+          transform:  headerVis ? 'translateY(0)' : 'translateY(-12px)',
           transition: 'opacity 0.4s ease, transform 0.4s ease',
         }}
       >
@@ -435,7 +481,6 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Filtro de período */}
           <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1">
             {PERIODS.map(p => (
               <button
@@ -444,7 +489,7 @@ export default function DashboardPage() {
                 className="text-xs px-3 py-1 rounded-md transition-all duration-200"
                 style={{
                   background: period === p.key ? '#f0883e18' : 'transparent',
-                  color: period === p.key ? '#f0883e' : '#8b949e',
+                  color:      period === p.key ? '#f0883e'   : '#8b949e',
                   fontWeight: period === p.key ? 600 : 400,
                 }}
               >
@@ -455,7 +500,7 @@ export default function DashboardPage() {
           <button
             onClick={handleRefresh}
             className="p-2 rounded-lg bg-surface border border-border text-muted hover:text-foreground transition-all"
-            title="Actualizar"
+            title="Actualizar datos"
           >
             <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
           </button>
@@ -466,10 +511,11 @@ export default function DashboardPage() {
 
         {/* ── KPI Grid ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* FIX #1: totalProducts y totalStock derivados del array summary */}
           <KpiCard
             icon={Package}
             label="Productos activos"
-            value={summary?.totalProducts ?? summary?.total_products ?? null}
+            value={totalProducts}
             sub="en catálogo"
             color="#f0883e"
             delay={0}
@@ -478,7 +524,7 @@ export default function DashboardPage() {
           <KpiCard
             icon={Warehouse}
             label="Unidades en stock"
-            value={summary?.totalStock ?? summary?.total_stock ?? null}
+            value={Math.round(totalStock)}
             sub="inventario total"
             color="#3fb950"
             sparkData={sparkEntrada}
@@ -488,31 +534,30 @@ export default function DashboardPage() {
           <KpiCard
             icon={TrendingUp}
             label="Entradas"
-            value={totalEntradas}
-            sub={`en ${PERIODS.find(p => p.key === period)?.label}`}
+            value={Math.round(totalEntradas)}
+            sub={`en ${periodLabel}`}
             trend="up"
             color="#79c0ff"
             sparkData={sparkEntrada}
             delay={160}
-            loading={invLoading && !kardex.length}
+            loading={invLoading && !kardex?.length}
           />
           <KpiCard
             icon={TrendingDown}
             label="Salidas"
-            value={totalSalidas}
-            sub={`en ${PERIODS.find(p => p.key === period)?.label}`}
+            value={Math.round(totalSalidas)}
+            sub={`en ${periodLabel}`}
             trend="down"
             color="#d2a8ff"
             sparkData={sparkSalida}
             delay={240}
-            loading={invLoading && !kardex.length}
+            loading={invLoading && !kardex?.length}
           />
         </div>
 
-        {/* ── Fila principal: Gráfico + Aprobaciones ── */}
+        {/* ── Gráfico + Aprobaciones ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-          {/* Gráfico actividad kardex */}
           <div
             className="lg:col-span-2 bg-surface border border-border rounded-xl p-5"
             style={{ animation: 'fadeSlideUp 0.5s ease 0.3s both' }}
@@ -522,14 +567,15 @@ export default function DashboardPage() {
                 <Activity size={14} className="text-primary" />
                 <span className="text-subtle text-sm font-semibold">Actividad del inventario</span>
               </div>
-              <span className="text-muted text-xs">
-                {PERIODS.find(p => p.key === period)?.label}
-              </span>
+              <span className="text-muted text-xs">{periodLabel}</span>
             </div>
-            <ActivityChart data={kardex} loading={invLoading && !kardex.length} />
+            <ActivityChart
+              data={filteredKardex}
+              period={period}
+              loading={invLoading && !kardex?.length}
+            />
           </div>
 
-          {/* Aprobaciones pendientes */}
           <div
             className="bg-surface border border-border rounded-xl p-5 flex flex-col"
             style={{ animation: 'fadeSlideUp 0.5s ease 0.4s both' }}
@@ -577,10 +623,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Fila secundaria: Actividad reciente + Stock bajo ── */}
+        {/* ── Movimientos recientes + Stock bajo ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-          {/* Actividad reciente del kardex */}
           <div
             className="bg-surface border border-border rounded-xl p-5"
             style={{ animation: 'fadeSlideUp 0.5s ease 0.5s both' }}
@@ -590,29 +635,24 @@ export default function DashboardPage() {
                 <BarChart3 size={14} className="text-primary" />
                 <span className="text-subtle text-sm font-semibold">Movimientos recientes</span>
               </div>
-              <button
-                onClick={() => navigate('/kardex')}
-                className="text-xs text-muted hover:text-primary transition-colors flex items-center gap-1"
-              >
-                Ver más <ChevronRight size={11} />
-              </button>
+              <span className="text-muted text-xs">{filteredKardex.length} mov.</span>
             </div>
-            <div className="space-y-0">
-              {invLoading && !kardex.length ? (
+            <div>
+              {invLoading && !kardex?.length ? (
                 <div className="space-y-2">
                   {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-7 w-full" />)}
                 </div>
-              ) : kardex.length === 0 ? (
+              ) : filteredKardex.length === 0 ? (
                 <div className="text-center text-muted text-xs py-6">Sin movimientos en el período</div>
               ) : (
-                kardex.slice(0, 8).map((row, i) => (
+                filteredKardex.slice(0, 8).map((row, i) => (
                   <KardexRow key={row.id || i} row={row} index={i} />
                 ))
               )}
             </div>
           </div>
 
-          {/* Alertas stock bajo */}
+          {/* FIX #6: lowStock estructura real */}
           <div
             className="bg-surface border border-border rounded-xl p-5"
             style={{ animation: 'fadeSlideUp 0.5s ease 0.6s both' }}
@@ -640,7 +680,7 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 lowStock.slice(0, 6).map((item, i) => (
-                  <StockAlert key={item.id || i} item={item} index={i} />
+                  <StockAlert key={item.producto?.id || i} item={item} index={i} />
                 ))
               )}
             </div>
@@ -670,14 +710,13 @@ export default function DashboardPage() {
               key={to}
               onClick={() => navigate(to)}
               className="flex items-center gap-2.5 p-3.5 bg-surface border border-border rounded-xl text-muted hover:text-foreground group transition-all duration-200"
-              style={{ '--hover-color': color }}
               onMouseEnter={e => {
                 e.currentTarget.style.borderColor = `${color}60`
-                e.currentTarget.style.boxShadow = `0 0 12px ${color}10`
+                e.currentTarget.style.boxShadow   = `0 0 12px ${color}10`
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.borderColor = ''
-                e.currentTarget.style.boxShadow = ''
+                e.currentTarget.style.boxShadow   = ''
               }}
             >
               <div className="p-1.5 rounded-lg flex-shrink-0" style={{ background: `${color}15` }}>
@@ -685,11 +724,13 @@ export default function DashboardPage() {
               </div>
               <span className="text-xs font-medium flex-1 text-left">{label}</span>
               {badge ? (
-                <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold" style={{ background: `${color}20`, color }}>
+                <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+                  style={{ background: `${color}20`, color }}>
                   {badge}
                 </span>
               ) : (
-                <ArrowRight size={11} className="opacity-0 group-hover:opacity-100 transition-opacity" style={{ color }} />
+                <ArrowRight size={11} className="opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ color }} />
               )}
             </button>
           ))}
@@ -697,7 +738,6 @@ export default function DashboardPage() {
 
       </div>
 
-      {/* Keyframes inline */}
       <style>{`
         @keyframes fadeSlideUp {
           from { opacity: 0; transform: translateY(14px); }
