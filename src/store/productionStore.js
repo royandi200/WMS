@@ -8,7 +8,7 @@ import {
   closeOrder,
 } from '../api/production.api'
 
-export const useProductionStore = create((set) => ({
+export const useProductionStore = create((set, get) => ({
   list:    [],
   current: null,
   loading: false,
@@ -49,7 +49,7 @@ export const useProductionStore = create((set) => ({
       set({ current: data, loading: false })
       return data
     } catch (e) {
-      set({ error: e.response?.data?.message || 'Orden no encontrada', loading: false })
+      set({ error: e.response?.data?.error || e.response?.data?.message || 'Orden no encontrada', loading: false })
       return null
     }
   },
@@ -61,7 +61,7 @@ export const useProductionStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data: res.data }
     } catch (e) {
-      const msg = e.response?.data?.message || 'Error al iniciar producción'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al iniciar producción'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
@@ -74,7 +74,7 @@ export const useProductionStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data: res.data }
     } catch (e) {
-      const msg = e.response?.data?.message || 'Error al confirmar materiales'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al confirmar materiales'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
@@ -84,10 +84,21 @@ export const useProductionStore = create((set) => ({
     set({ loading: true, error: null })
     try {
       const res = await advanceOrder(body)
+      // Actualizar la fase en la lista local sin recargar toda la lista
+      const { phase, order_code } = res.data?.data ?? {}
+      if (phase) {
+        set((state) => ({
+          list: state.list.map((o) =>
+            o.codigo_orden === order_code || String(o.id) === String(body.order_id)
+              ? { ...o, current_phase: phase, fase: phase }
+              : o
+          ),
+        }))
+      }
       set({ loading: false })
       return { ok: true, data: res.data }
     } catch (e) {
-      const msg = e.response?.data?.message || 'Error al avanzar fase'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al avanzar fase'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
@@ -100,7 +111,7 @@ export const useProductionStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data: res.data }
     } catch (e) {
-      const msg = e.response?.data?.message || 'Error al cerrar producción'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cerrar producción'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
