@@ -53,6 +53,16 @@
 //        la respuesta de BB Cloud antes de cerrar la función.
 //        Esto corrige el bug donde Vercel mataba el proceso antes de que
 //        la petición HTTP a BB Cloud terminara.
+//  [17]  INTERCEPTOR LENGUAJE NATURAL:
+//        parsearAprobacionNatural() detecta antes del switch si el texto
+//        libre del mensaje contiene intención de aprobar/rechazar con un
+//        código REQ-XXXXXX, y reencamina action/params automáticamente.
+//        Patrones: apruebo, aprobar, autorizo, sí/si apruebo, ok apruebo,
+//        rechazo, rechazar, no apruebo, denegar + REQ-XXXXXX (case-insensitive).
+//        Mensaje WA al supervisor simplificado:
+//        "Responde *apruebo REQ-xxx* o *rechazo REQ-xxx*"
+//        en los tres flujos: SOLICITAR_INICIO_PRODUCCION,
+//        SOLICITAR_CIERRE_PRODUCCION y SOLICITAR_DESPACHO.
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -95,6 +105,79 @@ const RBAC = {
   AJUSTE_INVENTARIO:               ['Supervisor','Admin'],
   CONSULTAR_SOLICITUDES_PENDIENTES:['Supervisor','Admin'],
 };
+
+// ─────────────────────────────────────────────────────────────
+// [FIX 17] parsearAprobacionNatural
+// Detecta en texto libre si el supervisor está aprobando o
+// rechazando una solicitud, sin necesidad de comando exacto.
+// Retorna { action, params } si lo detecta, o null si no.
+// ─────────────────────────────────────────────────────────────
+function parsearAprobacionNatural(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+
+  const txt = rawText.trim().toLowerCase();
+
+  // Extraer código REQ-XXXXXX (case-insensitive, con o sin guion)
+  const matchReq = rawText.match(/REQ-\d{4,8}/i);
+  if (!matchReq) return null;
+  const idSolicitud = matchReq[0].toUpperCase();
+
+  // Patrones de APROBACIÓN
+  const patronesAprobacion = [
+    /\baprueb[oa]\b/,
+    /\baprobar\b/,
+    /\bautorizo\b/,
+    /\bautorizar\b/,
+    /\bconfirmo\b/,
+    /\bconfirmar\b/,
+    /\bsi\s+aprueb[oa]\b/,
+    /\bs[íi]\s+aprueb[oa]\b/,
+    /\bsi\s+autorizo\b/,
+    /\bs[íi]\s+autorizo\b/,
+    /\bok\s+aprueb[oa]\b/,
+    /\bproceder\b/,
+    /\bprocede\b/,
+    /\baprobado\b/,
+    /\bautorizado\b/,
+    /\bdar paso\b/,
+    /\bvisto bueno\b/,
+    /\bvb\b/,
+  ];
+
+  // Patrones de RECHAZO
+  const patronesRechazo = [
+    /\brechaz[oa]\b/,
+    /\brechazar\b/,
+    /\bno\s+aprueb[oa]\b/,
+    /\bno\s+autorizo\b/,
+    /\bdeneg[ao]\b/,
+    /\bdenegar\b/,
+    /\bcancelar\b/,
+    /\bcancelo\b/,
+    /\bno\s+procede\b/,
+    /\brechazado\b/,
+    /\bno\s+autorizado\b/,
+  ];
+
+  for (const patron of patronesAprobacion) {
+    if (patron.test(txt)) {
+      console.log(`[parsearAprobacionNatural] ✅ Detectada APROBACIÓN natural: "${rawText.slice(0,80)}" → id_solicitud="${idSolicitud}"`);
+      return { action: 'APROBAR_SOLICITUD', params: { id_solicitud: idSolicitud } };
+    }
+  }
+
+  for (const patron of patronesRechazo) {
+    if (patron.test(txt)) {
+      // Intentar extraer motivo: todo lo que viene después del REQ-xxx
+      const motivoMatch = rawText.match(/REQ-\d{4,8}\s*[,\-–]?\s*(.+)/i);
+      const motivo = motivoMatch ? motivoMatch[1].trim() : null;
+      console.log(`[parsearAprobacionNatural] ❌ Detectado RECHAZO natural: "${rawText.slice(0,80)}" → id_solicitud="${idSolicitud}" motivo="${motivo}"`);
+      return { action: 'RECHAZAR_SOLICITUD', params: { id_solicitud: idSolicitud, motivo } };
+    }
+  }
+
+  return null;
+}
 
 // ─────────────────────────────────────────────────────────────
 // HELPERS
@@ -255,11 +338,7 @@ function roundQty(n) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// [FIX 16] pushWA — ahora es async y retorna una Promise.
-//   Ya NO es fire-and-forget. Los handlers hacen `await pushWA(...)`
-//   para que Vercel mantenga la función viva hasta recibir respuesta
-//   de BB Cloud. Esto corrige el bug donde el proceso moría antes
-//   de completar la petición HTTP saliente.
+// [FIX 16] pushWA — async, retorna Promise. No es fire-and-forget.
 // ─────────────────────────────────────────────────────────────
 async function pushWA(phone, text) {
   return new Promise((resolve) => {
@@ -471,7 +550,8 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
           [
             `✅ *Orden ${orden.codigo_orden} APROBADA*`,
             `Tu solicitud fue validada. Los materiales están reservados.`,
-            `Cuando tengas los insumos físicamente, confirma con CONFIRMAR_MATERIALES_PRODUCCION.`,
+            `Cuando tengas los insumos físicamente, confirma con:`,
+            `CONFIRMAR_MATERIALES_PRODUCCION con id_orden: ${orden.codigo_orden}`,
             ``, `📦 *Materiales reservados:*`,
             ...reservados
           ].join('\n')
@@ -604,9 +684,24 @@ module.exports = async (req, res) => {
   if (!info || typeof info !== 'object') info = {};
 
   const from     = rawBody.from;
-  const action   = info['@ction'] || info.action || 'UNKNOWN';
-  const params   = info.params || {};
+  let action     = info['@ction'] || info.action || 'UNKNOWN';
+  let params     = info.params || {};
   const priority = info.priority || 'baja';
+
+  // ── [FIX 17] Interceptor de lenguaje natural ──────────────
+  // Si BuilderBot no pudo extraer una acción estructurada (UNKNOWN o
+  // MODO_CHARLA), intentamos detectar aprobación/rechazo en el texto
+  // libre del mensaje original antes de entrar al switch.
+  if (action === 'UNKNOWN' || action === 'MODO_CHARLA') {
+    const rawText = info.texto || info.content || info.message ||
+                    rawBody.body || rawBody.text || '';
+    const detectado = parsearAprobacionNatural(rawText);
+    if (detectado) {
+      console.log(`[webhook] 🔄 Redirigiendo "${action}" → "${detectado.action}" por lenguaje natural`);
+      action = detectado.action;
+      params = detectado.params;
+    }
+  }
 
   console.log(`[webhook] ▶ action="${action}" from="${from}" priority="${priority}"`);
 
@@ -781,7 +876,9 @@ module.exports = async (req, res) => {
               `Solicitado por: ${user.nombre}`,
               ``, `📋 *Disponibilidad de materiales:*`,
               ...picking,
-              ``, `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
+              ``,
+              `Para aprobar responde: *apruebo ${codigo}*`,
+              `Para rechazar responde: *rechazo ${codigo}*`
             ].join('\n')
           );
         } else {
@@ -928,7 +1025,9 @@ module.exports = async (req, res) => {
               `Estado actual: ${orden.estado}`,
               `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
               `Operario: ${user.nombre}`,
-              `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
+              ``,
+              `Para aprobar responde: *apruebo ${codigo}*`,
+              `Para rechazar responde: *rechazo ${codigo}*`
             ].join('\n')
           );
         } else {
@@ -973,7 +1072,9 @@ module.exports = async (req, res) => {
               `Producto: ${params.id_item}`,
               `Lote: ${params.id_lote} — Cantidad: ${params.cantidad}`,
               `Cliente: ${params.cliente_destino || 'N/A'}`,
-              `Para aprobar: APROBAR_SOLICITUD con id_solicitud: ${codigo}`
+              ``,
+              `Para aprobar responde: *apruebo ${codigo}*`,
+              `Para rechazar responde: *rechazo ${codigo}*`
             ].join('\n')
           );
         } else {
