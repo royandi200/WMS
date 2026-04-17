@@ -159,3 +159,7 @@ Consulta [`docs/siigo-integration.md`](docs/siigo-integration.md) para la guía 
 ## 📄 Licencia
 
 Proyecto privado. Todos los derechos reservados.
+
+---
+
+*Última actualización: Abril 2026*
