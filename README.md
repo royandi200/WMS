@@ -163,3 +163,4 @@ Proyecto privado. Todos los derechos reservados.
 ---
 
 *Última actualización: Abril 2026*
+
