@@ -72,6 +72,11 @@
 //           confirmo materiales orden X"
 //        Esto evita que el operario tenga que recordar el nombre exacto
 //        del comando y permite que BB Cloud lo interprete correctamente.
+//  [19]  FIX RBAC getOrCreateBotUser:
+//        Buscaba SOLO por email phone@wa.bot → supervisor que respondía
+//        desde WhatsApp era registrado como ghost Operario, bloqueando RBAC.
+//        Fix: primero busca por `telefono` en usuarios reales (activos, no
+//        bots); sólo si no hay match crea/retorna el ghost bot.
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
@@ -274,6 +279,24 @@ async function getDefaultBodega(db) {
 }
 
 async function getOrCreateBotUser(db, phone) {
+  // FIX RBAC: Buscar primero por teléfono en usuarios reales (no bots).
+  // Cubre el caso donde un supervisor/admin responde desde WhatsApp:
+  // su `from` llega como número y debe resolverse con su rol real,
+  // NO crear un ghost Operario que bloquea el RBAC.
+  const [realRows] = await db.execute(
+    `SELECT u.*, r.nombre AS rol_nombre FROM usuarios u
+     LEFT JOIN roles r ON r.id = u.rol_id
+     WHERE u.telefono = ?
+       AND u.activo = 1
+       AND u.email NOT LIKE '%@wa.bot'
+     LIMIT 1`, [phone]
+  );
+  if (realRows.length) {
+    console.log(`[getOrCreateBotUser] ✅ Usuario real por teléfono: id=${realRows[0].id} rol=${realRows[0].rol_nombre}`);
+    return realRows[0];
+  }
+
+  // Buscar ghost bot existente por email
   const botEmail = `${phone}@wa.bot`;
   const [rows] = await db.execute(
     `SELECT u.*, r.nombre AS rol_nombre FROM usuarios u
@@ -281,6 +304,8 @@ async function getOrCreateBotUser(db, phone) {
      WHERE u.email = ? LIMIT 1`, [botEmail]
   );
   if (rows.length) return rows[0];
+
+  // Crear ghost bot sólo si no hay usuario real ni bot previo
   const [roles] = await db.execute(
     `SELECT id FROM roles WHERE nombre = 'Operario' LIMIT 1`
   );
@@ -289,6 +314,7 @@ async function getOrCreateBotUser(db, phone) {
     `INSERT INTO usuarios (nombre, email, rol_id, activo, password_hash) VALUES (?,?,?,1,'bot-user')`,
     [`WA-${phone}`, botEmail, roleId]
   );
+  console.log(`[getOrCreateBotUser] 🤖 Ghost bot creado para phone=${phone}`);
   return { id: ins.insertId, nombre: `WA-${phone}`, email: botEmail, rol_nombre: 'Operario' };
 }
 
