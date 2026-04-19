@@ -1405,46 +1405,85 @@ module.exports = async (req, res) => {
 
       // ── Trazabilidad de lote ──────────────────────────────────
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
-        const [lotRows] = await db.execute(
-          `SELECT l.*, p.nombre, p.siigo_code
-           FROM lots l JOIN productos p ON p.id = l.product_id
-           WHERE l.lpn = ? LIMIT 1`, [params.id_lote]
-        ).catch(() => [[]]);
-        if (lotRows.length) {
-          const l = lotRows[0];
-          const [kRows] = await db.execute(
-            `SELECT action, qty, balance_after, created_at FROM kardex
-             WHERE lot_id = ? ORDER BY created_at ASC`, [l.id]
-          ).catch(() => [[]]);
-          const history = kRows.length
-            ? kRows.map(k => `  ${k.action}: ${k.qty > 0 ? '+' : ''}${k.qty} (saldo: ${k.balance_after})`).join('\n')
-            : '  (Sin movimientos en kardex)';
-          mensaje = [
-            `🔎 *Lote: ${params.id_lote}*`,
-            `Producto: ${l.nombre} (${l.siigo_code})`,
-            `Inicial: ${l.qty_initial} und`,
-            `Actual: ${l.qty_current} und`,
-            `Estado: ${l.status}  |  Origen: ${l.origin}`,
-            `Vence: ${l.expiry_date || 'N/A'}`,
-            ``, `📋 *Historial:*`, history
-          ].join('\n');
-        } else {
-          const [rows] = await db.execute(
-            `SELECT s.*, p.nombre, p.siigo_code FROM stock s
-             JOIN productos p ON p.id=s.producto_id WHERE s.lote = ? LIMIT 1`,
-            [params.id_lote]
-          );
-          if (!rows.length) throw { status: 404, message: `Lote "${params.id_lote}" no encontrado` };
-          const s = rows[0];
-          mensaje = [
-            `🔎 *Lote: ${params.id_lote}*`,
-            `Producto: ${s.nombre} (${s.siigo_code})`,
-            `Cantidad: ${s.cantidad} und`,
-            `Vence: ${s.fecha_venc || 'N/A'}`
-          ].join('\n');
-        }
-        break;
-      }
+  const [lotRows] = await db.execute(
+    `SELECT l.*, p.nombre, p.siigo_code, op.codigo_orden
+     FROM lots l
+     JOIN productos p ON p.id = l.product_id
+     LEFT JOIN ordenes_produccion op ON op.id = l.production_order_id
+     WHERE l.lpn = ?
+     LIMIT 1`,
+    [params.id_lote]
+  ).catch(() => [[]]);
+
+  if (lotRows.length) {
+    const l = lotRows[0];
+
+    const [kRows] = await db.execute(
+      `SELECT
+         k.action,
+         k.qty,
+         k.balance_after,
+         k.reference,
+         k.notes,
+         k.created_at
+       FROM kardex k
+       WHERE k.lot_id = ?
+       ORDER BY k.created_at ASC`,
+      [l.id]
+    ).catch(() => [[]]);
+
+    const history = kRows.length
+      ? kRows.map(k => {
+          const fecha = new Date(k.created_at).toLocaleString('es-CO');
+          let extra = '';
+
+          if (k.notes) {
+            extra = ` | ${k.notes}`;
+          }
+
+          return `  ${fecha} | ${k.action}: ${k.qty > 0 ? '+' : ''}${k.qty} (saldo: ${k.balance_after})${extra}`;
+        }).join('\n')
+      : '  (Sin movimientos en kardex)';
+
+    mensaje = [
+      `🔎 *Lote: ${params.id_lote}*`,
+      `Producto: ${l.nombre} (${l.siigo_code})`,
+      l.codigo_orden ? `Orden origen: ${l.codigo_orden}` : (l.notes ? `Referencia: ${l.notes}` : ''),
+      `Inicial: ${l.qty_initial} und`,
+      `Actual: ${l.qty_current} und`,
+      `Estado: ${l.status}  |  Origen: ${l.origin}`,
+      `Creado: ${new Date(l.created_at).toLocaleString('es-CO')}`,
+      `Vence: ${l.expiry_date || 'N/A'}`,
+      ``,
+      `📋 *Historial:*`,
+      history
+    ].filter(Boolean).join('\n');
+
+  } else {
+    const [rows] = await db.execute(
+      `SELECT s.*, p.nombre, p.siigo_code
+       FROM stock s
+       JOIN productos p ON p.id = s.producto_id
+       WHERE s.lote = ?
+       LIMIT 1`,
+      [params.id_lote]
+    );
+
+    if (!rows.length) {
+      throw { status: 404, message: `Lote "${params.id_lote}" no encontrado` };
+    }
+
+    const s = rows[0];
+
+    mensaje = [
+      `🔎 *Lote: ${params.id_lote}*`,
+      `Producto: ${s.nombre} (${s.siigo_code})`,
+      `Cantidad: ${s.cantidad} und`,
+      `Vence: ${s.fecha_venc || 'N/A'}`
+    ].join('\n');
+  }
+  break;
+}
 
       // ── Capacidad de fabricación ──────────────────────────────
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
