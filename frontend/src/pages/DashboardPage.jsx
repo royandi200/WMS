@@ -383,8 +383,8 @@ export default function DashboardPage() {
       fetchLowStock(),
       fetchKardex({ limit:200, page:1 }),
       fetchApprovals({ estado:'PENDIENTE', limit:10 }),
-      fetchProd({ limit:20 }),
-      fetchWaste({ limit:50 }),
+      fetchProd({}).catch(()=>{}),
+      fetchWaste({}).catch(()=>{}),
     ])
     setLastUpdate(Date.now())
   }, [fetchSummary,fetchLowStock,fetchKardex,fetchApprovals,fetchProd,fetchWaste])
@@ -413,8 +413,11 @@ export default function DashboardPage() {
   const sparkEntrada  = useMemo(()=>Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]; return (kardex||[]).filter(r=>r.tipo==='entrada'&&(r.fecha||'').startsWith(day)).reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) }),[kardex])
   const sparkSalida   = useMemo(()=>Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]; return (kardex||[]).filter(r=>r.tipo==='salida'&&(r.fecha||'').startsWith(day)) .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) }),[kardex])
 
-  const prodActivas  = prodList.filter(o=>['en_proceso','pendiente'].includes(o.status)).length
-  const wasteTotalHoy = wasteList.filter(w=>{ const d=new Date(w.created_at||w.createdAt||0); return d.toDateString()===new Date().toDateString() }).length
+  const safeProd     = Array.isArray(prodList)  ? prodList  : []
+  const safeWaste    = Array.isArray(wasteList) ? wasteList : []
+  const safeApprovals = Array.isArray(approvals) ? approvals : []
+  const prodActivas  = safeProd.filter(o=>['en_proceso','pendiente'].includes(o.status)).length
+  const wasteTotalHoy = safeWaste.filter(w=>{ const d=new Date(w.created_at||w.createdAt||0); return d.toDateString()===new Date().toDateString() }).length
 
   const periodLabel = PERIODS.find(p=>p.key===period)?.label
   const hora   = new Date().getHours()
@@ -424,8 +427,8 @@ export default function DashboardPage() {
   const flowNodes = [
     {
       icon:Truck, label:'Recepciones', sublabel:'Entrada de mercancía',
-      color:'#58a6ff', count:approvals.filter(a=>a.accion==='RECEPCION').length,
-      countLabel:'pendientes', alert:approvals.filter(a=>a.accion==='RECEPCION').length>0,
+      color:'#58a6ff', count:safeApprovals.filter(a=>a.accion==='RECEPCION').length,
+      countLabel:'pendientes', alert:safeApprovals.filter(a=>a.accion==='RECEPCION').length>0,
       pulse:false, href:'/recepciones', delay:100,
     },
     {
@@ -448,8 +451,8 @@ export default function DashboardPage() {
     },
     {
       icon:ClipboardList, label:'Despachos', sublabel:'Salida de mercancía',
-      color:'#d2a8ff', count:approvals.filter(a=>a.accion==='DESPACHO').length,
-      countLabel:'pendientes', alert:approvals.filter(a=>a.accion==='DESPACHO').length>0,
+      color:'#d2a8ff', count:safeApprovals.filter(a=>a.accion==='DESPACHO').length,
+      countLabel:'pendientes', alert:safeApprovals.filter(a=>a.accion==='DESPACHO').length>0,
       pulse:false, href:'/despachos', delay:420,
     },
   ]
@@ -559,9 +562,9 @@ export default function DashboardPage() {
                 <div className="h-3 w-px bg-border"/>
                 <span className="text-[10px] text-red-400 font-semibold">⚠ {lowStock.length} bajo mínimo</span>
               </>}
-              {approvals.length > 0 && <>
+              {safeApprovals.length > 0 && <>
                 <div className="h-3 w-px bg-border"/>
-                <span className="text-[10px] text-amber-400 font-semibold">{approvals.length} aprobaciones pendientes</span>
+                <span className="text-[10px] text-amber-400 font-semibold">{safeApprovals.length} aprobaciones pendientes</span>
               </>}
             </div>
           </div>
@@ -596,26 +599,26 @@ export default function DashboardPage() {
                 <Clock size={13} className="text-amber-400"/>
                 <span className="text-subtle text-sm font-semibold">Aprobaciones</span>
               </div>
-              {approvals.length>0 && (
+              {safeApprovals.length>0 && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-400/15 text-amber-400 font-bold">
-                  {approvals.length}
+                  {safeApprovals.length}
                 </span>
               )}
             </div>
             <div className="flex-1 overflow-y-auto max-h-44 min-h-0">
-              {appLoading&&!approvals.length
+              {appLoading&&!safeApprovals.length
                 ? <div className="space-y-2">{[1,2,3].map(i=><Sk key={i} className="h-8 w-full"/>)}</div>
-                : approvals.length===0
+                : safeApprovals.length===0
                   ? <div className="flex flex-col items-center justify-center h-24 gap-2">
                       <CheckCircle size={20} className="text-emerald-400/50"/>
                       <span className="text-muted text-xs">Sin pendientes</span>
                     </div>
-                  : approvals.slice(0,8).map((item,i)=>(
+                  : safeApprovals.slice(0,8).map((item,i)=>(
                       <ApprovalRow key={item.id} item={item} index={i} onNavigate={()=>navigate('/aprobaciones')}/>
                     ))
               }
             </div>
-            {approvals.length>0 && (
+            {safeApprovals.length>0 && (
               <button onClick={()=>navigate('/aprobaciones')}
                 className="mt-3 flex items-center justify-center gap-1.5 text-xs text-primary hover:text-primary-hover transition-colors py-1.5 border-t border-border/40">
                 Ver todas <ArrowRight size={11}/>
@@ -685,7 +688,7 @@ export default function DashboardPage() {
             {icon:Warehouse,     label:'Recepciones',  to:'/recepciones',  color:'#3fb950'},
             {icon:Truck,         label:'Despachos',     to:'/despachos',    color:'#f0883e'},
             {icon:Package,       label:'Inventario',    to:'/inventario',   color:'#79c0ff'},
-            {icon:ClipboardList, label:'Aprobaciones',  to:'/aprobaciones', color:'#d2a8ff', badge:approvals.length||null},
+            {icon:ClipboardList, label:'Aprobaciones',  to:'/aprobaciones', color:'#d2a8ff', badge:safeApprovals.length||null},
           ].map(({icon:Icon,label,to,color,badge})=>(
             <button key={to} onClick={()=>navigate(to)}
               className="flex items-center gap-2.5 p-3.5 bg-surface border border-border rounded-xl text-muted hover:text-foreground group transition-all duration-200"
