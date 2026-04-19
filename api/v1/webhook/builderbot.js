@@ -689,18 +689,21 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
 
   const numeroDespacho = `DSP-${Date.now()}`;
 
-  const [despIns] = await db.execute(
-    `INSERT INTO despachos
-       (numero, cliente_nombre, bodega_id, estado, usuario_id, observaciones, creado_en, despachado_en)
-     VALUES (?, ?, ?, 'despachado', ?, ?, NOW(), NOW())`,
-    [
-      numeroDespacho,
-      payload.customer || null,
-      bodegaId,
-      aprobador_id,
-      `Despacho aprobado desde WhatsApp | Producto ID: ${payload.product_id} | Lote: ${payload.lpn || 'N/A'} | Cantidad: ${cantDesp}`
-    ]
-  );
+ const [despIns] = await db.execute(
+  `INSERT INTO despachos
+     (numero, cliente_nombre, bodega_id, producto_id, lote, cantidad, estado, usuario_id, observaciones, creado_en, despachado_en)
+   VALUES (?, ?, ?, ?, ?, ?, 'despachado', ?, ?, NOW(), NOW())`,
+  [
+    numeroDespacho,
+    payload.customer || null,
+    bodegaId,
+    payload.product_id,
+    payload.lpn || null,
+    cantDesp,
+    aprobador_id,
+    `Despacho aprobado desde WhatsApp`
+  ]
+);
 
   await db.execute(
     `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
