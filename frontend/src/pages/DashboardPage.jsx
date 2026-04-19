@@ -4,7 +4,6 @@ import { useInventoryStore }  from '../store/inventoryStore'
 import { useApprovalsStore }  from '../store/approvalsStore'
 import { useAuthStore }       from '../store/authStore'
 import { useProductionStore } from '../store/productionStore'
-import { useWasteStore }      from '../store/wasteStore'
 import {
   Package, TrendingUp, TrendingDown, AlertTriangle,
   CheckCircle, Clock, ArrowRight, RefreshCw,
@@ -371,7 +370,6 @@ export default function DashboardPage() {
   } = useInventoryStore()
   const { list:approvals,  loading:appLoading,  fetchList:fetchApprovals  } = useApprovalsStore()
   const { list:prodList,   loading:prodLoading,  fetchList:fetchProd       } = useProductionStore()
-  const { list:wasteList,  loading:wasteLoading, fetchList:fetchWaste      } = useWasteStore()
 
   const [period,     setPeriod]     = useState('week')
   const [refreshing, setRefreshing] = useState(false)
@@ -385,10 +383,10 @@ export default function DashboardPage() {
       fetchKardex({ limit:200, page:1 }),
       fetchApprovals({ estado:'PENDIENTE', limit:10 }),
       fetchProd({}).catch(()=>{}),
-      fetchWaste({}).catch(()=>{}),
+
     ])
     setLastUpdate(Date.now())
-  }, [fetchSummary,fetchLowStock,fetchKardex,fetchApprovals,fetchProd,fetchWaste])
+  }, [fetchSummary,fetchLowStock,fetchKardex,fetchApprovals,fetchProd])
 
   useEffect(()=>{ loadAll(); setTimeout(()=>setHeaderVis(true),50) },[]) // eslint-disable-line
 
@@ -414,11 +412,12 @@ export default function DashboardPage() {
   const sparkEntrada  = useMemo(()=>Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]; return (kardex||[]).filter(r=>r.tipo==='entrada'&&(r.fecha||'').startsWith(day)).reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) }),[kardex])
   const sparkSalida   = useMemo(()=>Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]; return (kardex||[]).filter(r=>r.tipo==='salida'&&(r.fecha||'').startsWith(day)) .reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) }),[kardex])
 
-  const safeProd     = Array.isArray(prodList)  ? prodList  : []
-  const safeWaste    = Array.isArray(wasteList) ? wasteList : []
+  const safeProd      = Array.isArray(prodList)  ? prodList  : []
   const safeApprovals = Array.isArray(approvals) ? approvals : []
   const prodActivas  = safeProd.filter(o=>['en_proceso','pendiente'].includes(o.status)).length
-  const wasteTotalHoy = safeWaste.filter(w=>{ const d=new Date(w.created_at||w.createdAt||0); return d.toDateString()===new Date().toDateString() }).length
+  const today         = new Date().toISOString().split('T')[0]
+  const wasteTotalHoy = Array.isArray(kardex) ? kardex.filter(r=>r.tipo==='merma'&&(r.fecha||'').startsWith(today)).length : 0
+  const wasteTotal    = Array.isArray(kardex) ? kardex.filter(r=>r.tipo==='merma').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) : 0
 
   const periodLabel = PERIODS.find(p=>p.key===period)?.label
   const hora   = new Date().getHours()
@@ -428,8 +427,8 @@ export default function DashboardPage() {
   const flowNodes = [
     {
       icon:Truck, label:'Recepciones', sublabel:'Entrada de mercancía',
-      color:'#58a6ff', count:null,
-      countLabel:null, alert:false,
+      color:'#58a6ff', count: Array.isArray(kardex) ? kardex.filter(r=>r.tipo==='entrada'&&(r.fecha||'').startsWith(today)).length || null : null,
+      countLabel:'hoy', alert:false,
       pulse:totalEntradas>0, href:'/recepciones', delay:100,
     },
     {
@@ -445,9 +444,9 @@ export default function DashboardPage() {
       pulse:prodActivas>0, href:'/produccion', delay:260,
     },
     {
-      icon:Trash2, label:'Mermas', sublabel:'Pérdidas hoy',
+      icon:Trash2, label:'Mermas', sublabel:`Total: ${fmtN(wasteTotal)} u.`,
       color:'#f85149', count:wasteTotalHoy||null,
-      countLabel:'hoy', alert:wasteTotalHoy>0,
+      countLabel:'mov. hoy', alert:wasteTotalHoy>0,
       pulse:false, href:'/mermas', delay:340,
     },
     {
