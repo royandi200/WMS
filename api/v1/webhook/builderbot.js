@@ -112,7 +112,7 @@ const RBAC = {
   CONSULTAR_TRAZABILIDAD_LOTE:     ['Operario','Supervisor','Admin'],
   CONSULTAR_CAPACIDAD_FABRICACION: ['Operario','Supervisor','Admin'],
   MODO_CHARLA:                     ['Operario','Supervisor','Admin'],
-  SOLICITAR_CIERRE_PRODUCCION:     ['Supervisor','Admin'],
+  SOLICITAR_CIERRE_PRODUCCION:     ['Operario','Supervisor','Admin'],
   SOLICITAR_DESPACHO:              ['Supervisor','Admin'],
   APROBAR_SOLICITUD:               ['Supervisor','Admin'],
   RECHAZAR_SOLICITUD:              ['Supervisor','Admin'],
