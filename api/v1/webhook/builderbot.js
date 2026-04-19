@@ -668,42 +668,70 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
     }
 
     case 'SOLICITAR_DESPACHO': {
-      const cantDesp  = Number(payload.qty) || 0;
-      const lotIdDesp = await lotIdByLpn(db, payload.lpn);
-      if (payload.lpn) {
-        await db.execute(
-          `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?)
-           WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
-          [cantDesp, payload.product_id, bodegaId, payload.lpn]
-        );
-        await db.execute(
-          `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?),
-           status = IF(qty_current - ? <= 0, 'DESPACHADO', status) WHERE lpn = ?`,
-          [cantDesp, cantDesp, payload.lpn]
-        ).catch(() => {});
-      }
-      await db.execute(
-        `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
-         VALUES ('salida',?,?,?,?,'despacho_aprobado',?)`,
-        [payload.product_id, bodegaId, payload.lpn || null, cantDesp, aprobador_id]
-      );
-      const balance = await getStockBalance(db, payload.product_id, bodegaId);
-      await logKardex(db, {
-        product_id: payload.product_id, user_id: aprobador_id,
-        action: 'DESPACHO', qty: -cantDesp, lot_id: lotIdDesp,
-        balance_after: balance,
-        reference: payload.lpn ? `lote:${payload.lpn}` : null,
-        notes: payload.customer ? `Cliente: ${payload.customer}` : null,
-        approved_by: aprobador_id,
-      });
-      if (payload.operario_phone) {
-        await pushWA(
-          payload.operario_phone,
-          `✅ *Despacho aprobado*\nProducto despachado: ${cantDesp} und`
-        );
-      }
-      return { despachado: cantDesp };
-    }
+  const cantDesp  = Number(payload.qty) || 0;
+  const lotIdDesp = await lotIdByLpn(db, payload.lpn);
+
+  if (payload.lpn) {
+    await db.execute(
+      `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?)
+       WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
+      [cantDesp, payload.product_id, bodegaId, payload.lpn]
+    );
+
+    await db.execute(
+      `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?),
+       status = IF(qty_current - ? <= 0, 'DESPACHADO', status) WHERE lpn = ?`,
+      [cantDesp, cantDesp, payload.lpn]
+    ).catch(() => {});
+  }
+
+  const numeroDespacho = `DSP-${Date.now()}`;
+
+  const [despIns] = await db.execute(
+    `INSERT INTO despachos
+       (numero, cliente_nombre, bodega_id, estado, usuario_id, observaciones, creado_en, despachado_en)
+     VALUES (?, ?, ?, 'despachado', ?, ?, NOW(), NOW())`,
+    [
+      numeroDespacho,
+      payload.customer || null,
+      bodegaId,
+      aprobador_id,
+      `Despacho aprobado desde WhatsApp | Producto ID: ${payload.product_id} | Lote: ${payload.lpn || 'N/A'} | Cantidad: ${cantDesp}`
+    ]
+  );
+
+  await db.execute(
+    `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
+     VALUES ('salida',?,?,?,?,?,'despacho_aprobado',?)`,
+    [payload.product_id, bodegaId, payload.lpn || null, cantDesp, despIns.insertId, aprobador_id]
+  );
+
+  const balance = await getStockBalance(db, payload.product_id, bodegaId);
+
+  await logKardex(db, {
+    product_id: payload.product_id,
+    user_id: aprobador_id,
+    action: 'DESPACHO',
+    qty: -cantDesp,
+    lot_id: lotIdDesp,
+    balance_after: balance,
+    reference: `despacho:${numeroDespacho}`,
+    notes: payload.customer ? `Cliente: ${payload.customer}` : null,
+    approved_by: aprobador_id,
+  });
+
+  if (payload.operario_phone) {
+    await pushWA(
+      payload.operario_phone,
+      `✅ *Despacho aprobado*\nNro despacho: ${numeroDespacho}\nProducto despachado: ${cantDesp} und`
+    );
+  }
+
+  return {
+    despachado: cantDesp,
+    numero_despacho: numeroDespacho
+  };
+}
 
     default:
       throw { status: 422, message: `No hay handler de aprobación para: ${accion}` };
