@@ -1020,51 +1020,113 @@ module.exports = async (req, res) => {
 
       // ── 4. REPORTE_MERMA ──────────────────────────────────────
       case 'REPORTE_MERMA': {
-        const p = await findProductBySku(db, params.id_item);
-        const cantMerma  = Math.abs(Number(params.cantidad));
-        const lotIdMerma = await lotIdByLpn(db, params.id_lote);
+  const p = await findProductBySku(db, params.id_item);
+  const cantMerma = Math.abs(Number(params.cantidad));
+  const lotIdMerma = await lotIdByLpn(db, params.id_lote);
 
-        const mermaNoteParts = [];
-        if (params.motivo)   mermaNoteParts.push(`Motivo: ${params.motivo}`);
-        if (params.id_orden) mermaNoteParts.push(`Orden: ${params.id_orden}`);
-        if (params.id_lote)  mermaNoteParts.push(`Lote: ${params.id_lote}`);
-        const mermaNote = mermaNoteParts.join(' | ') || null;
+  let ordenId = null;
+  let codigoOrden = null;
+  let tipoMerma = params.id_orden ? 'PROCESO' : 'BODEGA';
 
-        await db.execute(
-          `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
-           VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
-          [p.id, bodegaId, params.id_lote || null, -cantMerma, user.id]
-        );
-        if (params.id_lote) {
-          await db.execute(
-            `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?) WHERE producto_id=? AND lote=?`,
-            [cantMerma, p.id, params.id_lote]
-          );
-          await db.execute(
-            `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?),
-             status = IF(qty_current - ? <= 0, 'AGOTADO', status) WHERE lpn = ?`,
-            [cantMerma, cantMerma, params.id_lote]
-          ).catch(() => {});
-        }
-        const balance = await getStockBalance(db, p.id, bodegaId);
-        await logKardex(db, {
-          product_id: p.id, user_id: user.id,
-          action: params.id_orden ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
-          qty: -cantMerma, lot_id: lotIdMerma, balance_after: balance,
-          reference: params.id_orden
-            ? `orden_produccion:${params.id_orden}`
-            : (params.id_lote ? `lote:${params.id_lote}` : null),
-          notes: mermaNote,
-        });
-        mensaje = [
-          `⚠️ *Merma registrada*`,
-          `Producto: ${params.id_item}`,
-          `Cantidad: ${cantMerma}`,
-          `Motivo: ${params.motivo || 'No especificado'}`,
-          params.id_orden ? `Orden: ${params.id_orden}` : ''
-        ].filter(Boolean).join('\n');
-        break;
-      }
+  if (params.id_orden) {
+    const [opRows] = await db.execute(
+      `SELECT id, codigo_orden, estado
+       FROM ordenes_produccion
+       WHERE id = ? OR codigo_orden = ?
+       LIMIT 1`,
+      [params.id_orden, params.id_orden]
+    );
+
+    if (!opRows.length) {
+      throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
+    }
+
+    const op = opRows[0];
+    ordenId = op.id;
+    codigoOrden = op.codigo_orden;
+
+    if (op.estado !== 'EN_PROCESO') {
+      throw {
+        status: 409,
+        message: `La orden ${op.codigo_orden} está en estado "${op.estado}". Si ya fue cerrada, reporta la merma usando el lote correspondiente.`
+      };
+    }
+  }
+
+  const numeroMerma = `MER-${Date.now()}`;
+
+  await db.execute(
+    `INSERT INTO mermas
+       (numero, tipo, producto_id, lote, orden_produccion_id, cantidad, motivo, usuario_id, creado_en)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      numeroMerma,
+      tipoMerma,
+      p.id,
+      params.id_lote || null,
+      ordenId,
+      cantMerma,
+      params.motivo || null,
+      user.id
+    ]
+  );
+
+  await db.execute(
+    `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
+     VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
+    [p.id, bodegaId, params.id_lote || null, -cantMerma, user.id]
+  );
+
+  if (params.id_lote) {
+    await db.execute(
+      `UPDATE stock
+       SET cantidad = GREATEST(0, cantidad - ?)
+       WHERE producto_id = ? AND lote = ?`,
+      [cantMerma, p.id, params.id_lote]
+    );
+
+    await db.execute(
+      `UPDATE lots
+       SET qty_current = GREATEST(0, qty_current - ?),
+           status = IF(GREATEST(0, qty_current - ?) <= 0, 'AGOTADO', 'DISPONIBLE')
+       WHERE lpn = ?`,
+      [cantMerma, cantMerma, params.id_lote]
+    ).catch(() => {});
+  }
+
+  const balance = await getStockBalance(db, p.id, bodegaId);
+
+  const mermaNoteParts = [];
+  if (params.motivo) mermaNoteParts.push(`Motivo: ${params.motivo}`);
+  if (codigoOrden) mermaNoteParts.push(`Orden: ${codigoOrden}`);
+  if (params.id_lote) mermaNoteParts.push(`Lote: ${params.id_lote}`);
+  if (numeroMerma) mermaNoteParts.push(`Merma: ${numeroMerma}`);
+  const mermaNote = mermaNoteParts.join(' | ') || null;
+
+  await logKardex(db, {
+    product_id: p.id,
+    user_id: user.id,
+    action: params.id_orden ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
+    qty: -cantMerma,
+    lot_id: lotIdMerma,
+    balance_after: balance,
+    reference: ordenId
+      ? `orden_produccion:${codigoOrden}`
+      : (params.id_lote ? `lote:${params.id_lote}` : null),
+    notes: mermaNote,
+  });
+
+  mensaje = [
+    `⚠️ *Merma registrada*`,
+    `Nro merma: ${numeroMerma}`,
+    `Producto: ${params.id_item}`,
+    `Cantidad: ${cantMerma}`,
+    `Motivo: ${params.motivo || 'No especificado'}`,
+    codigoOrden ? `Orden: ${codigoOrden}` : '',
+    params.id_lote ? `Lote: ${params.id_lote}` : ''
+  ].filter(Boolean).join('\n');
+  break;
+}
 
       // ── 5. SOLICITAR_CIERRE_PRODUCCION → encolar ─────────────
       case 'SOLICITAR_CIERRE_PRODUCCION': {
