@@ -624,7 +624,13 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
          WHERE id=?`,
         [cantReal, aprobador_id, orden.id]
       );
-      const lpnOP = `L-OP${orden.id}-${Date.now()}`;
+      const [prodRows] = await db.execute(
+        `SELECT siigo_code FROM productos WHERE id = ? LIMIT 1`,
+        [orden.producto_id]
+      );
+      const skuPT = prodRows[0]?.siigo_code || `PT-${orden.producto_id}`;
+      const lpnOP = `L-${skuPT}-${orden.codigo_orden}-${Date.now()}`;
+
       const lotId = await createLot(db, {
         lpn: lpnOP, product_id: orden.producto_id, bodega_id: bodegaId,
         qty: cantReal, origin: 'PRODUCCION', received_by: aprobador_id,
