@@ -50,9 +50,9 @@ export default function MermasPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-foreground mb-6">Mermas</h1>
+      <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Mermas</h1>
 
-      <div className="flex gap-1 mb-6 border-b border-border">
+      <div className="flex gap-1 mb-4 md:mb-6 border-b border-border overflow-x-auto pb-px scrollbar-none">
         {TABS.map((t, i) => (
           <button key={t} onClick={() => { setTab(i); clearError() }}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
@@ -117,7 +117,7 @@ export default function MermasPage() {
           )}
           {list.length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead>
                   <tr className="bg-surface border-b border-border">
                     {['Tipo','Producto','Cantidad','Lote','Motivo','Fecha'].map((c) => (

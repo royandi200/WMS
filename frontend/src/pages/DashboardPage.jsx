@@ -143,7 +143,7 @@ function FlowNode({ icon:Icon, label, sublabel, color, count, countLabel, alert,
             animation:'alertPing 1.5s ease-in-out infinite'}}/>
       )}
       {/* Nodo */}
-      <div className="relative w-16 h-16 rounded-2xl border-2 flex items-center justify-center transition-all duration-200 group-hover:scale-110"
+      <div className="relative w-12 h-12 md:w-16 md:h-16 rounded-2xl border-2 flex items-center justify-center transition-all duration-200 group-hover:scale-110"
         style={{
           background:`linear-gradient(135deg,${color}20,${color}08)`,
           borderColor:`${color}50`,
@@ -153,7 +153,8 @@ function FlowNode({ icon:Icon, label, sublabel, color, count, countLabel, alert,
           <div className="absolute inset-0 rounded-2xl animate-ping opacity-20"
             style={{background:color}}/>
         )}
-        <Icon size={22} style={{color}}/>
+        <Icon size={18} className="md:hidden" style={{color}}/>
+        <Icon size={22} className="hidden md:block" style={{color}}/>
       </div>
       {/* Badge count */}
       {count != null && (
@@ -488,7 +489,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1">
             {PERIODS.map(p=>(
               <button key={p.key} onClick={()=>setPeriod(p.key)}
-                className="text-xs px-3 py-1 rounded-md transition-all duration-200"
+                className="text-xs px-2.5 md:px-3 py-1 rounded-md transition-all duration-200"
                 style={{background:period===p.key?'#f0883e15':'transparent',
                   color:period===p.key?'#f0883e':'#8b949e',fontWeight:period===p.key?600:400}}>
                 {p.label}
@@ -534,7 +535,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Flujo: nodos + conectores */}
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between overflow-x-auto pb-1 -mx-1 px-1 gap-1 md:gap-0">
               {flowNodes.map((node, i) => (
                 <div key={node.label} className="flex items-start" style={{flex:1}}>
                   <FlowNode {...node}/>
@@ -555,8 +556,8 @@ export default function DashboardPage() {
                 <span className="text-[10px] text-muted">Sistema operativo</span>
               </div>
               <div className="h-3 w-px bg-border"/>
-              <span className="text-[10px] text-muted">{prodActivas} órdenes activas</span>
-              <div className="h-3 w-px bg-border"/>
+              <span className="hidden sm:inline text-[10px] text-muted">{prodActivas} órdenes activas</span>
+              <div className="hidden sm:block h-3 w-px bg-border"/>
               <span className="text-[10px] text-muted">{fmtN(totalStock)} u. en stock</span>
               {lowStock.length > 0 && <>
                 <div className="h-3 w-px bg-border"/>
@@ -579,7 +580,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── GRÁFICO + APROBACIONES ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
           <div className="lg:col-span-2 bg-surface border border-border rounded-xl p-5"
             style={{animation:'fadeSlideUp .5s ease .35s both'}}>
             <div className="flex items-center justify-between mb-4">

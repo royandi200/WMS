@@ -43,7 +43,7 @@ export default function RecepcionPage() {
 
   return (
     <div className="max-w-xl">
-      <h1 className="text-xl font-semibold text-foreground mb-6">Registrar Recepción</h1>
+      <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Registrar Recepción</h1>
 
       {toast && (
         <div className={`mb-4 px-4 py-3 rounded-lg border text-sm ${

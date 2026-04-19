@@ -41,7 +41,7 @@ export default function DespachoPage() {
 
   return (
     <div className="max-w-xl">
-      <h1 className="text-xl font-semibold text-foreground mb-6">Registrar Despacho</h1>
+      <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Registrar Despacho</h1>
 
       {toast && (
         <div className={`mb-4 px-4 py-3 rounded-lg border text-sm ${
