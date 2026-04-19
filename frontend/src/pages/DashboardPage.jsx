@@ -224,23 +224,24 @@ function ActivityChart({ data=[], loading }) {
   )
   return (
     <div className="space-y-3">
-      <div className="flex items-end gap-1.5 h-28">
+      <div className="flex items-end gap-1.5" style={{height:'112px'}}>
         {grouped.map((g,gi)=>(
-          <div key={g.day} className="flex-1 flex flex-col items-center">
-            <div className="w-full flex flex-col-reverse gap-0.5 flex-1 justify-end">
+          <div key={g.day} className="flex-1 flex flex-col items-center" style={{height:'112px'}}>
+            <div className="w-full flex flex-col-reverse gap-0.5 overflow-hidden" style={{height:'88px',justifyContent:'flex-end',display:'flex',flexDirection:'column-reverse'}}>
               {TIPOS.map(tipo=>(
                 <div key={tipo}
                   title={`${LABELS[tipo]}: ${g[tipo]}`}
-                  className="w-full rounded-sm transition-all duration-700"
+                  className="w-full rounded-sm transition-all duration-700 flex-shrink-0"
                   style={{
-                    height:anim?`${Math.max((g[tipo]/maxVal)*100,g[tipo]>0?4:0)}px`:'0px',
+                    height:anim?`${Math.max((g[tipo]/maxVal)*88,g[tipo]>0?3:0)}px`:'0px',
+                    maxHeight:'88px',
                     background:COLORES[tipo],opacity:g[tipo]>0?.9:0,
                     transitionDelay:`${gi*60}ms`,
                     boxShadow:g[tipo]>0?`0 0 6px ${COLORES[tipo]}50`:'none',
                   }}/>
               ))}
             </div>
-            <span className="text-muted text-[10px] mt-1.5">{g.day}</span>
+            <span className="text-muted text-[10px] mt-1.5 shrink-0">{g.day}</span>
           </div>
         ))}
       </div>
@@ -323,7 +324,9 @@ const ACCION_COLOR = {DESPACHO:'#f0883e',RECEPCION:'#3fb950',MERMA:'#f85149',PRO
 function ApprovalRow({ item, index, onNavigate }) {
   const [vis, setVis] = useState(false)
   useEffect(()=>{ const t=setTimeout(()=>setVis(true),60*index); return()=>clearTimeout(t) },[index])
-  const color = ACCION_COLOR[item.accion?.toUpperCase()] || '#8b949e'
+  const color = '#d2a8ff'
+  const label = item.producto_nombre || item.producto || item.siigo_code || `Ajuste #${String(item.id).slice(0,8)}`
+  const sub   = item.bodega_orig_nombre ? `${item.bodega_orig_nombre}` : item.usuario_nombre || 'ajuste'
   return (
     <div className="flex items-center gap-3 py-2.5 border-b border-border/30 last:border-0 cursor-pointer group"
       style={{opacity:vis?1:0,transform:vis?'translateX(0)':'translateX(8px)',
@@ -331,10 +334,8 @@ function ApprovalRow({ item, index, onNavigate }) {
       onClick={onNavigate}>
       <div className="w-2 h-2 rounded-full shrink-0 animate-pulse" style={{background:color}}/>
       <div className="flex-1 min-w-0">
-        <div className="text-subtle text-xs font-medium truncate">
-          {item.codigosolicitud||item.codigo_solicitud||item.id}
-        </div>
-        <div className="text-muted text-[10px]">{item.accion}</div>
+        <div className="text-subtle text-xs font-medium truncate">{label}</div>
+        <div className="text-muted text-[10px]">{sub} · {Number(item.cantidad||0).toLocaleString('es-CO')} u.</div>
       </div>
       <ChevronRight size={11} className="text-muted group-hover:text-primary transition-colors"/>
     </div>
@@ -427,33 +428,33 @@ export default function DashboardPage() {
   const flowNodes = [
     {
       icon:Truck, label:'Recepciones', sublabel:'Entrada de mercancía',
-      color:'#58a6ff', count:safeApprovals.filter(a=>a.accion==='RECEPCION').length,
-      countLabel:'pendientes', alert:safeApprovals.filter(a=>a.accion==='RECEPCION').length>0,
-      pulse:false, href:'/recepciones', delay:100,
+      color:'#58a6ff', count:null,
+      countLabel:null, alert:false,
+      pulse:totalEntradas>0, href:'/recepciones', delay:100,
     },
     {
       icon:Warehouse, label:'Almacén', sublabel:'Stock disponible',
-      color:'#3fb950', count:lowStock.length,
+      color:'#3fb950', count:lowStock.length||null,
       countLabel:'bajo mínimo', alert:lowStock.length>0,
       pulse:lowStock.length>0, href:'/inventario', delay:180,
     },
     {
       icon:Factory, label:'Producción', sublabel:'Órdenes activas',
-      color:'#f0883e', count:prodActivas,
+      color:'#f0883e', count:prodActivas||null,
       countLabel:'en proceso', alert:false,
       pulse:prodActivas>0, href:'/produccion', delay:260,
     },
     {
       icon:Trash2, label:'Mermas', sublabel:'Pérdidas hoy',
-      color:'#f85149', count:wasteTotalHoy,
-      countLabel:'registros hoy', alert:wasteTotalHoy>0,
+      color:'#f85149', count:wasteTotalHoy||null,
+      countLabel:'hoy', alert:wasteTotalHoy>0,
       pulse:false, href:'/mermas', delay:340,
     },
     {
-      icon:ClipboardList, label:'Despachos', sublabel:'Salida de mercancía',
-      color:'#d2a8ff', count:safeApprovals.filter(a=>a.accion==='DESPACHO').length,
-      countLabel:'pendientes', alert:safeApprovals.filter(a=>a.accion==='DESPACHO').length>0,
-      pulse:false, href:'/despachos', delay:420,
+      icon:ClipboardList, label:'Aprobaciones', sublabel:'Ajustes pendientes SIIGO',
+      color:'#d2a8ff', count:safeApprovals.length||null,
+      countLabel:'pendientes', alert:safeApprovals.length>0,
+      pulse:safeApprovals.length>0, href:'/aprobaciones', delay:420,
     },
   ]
 
