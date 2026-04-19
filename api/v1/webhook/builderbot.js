@@ -679,11 +679,12 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
     );
 
     await db.execute(
-      `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?),
-       status = IF(qty_current - ? <= 0, 'DESPACHADO', status) WHERE lpn = ?`,
-      [cantDesp, cantDesp, payload.lpn]
-    ).catch(() => {});
-  }
+  `UPDATE lots
+   SET qty_current = GREATEST(0, qty_current - ?),
+       status = IF(GREATEST(0, qty_current - ?) <= 0, 'DESPACHADO', 'DISPONIBLE')
+   WHERE lpn = ?`,
+  [cantDesp, cantDesp, payload.lpn]
+).catch(() => {});
 
   const numeroDespacho = `DSP-${Date.now()}`;
 
