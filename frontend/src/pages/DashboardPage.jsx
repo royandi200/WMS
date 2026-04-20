@@ -506,36 +506,33 @@ export default function DashboardPage() {
       <div className="px-6 pb-8 space-y-5">
 
         {/* ── PLANO DE FLUJO ── */}
-        <div className="relative bg-surface border border-border rounded-xl p-5 overflow-hidden"
+        <div className="relative bg-surface border border-border rounded-xl overflow-visible"
           style={{animation:'fadeSlideUp .5s ease .1s both'}}>
 
-          {/* Scanline effect */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-xl opacity-[0.03]">
-            <div className="absolute w-full h-16 bg-gradient-to-b from-transparent via-foreground to-transparent"
-              style={{animation:'scanline 8s linear infinite'}}/>
+          {/* Header del plano */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border/50">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={13} className="text-primary"/>
+              <span className="text-subtle text-sm font-semibold">Plano de operaciones</span>
+              <span className="text-[9px] text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+                LIVE
+              </span>
+            </div>
+            <div className="flex items-center gap-1 text-[10px] text-muted">
+              <Wifi size={10} className="text-emerald-400"/>
+              <span>En tiempo real</span>
+            </div>
           </div>
 
-          {/* Grid dots background */}
-          <div className="absolute inset-0 rounded-xl opacity-[0.04]"
-            style={{backgroundImage:'radial-gradient(circle,#e6edf3 1px,transparent 1px)',backgroundSize:'24px 24px'}}/>
+          {/* Grid dots background — solo en el área de nodos */}
+          <div className="relative">
+            <div className="absolute inset-0 rounded-b-xl opacity-[0.04] pointer-events-none"
+              style={{backgroundImage:'radial-gradient(circle,#e6edf3 1px,transparent 1px)',backgroundSize:'24px 24px'}}/>
 
-          <div className="relative z-10">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={13} className="text-primary"/>
-                <span className="text-subtle text-sm font-semibold">Plano de operaciones</span>
-                <span className="text-[9px] text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider">
-                  LIVE
-                </span>
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-muted">
-                <Wifi size={10} className="text-emerald-400"/>
-                <span>En tiempo real</span>
-              </div>
-            </div>
+          <div className="relative z-10 px-5 pt-6 pb-4">
 
             {/* Flujo: nodos + conectores */}
-            <div className="flex items-center justify-between overflow-x-auto pb-2 -mx-1 px-1 gap-1 md:gap-0">
+            <div className="flex items-center justify-between overflow-x-auto pb-2 gap-1 md:gap-0">
               {flowNodes.map((node, i) => (
                 <div key={node.label} className="flex items-start" style={{flex:1}}>
                   <FlowNode {...node}/>
@@ -568,6 +565,7 @@ export default function DashboardPage() {
                 <span className="text-[10px] text-amber-400 font-semibold">{safeApprovals.length} aprobaciones pendientes</span>
               </>}
             </div>
+          </div>
           </div>
         </div>
 
