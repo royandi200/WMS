@@ -920,9 +920,10 @@ module.exports = async (req, res) => {
              VALUES (?,?,?,?,?)`,
             [recepcionId, p.id, lpnNov, cantMala, cantMala]
           );
+          const balanceNov = await getStockBalance(db, p.id, bodegaId);
           await logKardex(db, {
             product_id: p.id, user_id: user.id, action: 'INGRESO_NOVEDAD',
-            qty: cantMala, lot_id: lotIdNov,
+            qty: cantMala, lot_id: lotIdNov, balance_after: balanceNov,
             reference: `recepcion:${numero}`,
             notes: `Cantidad con novedad — lote ${lpnNov}`,
           });
@@ -1544,7 +1545,7 @@ module.exports = async (req, res) => {
         );
         const balance = await getStockBalance(db, p.id, bodegaId);
         await logKardex(db, {
-          product_id: p.id, user_id: user.id, action: 'AJUSTE_INVENTARIO',
+          product_id: p.id, user_id: user.id, action: 'AJUSTE_MANUAL',
           qty: diff, lot_id: lotIdAjuste, balance_after: balance,
           reference: params.id_lote ? `lote:${params.id_lote}` : null,
           notes: params.motivo || null,
@@ -1845,7 +1846,7 @@ module.exports = async (req, res) => {
           await logKardex(db, {
             product_id:    item.insumo_id,
             user_id:       user.id,
-            action:        'CONSUMO_PRODUCCION',
+            action:        'CONSUMO_MATERIAL',
             qty:           -cantInsumo,
             balance_after: balInsumo,
             reference:     `orden_produccion:${orden.codigo_orden}`,
