@@ -1466,21 +1466,37 @@ module.exports = async (req, res) => {
           if (!result.rows.length) {
             mensaje = `📊 *Stock: ${params.id_item}*\n  Sin stock disponible`;
           } else {
+            // [FIX 21] Lotes vencidos: marcar con 🚨 y bloque de alerta al final
+            const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+            const lotesVencidos = [];
             const lotesLines = result.rows
               .map(r => {
-                const disp  = parseFloat(r.disponible || 0);
-                const vence = r.vence ? ` (vence ${new Date(r.vence).toLocaleDateString('es-CO')})` : '';
-                const lpnCorto = r.lote && r.lote.length > 24 ? r.lote.slice(0, 24) + '…' : (r.lote || 'sin lote');
-                return `  • ${lpnCorto}: *${disp} und*${vence}`;
+                const disp = parseFloat(r.disponible || 0);
+                const lpnCorto = r.lote && r.lote.length > 26 ? r.lote.slice(0, 26) + '…' : (r.lote || 'sin lote');
+                let venceStr = '';
+                if (r.vence) {
+                  const fv = new Date(r.vence); fv.setHours(0, 0, 0, 0);
+                  if (fv < hoy) {
+                    venceStr = ` 🚨 *VENCIÓ ${fv.toLocaleDateString('es-CO')}*`;
+                    lotesVencidos.push(lpnCorto);
+                  } else {
+                    venceStr = ` (vence ${fv.toLocaleDateString('es-CO')})`;
+                  }
+                }
+                return `  • ${lpnCorto}: *${disp} und*${venceStr}`;
               })
               .join('\n');
+            const alertaVencidos = lotesVencidos.length
+              ? `\n\n⛔ *ALERTA — ${lotesVencidos.length} lote${lotesVencidos.length > 1 ? 's' : ''} VENCIDO${lotesVencidos.length > 1 ? 'S' : ''}:*\n${lotesVencidos.map(l => `  ❌ ${l}`).join('\n')}\n_Requiere disposición inmediata. Notifica al supervisor._`
+              : '';
             mensaje = [
               `📊 *Stock ${label}: ${params.id_item}*`,
               `Total disponible: *${totalDisp} und* (${result.rows.length} lote${result.rows.length > 1 ? 's' : ''})`,
               ``,
               `📦 *Lotes FIFO:*`,
-              lotesLines
-            ].join('\n');
+              lotesLines,
+              alertaVencidos
+            ].filter(Boolean).join('\n');
           }
         } else {
           const lines = result.rows.length
