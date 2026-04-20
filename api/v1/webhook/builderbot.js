@@ -774,9 +774,11 @@ module.exports = async (req, res) => {
 
     // [FIX 20] Bloquear números no registrados antes de cualquier operación
     if (!user) {
-      const msg = `⛔ Tu número no está registrado en el sistema.\nContacta al administrador para solicitar acceso.`;
-      await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'UNREGISTERED_PHONE' }, status: 'REJECTED' });
-      return res.status(403).json({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
+      const msg = `⛔ Aún no eres parte del equipo GummyBox.\nContacta con un administrador para solicitar acceso.`;
+      await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'UNREGISTERED_PHONE', mensaje: msg }, status: 'REJECTED' });
+      // Retornar 200 para que BuilderBot Cloud pueda renderizar el mensaje en WhatsApp.
+      // El 4xx impide que BBC lea el body y muestra el placeholder {mensaje} literal.
+      return res.status(200).json({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
     const bodegaId = await getDefaultBodega(db);
