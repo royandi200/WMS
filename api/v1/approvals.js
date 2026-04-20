@@ -27,7 +27,7 @@ module.exports = async (req, res) => {
        LEFT JOIN usuarios s ON s.id = a.solicitado_por
        LEFT JOIN usuarios p ON p.id = a.procesado_por
        ${where}
-       ORDER BY a.creado_en ${estado === 'PENDIENTE' ? 'ASC' : 'DESC'}
+       ORDER BY a.creado_en DESC
        LIMIT ?`,
       [...params, limit]
     );
