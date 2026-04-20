@@ -137,21 +137,20 @@ function FlowNode({ icon:Icon, label, sublabel, color, count, countLabel, alert,
       style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(10px)',
         transition:`opacity .4s ease ${delay}ms,transform .4s ease ${delay}ms`,
         minWidth:'64px'}}>
-      {/* Pulse ring si hay alerta */}
+      {/* Dot alerta */}
       {alert && (
-        <span className="absolute -top-1 -right-1 z-20 w-3 h-3 rounded-full"
-          style={{background:color,boxShadow:`0 0 0 0 ${color}`,
-            animation:'alertPing 1.5s ease-in-out infinite'}}/>
+        <span className="absolute top-0 right-0 z-20 w-2.5 h-2.5 rounded-full border-2 border-background"
+          style={{background:color,animation:'liveDot 1.5s ease-in-out infinite'}}/>
       )}
       {/* Nodo */}
-      <div className="relative w-12 h-12 md:w-16 md:h-16 rounded-2xl border-2 flex items-center justify-center transition-all duration-200 group-hover:scale-110"
+      <div className="relative w-12 h-12 md:w-16 md:h-16 rounded-2xl border-2 flex items-center justify-center transition-all duration-200 group-hover:scale-110 overflow-hidden"
         style={{
           background:`linear-gradient(135deg,${color}20,${color}08)`,
           borderColor:`${color}50`,
           boxShadow:`0 0 20px ${color}20`,
         }}>
         {pulse && (
-          <div className="absolute inset-0 rounded-2xl animate-ping opacity-20"
+          <div className="absolute inset-0 rounded-2xl animate-pulse opacity-30"
             style={{background:color}}/>
         )}
         <Icon size={18} className="md:hidden" style={{color}}/>
