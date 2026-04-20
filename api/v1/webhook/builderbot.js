@@ -722,13 +722,16 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       [cantDesp, payload.product_id, bodegaId, payload.lpn]
     );
 
+    // [FIX 27b] Dos queries separadas: primero actualizar qty, luego evaluar status
+    // con el valor ya actualizado. Un solo SET doble tiene ambigüedad en MySQL.
     await db.execute(
-  `UPDATE lots
-   SET qty_current = GREATEST(0, qty_current - ?),
-       status = IF(GREATEST(0, qty_current - ?) <= 0, 'DESPACHADO', 'DISPONIBLE')
-   WHERE lpn = ?`,
-  [cantDesp, cantDesp, payload.lpn]
-).catch(() => {});
+      `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?) WHERE lpn = ?`,
+      [cantDesp, payload.lpn]
+    ).catch(() => {});
+    await db.execute(
+      `UPDATE lots SET status = IF(qty_current <= 0, 'DESPACHADO', 'DISPONIBLE') WHERE lpn = ?`,
+      [payload.lpn]
+    ).catch(() => {});
   }
 
   // [FIX 27] balance_after = saldo del lote específico (no suma total del producto)
