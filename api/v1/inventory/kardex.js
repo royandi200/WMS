@@ -26,7 +26,13 @@ module.exports = async (req, res) => {
     const rows = await query(
       `SELECT
          k.id,
-         k.action,
+         CASE
+           WHEN COALESCE(k.action, '') <> '' THEN k.action
+           WHEN k.reference LIKE 'orden_produccion:%' AND k.qty < 0 THEN 'CONSUMO_MATERIAL'
+           WHEN k.reference LIKE 'recepcion:%' AND k.qty > 0 THEN 'INGRESO_RECEPCION'
+           WHEN k.reference LIKE 'despacho:%' AND k.qty < 0 THEN 'DESPACHO'
+           ELSE 'AJUSTE_MANUAL'
+         END AS action,
          k.qty,
          k.balance_after,
          k.reference,
