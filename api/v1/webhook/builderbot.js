@@ -279,10 +279,9 @@ async function getDefaultBodega(db) {
 }
 
 async function getOrCreateBotUser(db, phone) {
-  // FIX RBAC: Buscar primero por teléfono en usuarios reales (no bots).
-  // Cubre el caso donde un supervisor/admin responde desde WhatsApp:
-  // su `from` llega como número y debe resolverse con su rol real,
-  // NO crear un ghost Operario que bloquea el RBAC.
+  // [FIX 19] Buscar primero por teléfono en usuarios reales.
+  // Resuelve el caso del supervisor que responde desde WhatsApp
+  // con su número real en vez de con su email.
   const [realRows] = await db.execute(
     `SELECT u.*, r.nombre AS rol_nombre FROM usuarios u
      LEFT JOIN roles r ON r.id = u.rol_id
@@ -296,26 +295,11 @@ async function getOrCreateBotUser(db, phone) {
     return realRows[0];
   }
 
-  // Buscar ghost bot existente por email
-  const botEmail = `${phone}@wa.bot`;
-  const [rows] = await db.execute(
-    `SELECT u.*, r.nombre AS rol_nombre FROM usuarios u
-     LEFT JOIN roles r ON r.id = u.rol_id
-     WHERE u.email = ? LIMIT 1`, [botEmail]
-  );
-  if (rows.length) return rows[0];
-
-  // Crear ghost bot sólo si no hay usuario real ni bot previo
-  const [roles] = await db.execute(
-    `SELECT id FROM roles WHERE nombre = 'Operario' LIMIT 1`
-  );
-  const roleId = roles[0]?.id || 1;
-  const [ins] = await db.execute(
-    `INSERT INTO usuarios (nombre, email, rol_id, activo, password_hash) VALUES (?,?,?,1,'bot-user')`,
-    [`WA-${phone}`, botEmail, roleId]
-  );
-  console.log(`[getOrCreateBotUser] 🤖 Ghost bot creado para phone=${phone}`);
-  return { id: ins.insertId, nombre: `WA-${phone}`, email: botEmail, rol_nombre: 'Operario' };
+  // [FIX 20] Número no registrado → null. NO se crean ghost bots.
+  // Un número desconocido no tiene por qué acceder al sistema.
+  // El handler principal intercepta null y devuelve 403.
+  console.warn(`[getOrCreateBotUser] ⛔ Número no registrado: ${phone} — acceso denegado`);
+  return null;
 }
 
 async function nextRecepcionNumero(db) {
@@ -787,6 +771,14 @@ module.exports = async (req, res) => {
     await saveLog(db, { from, action, priority, payload: rawBody, response: null, status: 'RECEIVED' });
 
     const user     = await getOrCreateBotUser(db, from);
+
+    // [FIX 20] Bloquear números no registrados antes de cualquier operación
+    if (!user) {
+      const msg = `⛔ Tu número no está registrado en el sistema.\nContacta al administrador para solicitar acceso.`;
+      await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'UNREGISTERED_PHONE' }, status: 'REJECTED' });
+      return res.status(403).json({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
+    }
+
     const bodegaId = await getDefaultBodega(db);
 
     const rolRaw  = user.rol_nombre || '';
