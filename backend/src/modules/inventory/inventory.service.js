@@ -1,4 +1,4 @@
-const { Producto, Stock, Movimiento, Usuario, sequelize } = require('../../models');
+const { Producto, Stock, Movimiento, Usuario, sequelize, Kardex, Lot, Product, User } = require('../../models');
 const { Op } = require('sequelize');
 const { getStockSummary } = require('../../utils/inventoryHelper');
 const AppError = require('../../utils/AppError');
@@ -39,31 +39,46 @@ exports.lotDetail = async (lote) => {
   return stock;
 };
 
-// Movimientos con filtros y paginación
-exports.kardexList = async ({ sku, producto_id, stock_id, tipo, page = 1, limit = 50 }) => {
+// Movimientos con filtros y paginación — lee tabla Kardex (nueva arquitectura)
+exports.kardexList = async ({ sku, producto_id, page = 1, limit = 30 }) => {
   const where = {};
-  if (producto_id) where.producto_id = producto_id;
-  if (stock_id)    where.lote_id = stock_id;
-  if (tipo)        where.tipo = tipo;
+  if (producto_id) where.product_id = producto_id;
 
   if (sku) {
-    const p = await Producto.findOne({ where: { siigo_code: sku } });
-    if (p) where.producto_id = p.id;
+    const p = await Product.findOne({ where: { siigo_code: sku } });
+    if (p) where.product_id = p.id;
   }
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
-  const { count, rows } = await Movimiento.findAndCountAll({
+  const { count, rows } = await Kardex.findAndCountAll({
     where,
     include: [
-      { model: Producto, as: 'producto', attributes: ['siigo_code','nombre'] },
-      { model: Usuario,  as: 'usuario',  attributes: ['nombre','email'] }
+      { model: Product, as: 'producto', attributes: ['siigo_code', 'nombre'] },
+      { model: Lot,     as: 'lot',      attributes: ['lpn'] },
+      { model: User,    as: 'usuario',  attributes: ['nombre', 'email'] },
     ],
-    order: [['creado_en', 'DESC']],
+    order: [['created_at', 'DESC']],
     limit: parseInt(limit),
-    offset
+    offset,
   });
 
-  return { total: count, page: parseInt(page), limit: parseInt(limit), rows };
+  return {
+    total: count,
+    page:  parseInt(page),
+    limit: parseInt(limit),
+    rows: rows.map(r => ({
+      created_at:    r.created_at,
+      action:        r.action,
+      sku:           r.producto?.siigo_code || null,
+      product_name:  r.producto?.nombre     || null,
+      lot_lpn:       r.lot?.lpn             || null,
+      qty:           r.qty,
+      balance_after: r.balance_after,
+      reference:     r.reference,
+      notes:         r.notes,
+      aprobado_por:  r.usuario?.nombre      || null,
+    })),
+  };
 };
 
 // Productos por debajo del stock mínimo
