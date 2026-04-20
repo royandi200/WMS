@@ -2,36 +2,47 @@ import { useEffect, useState } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
 
 const MOV_COLOR = {
-  ENTRADA:  'text-green-400',
-  SALIDA:   'text-danger',
-  AJUSTE:   'text-yellow-400',
-  MERMA:    'text-orange-400',
+  ENTRADA: 'text-green-400',
+  SALIDA: 'text-danger',
+  AJUSTE: 'text-yellow-400',
+  MERMA: 'text-orange-400',
   TRASLADO: 'text-blue-400',
+  DESPACHO: 'text-danger',
+  INGRESO_RECEPCION: 'text-green-400',
+  CIERRE_PRODUCCION: 'text-green-400',
+  CONSUMO_MATERIAL: 'text-danger',
+  MERMA_PROCESO: 'text-orange-400',
+  MERMA_BODEGA: 'text-orange-400',
+  AJUSTE_MANUAL: 'text-yellow-400',
+  DEVOLUCION: 'text-green-400',
 }
 
-// Normaliza una fila de v_kardex a campos seguros
-// v_kardex puede exponer: fecha, tipo, cantidad, saldo, referencia, producto_id, lote_id
-// Tambien soporta aliases en ingles por si cambia la vista
+const NEGATIVE_TYPES = new Set([
+  'SALIDA',
+  'MERMA',
+  'DESPACHO',
+  'CONSUMO_MATERIAL',
+  'MERMA_PROCESO',
+  'MERMA_BODEGA',
+])
+
 const norm = (r) => ({
-  fecha:      r.fecha      ?? r.created_at ?? r.creado_en ?? '',
-  tipo:       r.tipo       ?? r.type       ?? '',
-  producto:   r.producto   ?? r.product_sku ?? r.sku ?? r.product_id ?? r.producto_id ?? '—',
-  lote:       r.lote       ?? r.lote_id    ?? r.lot_id ?? '—',
-  cantidad:   r.cantidad   ?? r.qty        ?? r.quantity ?? 0,
-  saldo:      r.saldo      ?? r.balance    ?? '—',
-  referencia: r.referencia ?? r.reference  ?? r.ref ?? '—',
+  fecha: r.fecha ?? r.created_at ?? r.creado_en ?? '',
+  tipo: r.tipo ?? r.type ?? r.action ?? '',
+  producto: r.producto ?? r.product_name ?? r.product_sku ?? r.sku ?? r.product_id ?? r.producto_id ?? '—',
+  lote: r.lote ?? r.lot_lpn ?? r.lote_id ?? r.lot_id ?? '—',
+  cantidad: r.cantidad ?? r.qty ?? r.quantity ?? 0,
+  saldo: r.saldo ?? r.balance_after ?? r.balance ?? '—',
+  referencia: r.referencia ?? r.reference ?? r.ref ?? '—',
 })
 
 export default function KardexPage() {
   const [skuInput, setSkuInput] = useState('')
-  const [page, setPage]         = useState(1)
+  const [page, setPage] = useState(1)
   const { kardex, kardexMeta, loading, error, fetchKardex } = useInventoryStore()
 
-  // El backend filtra por producto_id (UUID), no por sku.
-  // Si el usuario escribe un SKU se manda como producto_id y el backend lo buscara;
-  // si la vista acepta texto parcial funcionara, si no simplemente no filtrara.
   const load = (p = 1) => fetchKardex({
-    ...(skuInput.trim() ? { producto_id: skuInput.trim() } : {}),
+    ...(skuInput.trim() ? { sku: skuInput.trim() } : {}),
     page: p,
     limit: 30,
   })
@@ -48,11 +59,11 @@ export default function KardexPage() {
 
       <form onSubmit={handleSearch} className="flex gap-2 mb-6 max-w-md">
         <div className="flex-1">
-          <label className="block text-xs text-muted mb-1">Filtrar por SKU / ID producto (opcional)</label>
+          <label className="block text-xs text-muted mb-1">Filtrar por SKU (opcional)</label>
           <input
             value={skuInput}
             onChange={(e) => setSkuInput(e.target.value)}
-            placeholder="Ej: RM-TAP-MED"
+            placeholder="Ej: EM-BOT-500"
             className="input-field"
           />
         </div>
@@ -94,25 +105,28 @@ export default function KardexPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-white/[0.02]">
-                    <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">
-                      {String(r.fecha).slice(0, 16).replace('T', ' ')}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-semibold ${MOV_COLOR[r.tipo] || 'text-muted'}`}>{r.tipo}</span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-primary">{r.producto}</td>
-                    <td className="px-4 py-3 text-muted text-xs">{String(r.lote).slice(0, 8)}</td>
-                    <td className={`px-4 py-3 tabular-nums font-semibold ${
-                      r.tipo === 'SALIDA' || r.tipo === 'MERMA' ? 'text-danger' : 'text-green-400'
-                    }`}>
-                      {r.tipo === 'SALIDA' || r.tipo === 'MERMA' ? `-${r.cantidad}` : `+${r.cantidad}`}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-foreground">{r.saldo}</td>
-                    <td className="px-4 py-3 text-muted text-xs">{r.referencia}</td>
-                  </tr>
-                ))}
+                {rows.map((r, i) => {
+                  const isNegative = NEGATIVE_TYPES.has(String(r.tipo || '').toUpperCase()) || Number(r.cantidad) < 0
+                  const cantidadAbs = Math.abs(Number(r.cantidad || 0))
+
+                  return (
+                    <tr key={i} className="border-b border-border/50 hover:bg-white/[0.02]">
+                      <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">
+                        {String(r.fecha).slice(0, 16).replace('T', ' ')}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-semibold ${MOV_COLOR[r.tipo] || 'text-muted'}`}>{r.tipo || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-primary">{r.producto}</td>
+                      <td className="px-4 py-3 text-muted text-xs">{r.lote && r.lote !== '—' ? String(r.lote).slice(0, 24) : '—'}</td>
+                      <td className={`px-4 py-3 tabular-nums font-semibold ${isNegative ? 'text-danger' : 'text-green-400'}`}>
+                        {`${isNegative ? '-' : '+'}${cantidadAbs}`}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums text-foreground">{r.saldo}</td>
+                      <td className="px-4 py-3 text-muted text-xs">{r.referencia}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
