@@ -1,4 +1,4 @@
-const { sequelize, Lot, Producto, Despacho, DespachoItem } = require('../../models');
+const { sequelize, Lot, Product, Despacho, DespachoItem } = require('../../models');
 const { logKardex } = require('../../utils/kardexHelper');
 const { generateLPN } = require('../../utils/generateCodes');
 const AppError = require('../../utils/AppError');
@@ -23,7 +23,7 @@ exports.dispatch = async (
 
     // 1. Bloquear y validar lote
     const lot = await Lot.findByPk(lot_id, {
-      include: [{ model: Producto, as: 'producto' }],
+      include: [{ model: Product, as: 'producto' }],
       lock: t.LOCK.UPDATE,
       transaction: t,
     });

@@ -1,4 +1,4 @@
-const { sequelize, Producto, Lot, Recepcion } = require('../../models');
+const { sequelize, Product, Lot, Recepcion } = require('../../models');
 const { generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
@@ -10,7 +10,7 @@ exports.receive = async (
   { producto_id, qty_total, qty_damaged = 0, proveedor, fecha_vencimiento, notas },
   usuario
 ) => {
-  const producto = await Producto.findByPk(producto_id);
+  const producto = await Product.findByPk(producto_id);
   if (!producto) throw new AppError('Producto no encontrado', 404);
 
   const qty_good = qty_total - qty_damaged;
@@ -39,7 +39,7 @@ exports.receive = async (
         id:          uuidv4(),
         lpn,
         product_id:  producto_id,
-        bodega_id:   BODEGA.PPAL,          // FIX: campo requerido
+        bodega_id:   BODEGA.PPAL,
         qty_initial: qty_good,
         qty_current: qty_good,
         supplier:    proveedor            || null,
@@ -47,7 +47,7 @@ exports.receive = async (
         origin:      'RECEPCION',
         status:      'DISPONIBLE',
         received_by: usuario.id,
-        notes:       notas                || null,  // FIX: era 'notas'
+        notes:       notas                || null,
       }, { transaction: t });
 
       await logKardex({
@@ -62,7 +62,6 @@ exports.receive = async (
         notas:            `Recepción de ${proveedor || 'proveedor'}`,
       }, t);
 
-      // FIX: qty_current en vez de qty (alineado con builderbot.service)
       result.lots.push({ lpn, status: 'DISPONIBLE', qty_current: qty_good });
     }
 
@@ -74,7 +73,7 @@ exports.receive = async (
         id:          uuidv4(),
         lpn:         lpnNov,
         product_id:  producto_id,
-        bodega_id:   BODEGA.CUARENTENA,    // FIX: campo requerido
+        bodega_id:   BODEGA.CUARENTENA,
         qty_initial: qty_damaged,
         qty_current: qty_damaged,
         supplier:    proveedor            || null,
