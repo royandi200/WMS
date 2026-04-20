@@ -1232,43 +1232,100 @@ module.exports = async (req, res) => {
 
       // ── 7. GESTION_DEVOLUCION ─────────────────────────────────
       case 'GESTION_DEVOLUCION': {
-        const p           = await findProductBySku(db, params.id_item);
-        const estadoNorm  = normalizarEstadoDevolucion(params.estado);
-        const lpnDev      = `L-DEV-${p.siigo_code}-${Date.now()}`;
-        const numero      = await nextRecepcionNumero(db);
-        const [recIns] = await db.execute(
-          `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
-           VALUES (?,?,?,'completada',?,?)`,
-          [numero, bodegaId, params.cliente_origen || null, user.id,
-           `Devolución - ${estadoNorm}`]
-        );
-        await db.execute(
-          `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
-           VALUES (?,?,?,?,?)`,
-          [recIns.insertId, p.id, lpnDev, params.cantidad, params.cantidad]
-        );
-        await upsertStock(db, { producto_id: p.id, bodega_id: bodegaId, lote: lpnDev, cantidad: params.cantidad });
-        const lotIdDev = await createLot(db, {
-          lpn: lpnDev, product_id: p.id, bodega_id: bodegaId,
-          qty: params.cantidad, origin: 'DEVOLUCION', received_by: user.id,
-          notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${estadoNorm}`,
-        });
-        const balance = await getStockBalance(db, p.id, bodegaId);
-        await logKardex(db, {
-          product_id: p.id, user_id: user.id, action: 'DEVOLUCION',
-          qty: params.cantidad, lot_id: lotIdDev, balance_after: balance,
-          reference: `recepcion:${numero}`,
-          notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${estadoNorm}`,
-        });
-        mensaje = [
-          `🔄 *Devolución registrada*`,
-          `Producto: ${params.id_item}`,
-          `Cantidad: ${params.cantidad}`,
-          `Estado: ${estadoNorm}`,
-          `Lote: ${lpnDev}`
-        ].join('\n');
-        break;
-      }
+  const p          = await findProductBySku(db, params.id_item);
+  const estadoNorm = normalizarEstadoDevolucion(params.estado);
+  const lpnDev     = `L-DEV-${p.siigo_code}-${Date.now()}`;
+  const numeroRec  = await nextRecepcionNumero(db);
+  const numeroDev  = `DEV-${Date.now()}`;
+
+  const [recIns] = await db.execute(
+    `INSERT INTO recepciones (numero, bodega_id, proveedor_nombre, estado, usuario_id, observaciones)
+     VALUES (?,?,?,'completada',?,?)`,
+    [
+      numeroRec,
+      bodegaId,
+      params.cliente_origen || null,
+      user.id,
+      `Devolución - ${estadoNorm}`
+    ]
+  );
+
+  await db.execute(
+    `INSERT INTO recepcion_items (recepcion_id, producto_id, lote, cantidad_esp, cantidad_rec)
+     VALUES (?,?,?,?,?)`,
+    [recIns.insertId, p.id, lpnDev, params.cantidad, params.cantidad]
+  );
+
+  const lotIdDev = await createLot(db, {
+    lpn: lpnDev,
+    product_id: p.id,
+    bodega_id: bodegaId,
+    qty: params.cantidad,
+    origin: 'DEVOLUCION',
+    received_by: user.id,
+    notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${estadoNorm}`,
+  });
+
+  // Si la devolución queda en cuarentena, NO suma stock disponible
+  if (estadoNorm === 'CUARENTENA') {
+    await db.execute(
+      `UPDATE lots
+       SET status = 'CUARENTENA'
+       WHERE id = ?`,
+      [lotIdDev]
+    ).catch(() => {});
+  } else {
+    await upsertStock(db, {
+      producto_id: p.id,
+      bodega_id: bodegaId,
+      lote: lpnDev,
+      cantidad: params.cantidad
+    });
+  }
+
+  await db.execute(
+    `INSERT INTO devoluciones
+       (numero, producto_id, lote, cliente_origen, cantidad, estado, recepcion_id, usuario_id, observaciones, creado_en)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      numeroDev,
+      p.id,
+      lpnDev,
+      params.cliente_origen || null,
+      params.cantidad,
+      estadoNorm,
+      recIns.insertId,
+      user.id,
+      `Registrada desde WhatsApp`
+    ]
+  );
+
+  const balance = await getStockBalance(db, p.id, bodegaId);
+
+  await logKardex(db, {
+    product_id: p.id,
+    user_id: user.id,
+    action: 'DEVOLUCION',
+    qty: params.cantidad,
+    lot_id: lotIdDev,
+    balance_after: balance,
+    reference: `recepcion:${numeroRec}`,
+    notes: `Cliente: ${params.cliente_origen || 'N/A'} | Estado: ${estadoNorm} | Devolución: ${numeroDev}`,
+  });
+
+  mensaje = [
+    `🔄 *Devolución registrada*`,
+    `Nro devolución: ${numeroDev}`,
+    `Producto: ${params.id_item}`,
+    `Cantidad: ${params.cantidad}`,
+    `Estado: ${estadoNorm}`,
+    `Lote: ${lpnDev}`,
+    estadoNorm === 'CUARENTENA'
+      ? `Destino: Cuarentena (no suma stock disponible)`
+      : `Destino: Stock disponible`
+  ].join('\n');
+  break;
+}
 
       // ── 8. APROBAR_SOLICITUD ──────────────────────────────────
       case 'APROBAR_SOLICITUD': {
