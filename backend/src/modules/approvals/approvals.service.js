@@ -1,11 +1,11 @@
-const { AprobacionSolicitud, Usuario } = require('../../models');
+const { Op } = require('sequelize');
+const { ApprovalQueue, User } = require('../../models');
 const AppError = require('../../utils/AppError');
 const receptionService  = require('../reception/reception.service');
 const productionService = require('../production/production.service');
 const dispatchService   = require('../dispatch/dispatch.service');
 const wasteService      = require('../waste/waste.service');
 const returnsService    = require('../returns/returns.service');
-const builderBotService = require('../webhook/builderbot.service');
 
 const ACTION_HANDLERS = {
   INGRESO_RECEPCION:           (p, u) => receptionService.receive(p, u),
@@ -17,14 +17,57 @@ const ACTION_HANDLERS = {
   GESTION_DEVOLUCION:          (p, u) => returnsService.processReturn(p, u)
 };
 
-exports.list = () => AprobacionSolicitud.findAll({
-  where: { estado: 'PENDIENTE' },
-  include: [{ model: Usuario, as: 'solicitante', attributes: ['nombre','email'] }],
-  order: [['creado_en','ASC']]
-});
+function buildWhere(estado) {
+  const value = String(estado || 'PENDIENTE').trim().toUpperCase();
+  if (value === 'ALL' || value === 'TODOS') return {};
+  if (value === 'HISTORIAL') {
+    return { estado: { [Op.in]: ['APROBADO', 'RECHAZADO', 'EXPIRADO'] } };
+  }
+  return { estado: value };
+}
+
+function serializeSolicitud(solicitud) {
+  const payload = solicitud.payload || {};
+  return {
+    id: solicitud.id,
+    codigo_solicitud: solicitud.codigo_solicitud,
+    tipo: solicitud.accion,
+    accion: solicitud.accion,
+    estado: solicitud.estado,
+    cantidad: payload.cantidad ?? payload.cantidad_real ?? payload.cantidad_planificada ?? payload.cantidad_deseada ?? null,
+    lote: payload.id_lote ?? payload.lote ?? payload.lot ?? payload.lote_usado ?? payload.lote_sugerido ?? null,
+    creado_en: solicitud.creado_en,
+    procesado_en: solicitud.procesado_en,
+    motivo_rechazo: solicitud.motivo_rechazo,
+    producto_nombre: payload.producto_nombre ?? payload.producto ?? payload.id_producto_final ?? payload.id_item ?? payload.sku ?? null,
+    siigo_code: payload.siigo_code ?? payload.sku ?? null,
+    id_item: payload.id_item ?? payload.id_producto_final ?? null,
+    id_orden: payload.id_orden ?? null,
+    bodega_orig_nombre: payload.bodega_origen ?? payload.bodega_orig_nombre ?? null,
+    bodega_dest_nombre: payload.bodega_destino ?? payload.bodega_dest_nombre ?? null,
+    usuario_nombre: solicitud.solicitante?.nombre ?? null,
+    procesado_por_nombre: solicitud.procesador?.nombre ?? null,
+    payload,
+  };
+}
+
+exports.list = async ({ estado = 'PENDIENTE', limit = 50 } = {}) => {
+  const parsedLimit = Number(limit);
+  const rows = await ApprovalQueue.findAll({
+    where: buildWhere(estado),
+    include: [
+      { model: User, as: 'solicitante', attributes: ['nombre', 'email'] },
+      { model: User, as: 'procesador', attributes: ['nombre', 'email'] },
+    ],
+    order: [['creado_en', String(estado || 'PENDIENTE').toUpperCase() === 'PENDIENTE' ? 'ASC' : 'DESC']],
+    ...(Number.isFinite(parsedLimit) && parsedLimit > 0 ? { limit: parsedLimit } : {}),
+  });
+
+  return rows.map(serializeSolicitud);
+};
 
 exports.approve = async (codigo_solicitud, aprobador) => {
-  const solicitud = await AprobacionSolicitud.findOne({ where: { codigo_solicitud, estado: 'PENDIENTE' } });
+  const solicitud = await ApprovalQueue.findOne({ where: { codigo_solicitud, estado: 'PENDIENTE' } });
   if (!solicitud) throw new AppError(`Solicitud ${codigo_solicitud} no encontrada o ya procesada`, 404);
 
   const handler = ACTION_HANDLERS[solicitud.accion];
@@ -33,44 +76,27 @@ exports.approve = async (codigo_solicitud, aprobador) => {
   const result = await handler(solicitud.payload, aprobador);
 
   await solicitud.update({
-    estado:       'APROBADO',
+    estado: 'APROBADO',
     procesado_por: aprobador.id,
-    procesado_en:  new Date()
+    procesado_en: new Date()
   });
-
-  const solicitante = await Usuario.findByPk(solicitud.solicitado_por);
-  if (solicitante?.email) {
-    builderBotService.sendMessage(
-      solicitante.email,
-      `✅ *Solicitud ${codigo_solicitud} Aprobada*\nAcción: ${solicitud.accion.replace(/_/g,' ')}\nAprobada por: ${aprobador.nombre}`
-    ).catch(() => {});
-  }
 
   return { codigo_solicitud, accion: solicitud.accion, result };
 };
 
 exports.reject = async ({ codigo_solicitud, motivo }, aprobador) => {
-  const solicitud = await AprobacionSolicitud.findOne({ where: { codigo_solicitud, estado: 'PENDIENTE' } });
+  const solicitud = await ApprovalQueue.findOne({ where: { codigo_solicitud, estado: 'PENDIENTE' } });
   if (!solicitud) throw new AppError(`Solicitud ${codigo_solicitud} no encontrada o ya procesada`, 404);
 
   await solicitud.update({
-    estado:           'RECHAZADO',
-    procesado_por:    aprobador.id,
-    procesado_en:     new Date(),
-    motivo_rechazo:   motivo
+    estado: 'RECHAZADO',
+    procesado_por: aprobador.id,
+    procesado_en: new Date(),
+    motivo_rechazo: motivo
   });
-
-  const solicitante = await Usuario.findByPk(solicitud.solicitado_por);
-  if (solicitante?.email) {
-    builderBotService.sendMessage(
-      solicitante.email,
-      `❌ *Solicitud ${codigo_solicitud} Rechazada*\n${motivo ? 'Motivo: ' + motivo : 'Sin motivo especificado'}`
-    ).catch(() => {});
-  }
 
   return { codigo_solicitud, estado: 'RECHAZADO' };
 };
 
-// Alias para compatibilidad con builderbot que usa request_code
-exports.approveByCode  = (rc, u) => exports.approve(rc, u);
-exports.rejectByCode   = (d, u)  => exports.reject({ codigo_solicitud: d.request_code, motivo: d.reason }, u);
+exports.approveByCode = (rc, u) => exports.approve(rc, u);
+exports.rejectByCode = (d, u) => exports.reject({ codigo_solicitud: d.request_code, motivo: d.reason }, u);
