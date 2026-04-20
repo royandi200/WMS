@@ -262,8 +262,8 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Plano: flujo horizontal ── */}
-      <div className="flex items-stretch gap-0 overflow-x-auto pb-1"
-        style={{ minHeight: '220px' }}>
+      <div className="flex items-stretch gap-0 overflow-x-auto"
+        style={{ minHeight: '280px' }}>
         {zones.map((zone, i) => (
           <div key={zone.title} className="flex items-center gap-0 min-w-0" style={{ flex: '1 1 0' }}>
             <Zone {...zone} style={{ flex: 1, minWidth: '140px' }} />
