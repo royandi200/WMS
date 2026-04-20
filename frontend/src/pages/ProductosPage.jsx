@@ -16,6 +16,12 @@ const EMPTY_FORM = {
 
 const TABS = ['Catálogo', 'Nuevo producto']
 
+const SEMAFORO_STYLE = {
+  OK:       'text-green-400 bg-green-400/10 border-green-400/20',
+  ATENCION: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20',
+  CRITICO:  'text-red-400 bg-red-400/10 border-red-400/20',
+}
+
 export default function ProductosPage() {
   const [tab,      setTab]      = useState(0)
   const [search,   setSearch]   = useState('')
@@ -25,7 +31,7 @@ export default function ProductosPage() {
   const [form,     setForm]     = useState(EMPTY_FORM)
   const [toast,    setToast]    = useState(null)
 
-  const { list, loading, error, filters, fetchList, create, update, toggle, clearError } = useProductsStore()
+  const { list, loading, error, fetchList, create, update, toggle, clearError } = useProductsStore()
 
   useEffect(() => { fetchList() }, [])
 
@@ -138,49 +144,88 @@ export default function ProductosPage() {
                   p.active ? 'border-border' : 'border-border/40 opacity-60'
                 }`}>
                   <div className="flex items-center gap-3 px-4 py-3">
-                    <button onClick={() => setExpanded(expanded === p.id ? null : p.id)}
-                      className="text-muted hover:text-foreground transition-colors text-xs w-4">
+                    <button
+                      onClick={() => setExpanded(expanded === p.id ? null : p.id)}
+                      className="text-muted hover:text-foreground transition-colors text-xs w-4"
+                    >
                       {expanded === p.id ? '▲' : '▼'}
                     </button>
+
                     <span className={`hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
                       TYPE_COLOR[p.type] || 'text-muted bg-white/5'
-                    }`}>{p.type?.replace('_', ' ')}</span>
+                    }`}>
+                      {p.type?.replace('_', ' ')}
+                    </span>
+
                     <div className="flex-1 min-w-0">
                       <span className="font-mono text-sm text-primary font-semibold">{p.sku}</span>
                       <span className="text-foreground text-sm ml-2 truncate">{p.name}</span>
                     </div>
-                    <div className="hidden md:flex items-center gap-4 text-xs text-muted tabular-nums">
-                      <span>Mín <strong className="text-foreground">{p.min_stock}</strong></span>
-                      <span>Máx <strong className="text-foreground">{p.max_stock}</strong></span>
-                      <span>U. <strong className="text-foreground">{p.unit}</strong></span>
+
+                    <div className="hidden xl:grid grid-cols-4 gap-4 text-xs text-muted tabular-nums min-w-[420px]">
+                      <span>Disp <strong className="text-foreground">{p.disponible ?? 0}</strong></span>
+                      <span>Cuar <strong className="text-foreground">{p.cuarentena ?? 0}</strong></span>
+                      <span>Res <strong className="text-foreground">{p.reservado ?? 0}</strong></span>
+                      <span>Total <strong className="text-foreground">{p.total_fisico ?? 0}</strong></span>
                     </div>
+
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
+                      SEMAFORO_STYLE[p.semaforo] || 'text-muted bg-white/5 border-border'
+                    }`}>
+                      {p.semaforo || 'OK'}
+                    </span>
+
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                       p.active ? 'text-green-400 bg-green-400/10' : 'text-muted bg-white/5'
-                    }`}>{p.active ? 'Activo' : 'Inactivo'}</span>
+                    }`}>
+                      {p.active ? 'Activo' : 'Inactivo'}
+                    </span>
+
                     <div className="flex gap-1">
-                      <button onClick={() => startEdit(p)}
-                        className="text-xs px-2 py-1 border border-border rounded hover:border-primary/50 text-muted hover:text-foreground transition-colors">
+                      <button
+                        onClick={() => startEdit(p)}
+                        className="text-xs px-2 py-1 border border-border rounded hover:border-primary/50 text-muted hover:text-foreground transition-colors"
+                      >
                         Editar
                       </button>
-                      <button onClick={() => handleToggle(p)}
+                      <button
+                        onClick={() => handleToggle(p)}
                         className={`text-xs px-2 py-1 border rounded transition-colors ${
                           p.active
                             ? 'border-danger/30 text-danger hover:bg-danger/10'
                             : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
-                        }`}>
+                        }`}
+                      >
                         {p.active ? 'Inactivar' : 'Activar'}
                       </button>
                     </div>
                   </div>
+
                   {expanded === p.id && (
-                    <div className="border-t border-border/50 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                      <Detail label="ID" value={p.id} mono />
-                      <Detail label="Descripción" value={p.description || '—'} />
-                      <Detail label="SIIGO ID" value={p.siigo_id || '—'} />
-                      <Detail label="SIIGO Code" value={p.siigo_code || '—'} />
-                      <Detail label="SIIGO Activo" value={p.siigo_active ? 'Sí' : 'No'} />
-                      <Detail label="Últ. sync" value={p.siigo_sync_at?.slice(0,10) || '—'} />
-                      <Detail label="Creado" value={p.createdAt?.slice(0,10) || p.created_at?.slice(0,10) || '—'} />
+                    <div className="border-t border-border/50 px-4 py-3 space-y-4 text-xs">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <Detail label="Disponible" value={p.disponible ?? 0} />
+                        <Detail label="Cuarentena" value={p.cuarentena ?? 0} />
+                        <Detail label="Reservado" value={p.reservado ?? 0} />
+                        <Detail label="Total físico" value={p.total_fisico ?? 0} />
+                        <Detail label="Lotes activos" value={p.lotes_activos ?? 0} />
+                        <Detail label="Próx. vencimiento" value={p.proximo_vencimiento || '—'} />
+                        <Detail label="Últ. movimiento" value={p.ultimo_movimiento || '—'} />
+                        <Detail label="Semáforo" value={p.semaforo || 'OK'} />
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <Detail label="ID" value={p.id} mono />
+                        <Detail label="Descripción" value={p.description || '—'} />
+                        <Detail label="SIIGO ID" value={p.siigo_id || '—'} />
+                        <Detail label="SIIGO Code" value={p.siigo_code || '—'} />
+                        <Detail label="SIIGO Activo" value={p.siigo_active ? 'Sí' : 'No'} />
+                        <Detail label="Últ. sync" value={p.siigo_sync_at?.slice(0,10) || '—'} />
+                        <Detail label="Creado" value={p.createdAt?.slice(0,10) || p.created_at?.slice(0,10) || '—'} />
+                        <Detail label="Unidad" value={p.unit || 'und'} />
+                        <Detail label="Stock mínimo" value={p.min_stock ?? 0} />
+                        <Detail label="Stock máximo" value={p.max_stock ?? 0} />
+                      </div>
                     </div>
                   )}
                 </div>
