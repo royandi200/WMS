@@ -135,7 +135,8 @@ function FlowNode({ icon:Icon, label, sublabel, color, count, countLabel, alert,
     <button onClick={()=>navigate(href)}
       className="relative flex flex-col items-center gap-2 group"
       style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(10px)',
-        transition:`opacity .4s ease ${delay}ms,transform .4s ease ${delay}ms`}}>
+        transition:`opacity .4s ease ${delay}ms,transform .4s ease ${delay}ms`,
+        minWidth:'64px'}}>
       {/* Pulse ring si hay alerta */}
       {alert && (
         <span className="absolute -top-1 -right-1 z-20 w-3 h-3 rounded-full"
@@ -459,7 +460,7 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div>
       <style>{`
         @keyframes fadeSlideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
         @keyframes alertPing   { 0%,100%{box-shadow:0 0 0 0 currentColor} 50%{box-shadow:0 0 0 6px transparent} }
@@ -525,7 +526,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Área de nodos */}
-          <div className="px-5 pt-8 pb-4">
+          <div className="px-5 py-6" style={{minHeight:'140px'}}>
 
             {/* Flujo: nodos + conectores */}
             <div className="flex items-center justify-between overflow-x-auto pb-2 gap-1 md:gap-0">
