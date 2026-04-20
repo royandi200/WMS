@@ -54,7 +54,7 @@ export default function ProductosPage() {
   })
 
   const handleExpand = async (id) => {
-    if (expanded === id) {
+    if (Number(expanded) === Number(id)) {
       setExpanded(null)
       return
     }
@@ -157,7 +157,8 @@ export default function ProductosPage() {
           {!loading && filtered.length > 0 && (
             <div className="space-y-2">
               {filtered.map((p) => {
-                const lotes = expanded === p.id && detail?.id === p.id ? (detail.lotes || []) : []
+                const showDetail = Number(expanded) === Number(p.id) && Number(detail?.id) === Number(p.id)
+                const lotes = showDetail ? (detail?.lotes || []) : []
                 return (
                   <div key={p.id} className={`bg-surface border rounded-lg overflow-hidden transition-colors ${
                     p.active ? 'border-border' : 'border-border/40 opacity-60'
@@ -167,7 +168,7 @@ export default function ProductosPage() {
                         onClick={() => handleExpand(p.id)}
                         className="text-muted hover:text-foreground transition-colors text-xs w-4"
                       >
-                        {expanded === p.id ? '▲' : '▼'}
+                        {Number(expanded) === Number(p.id) ? '▲' : '▼'}
                       </button>
 
                       <span className={`hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
@@ -220,7 +221,7 @@ export default function ProductosPage() {
                       </div>
                     </div>
 
-                    {expanded === p.id && (
+                    {Number(expanded) === Number(p.id) && (
                       <div className="border-t border-border/50 px-4 py-3 space-y-4 text-xs">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <Detail label="Disponible" value={p.disponible ?? 0} />
@@ -248,7 +249,9 @@ export default function ProductosPage() {
 
                         <div>
                           <p className="text-sm font-semibold text-foreground mb-2">Detalle por lote</p>
-                          {lotes.length === 0 ? (
+                          {!showDetail ? (
+                            <p className="text-muted">Cargando detalle…</p>
+                          ) : lotes.length === 0 ? (
                             <p className="text-muted">Sin lotes registrados para este producto.</p>
                           ) : (
                             <div className="overflow-x-auto rounded-lg border border-border/60">
