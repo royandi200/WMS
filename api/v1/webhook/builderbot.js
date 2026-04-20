@@ -725,11 +725,17 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
     await db.execute(
   `UPDATE lots
    SET qty_current = GREATEST(0, qty_current - ?),
-       status = IF(qty_current <= 0, 'DESPACHADO', 'DISPONIBLE')
+       status = IF(GREATEST(0, qty_current - ?) <= 0, 'DESPACHADO', 'DISPONIBLE')
    WHERE lpn = ?`,
-  [cantDesp, payload.lpn]
+  [cantDesp, cantDesp, payload.lpn]
 ).catch(() => {});
   }
+
+  // [FIX 27] balance_after = saldo del lote específico (no suma total del producto)
+  const [lotBalRow] = payload.lpn
+    ? await db.execute(`SELECT qty_current FROM lots WHERE lpn = ? LIMIT 1`, [payload.lpn]).catch(() => [[]])
+    : [[]];
+  const lotBalance = lotBalRow[0] != null ? parseFloat(lotBalRow[0].qty_current) : 0;
 
   const numeroDespacho = `DSP-${Date.now()}`;
 
@@ -755,24 +761,23 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
     [payload.product_id, bodegaId, payload.lpn || null, cantDesp, despIns.insertId, aprobador_id]
   );
 
-  const balance = await getStockBalance(db, payload.product_id, bodegaId);
-
   await logKardex(db, {
     product_id: payload.product_id,
     user_id: aprobador_id,
     action: 'DESPACHO',
     qty: -cantDesp,
     lot_id: lotIdDesp,
-    balance_after: balance,
+    balance_after: lotBalance,
     reference: `despacho:${numeroDespacho}`,
     notes: payload.customer ? `Cliente: ${payload.customer}` : null,
     approved_by: aprobador_id,
   });
 
   if (payload.operario_phone) {
+    const saldoLinea = payload.lpn ? `\nSaldo lote: ${lotBalance} und` : '';
     await pushWA(
       payload.operario_phone,
-      `✅ *Despacho aprobado*\nNro despacho: ${numeroDespacho}\nProducto despachado: ${cantDesp} und`
+      `✅ *Despacho aprobado*\nNro despacho: ${numeroDespacho}\nDespachado: ${cantDesp} und${saldoLinea}`
     );
   }
 
