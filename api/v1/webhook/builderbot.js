@@ -467,6 +467,23 @@ async function getSupervisorPhone(db) {
   return phone;
 }
 
+// getSupervisorPhones — retorna TODOS los teléfonos de supervisores/admin activos
+async function getSupervisorPhones(db) {
+  const [rows] = await db.execute(
+    `SELECT u.telefono FROM usuarios u
+     JOIN roles r ON r.id = u.rol_id
+     WHERE LOWER(r.nombre) IN ('supervisor','admin')
+       AND u.activo = 1
+       AND u.telefono IS NOT NULL
+       AND u.email NOT LIKE '%@wa.bot'
+     ORDER BY FIELD(LOWER(r.nombre), 'supervisor', 'admin') ASC,
+              u.id ASC`
+  ).catch(() => [[]]);
+  const phones = rows.map(r => r.telefono).filter(Boolean);
+  console.log(`[getSupervisorPhones] ${phones.length} destinatario(s): [${phones.join(', ')}]`);
+  return phones;
+}
+
 async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
   try {
     if (sku) {
@@ -939,25 +956,23 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        const supPhone = await getSupervisorPhone(db);
-        console.log(`[SOLICITAR_INICIO_PRODUCCION] supPhone="${supPhone}" | solicitud="${codigo}" | orden="${codigoOrden}"`);
-        if (supPhone) {
-          await pushWA(
-            supPhone,
-            [
-              `🏭 *Solicitud de inicio de producción: ${codigo}*`,
-              `Orden: ${codigoOrden}`,
-              `Producto: ${params.id_producto_final} — ${cantPlan} uds`,
-              `Solicitado por: ${user.nombre}`,
-              ``, `📋 *Disponibilidad de materiales:*`,
-              ...picking,
-              ``,
-              `Para aprobar responde: *apruebo ${codigo}*`,
-              `Para rechazar responde: *rechazo ${codigo}*`
-            ].join('\n')
-          );
+        const supPhones1 = await getSupervisorPhones(db);
+        console.log(`[SOLICITAR_INICIO_PRODUCCION] supPhones=[${supPhones1.join(',')}] | solicitud="${codigo}" | orden="${codigoOrden}"`);
+        if (supPhones1.length) {
+          const textoWA1 = [
+            `🏭 *Solicitud de inicio de producción: ${codigo}*`,
+            `Orden: ${codigoOrden}`,
+            `Producto: ${params.id_producto_final} — ${cantPlan} uds`,
+            `Solicitado por: ${user.nombre}`,
+            ``, `📋 *Disponibilidad de materiales:*`,
+            ...picking,
+            ``,
+            `Para aprobar responde: *apruebo ${codigo}*`,
+            `Para rechazar responde: *rechazo ${codigo}*`
+          ].join('\n');
+          await Promise.all(supPhones1.map(p => pushWA(p, textoWA1)));
         } else {
-          console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor.`);
+          console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
 
         await logSystemEvent(db, { modulo: 'produccion', nivel: 'INFO',
@@ -1151,24 +1166,22 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        const supPhone = await getSupervisorPhone(db);
-        console.log(`[SOLICITAR_CIERRE_PRODUCCION] supPhone="${supPhone}" | solicitud="${codigo}" | orden="${orden.codigo_orden}"`);
-        if (supPhone) {
-          await pushWA(
-            supPhone,
-            [
-              `🏭 *Solicitud cierre de producción: ${codigo}*`,
-              `Orden: ${orden.codigo_orden}`,
-              `Estado actual: ${orden.estado}`,
-              `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
-              `Operario: ${user.nombre}`,
-              ``,
-              `Para aprobar responde: *apruebo ${codigo}*`,
-              `Para rechazar responde: *rechazo ${codigo}*`
-            ].join('\n')
-          );
+        const supPhones2 = await getSupervisorPhones(db);
+        console.log(`[SOLICITAR_CIERRE_PRODUCCION] supPhones=[${supPhones2.join(',')}] | solicitud="${codigo}" | orden="${orden.codigo_orden}"`);
+        if (supPhones2.length) {
+          const textoWA2 = [
+            `🏭 *Solicitud cierre de producción: ${codigo}*`,
+            `Orden: ${orden.codigo_orden}`,
+            `Estado actual: ${orden.estado}`,
+            `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
+            `Operario: ${user.nombre}`,
+            ``,
+            `Para aprobar responde: *apruebo ${codigo}*`,
+            `Para rechazar responde: *rechazo ${codigo}*`
+          ].join('\n');
+          await Promise.all(supPhones2.map(p => pushWA(p, textoWA2)));
         } else {
-          console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  supPhone es null — no se enviará WA al supervisor.`);
+          console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
 
         mensaje = [
@@ -1199,23 +1212,21 @@ module.exports = async (req, res) => {
           }), user.id]
         );
 
-        const supPhone = await getSupervisorPhone(db);
-        console.log(`[SOLICITAR_DESPACHO] supPhone="${supPhone}" | solicitud="${codigo}"`);
-        if (supPhone) {
-          await pushWA(
-            supPhone,
-            [
-              `📦 *Solicitud de despacho: ${codigo}*`,
-              `Producto: ${params.id_item}`,
-              `Lote: ${params.id_lote} — Cantidad: ${params.cantidad}`,
-              `Cliente: ${params.cliente_destino || 'N/A'}`,
-              ``,
-              `Para aprobar responde: *apruebo ${codigo}*`,
-              `Para rechazar responde: *rechazo ${codigo}*`
-            ].join('\n')
-          );
+        const supPhones3 = await getSupervisorPhones(db);
+        console.log(`[SOLICITAR_DESPACHO] supPhones=[${supPhones3.join(',')}] | solicitud="${codigo}"`);
+        if (supPhones3.length) {
+          const textoWA3 = [
+            `📦 *Solicitud de despacho: ${codigo}*`,
+            `Producto: ${params.id_item}`,
+            `Lote: ${params.id_lote} — Cantidad: ${params.cantidad}`,
+            `Cliente: ${params.cliente_destino || 'N/A'}`,
+            ``,
+            `Para aprobar responde: *apruebo ${codigo}*`,
+            `Para rechazar responde: *rechazo ${codigo}*`
+          ].join('\n');
+          await Promise.all(supPhones3.map(p => pushWA(p, textoWA3)));
         } else {
-          console.warn(`[SOLICITAR_DESPACHO] ⚠️  supPhone es null — no se enviará WA al supervisor.`);
+          console.warn(`[SOLICITAR_DESPACHO] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
 
         mensaje = [
