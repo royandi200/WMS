@@ -1,11 +1,11 @@
-const { Producto, Stock, Movimiento, Usuario, sequelize, Kardex, Lot, Product, User } = require('../../models');
+const { Product, User, Stock, Movimiento, Lot, Kardex, sequelize } = require('../../models');
 const { Op } = require('sequelize');
 const { getStockSummary } = require('../../utils/inventoryHelper');
 const AppError = require('../../utils/AppError');
 
 // Resumen global de todos los productos activos
 exports.globalSummary = async () => {
-  const productos = await Producto.findAll({ where: { activo: true } });
+  const productos = await Product.findAll({ where: { activo: true } });
   return Promise.all(productos.map(async p => ({
     ...p.toJSON(),
     stock: await getStockSummary(p.id)
@@ -14,7 +14,7 @@ exports.globalSummary = async () => {
 
 // Stock detallado de un producto con sus lotes/stocks
 exports.productStock = async (productoId) => {
-  const producto = await Producto.findByPk(productoId);
+  const producto = await Product.findByPk(productoId);
   if (!producto) throw new AppError('Producto no encontrado', 404);
 
   const stocks = await Stock.findAll({
@@ -33,7 +33,7 @@ exports.productStock = async (productoId) => {
 exports.lotDetail = async (lote) => {
   const stock = await Stock.findOne({
     where: { lote },
-    include: [{ model: Producto, as: 'producto' }]
+    include: [{ model: Product, as: 'producto' }]
   });
   if (!stock) throw new AppError(`Lote ${lote} no encontrado`, 404);
   return stock;
@@ -58,7 +58,7 @@ exports.kardexList = async ({ sku, producto_id, page = 1, limit = 30 }) => {
       { model: User,    as: 'usuario',  attributes: ['nombre', 'email'] },
     ],
     order: [['created_at', 'DESC']],
-    limit: parseInt(limit),
+    limit:  parseInt(limit),
     offset,
   });
 
@@ -83,7 +83,7 @@ exports.kardexList = async ({ sku, producto_id, page = 1, limit = 30 }) => {
 
 // Productos por debajo del stock mínimo
 exports.lowStock = async () => {
-  const productos = await Producto.findAll({ where: { activo: true, stock_minimo: { [Op.gt]: 0 } } });
+  const productos = await Product.findAll({ where: { activo: true, stock_minimo: { [Op.gt]: 0 } } });
   const alertas = [];
   for (const p of productos) {
     const s = await getStockSummary(p.id);
