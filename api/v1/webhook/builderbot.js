@@ -1351,7 +1351,28 @@ module.exports = async (req, res) => {
           `SELECT * FROM aprobaciones WHERE codigo_solicitud = ? AND estado = 'PENDIENTE' LIMIT 1`,
           [params.id_solicitud]
         );
-        if (!rows.length) throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada o ya procesada` };
+        if (!rows.length) {
+          // Solicitud ya procesada: buscar quién la procesó
+          const [proc] = await db.execute(
+            `SELECT a.estado, a.procesado_en, a.motivo_rechazo,
+                    u.nombre AS procesado_nombre
+             FROM aprobaciones a
+             LEFT JOIN usuarios u ON u.id = a.procesado_por
+             WHERE a.codigo_solicitud = ? LIMIT 1`,
+            [params.id_solicitud]
+          );
+          if (proc.length) {
+            const p      = proc[0];
+            const quien  = p.procesado_nombre || 'otro supervisor';
+            const cuando = p.procesado_en
+              ? new Date(p.procesado_en).toLocaleString('es-CO', { dateStyle:'short', timeStyle:'short' })
+              : '';
+            const label  = p.estado === 'APROBADO' ? '✅ aprobada' : p.estado === 'RECHAZADO' ? '❌ rechazada' : p.estado;
+            const motivo = p.motivo_rechazo ? `\nMotivo: ${p.motivo_rechazo}` : '';
+            throw { status: 409, message: `${params.id_solicitud} ya fue ${label} por ${quien}${cuando ? ` el ${cuando}` : ''}${motivo}` };
+          }
+          throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada` };
+        }
         const solicitud = rows[0];
         const payload   = typeof solicitud.payload === 'string'
           ? JSON.parse(solicitud.payload) : solicitud.payload;
@@ -1380,7 +1401,28 @@ module.exports = async (req, res) => {
           `SELECT * FROM aprobaciones WHERE codigo_solicitud = ? AND estado = 'PENDIENTE' LIMIT 1`,
           [params.id_solicitud]
         );
-        if (!rows.length) throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada o ya procesada` };
+        if (!rows.length) {
+          // Solicitud ya procesada: buscar quién la procesó
+          const [proc] = await db.execute(
+            `SELECT a.estado, a.procesado_en, a.motivo_rechazo,
+                    u.nombre AS procesado_nombre
+             FROM aprobaciones a
+             LEFT JOIN usuarios u ON u.id = a.procesado_por
+             WHERE a.codigo_solicitud = ? LIMIT 1`,
+            [params.id_solicitud]
+          );
+          if (proc.length) {
+            const p      = proc[0];
+            const quien  = p.procesado_nombre || 'otro supervisor';
+            const cuando = p.procesado_en
+              ? new Date(p.procesado_en).toLocaleString('es-CO', { dateStyle:'short', timeStyle:'short' })
+              : '';
+            const label  = p.estado === 'APROBADO' ? '✅ aprobada' : p.estado === 'RECHAZADO' ? '❌ rechazada' : p.estado;
+            const motivo = p.motivo_rechazo ? `\nMotivo: ${p.motivo_rechazo}` : '';
+            throw { status: 409, message: `${params.id_solicitud} ya fue ${label} por ${quien}${cuando ? ` el ${cuando}` : ''}${motivo}` };
+          }
+          throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada` };
+        }
         const payload = typeof rows[0].payload === 'string'
           ? JSON.parse(rows[0].payload) : rows[0].payload;
         await db.execute(
