@@ -23,7 +23,15 @@ module.exports = async (req, res) => {
       [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Producto no encontrado en inventario' });
-    return res.status(200).json({ ok: true, data: rows });
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const data = rows.map(r => {
+      const fv = r.fecha_venc ? new Date(r.fecha_venc) : null;
+      return {
+        ...r,
+        estado_calculado: fv && fv < hoy ? 'VENCIDO' : 'DISPONIBLE',
+      };
+    });
+    return res.status(200).json({ ok: true, data });
   } catch (err) {
     console.error('[inventory/product/:id]', err.message);
     return res.status(500).json({ ok: false, error: err.message });

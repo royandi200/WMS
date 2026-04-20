@@ -18,7 +18,14 @@ module.exports = async (req, res) => {
       [lpn]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
-    return res.status(200).json({ ok: true, data: rows[0] });
+    const row = rows[0];
+    // Calcular estado real en base a fecha de vencimiento
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const fv = row.expiry_date ? new Date(row.expiry_date) : null;
+    row.estado_calculado = fv && fv < hoy
+      ? 'VENCIDO'
+      : (row.status || 'DISPONIBLE').toUpperCase();
+    return res.status(200).json({ ok: true, data: row });
   } catch (err) {
     console.error('[inventory/lot/:lpn]', err.message);
     return res.status(500).json({ ok: false, error: 'Error al obtener lote' });

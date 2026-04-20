@@ -495,12 +495,16 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
         `SELECT s.lote,
                 (s.cantidad - s.reservada) AS disponible,
                 l.expiry_date AS vence,
-                l.status AS estado_lote
+                COALESCE(l.status, 'DISPONIBLE') AS estado_lote,
+                b.codigo AS bodega_codigo
          FROM stock s
-         JOIN productos p ON p.id = s.producto_id
-         LEFT JOIN lots l ON l.lpn = s.lote
+         JOIN productos p  ON p.id  = s.producto_id
+         JOIN bodegas   b  ON b.id  = s.bodega_id
+         LEFT JOIN lots l  ON l.lpn = s.lote
          WHERE p.siigo_code = ?
-         ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END, l.expiry_date ASC, s.id ASC`,
+         ORDER BY b.id ASC,
+                  CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
+                  l.expiry_date ASC, s.id ASC`,
         [sku]
       );
       return { modo: 'fallback', rows };
@@ -1466,36 +1470,59 @@ module.exports = async (req, res) => {
           if (!result.rows.length) {
             mensaje = `📊 *Stock: ${params.id_item}*\n  Sin stock disponible`;
           } else {
-            // [FIX 21] Lotes vencidos: marcar con 🚨 y bloque de alerta al final
+            // [FIX 22] Separar lotes por estado: vencidos, cuarentena, disponibles
             const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-            const lotesVencidos = [];
-            const lotesLines = result.rows
-              .map(r => {
-                const disp = parseFloat(r.disponible || 0);
-                const lpnCorto = r.lote && r.lote.length > 26 ? r.lote.slice(0, 26) + '…' : (r.lote || 'sin lote');
-                let venceStr = '';
-                if (r.vence) {
-                  const fv = new Date(r.vence); fv.setHours(0, 0, 0, 0);
-                  if (fv < hoy) {
-                    venceStr = ` 🚨 *VENCIÓ ${fv.toLocaleDateString('es-CO')}*`;
-                    lotesVencidos.push(lpnCorto);
-                  } else {
-                    venceStr = ` (vence ${fv.toLocaleDateString('es-CO')})`;
-                  }
+            const lotesVencidosInfo = [];
+            const lotesCuarentenaInfo = [];
+            const lotesDispLines = [];
+            let totalNeto = 0;
+
+            for (const r of result.rows) {
+              const disp = parseFloat(r.disponible || 0);
+              const lpnCorto = r.lote && r.lote.length > 26 ? r.lote.slice(0, 26) + '…' : (r.lote || 'sin lote');
+
+              // 1) Vencido por fecha
+              if (r.vence) {
+                const fv = new Date(r.vence); fv.setHours(0, 0, 0, 0);
+                if (fv < hoy) {
+                  lotesVencidosInfo.push({ lpnCorto, disp, fecha: fv.toLocaleDateString('es-CO') });
+                  continue;
                 }
-                return `  • ${lpnCorto}: *${disp} und*${venceStr}`;
-              })
-              .join('\n');
-            const alertaVencidos = lotesVencidos.length
-              ? `\n\n⛔ *ALERTA — ${lotesVencidos.length} lote${lotesVencidos.length > 1 ? 's' : ''} VENCIDO${lotesVencidos.length > 1 ? 'S' : ''}:*\n${lotesVencidos.map(l => `  ❌ ${l}`).join('\n')}\n_Requiere disposición inmediata. Notifica al supervisor._`
+              }
+              // 2) En cuarentena por estado_lote
+              if (r.estado_lote === 'CUARENTENA') {
+                lotesCuarentenaInfo.push({ lpnCorto, disp });
+                continue;
+              }
+              // 3) Disponible real
+              const venceStr = r.vence ? ` (vence ${new Date(r.vence).toLocaleDateString('es-CO')})` : '';
+              lotesDispLines.push(`  • ${lpnCorto}: *${disp} und*${venceStr}`);
+              totalNeto += disp;
+            }
+
+            const secDisp = lotesDispLines.length
+              ? [`📦 *Lotes FIFO:*`, ...lotesDispLines].join('\n')
+              : `📦 *Lotes FIFO:*\n  (Sin lotes disponibles)`;
+
+            const secCuarentena = lotesCuarentenaInfo.length
+              ? `\n⚠️ *En cuarentena (${lotesCuarentenaInfo.length} lote${lotesCuarentenaInfo.length > 1 ? 's' : ''}):*\n`
+                + lotesCuarentenaInfo.map(l => `  🔒 ${l.lpnCorto}: *${l.disp} und*`).join('\n')
+                + `\n_No disponible para despacho. Requiere aprobación._`
               : '';
+
+            const secVencidos = lotesVencidosInfo.length
+              ? `\n⛔ *ALERTA — ${lotesVencidosInfo.length} lote${lotesVencidosInfo.length > 1 ? 's' : ''} VENCIDO${lotesVencidosInfo.length > 1 ? 'S' : ''}:*\n`
+                + lotesVencidosInfo.map(l => `  ❌ ${l.lpnCorto} 🚨 *VENCIÓ ${l.fecha}*`).join('\n')
+                + `\n_Requiere disposición inmediata. Notifica al supervisor._`
+              : '';
+
             mensaje = [
               `📊 *Stock ${label}: ${params.id_item}*`,
-              `Total disponible: *${totalDisp} und* (${result.rows.length} lote${result.rows.length > 1 ? 's' : ''})`,
+              `Total disponible: *${totalNeto} und*`,
               ``,
-              `📦 *Lotes FIFO:*`,
-              lotesLines,
-              alertaVencidos
+              secDisp,
+              secCuarentena,
+              secVencidos
             ].filter(Boolean).join('\n');
           }
         } else {
