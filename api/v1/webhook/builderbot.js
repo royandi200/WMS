@@ -540,6 +540,45 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
   }
 }
 
+// findFifoLot — selecciona el lote FIFO más antiguo con stock disponible
+async function findFifoLot(db, sku, bodegaId) {
+  try {
+    const [bodRow] = await db.execute(
+      `SELECT codigo FROM bodegas WHERE id = ? LIMIT 1`, [bodegaId]
+    ).catch(() => [[]]);
+    const bodCod = bodRow[0]?.codigo || 'BG-PPAL';
+    const [rows] = await db.execute(
+      `SELECT lote, disponible, vence
+       FROM v_stock_disponible
+       WHERE sku = ? AND bodega = ?
+         AND estado_lote = 'DISPONIBLE'
+       ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC
+       LIMIT 1`,
+      [sku, bodCod]
+    );
+    if (rows[0]) return { lpn: rows[0].lote, disponible: parseFloat(rows[0].disponible), modo: 'vista' };
+  } catch (_) {}
+  // Fallback directo a stock
+  const [rows] = await db.execute(
+    `SELECT s.lote,
+            (s.cantidad - s.reservada) AS disponible,
+            l.expiry_date AS vence
+     FROM stock s
+     JOIN productos p ON p.id = s.producto_id
+     LEFT JOIN lots  l ON l.lpn = s.lote
+     WHERE p.siigo_code = ?
+       AND s.bodega_id  = ?
+       AND (s.cantidad - s.reservada) > 0
+       AND COALESCE(l.status, 'DISPONIBLE') = 'DISPONIBLE'
+     ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
+              l.expiry_date ASC, s.id ASC
+     LIMIT 1`,
+    [sku, bodegaId]
+  ).catch(() => [[]]);
+  if (!rows[0]) return null;
+  return { lpn: rows[0].lote, disponible: parseFloat(rows[0].disponible), modo: 'fallback' };
+}
+
 // ─────────────────────────────────────────────────────────────
 // executeApprovedPayload — acciones que requieren aprobación
 // ─────────────────────────────────────────────────────────────
@@ -1202,32 +1241,50 @@ module.exports = async (req, res) => {
         break;
       }
 
-      // ── 6. SOLICITAR_DESPACHO → encolar ──────────────────────
+      // ── 6. SOLICITAR_DESPACHO → encolar (FIFO auto si no viene id_lote) ────
       case 'SOLICITAR_DESPACHO': {
         if (!params.id_item) throw { status: 400, message: 'id_item es obligatorio para SOLICITAR_DESPACHO' };
-        const p      = await findProductBySku(db, params.id_item);
-        const lot    = await lotIdByLpn(db, params.id_lote);
+        const p = await findProductBySku(db, params.id_item);
+
+        // FIFO auto-select: si el operario no especificó lote, tomamos el más antiguo disponible
+        let lpnDespacho = params.id_lote || null;
+        let fifoAuto    = false;
+        if (!lpnDespacho) {
+          const fifoLot = await findFifoLot(db, p.siigo_code, bodegaId);
+          if (!fifoLot) throw { status: 409, message: `Sin stock disponible para ${params.id_item}` };
+          const cantSol = Number(params.cantidad) || 0;
+          if (cantSol > fifoLot.disponible) {
+            throw { status: 409, message: `Stock insuficiente. Disponible en lote FIFO: ${fifoLot.disponible} und (${fifoLot.lpn})` };
+          }
+          lpnDespacho = fifoLot.lpn;
+          fifoAuto    = true;
+          console.log(`[SOLICITAR_DESPACHO] FIFO auto-seleccionado: lpn="${lpnDespacho}"`);
+        }
+
+        const lot    = await lotIdByLpn(db, lpnDespacho);
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
            VALUES (?, 'SOLICITAR_DESPACHO', ?, ?, 'PENDIENTE', NOW())`,
           [codigo, JSON.stringify({
             lot_id:         lot,
-            lpn:            params.id_lote,
+            lpn:            lpnDespacho,
             product_id:     p.id,
             qty:            params.cantidad,
             customer:       params.cliente_destino,
             operario_phone: from,
+            fifo_auto:      fifoAuto,
           }), user.id]
         );
 
+        const loteModo  = fifoAuto ? `${lpnDespacho} ⤵️ FIFO auto` : lpnDespacho;
         const supPhones3 = await getSupervisorPhones(db);
-        console.log(`[SOLICITAR_DESPACHO] supPhones=[${supPhones3.join(',')}] | solicitud="${codigo}"`);
+        console.log(`[SOLICITAR_DESPACHO] supPhones=[${supPhones3.join(',')}] | solicitud="${codigo}" | lote="${lpnDespacho}" | fifoAuto=${fifoAuto}`);
         if (supPhones3.length) {
           const textoWA3 = [
             `📦 *Solicitud de despacho: ${codigo}*`,
             `Producto: ${params.id_item}`,
-            `Lote: ${params.id_lote} — Cantidad: ${params.cantidad}`,
+            `Lote: ${loteModo} — Cantidad: ${params.cantidad}`,
             `Cliente: ${params.cliente_destino || 'N/A'}`,
             ``,
             `Para aprobar responde: *apruebo ${codigo}*`,
@@ -1238,10 +1295,13 @@ module.exports = async (req, res) => {
           console.warn(`[SOLICITAR_DESPACHO] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
 
+        const lpnCortoDisp = lpnDespacho && lpnDespacho.length > 30
+          ? lpnDespacho.slice(0, 30) + '…'
+          : lpnDespacho;
         mensaje = [
           `⏳ *Solicitud de despacho: ${codigo}*`,
           `Producto: ${params.id_item}`,
-          `Lote: ${params.id_lote}`,
+          `Lote: ${lpnCortoDisp}${fifoAuto ? ' (FIFO auto)' : ''}`,
           `Cantidad: ${params.cantidad}`,
           `El supervisor fue notificado.`
         ].join('\n');
