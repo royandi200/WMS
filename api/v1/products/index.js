@@ -3,36 +3,37 @@
 const { query } = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
-// Mapea una fila de la tabla `productos` al contrato que espera el frontend.
-// Campos clave del frontend: id, sku, name, description, type, unit,
-//   min_stock, max_stock, active, siigo_id, siigo_code, createdAt
-// Nota: la tabla no tiene stock_minimo/max — se retorna 0 como valor por defecto
-// hasta que se agregue esa columna al schema.
+// Mapea una fila de producto + métricas dashboard al contrato que espera el frontend.
 const toRow = (row) => ({
-  id:           row.id,
-  // sku es el alias público de siigo_code
-  sku:          row.siigo_code,
-  siigo_id:     row.siigo_id,
-  siigo_code:   row.siigo_code,
-  name:         row.nombre,
-  description:  row.descripcion,
-  // type: frontend usa MATERIA_PRIMA/PRODUCTO_TERMINADO/INSUMO/EMPAQUE;
-  // BD usa Product/Service/Combo/ConsumerGood. Se conserva el valor real.
-  type:         row.tipo_producto,
-  unit_code:    row.unit_code,
-  unit:         row.unit_label ?? row.unit_code ?? 'und',
-  barcode:      row.barcode,
-  referencia:   row.referencia,
-  marca:        row.marca,
-  precio_venta: Number(row.precio_venta || 0),
-  control_stock:row.control_stock === 1,
-  // min_stock / max_stock: columnas aún no existen en el schema.
-  // Se exponen como 0 para que el frontend no crashee con undefined.
-  min_stock:    Number(row.stock_minimo ?? row.min_stock ?? 0),
-  max_stock:    Number(row.stock_maximo ?? row.max_stock ?? 0),
-  active:       row.activo === 1,
-  siigo_sync_at: row.siigo_synced_at,
-  createdAt:    row.creado_en,
+  id:             row.id ?? row.producto_id,
+  sku:            row.siigo_code ?? row.sku,
+  siigo_id:       row.siigo_id,
+  siigo_code:     row.siigo_code ?? row.sku,
+  name:           row.nombre,
+  description:    row.descripcion,
+  type:           row.tipo_producto,
+  unit_code:      row.unit_code,
+  unit:           row.unit_label ?? row.unit_code ?? 'und',
+  barcode:        row.barcode,
+  referencia:     row.referencia,
+  marca:          row.marca,
+  precio_venta:   Number(row.precio_venta || 0),
+  control_stock:  row.control_stock === 1,
+  min_stock:      Number(row.stock_minimo ?? row.min_stock ?? 0),
+  max_stock:      Number(row.stock_maximo ?? row.max_stock ?? 0),
+  active:         row.activo === 1,
+  siigo_sync_at:  row.siigo_synced_at,
+  createdAt:      row.creado_en,
+
+  // métricas dashboard
+  disponible:          Number(row.disponible ?? 0),
+  cuarentena:          Number(row.cuarentena ?? 0),
+  reservado:           Number(row.reservado ?? 0),
+  total_fisico:        Number(row.total_fisico ?? 0),
+  lotes_activos:       Number(row.lotes_activos ?? 0),
+  proximo_vencimiento: row.proximo_vencimiento ?? null,
+  ultimo_movimiento:   row.ultimo_movimiento ?? null,
+  semaforo:            row.semaforo ?? 'OK',
 });
 
 module.exports = async (req, res) => {
@@ -45,31 +46,57 @@ module.exports = async (req, res) => {
     try {
       const { search = '', type = '', active = 'true', page = 1, limit = 50 } = req.query;
       const offset = (Number(page) - 1) * Number(limit);
-      let sql = `SELECT * FROM productos WHERE 1=1`;
+
+      let sql = `
+        SELECT
+          p.*,
+          vd.producto_id,
+          vd.sku,
+          vd.disponible,
+          vd.cuarentena,
+          vd.reservado,
+          vd.total_fisico,
+          vd.lotes_activos,
+          vd.proximo_vencimiento,
+          vd.ultimo_movimiento,
+          vd.semaforo
+        FROM productos p
+        LEFT JOIN v_dashboard_productos vd
+          ON vd.producto_id = p.id
+        WHERE 1=1
+      `;
       const args = [];
 
-      if (active === 'true')  { sql += ` AND activo = 1`; }
-      if (active === 'false') { sql += ` AND activo = 0`; }
-      if (type)   { sql += ` AND tipo_producto = ?`; args.push(type); }
+      if (active === 'true')  sql += ` AND p.activo = 1`;
+      if (active === 'false') sql += ` AND p.activo = 0`;
+      if (type) {
+        sql += ` AND p.tipo_producto = ?`;
+        args.push(type);
+      }
       if (search) {
-        sql += ` AND (siigo_code LIKE ? OR nombre LIKE ? OR barcode LIKE ?)`;
+        sql += ` AND (p.siigo_code LIKE ? OR p.nombre LIKE ? OR p.barcode LIKE ?)`;
         args.push(`%${search}%`, `%${search}%`, `%${search}%`);
       }
-      sql += ` ORDER BY nombre ASC LIMIT ? OFFSET ?`;
+
+      sql += ` ORDER BY p.nombre ASC LIMIT ? OFFSET ?`;
       args.push(Number(limit), offset);
 
       const rows = await query(sql, args);
 
-      // Count query paralela
-      let countSql = `SELECT COUNT(*) AS total FROM productos WHERE 1=1`;
+      let countSql = `SELECT COUNT(*) AS total FROM productos p WHERE 1=1`;
       const countArgs = [];
-      if (active === 'true')  countSql += ` AND activo = 1`;
-      if (active === 'false') countSql += ` AND activo = 0`;
-      if (type)   { countSql += ` AND tipo_producto = ?`; countArgs.push(type); }
+
+      if (active === 'true')  countSql += ` AND p.activo = 1`;
+      if (active === 'false') countSql += ` AND p.activo = 0`;
+      if (type) {
+        countSql += ` AND p.tipo_producto = ?`;
+        countArgs.push(type);
+      }
       if (search) {
-        countSql += ` AND (siigo_code LIKE ? OR nombre LIKE ? OR barcode LIKE ?)`;
+        countSql += ` AND (p.siigo_code LIKE ? OR p.nombre LIKE ? OR p.barcode LIKE ?)`;
         countArgs.push(`%${search}%`, `%${search}%`, `%${search}%`);
       }
+
       const countRows = await query(countSql, countArgs);
 
       return res.status(200).json({
