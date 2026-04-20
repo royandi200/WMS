@@ -30,6 +30,9 @@ function mapRow(row) {
 
 module.exports = async (req, res) => {
   cors(res, 'GET, PUT');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try { verifyToken(req); }
