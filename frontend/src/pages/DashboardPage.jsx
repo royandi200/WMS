@@ -177,7 +177,7 @@ function FlowNode({ icon:Icon, label, sublabel, color, count, countLabel, alert,
 // ─── Flow Connector ───────────────────────────────────────────────────────────
 function FlowLine({ animated=false, color='#30363d' }) {
   return (
-    <div className="flex items-center justify-center flex-1 px-1" style={{marginBottom:'28px'}}>
+    <div className="flex items-center justify-center flex-1 px-1" style={{marginBottom:'0px'}}>
       <div className="relative h-px flex-1" style={{background:color}}>
         {animated && (
           <div className="absolute inset-y-0 left-0 w-4 rounded-full"
@@ -520,7 +520,7 @@ export default function DashboardPage() {
             style={{backgroundImage:'radial-gradient(circle,#e6edf3 1px,transparent 1px)',backgroundSize:'24px 24px'}}/>
 
           <div className="relative z-10">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-2">
                 <ShieldCheck size={13} className="text-primary"/>
                 <span className="text-subtle text-sm font-semibold">Plano de operaciones</span>
@@ -535,7 +535,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Flujo: nodos + conectores */}
-            <div className="flex items-start justify-between overflow-x-auto pb-1 -mx-1 px-1 gap-1 md:gap-0">
+            <div className="flex items-center justify-between overflow-x-auto pb-2 -mx-1 px-1 gap-1 md:gap-0">
               {flowNodes.map((node, i) => (
                 <div key={node.label} className="flex items-start" style={{flex:1}}>
                   <FlowNode {...node}/>
