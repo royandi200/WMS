@@ -164,6 +164,6 @@ Proyecto privado. Todos los derechos reservados.
 
 *Última actualización: Abril 2026*
 
-Validación de acceso a GitHub.
+Validación de Acceso a GitHub.
 
 Línea de actualización documental.
