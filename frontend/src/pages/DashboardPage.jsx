@@ -506,11 +506,11 @@ export default function DashboardPage() {
       <div className="px-6 pb-8 space-y-5">
 
         {/* ── PLANO DE FLUJO ── */}
-        <div className="relative bg-surface border border-border rounded-xl overflow-visible"
+        <div className="bg-surface border border-border rounded-xl"
           style={{animation:'fadeSlideUp .5s ease .1s both'}}>
 
           {/* Header del plano */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border/50">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border">
             <div className="flex items-center gap-2">
               <ShieldCheck size={13} className="text-primary"/>
               <span className="text-subtle text-sm font-semibold">Plano de operaciones</span>
@@ -524,12 +524,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Grid dots background — solo en el área de nodos */}
-          <div className="relative">
-            <div className="absolute inset-0 rounded-b-xl opacity-[0.04] pointer-events-none"
-              style={{backgroundImage:'radial-gradient(circle,#e6edf3 1px,transparent 1px)',backgroundSize:'24px 24px'}}/>
-
-          <div className="relative z-10 px-5 pt-6 pb-4">
+          {/* Área de nodos */}
+          <div className="px-5 pt-8 pb-4">
 
             {/* Flujo: nodos + conectores */}
             <div className="flex items-center justify-between overflow-x-auto pb-2 gap-1 md:gap-0">
@@ -565,7 +561,6 @@ export default function DashboardPage() {
                 <span className="text-[10px] text-amber-400 font-semibold">{safeApprovals.length} aprobaciones pendientes</span>
               </>}
             </div>
-          </div>
           </div>
         </div>
 
