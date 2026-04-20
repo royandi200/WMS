@@ -1689,13 +1689,36 @@ module.exports = async (req, res) => {
     console.log(`[webhook] ✅ action="${action}" completado OK`);
     return res.json({ ok: true, message: mensaje, mensaje });
 
-  } catch (err) {
-    const errMsg = err.message || 'Error interno';
-    console.error(`[webhook] ❌ action="${action}" error:`, errMsg);
-    await saveLog(db, { from, action, priority, payload: rawBody,
-      response: { error: errMsg }, status: 'ERROR' }).catch(() => {});
-    return res.status(err.status || 500).json({ ok: false, message: `❌ ${errMsg}`, mensaje: `❌ ${errMsg}`, error: errMsg });
-  } finally {
+} catch (err) {
+  const errMsg = err.message || 'Error interno';
+  const statusCode = Number(err.status || 500);
+  const isBusinessError = statusCode >= 400 && statusCode < 500;
+
+  console.error(`[webhook] ❌ action="${action}" error:`, errMsg);
+
+  await saveLog(db, {
+    from,
+    action,
+    priority,
+    payload: rawBody,
+    response: { error: errMsg, statusCode },
+    status: isBusinessError ? 'BUSINESS_ERROR' : 'ERROR'
+  }).catch(() => {});
+
+  const body = {
+    ok: false,
+    message: `❌ ${errMsg}`,
+    mensaje: `❌ ${errMsg}`,
+    error: errMsg,
+    status: statusCode
+  };
+
+  if (isBusinessError) {
+    return res.status(200).json(body);
+  }
+
+  return res.status(500).json(body);
+} finally {
     await db.end().catch(() => {});
   }
 };
