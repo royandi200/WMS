@@ -22,6 +22,14 @@ const SEMAFORO_STYLE = {
   CRITICO:  'text-red-400 bg-red-400/10 border-red-400/20',
 }
 
+const LOTE_STATUS_STYLE = {
+  DISPONIBLE: 'text-green-400 bg-green-400/10 border-green-400/20',
+  CUARENTENA: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20',
+  COMPROMETIDO: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+  DESPACHADO: 'text-slate-300 bg-slate-400/10 border-slate-400/20',
+  AGOTADO: 'text-red-400 bg-red-400/10 border-red-400/20',
+}
+
 export default function ProductosPage() {
   const [tab,      setTab]      = useState(0)
   const [search,   setSearch]   = useState('')
@@ -31,7 +39,7 @@ export default function ProductosPage() {
   const [form,     setForm]     = useState(EMPTY_FORM)
   const [toast,    setToast]    = useState(null)
 
-  const { list, loading, error, fetchList, create, update, toggle, clearError } = useProductsStore()
+  const { list, detail, loading, error, fetchList, fetchOne, create, update, toggle, clearError } = useProductsStore()
 
   useEffect(() => { fetchList() }, [])
 
@@ -44,6 +52,15 @@ export default function ProductosPage() {
     const matchType = !typeF || p.type === typeF
     return matchSearch && matchType
   })
+
+  const handleExpand = async (id) => {
+    if (expanded === id) {
+      setExpanded(null)
+      return
+    }
+    setExpanded(id)
+    await fetchOne(id)
+  }
 
   const startEdit = (p) => {
     setEditing(p)
@@ -139,97 +156,142 @@ export default function ProductosPage() {
 
           {!loading && filtered.length > 0 && (
             <div className="space-y-2">
-              {filtered.map((p) => (
-                <div key={p.id} className={`bg-surface border rounded-lg overflow-hidden transition-colors ${
-                  p.active ? 'border-border' : 'border-border/40 opacity-60'
-                }`}>
-                  <div className="flex items-center gap-3 px-4 py-3">
-                    <button
-                      onClick={() => setExpanded(expanded === p.id ? null : p.id)}
-                      className="text-muted hover:text-foreground transition-colors text-xs w-4"
-                    >
-                      {expanded === p.id ? '▲' : '▼'}
-                    </button>
-
-                    <span className={`hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      TYPE_COLOR[p.type] || 'text-muted bg-white/5'
-                    }`}>
-                      {p.type?.replace('_', ' ')}
-                    </span>
-
-                    <div className="flex-1 min-w-0">
-                      <span className="font-mono text-sm text-primary font-semibold">{p.sku}</span>
-                      <span className="text-foreground text-sm ml-2 truncate">{p.name}</span>
-                    </div>
-
-                    <div className="hidden xl:grid grid-cols-4 gap-4 text-xs text-muted tabular-nums min-w-[420px]">
-                      <span>Disp <strong className="text-foreground">{p.disponible ?? 0}</strong></span>
-                      <span>Cuar <strong className="text-foreground">{p.cuarentena ?? 0}</strong></span>
-                      <span>Res <strong className="text-foreground">{p.reservado ?? 0}</strong></span>
-                      <span>Total <strong className="text-foreground">{p.total_fisico ?? 0}</strong></span>
-                    </div>
-
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                      SEMAFORO_STYLE[p.semaforo] || 'text-muted bg-white/5 border-border'
-                    }`}>
-                      {p.semaforo || 'OK'}
-                    </span>
-
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      p.active ? 'text-green-400 bg-green-400/10' : 'text-muted bg-white/5'
-                    }`}>
-                      {p.active ? 'Activo' : 'Inactivo'}
-                    </span>
-
-                    <div className="flex gap-1">
+              {filtered.map((p) => {
+                const lotes = expanded === p.id && detail?.id === p.id ? (detail.lotes || []) : []
+                return (
+                  <div key={p.id} className={`bg-surface border rounded-lg overflow-hidden transition-colors ${
+                    p.active ? 'border-border' : 'border-border/40 opacity-60'
+                  }`}>
+                    <div className="flex items-center gap-3 px-4 py-3">
                       <button
-                        onClick={() => startEdit(p)}
-                        className="text-xs px-2 py-1 border border-border rounded hover:border-primary/50 text-muted hover:text-foreground transition-colors"
+                        onClick={() => handleExpand(p.id)}
+                        className="text-muted hover:text-foreground transition-colors text-xs w-4"
                       >
-                        Editar
+                        {expanded === p.id ? '▲' : '▼'}
                       </button>
-                      <button
-                        onClick={() => handleToggle(p)}
-                        className={`text-xs px-2 py-1 border rounded transition-colors ${
-                          p.active
-                            ? 'border-danger/30 text-danger hover:bg-danger/10'
-                            : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
-                        }`}
-                      >
-                        {p.active ? 'Inactivar' : 'Activar'}
-                      </button>
+
+                      <span className={`hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        TYPE_COLOR[p.type] || 'text-muted bg-white/5'
+                      }`}>
+                        {p.type?.replace('_', ' ')}
+                      </span>
+
+                      <div className="flex-1 min-w-0">
+                        <span className="font-mono text-sm text-primary font-semibold">{p.sku}</span>
+                        <span className="text-foreground text-sm ml-2 truncate">{p.name}</span>
+                      </div>
+
+                      <div className="hidden xl:grid grid-cols-4 gap-4 text-xs text-muted tabular-nums min-w-[420px]">
+                        <span>Disp <strong className="text-foreground">{p.disponible ?? 0}</strong></span>
+                        <span>Cuar <strong className="text-foreground">{p.cuarentena ?? 0}</strong></span>
+                        <span>Res <strong className="text-foreground">{p.reservado ?? 0}</strong></span>
+                        <span>Total <strong className="text-foreground">{p.total_fisico ?? 0}</strong></span>
+                      </div>
+
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
+                        SEMAFORO_STYLE[p.semaforo] || 'text-muted bg-white/5 border-border'
+                      }`}>
+                        {p.semaforo || 'OK'}
+                      </span>
+
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        p.active ? 'text-green-400 bg-green-400/10' : 'text-muted bg-white/5'
+                      }`}>
+                        {p.active ? 'Activo' : 'Inactivo'}
+                      </span>
+
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => startEdit(p)}
+                          className="text-xs px-2 py-1 border border-border rounded hover:border-primary/50 text-muted hover:text-foreground transition-colors"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleToggle(p)}
+                          className={`text-xs px-2 py-1 border rounded transition-colors ${
+                            p.active
+                              ? 'border-danger/30 text-danger hover:bg-danger/10'
+                              : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
+                          }`}
+                        >
+                          {p.active ? 'Inactivar' : 'Activar'}
+                        </button>
+                      </div>
                     </div>
+
+                    {expanded === p.id && (
+                      <div className="border-t border-border/50 px-4 py-3 space-y-4 text-xs">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <Detail label="Disponible" value={p.disponible ?? 0} />
+                          <Detail label="Cuarentena" value={p.cuarentena ?? 0} />
+                          <Detail label="Reservado" value={p.reservado ?? 0} />
+                          <Detail label="Total físico" value={p.total_fisico ?? 0} />
+                          <Detail label="Lotes activos" value={p.lotes_activos ?? 0} />
+                          <Detail label="Próx. vencimiento" value={p.proximo_vencimiento || '—'} />
+                          <Detail label="Últ. movimiento" value={p.ultimo_movimiento || '—'} />
+                          <Detail label="Semáforo" value={p.semaforo || 'OK'} />
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          <Detail label="ID" value={p.id} mono />
+                          <Detail label="Descripción" value={p.description || '—'} />
+                          <Detail label="SIIGO ID" value={p.siigo_id || '—'} />
+                          <Detail label="SIIGO Code" value={p.siigo_code || '—'} />
+                          <Detail label="SIIGO Activo" value={p.siigo_active ? 'Sí' : 'No'} />
+                          <Detail label="Últ. sync" value={p.siigo_sync_at?.slice(0,10) || '—'} />
+                          <Detail label="Creado" value={p.createdAt?.slice(0,10) || p.created_at?.slice(0,10) || '—'} />
+                          <Detail label="Unidad" value={p.unit || 'und'} />
+                          <Detail label="Stock mínimo" value={p.min_stock ?? 0} />
+                          <Detail label="Stock máximo" value={p.max_stock ?? 0} />
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-semibold text-foreground mb-2">Detalle por lote</p>
+                          {lotes.length === 0 ? (
+                            <p className="text-muted">Sin lotes registrados para este producto.</p>
+                          ) : (
+                            <div className="overflow-x-auto rounded-lg border border-border/60">
+                              <table className="min-w-full text-xs">
+                                <thead className="bg-white/5 text-muted">
+                                  <tr>
+                                    <th className="text-left px-3 py-2">Lote</th>
+                                    <th className="text-right px-3 py-2">Cantidad</th>
+                                    <th className="text-right px-3 py-2">Reservado</th>
+                                    <th className="text-right px-3 py-2">Disponible</th>
+                                    <th className="text-left px-3 py-2">Estado</th>
+                                    <th className="text-left px-3 py-2">Origen</th>
+                                    <th className="text-left px-3 py-2">Vence</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {lotes.map((l) => (
+                                    <tr key={l.stock_id || l.lote} className="border-t border-border/40">
+                                      <td className="px-3 py-2 font-mono text-foreground break-all">{l.lote || '—'}</td>
+                                      <td className="px-3 py-2 text-right text-foreground">{l.cantidad}</td>
+                                      <td className="px-3 py-2 text-right text-foreground">{l.reservada}</td>
+                                      <td className="px-3 py-2 text-right text-foreground">{l.disponible_lote}</td>
+                                      <td className="px-3 py-2">
+                                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                                          LOTE_STATUS_STYLE[l.estado_lote] || 'text-muted bg-white/5 border-border'
+                                        }`}>
+                                          {l.estado_lote}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 text-foreground">{l.origen_lote}</td>
+                                      <td className="px-3 py-2 text-foreground">{l.vence || '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {expanded === p.id && (
-                    <div className="border-t border-border/50 px-4 py-3 space-y-4 text-xs">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <Detail label="Disponible" value={p.disponible ?? 0} />
-                        <Detail label="Cuarentena" value={p.cuarentena ?? 0} />
-                        <Detail label="Reservado" value={p.reservado ?? 0} />
-                        <Detail label="Total físico" value={p.total_fisico ?? 0} />
-                        <Detail label="Lotes activos" value={p.lotes_activos ?? 0} />
-                        <Detail label="Próx. vencimiento" value={p.proximo_vencimiento || '—'} />
-                        <Detail label="Últ. movimiento" value={p.ultimo_movimiento || '—'} />
-                        <Detail label="Semáforo" value={p.semaforo || 'OK'} />
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        <Detail label="ID" value={p.id} mono />
-                        <Detail label="Descripción" value={p.description || '—'} />
-                        <Detail label="SIIGO ID" value={p.siigo_id || '—'} />
-                        <Detail label="SIIGO Code" value={p.siigo_code || '—'} />
-                        <Detail label="SIIGO Activo" value={p.siigo_active ? 'Sí' : 'No'} />
-                        <Detail label="Últ. sync" value={p.siigo_sync_at?.slice(0,10) || '—'} />
-                        <Detail label="Creado" value={p.createdAt?.slice(0,10) || p.created_at?.slice(0,10) || '—'} />
-                        <Detail label="Unidad" value={p.unit || 'und'} />
-                        <Detail label="Stock mínimo" value={p.min_stock ?? 0} />
-                        <Detail label="Stock máximo" value={p.max_stock ?? 0} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
