@@ -1169,11 +1169,20 @@ module.exports = async (req, res) => {
         const supPhones2 = await getSupervisorPhones(db);
         console.log(`[SOLICITAR_CIERRE_PRODUCCION] supPhones=[${supPhones2.join(',')}] | solicitud="${codigo}" | orden="${orden.codigo_orden}"`);
         if (supPhones2.length) {
+          const cantPlan2  = parseFloat(orden.cantidad_planeada) || 0;
+          const cantReal2  = params.cantidad_real != null ? parseFloat(params.cantidad_real) : cantPlan2;
+          const merma2     = cantPlan2 - cantReal2;
+          const mermaLinea = merma2 > 0
+            ? `📉 *Merma: ${merma2.toFixed(1)} und (${((merma2 / cantPlan2) * 100).toFixed(1)}%) — REQUIERE REVISIÓN*`
+            : merma2 < 0
+              ? `📈 Excedente: ${Math.abs(merma2).toFixed(1)} und sobre lo planeado`
+              : `✅ Sin merma`;
           const textoWA2 = [
             `🏭 *Solicitud cierre de producción: ${codigo}*`,
             `Orden: ${orden.codigo_orden}`,
             `Estado actual: ${orden.estado}`,
-            `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
+            `Planeado: ${cantPlan2} und | Real: ${cantReal2} und`,
+            mermaLinea,
             `Operario: ${user.nombre}`,
             ``,
             `Para aprobar responde: *apruebo ${codigo}*`,
