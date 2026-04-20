@@ -4,28 +4,27 @@
 const { query }             = require('../../_lib/db');
 const { cors, verifyToken } = require('../../_lib/auth');
 
-// Usa las columnas reales de la tabla `productos` (ver database/schema.sql)
 function mapRow(row) {
   return {
-    id:           row.id,
-    sku:          row.siigo_code,          // alias público
-    siigo_id:     row.siigo_id,
-    siigo_code:   row.siigo_code,
-    name:         row.nombre,
-    description:  row.descripcion,
-    type:         row.tipo_producto,
-    unit_code:    row.unit_code,
-    unit:         row.unit_label ?? row.unit_code ?? 'und',
-    barcode:      row.barcode,
-    referencia:   row.referencia,
-    marca:        row.marca,
-    precio_venta: Number(row.precio_venta || 0),
-    control_stock:row.control_stock === 1,
-    min_stock:    Number(row.stock_minimo ?? row.min_stock ?? 0),
-    max_stock:    Number(row.stock_maximo ?? row.max_stock ?? 0),
-    active:       row.activo === 1 || row.activo === true,
+    id:            row.id,
+    sku:           row.siigo_code,
+    siigo_id:      row.siigo_id,
+    siigo_code:    row.siigo_code,
+    name:          row.nombre,
+    description:   row.descripcion,
+    type:          row.tipo_producto,
+    unit_code:     row.unit_code,
+    unit:          row.unit_label ?? row.unit_code ?? 'und',
+    barcode:       row.barcode,
+    referencia:    row.referencia,
+    marca:         row.marca,
+    precio_venta:  Number(row.precio_venta || 0),
+    control_stock: row.control_stock === 1,
+    min_stock:     Number(row.stock_minimo ?? row.min_stock ?? 0),
+    max_stock:     Number(row.stock_maximo ?? row.max_stock ?? 0),
+    active:        row.activo === 1 || row.activo === true,
     siigo_sync_at: row.siigo_synced_at,
-    createdAt:    row.creado_en,
+    createdAt:     row.creado_en,
   };
 }
 
@@ -43,18 +42,56 @@ module.exports = async (req, res) => {
     try {
       const rows = await query(`SELECT * FROM productos WHERE id = ? LIMIT 1`, [id]);
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
-      return res.status(200).json({ ok: true, data: mapRow(rows[0]) });
+
+      const producto = mapRow(rows[0]);
+
+      const lotes = await query(
+        `SELECT
+           s.id AS stock_id,
+           s.lote,
+           s.cantidad,
+           COALESCE(s.reservada, 0) AS reservada,
+           (s.cantidad - COALESCE(s.reservada, 0)) AS disponible_lote,
+           l.status AS estado_lote,
+           l.origin AS origen_lote,
+           l.expiry_date AS vence,
+           s.actualizado_en
+         FROM stock s
+         LEFT JOIN lots l
+           ON BINARY l.lpn = BINARY s.lote
+         WHERE s.producto_id = ?
+         ORDER BY
+           CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
+           l.expiry_date ASC,
+           s.actualizado_en DESC,
+           s.lote ASC`,
+        [id]
+      );
+
+      return res.status(200).json({
+        ok: true,
+        data: {
+          ...producto,
+          lotes: lotes.map((r) => ({
+            stock_id:        r.stock_id,
+            lote:            r.lote,
+            cantidad:        Number(r.cantidad || 0),
+            reservada:       Number(r.reservada || 0),
+            disponible_lote: Number(r.disponible_lote || 0),
+            estado_lote:     r.estado_lote || 'DISPONIBLE',
+            origen_lote:     r.origen_lote || 'N/A',
+            vence:           r.vence,
+            actualizado_en:  r.actualizado_en,
+          }))
+        }
+      });
     } catch (err) {
       console.error('[products/:id GET]', err.message);
       return res.status(500).json({ ok: false, error: 'Error al obtener producto' });
     }
   }
 
-  // ── PUT (actualizar)
-  // El frontend envía: { name, description, type, unit, min_stock, max_stock }
-  // Columnas reales en BD: nombre, descripcion, tipo_producto, unit_label
-  // Nota: min_stock/max_stock no existen aún en el schema — se ignoran por ahora
-  // sin generar error, para no bloquear el flujo del frontend.
+  // ── PUT
   if (req.method === 'PUT') {
     try {
       const { name, description, type, unit } = req.body || {};
