@@ -21,14 +21,38 @@ const ACTION_META = {
   SIIGO_SYNC:           { label: 'Sync Siigo',           color: 'text-muted',      sign: '±' },
 }
 
-function getActionMeta(action = '') {
-  return ACTION_META[action] ?? { label: action, color: 'text-muted', sign: '' }
+// Si action llega vacío (''), inferimos el tipo por referencia y signo de qty
+function resolveAction(action, reference, qty) {
+  if (action && ACTION_META[action]) return action
+
+  if (!action || action === '') {
+    const ref = reference || ''
+    if (ref.startsWith('orden_produccion:')) {
+      const n = parseFloat(qty ?? 0)
+      return n < 0 ? 'CONSUMO_MATERIAL' : 'CIERRE_PRODUCCION'
+    }
+    if (ref.startsWith('recepcion:'))  return 'INGRESO_RECEPCION'
+    if (ref.startsWith('despacho:'))   return 'DESPACHO'
+    if (ref.startsWith('merma:'))      return 'MERMA_PROCESO'
+    if (ref.startsWith('devolucion:')) return 'DEVOLUCION'
+  }
+
+  return null  // desconocido
+}
+
+function getActionMeta(action, reference, qty) {
+  const resolved = resolveAction(action, reference, qty)
+  return ACTION_META[resolved] ?? { label: resolved || action || 'Movimiento', color: 'text-muted', sign: '' }
 }
 
 function fmtQty(qty, sign) {
   const n = parseFloat(qty)
   if (sign === '+') return `+${Math.abs(n).toFixed(3)}`
   if (sign === '-') return `-${Math.abs(n).toFixed(3)}`
+  if (sign === '') {
+    // sin meta definida — mostramos el valor real con su signo
+    return n >= 0 ? `+${n.toFixed(3)}` : n.toFixed(3)
+  }
   return (n >= 0 ? `+${n.toFixed(3)}` : n.toFixed(3))
 }
 
@@ -56,11 +80,11 @@ export default function KardexPage() {
       {/* Filtro */}
       <form onSubmit={handleSearch} className="flex gap-2 mb-6 max-w-md">
         <div className="flex-1">
-          <label className="block text-xs text-muted mb-1">Filtrar por SKU (opcional)</label>
+          <label className="block text-xs text-muted mb-1">Filtrar por SKU / ID producto (opcional)</label>
           <input
             value={sku}
             onChange={(e) => setSku(e.target.value)}
-            placeholder="Ej: PT-MIXB-60"
+            placeholder="Ej: RM-TAP-MED"
             className="input-field"
           />
         </div>
@@ -107,9 +131,9 @@ export default function KardexPage() {
               </thead>
               <tbody>
                 {kardex.map((r, i) => {
-                  const meta  = getActionMeta(r.action)
-                  const qty   = parseFloat(r.qty ?? 0)
-                  const lpn   = r.lot_lpn || '—'
+                  const meta     = getActionMeta(r.action, r.reference, r.qty)
+                  const qty      = parseFloat(r.qty ?? 0)
+                  const lpn      = r.lot_lpn || '—'
                   const lpnShort = lpn !== '—' && lpn.length > 20 ? lpn.slice(0, 20) + '…' : lpn
 
                   return (
