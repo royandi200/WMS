@@ -541,42 +541,53 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
 }
 
 // findFifoLot — selecciona el lote FIFO más antiguo con stock disponible
-async function findFifoLot(db, sku, bodegaId) {
+async function findFifoLots(db, sku, bodegaId) {
   try {
     const [bodRow] = await db.execute(
       `SELECT codigo FROM bodegas WHERE id = ? LIMIT 1`, [bodegaId]
     ).catch(() => [[]]);
     const bodCod = bodRow[0]?.codigo || 'BG-PPAL';
+
     const [rows] = await db.execute(
       `SELECT lote, disponible, vence
        FROM v_stock_disponible
        WHERE sku = ? AND bodega = ?
          AND estado_lote = 'DISPONIBLE'
-       ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC
-       LIMIT 1`,
+         AND disponible > 0
+       ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC`,
       [sku, bodCod]
     );
-    if (rows[0]) return { lpn: rows[0].lote, disponible: parseFloat(rows[0].disponible), modo: 'vista' };
+
+    return rows.map(r => ({
+      lpn: r.lote,
+      disponible: parseFloat(r.disponible || 0),
+      vence: r.vence || null,
+      modo: 'vista'
+    }));
   } catch (_) {}
-  // Fallback directo a stock
+
   const [rows] = await db.execute(
     `SELECT s.lote,
             (s.cantidad - s.reservada) AS disponible,
             l.expiry_date AS vence
      FROM stock s
      JOIN productos p ON p.id = s.producto_id
-     LEFT JOIN lots  l ON l.lpn = s.lote
+     LEFT JOIN lots l ON l.lpn = s.lote
      WHERE p.siigo_code = ?
-       AND s.bodega_id  = ?
+       AND s.bodega_id = ?
        AND (s.cantidad - s.reservada) > 0
        AND COALESCE(l.status, 'DISPONIBLE') = 'DISPONIBLE'
      ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
-              l.expiry_date ASC, s.id ASC
-     LIMIT 1`,
+              l.expiry_date ASC, s.id ASC`,
     [sku, bodegaId]
   ).catch(() => [[]]);
-  if (!rows[0]) return null;
-  return { lpn: rows[0].lote, disponible: parseFloat(rows[0].disponible), modo: 'fallback' };
+
+  return rows.map(r => ({
+    lpn: r.lote,
+    disponible: parseFloat(r.disponible || 0),
+    vence: r.vence || null,
+    modo: 'fallback'
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────
