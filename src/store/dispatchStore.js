@@ -1,10 +1,26 @@
 import { create } from 'zustand'
-import { createDispatch } from '../api/dispatch.api'
+import { createDispatch, listDispatches } from '../api/dispatch.api'
 
 export const useDispatchStore = create((set) => ({
+  list: [],
   loading: false,
-  error:   null,
+  loadingList: false,
+  error: null,
   lastDispatch: null,
+
+  fetchList: async (params = {}) => {
+    set({ loadingList: true, error: null })
+    try {
+      const data = await listDispatches(params)
+      set({
+        list: data.rows || data.data || data || [],
+        loadingList: false,
+      })
+    } catch (e) {
+      const msg = e.response?.data?.message || 'Error al cargar histórico de despachos'
+      set({ error: msg, loadingList: false })
+    }
+  },
 
   submit: async (body) => {
     set({ loading: true, error: null })
