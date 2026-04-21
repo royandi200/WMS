@@ -68,14 +68,23 @@ module.exports = async (req, res) => {
 
     if (productIds.length) {
       const availableRows = await query(
-        `SELECT producto_id, COALESCE(SUM(cantidad - reservada), 0) AS total
-         FROM stock
-         WHERE producto_id IN (${productIds.map(() => '?').join(',')})
-         GROUP BY producto_id`,
+        `SELECT
+           s.producto_id,
+           COALESCE(SUM(
+             CASE
+               WHEN l.id IS NOT NULL AND COALESCE(l.status, 'DISPONIBLE') <> 'DISPONIBLE' THEN 0
+               WHEN l.expiry_date IS NOT NULL AND DATE(l.expiry_date) < CURDATE() THEN 0
+               ELSE (COALESCE(s.cantidad, 0) - COALESCE(s.reservada, 0))
+             END
+           ), 0) AS total_disponible
+         FROM stock s
+         LEFT JOIN lots l ON l.lpn = s.lote
+         WHERE s.producto_id IN (${productIds.map(() => '?').join(',')})
+         GROUP BY s.producto_id`,
         productIds
       );
 
-      const availableMap = new Map(availableRows.map((r) => [Number(r.producto_id), Number(r.total || 0)]));
+      const availableMap = new Map(availableRows.map((r) => [Number(r.producto_id), Number(r.total_disponible || 0)]));
 
       const allProductRows = await query(
         `SELECT id, product_id, qty, created_at
