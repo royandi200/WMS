@@ -541,7 +541,7 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
 }
 
 // findFifoLot — selecciona el lote FIFO más antiguo con stock disponible
-async function findFifoLots(db, sku, bodegaId) {
+async function findFifoLot(db, sku, bodegaId) {
   try {
     const [bodRow] = await db.execute(
       `SELECT codigo FROM bodegas WHERE id = ? LIMIT 1`, [bodegaId]
