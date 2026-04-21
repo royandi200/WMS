@@ -68,15 +68,14 @@ module.exports = async (req, res) => {
 
     if (productIds.length) {
       const availableRows = await query(
-        `SELECT p.id AS product_id, COALESCE(SUM(v.disponible), 0) AS total
-         FROM productos p
-         LEFT JOIN v_stock_disponible v ON v.sku = p.siigo_code
-         WHERE p.id IN (${productIds.map(() => '?').join(',')})
-         GROUP BY p.id`,
+        `SELECT producto_id, COALESCE(SUM(cantidad - reservada), 0) AS total
+         FROM stock
+         WHERE producto_id IN (${productIds.map(() => '?').join(',')})
+         GROUP BY producto_id`,
         productIds
       );
 
-      const availableMap = new Map(availableRows.map((r) => [Number(r.product_id), Number(r.total || 0)]));
+      const availableMap = new Map(availableRows.map((r) => [Number(r.producto_id), Number(r.total || 0)]));
 
       const allProductRows = await query(
         `SELECT id, product_id, qty, created_at
