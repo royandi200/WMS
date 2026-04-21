@@ -67,15 +67,16 @@ module.exports = async (req, res) => {
     let balanceById = {};
 
     if (productIds.length) {
-      const stockRows = await query(
-        `SELECT producto_id, COALESCE(SUM(cantidad), 0) AS total
-         FROM stock
-         WHERE producto_id IN (${productIds.map(() => '?').join(',')})
-         GROUP BY producto_id`,
+      const availableRows = await query(
+        `SELECT p.id AS product_id, COALESCE(SUM(v.disponible), 0) AS total
+         FROM productos p
+         LEFT JOIN v_stock_disponible v ON v.sku = p.siigo_code
+         WHERE p.id IN (${productIds.map(() => '?').join(',')})
+         GROUP BY p.id`,
         productIds
       );
 
-      const stockMap = new Map(stockRows.map((r) => [Number(r.producto_id), Number(r.total || 0)]));
+      const availableMap = new Map(availableRows.map((r) => [Number(r.product_id), Number(r.total || 0)]));
 
       const allProductRows = await query(
         `SELECT id, product_id, qty, created_at
@@ -88,7 +89,7 @@ module.exports = async (req, res) => {
       const laterDeltaByProduct = new Map();
       balanceById = allProductRows.reduce((acc, row) => {
         const productId = Number(row.product_id);
-        const currentTotal = Number(stockMap.get(productId) || 0);
+        const currentTotal = Number(availableMap.get(productId) || 0);
         const laterDelta = Number(laterDeltaByProduct.get(productId) || 0);
         acc[row.id] = Number((currentTotal - laterDelta).toFixed(3));
         laterDeltaByProduct.set(productId, laterDelta + Number(row.qty || 0));
