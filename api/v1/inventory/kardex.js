@@ -26,6 +26,7 @@ module.exports = async (req, res) => {
     const rows = await query(
       `SELECT
          k.id,
+         k.product_id,
          CASE
            WHEN COALESCE(k.action, '') <> '' THEN k.action
            WHEN k.reference LIKE 'orden_produccion:%' AND k.qty < 0 THEN 'CONSUMO_MATERIAL'
@@ -62,9 +63,49 @@ module.exports = async (req, res) => {
       args
     );
 
+    const productIds = [...new Set(rows.map((r) => Number(r.product_id)).filter(Boolean))];
+    let balanceById = {};
+
+    if (productIds.length) {
+      const stockRows = await query(
+        `SELECT producto_id, COALESCE(SUM(cantidad), 0) AS total
+         FROM stock
+         WHERE producto_id IN (${productIds.map(() => '?').join(',')})
+         GROUP BY producto_id`,
+        productIds
+      );
+
+      const stockMap = new Map(stockRows.map((r) => [Number(r.producto_id), Number(r.total || 0)]));
+
+      const allProductRows = await query(
+        `SELECT id, product_id, qty, created_at
+         FROM kardex
+         WHERE product_id IN (${productIds.map(() => '?').join(',')})
+         ORDER BY created_at DESC`,
+        productIds
+      );
+
+      const laterDeltaByProduct = new Map();
+      balanceById = allProductRows.reduce((acc, row) => {
+        const productId = Number(row.product_id);
+        const currentTotal = Number(stockMap.get(productId) || 0);
+        const laterDelta = Number(laterDeltaByProduct.get(productId) || 0);
+        acc[row.id] = Number((currentTotal - laterDelta).toFixed(3));
+        laterDeltaByProduct.set(productId, laterDelta + Number(row.qty || 0));
+        return acc;
+      }, {});
+    }
+
+    const normalizedRows = rows.map((row) => ({
+      ...row,
+      balance_after: Object.prototype.hasOwnProperty.call(balanceById, row.id)
+        ? balanceById[row.id]
+        : row.balance_after,
+    }));
+
     return res.status(200).json({
       ok: true,
-      data: { rows, total: Number(countRows[0]?.total ?? 0) }
+      data: { rows: normalizedRows, total: Number(countRows[0]?.total ?? 0) }
     });
   } catch (err) {
     console.error('[inventory/kardex]', err.message);
