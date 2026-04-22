@@ -1,7 +1,7 @@
 // POST   /api/v1/inventory/ubicaciones        → crear ubicación
 // PUT    /api/v1/inventory/ubicaciones        → actualizar posición/zona (drag)
 // DELETE /api/v1/inventory/ubicaciones?id=X  → eliminar (solo si sin stock)
-const { query, execute } = require('../../_lib/db')
+const { query } = require('../../_lib/db')
 const { cors, verifyToken } = require('../../_lib/auth')
 
 module.exports = async (req, res) => {
@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
       )
       if (exist) return res.status(409).json({ ok:false, error:'Ya existe una ubicación con ese código' })
 
-      const result = await execute(
+      const result = await query(
         `INSERT INTO ubicaciones (bodega_id, codigo, zona, pasillo, nivel, posicion, canvas_x, canvas_y, activa)
          VALUES (?,?,?,?,?,?,?,?,1)`,
         [bodega_id, codigo, zona, pasillo||null, nivel, posicion, canvas_x||0, canvas_y||0]
@@ -47,7 +47,7 @@ module.exports = async (req, res) => {
 
       if (!fields.length) return res.status(400).json({ ok:false, error:'Nada que actualizar' })
       vals.push(id)
-      await execute(`UPDATE ubicaciones SET ${fields.join(',')} WHERE id=?`, vals)
+      await query(`UPDATE ubicaciones SET ${fields.join(',')} WHERE id=?`, vals)
       return res.json({ ok:true })
     }
 
@@ -62,7 +62,7 @@ module.exports = async (req, res) => {
       if (Number(stock?.total) > 0)
         return res.status(409).json({ ok:false, error:'No se puede eliminar: tiene stock asignado' })
 
-      await execute('DELETE FROM ubicaciones WHERE id=?', [id])
+      await query('DELETE FROM ubicaciones WHERE id=?', [id])
       return res.json({ ok:true })
     }
 
