@@ -1,367 +1,650 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
-import { Package, X, Search, AlertTriangle, CheckCircle, Box, RefreshCw, Layers } from 'lucide-react'
+import { createUbicacion, updateUbicacion, deleteUbicacion } from '../api/inventory.api'
+import { X, RefreshCw, Edit2, Trash2, Check, Plus, Move, Eye, Settings } from 'lucide-react'
 
-// ─── Colores por estado ───────────────────────────────────────────────────────
-const ESTADO = {
-  ok:    { bg:'#3fb95018', border:'#3fb95050', dot:'#3fb950', label:'Con stock',  icon:'✓' },
-  bajo:  { bg:'#f0883e18', border:'#f0883e50', dot:'#f0883e', label:'Bajo mín.',  icon:'⚠' },
-  vacio: { bg:'#ffffff06', border:'#30363d',   dot:'#8b949e', label:'Vacía',      icon:'○' },
+// ─── Constantes ───────────────────────────────────────────────────────────────
+const CELL_W = 64
+const CELL_H = 64
+const GRID   = 24   // snap grid px
+
+const ZONA_COLORS = {
+  'Zona A': { bg:'#58a6ff18', border:'#58a6ff50', accent:'#58a6ff', label:'#58a6ff' },
+  'Zona B': { bg:'#3fb95018', border:'#3fb95050', accent:'#3fb950', label:'#3fb950' },
+  'Zona C': { bg:'#f0883e18', border:'#f0883e50', accent:'#f0883e', label:'#f0883e' },
+  'Zona D': { bg:'#d2a8ff18', border:'#d2a8ff50', accent:'#d2a8ff', label:'#d2a8ff' },
+  'Zona E': { bg:'#f8514918', border:'#f8514950', accent:'#f85149', label:'#f85149' },
+}
+const STOCK_STATE = {
+  ok:    '#3fb950',
+  bajo:  '#f0883e',
+  vacio: '#8b949e',
+}
+const snap = v => Math.round(v / GRID) * GRID
+
+// ─── Plantillas del panel lateral ────────────────────────────────────────────
+const TEMPLATES = [
+  { id:'single',  label:'Ubicación',   w:1, h:1, icon:'□' },
+  { id:'row3',    label:'Fila 3',      w:3, h:1, icon:'□□□' },
+  { id:'row5',    label:'Fila 5',      w:5, h:1, icon:'□□□□□' },
+  { id:'rack2x4', label:'Rack 2×4',   w:2, h:4, icon:'▦' },
+  { id:'rack3x3', label:'Rack 3×3',   w:3, h:3, icon:'▦' },
+]
+
+// ─── Genera ubicaciones desde una plantilla ───────────────────────────────────
+function generateFromTemplate(tpl, zona, pasillo, startX, startY) {
+  const items = []
+  for (let row = 0; row < tpl.h; row++) {
+    for (let col = 0; col < tpl.w; col++) {
+      const nivel   = String(row + 1)
+      const posicion= String.fromCharCode(97 + col)
+      items.push({
+        codigo:   `${zona.replace('Zona ','')}-${String(pasillo).padStart(2,'0')}-${nivel}${posicion}`,
+        zona,
+        pasillo:  String(pasillo).padStart(2,'0'),
+        nivel,
+        posicion,
+        canvas_x: startX + col * (CELL_W + 4),
+        canvas_y: startY + row * (CELL_H + 4),
+      })
+    }
+  }
+  return items
 }
 
-// ─── Celda de ubicación ───────────────────────────────────────────────────────
-function UbicCell({ ub, selected, onClick }) {
-  const e = ESTADO[ub.estado] || ESTADO.vacio
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function Toast({ msg, ok, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t) }, [])
   return (
-    <button
-      onClick={() => onClick(ub)}
-      title={`${ub.codigo} · ${ub.estado === 'vacio' ? 'Vacía' : ub.cantidad_total + ' u.'}`}
-      className="relative flex flex-col items-center justify-center rounded-lg border transition-all duration-150 active:scale-95 group"
+    <div className="fixed bottom-6 right-6 z-[200] flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium"
       style={{
-        width: '52px', height: '52px',
-        background:   selected ? e.dot + '30' : e.bg,
-        borderColor:  selected ? e.dot        : e.border,
-        boxShadow:    selected ? `0 0 0 2px ${e.dot}60` : 'none',
+        background: ok ? '#3fb95020' : '#f8514920',
+        borderColor: ok ? '#3fb95060' : '#f8514960',
+        color: ok ? '#3fb950' : '#f85149',
+        animation: 'slideInRight .2s ease',
       }}>
-      {/* Dot estado */}
-      <div className="w-2 h-2 rounded-full mb-1" style={{ background: e.dot }}/>
-      {/* Código corto */}
-      <span className="text-[9px] font-mono font-bold leading-none"
-        style={{ color: ub.estado === 'vacio' ? '#8b949e' : '#e6edf3' }}>
-        {ub.codigo.split('-').slice(-1)[0] || ub.codigo}
-      </span>
-      {/* Cantidad */}
-      {ub.estado !== 'vacio' && (
-        <span className="text-[8px] tabular-nums mt-0.5" style={{ color: e.dot }}>
-          {ub.cantidad_total >= 1000
-            ? (ub.cantidad_total / 1000).toFixed(1) + 'k'
-            : Math.round(ub.cantidad_total)}
-        </span>
-      )}
-    </button>
+      {ok ? <Check size={14}/> : <X size={14}/>}
+      {msg}
+    </div>
   )
 }
 
-// ─── Panel detalle ────────────────────────────────────────────────────────────
-function DetailPanel({ ub, onClose }) {
-  if (!ub) return null
-  const e = ESTADO[ub.estado] || ESTADO.vacio
+// ─── Modal editar ubicación ───────────────────────────────────────────────────
+function EditModal({ ub, onSave, onDelete, onClose }) {
+  const [codigo, setCodigo] = useState(ub.codigo)
+  const [zona,   setZona]   = useState(ub.zona)
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updateUbicacion({ id: ub.id, codigo, zona })
+      onSave({ ...ub, codigo, zona })
+    } catch(e) {
+      console.error(e)
+    } finally { setSaving(false) }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`¿Eliminar ubicación ${ub.codigo}?`)) return
+    try {
+      await deleteUbicacion(ub.id)
+      onDelete(ub.id)
+    } catch(e) {
+      alert(e.response?.data?.error || 'Error al eliminar')
+    }
+  }
+
   return (
-    <div className="bg-surface border border-border rounded-xl overflow-hidden flex flex-col"
-      style={{ minWidth: '260px', maxWidth: '300px' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ background: e.dot }}/>
-          <span className="text-sm font-bold text-foreground font-mono">{ub.codigo}</span>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      style={{ background:'rgba(0,0,0,0.6)', backdropFilter:'blur(4px)' }}
+      onClick={onClose}>
+      <div className="bg-[#161b22] border border-border rounded-2xl w-full max-w-sm shadow-2xl p-5"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-bold text-foreground">Editar ubicación</p>
+          <button onClick={onClose} className="text-muted hover:text-foreground"><X size={14}/></button>
         </div>
-        <button onClick={onClose}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-white/8 transition-colors">
-          <X size={13}/>
-        </button>
-      </div>
-
-      {/* Meta */}
-      <div className="px-4 py-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-b border-border/50">
-        {[
-          ['Bodega',   ub.bodega_nombre || ub.bodega_codigo],
-          ['Zona',     ub.zona],
-          ['Pasillo',  ub.pasillo],
-          ['Nivel',    ub.nivel],
-          ['Estado',   e.label],
-          ['Productos',ub.num_productos > 0 ? ub.num_productos : '—'],
-        ].map(([k,v]) => (
-          <div key={k}>
-            <p className="text-[9px] text-muted uppercase tracking-wider">{k}</p>
-            <p className="text-xs font-medium text-subtle">{v}</p>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] text-muted uppercase tracking-wider block mb-1">Código</label>
+            <input value={codigo} onChange={e => setCodigo(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 font-mono"/>
           </div>
-        ))}
-      </div>
-
-      {/* Items */}
-      <div className="flex-1 overflow-y-auto max-h-64">
-        {ub.items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 gap-2">
-            <Box size={20} className="text-muted opacity-40"/>
-            <span className="text-xs text-muted">Ubicación vacía</span>
+          <div>
+            <label className="text-[10px] text-muted uppercase tracking-wider block mb-1">Zona</label>
+            <select value={zona} onChange={e => setZona(e.target.value)}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50">
+              {Object.keys(ZONA_COLORS).map(z => <option key={z} value={z}>{z}</option>)}
+            </select>
           </div>
-        ) : ub.items.map((item, i) => (
-          <div key={i} className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border/30 last:border-0 hover:bg-white/3 transition-colors">
-            <div className="min-w-0">
-              <p className="text-xs font-mono text-primary truncate">{item.sku}</p>
-              <p className="text-[10px] text-muted truncate">{item.nombre}</p>
-              {item.lote !== '—' && (
-                <p className="text-[9px] text-muted/60">Lote: {item.lote}</p>
-              )}
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-sm font-bold tabular-nums" style={{ color: e.dot }}>
-                {Number(item.cantidad).toLocaleString('es-CO', { maximumFractionDigits: 1 })}
+          {ub.estado !== 'vacio' && (
+            <div className="rounded-lg bg-white/4 border border-border px-3 py-2">
+              <p className="text-[10px] text-muted mb-1">Stock actual</p>
+              <p className="text-sm font-bold tabular-nums"
+                style={{ color: STOCK_STATE[ub.estado] }}>
+                {ub.cantidad_total?.toLocaleString('es-CO')} u. · {ub.num_productos} prod.
               </p>
-              <p className="text-[9px] text-muted">u.</p>
             </div>
-          </div>
-        ))}
+          )}
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button onClick={handleDelete}
+            className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
+            <Trash2 size={14}/>
+          </button>
+          <button onClick={onClose}
+            className="flex-1 py-2 rounded-lg border border-border text-muted text-sm hover:bg-white/5 transition-colors">
+            Cancelar
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2 rounded-lg bg-primary text-black text-sm font-bold hover:bg-primary/80 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5">
+            {saving ? <RefreshCw size={12} className="animate-spin"/> : <Check size={12}/>}
+            Guardar
+          </button>
+        </div>
       </div>
     </div>
+  )
+}
+
+// ─── Panel lateral de plantillas ─────────────────────────────────────────────
+function SidePanel({ zonaActiva, setZonaActiva, pasilloActivo, setPasilloActivo, onDragStart }) {
+  return (
+    <div className="flex flex-col gap-4 w-52 shrink-0">
+
+      {/* Configuración */}
+      <div className="bg-surface border border-border rounded-xl p-3 space-y-3">
+        <p className="text-[10px] text-muted uppercase tracking-wider font-semibold">Configurar</p>
+        <div>
+          <label className="text-[10px] text-muted block mb-1">Zona</label>
+          <select value={zonaActiva} onChange={e => setZonaActiva(e.target.value)}
+            className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none">
+            {Object.keys(ZONA_COLORS).map(z => (
+              <option key={z} value={z}>{z}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-muted block mb-1">Pasillo</label>
+          <input type="number" min="1" max="99" value={pasilloActivo}
+            onChange={e => setPasilloActivo(e.target.value)}
+            className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none font-mono"/>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-sm" style={{ background: ZONA_COLORS[zonaActiva]?.accent }}/>
+          <span className="text-[10px] text-muted">{zonaActiva} · Pasillo {String(pasilloActivo).padStart(2,'0')}</span>
+        </div>
+      </div>
+
+      {/* Plantillas */}
+      <div className="bg-surface border border-border rounded-xl p-3">
+        <p className="text-[10px] text-muted uppercase tracking-wider font-semibold mb-2.5">Plantillas</p>
+        <p className="text-[10px] text-muted/60 mb-3 leading-relaxed">
+          Arrastra al plano para crear ubicaciones
+        </p>
+        <div className="space-y-1.5">
+          {TEMPLATES.map(tpl => (
+            <div key={tpl.id}
+              draggable
+              onDragStart={e => onDragStart(e, tpl)}
+              className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border bg-background hover:border-primary/40 hover:bg-primary/5 cursor-grab active:cursor-grabbing transition-all active:scale-95 select-none">
+              <span className="text-base leading-none font-mono text-muted">{tpl.icon}</span>
+              <div>
+                <p className="text-xs font-medium text-foreground">{tpl.label}</p>
+                <p className="text-[9px] text-muted">{tpl.w}×{tpl.h} celda{tpl.w*tpl.h>1?'s':''}</p>
+              </div>
+              <Move size={11} className="text-muted/40 ml-auto"/>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Leyenda */}
+      <div className="bg-surface border border-border rounded-xl p-3">
+        <p className="text-[10px] text-muted uppercase tracking-wider font-semibold mb-2">Estado</p>
+        <div className="space-y-1.5">
+          {[['ok','#3fb950','Con stock'],['bajo','#f0883e','Bajo mín.'],['vacio','#8b949e','Vacía']].map(([k,c,l]) => (
+            <div key={k} className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ background:c }}/>
+              <span className="text-[10px] text-muted">{l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Celda de ubicación en el canvas ─────────────────────────────────────────
+function CanvasCell({ ub, selected, editMode, onSelect, onDragStart, onDragEnd }) {
+  const color  = STOCK_STATE[ub.estado] || STOCK_STATE.vacio
+  const zc     = ZONA_COLORS[ub.zona]   || ZONA_COLORS['Zona A']
+  const isDrag = useRef(false)
+
+  return (
+    <div
+      draggable={editMode}
+      onDragStart={e => { isDrag.current = true; onDragStart(e, ub) }}
+      onDragEnd={e => { isDrag.current = false; onDragEnd(e) }}
+      onClick={() => { if (!isDrag.current) onSelect(ub) }}
+      className="absolute flex flex-col items-center justify-center rounded-xl border-2 transition-all duration-150 select-none"
+      style={{
+        left:        ub.canvas_x,
+        top:         ub.canvas_y,
+        width:       CELL_W,
+        height:      CELL_H,
+        background:  selected ? `${color}30` : zc.bg,
+        borderColor: selected ? color         : (ub.estado==='vacio' ? '#30363d' : color+'80'),
+        boxShadow:   selected ? `0 0 0 2px ${color}50, 0 4px 16px ${color}20` : `0 2px 8px ${zc.accent}10`,
+        cursor:      editMode ? 'grab' : 'pointer',
+        zIndex:      selected ? 10 : 1,
+      }}>
+      {/* Dot estado */}
+      <div className="w-2 h-2 rounded-full mb-1" style={{ background: color }}/>
+      {/* Código */}
+      <span className="text-[9px] font-mono font-bold leading-none text-center px-1 truncate w-full text-center"
+        style={{ color: ub.estado==='vacio' ? '#8b949e' : '#e6edf3' }}>
+        {ub.codigo.split('-').slice(-2).join('-') || ub.codigo}
+      </span>
+      {/* Cantidad */}
+      {ub.estado !== 'vacio' && (
+        <span className="text-[8px] tabular-nums mt-0.5 font-bold" style={{ color }}>
+          {ub.cantidad_total >= 1000
+            ? (ub.cantidad_total/1000).toFixed(1)+'k'
+            : Math.round(ub.cantidad_total)}
+        </span>
+      )}
+      {/* Edit icon overlay */}
+      {editMode && (
+        <div className="absolute inset-0 rounded-xl flex items-center justify-center bg-black/0 hover:bg-black/20 transition-colors opacity-0 hover:opacity-100">
+          <Move size={14} className="text-white"/>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Etiquetas de zona en el canvas ──────────────────────────────────────────
+function ZoneLabels({ ubicaciones }) {
+  const zones = useMemo(() => {
+    const map = {}
+    for (const u of ubicaciones) {
+      if (!map[u.zona]) map[u.zona] = { minX:Infinity, minY:Infinity, maxX:0, maxY:0 }
+      const z = map[u.zona]
+      z.minX = Math.min(z.minX, u.canvas_x)
+      z.minY = Math.min(z.minY, u.canvas_y - 28)
+      z.maxX = Math.max(z.maxX, u.canvas_x + CELL_W)
+      z.maxY = Math.max(z.maxY, u.canvas_y + CELL_H)
+    }
+    return map
+  }, [ubicaciones])
+
+  return (
+    <>
+      {Object.entries(zones).map(([zona, r]) => {
+        const zc = ZONA_COLORS[zona] || ZONA_COLORS['Zona A']
+        return (
+          <div key={zona}>
+            {/* Area highlight */}
+            <div className="absolute rounded-2xl pointer-events-none"
+              style={{
+                left:   r.minX - 12,
+                top:    r.minY - 8,
+                width:  r.maxX - r.minX + 24,
+                height: r.maxY - r.minY + 20,
+                background: zc.bg,
+                border: `1px dashed ${zc.border}`,
+              }}/>
+            {/* Label */}
+            <div className="absolute pointer-events-none px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest"
+              style={{
+                left:       r.minX - 12,
+                top:        r.minY - 26,
+                color:      zc.label,
+                background: zc.bg,
+                border:     `1px solid ${zc.border}`,
+              }}>
+              {zona}
+            </div>
+          </div>
+        )
+      })}
+    </>
   )
 }
 
 // ─── MAPA PRINCIPAL ───────────────────────────────────────────────────────────
 export default function MapaBodega() {
   const { mapa, loadingMapa, fetchMapa } = useInventoryStore()
-  const [selected,    setSelected]    = useState(null)
-  const [filterZona,  setFilterZona]  = useState('')
-  const [filterBodega,setFilterBodega]= useState('')
-  const [filterEstado,setFilterEstado]= useState('')
-  const [search,      setSearch]      = useState('')
+  const [cells,        setCells]        = useState([])
+  const [selected,     setSelected]     = useState(null)
+  const [editMode,     setEditMode]     = useState(false)
+  const [editModal,    setEditModal]    = useState(null)
+  const [zonaActiva,   setZonaActiva]   = useState('Zona A')
+  const [pasilloActivo,setPasilloActivo]= useState(1)
+  const [dragTpl,      setDragTpl]      = useState(null)
+  const [draggingCell, setDraggingCell] = useState(null)
+  const [dragOffset,   setDragOffset]  = useState({ x:0, y:0 })
+  const [saving,       setSaving]      = useState(false)
+  const [toast,        setToast]       = useState(null)
+  const canvasRef = useRef(null)
 
   useEffect(() => { fetchMapa() }, [])
 
-  const ubicaciones = mapa?.ubicaciones ?? []
-  const bodegas      = mapa?.bodegas      ?? []
-
-  // Zonas únicas de la bodega seleccionada
-  const zonas = useMemo(() => {
-    const base = filterBodega
-      ? ubicaciones.filter(u => String(u.bodega_id) === filterBodega)
-      : ubicaciones
-    return [...new Set(base.map(u => u.zona))].sort()
-  }, [ubicaciones, filterBodega])
-
-  // Filtrado
-  const filtered = useMemo(() => {
-    return ubicaciones.filter(u => {
-      if (filterBodega && String(u.bodega_id) !== filterBodega) return false
-      if (filterZona   && u.zona    !== filterZona)             return false
-      if (filterEstado && u.estado  !== filterEstado)           return false
-      if (search) {
-        const q = search.toLowerCase()
-        const matchCod  = u.codigo.toLowerCase().includes(q)
-        const matchSKU  = u.items.some(it => it.sku?.toLowerCase().includes(q) || it.nombre?.toLowerCase().includes(q))
-        if (!matchCod && !matchSKU) return false
-      }
-      return true
-    })
-  }, [ubicaciones, filterBodega, filterZona, filterEstado, search])
-
-  // Estadísticas
-  const stats = useMemo(() => ({
-    total: filtered.length,
-    ok:    filtered.filter(u => u.estado === 'ok').length,
-    bajo:  filtered.filter(u => u.estado === 'bajo').length,
-    vacio: filtered.filter(u => u.estado === 'vacio').length,
-  }), [filtered])
-
-  // Agrupar por zona → pasillo
-  const grouped = useMemo(() => {
-    const g = {}
-    for (const u of filtered) {
-      if (!g[u.zona]) g[u.zona] = {}
-      const p = u.pasillo || '—'
-      if (!g[u.zona][p]) g[u.zona][p] = []
-      g[u.zona][p].push(u)
+  // Sync cells from store + add mock if empty
+  useEffect(() => {
+    const src = mapa?.ubicaciones ?? []
+    if (src.length === 0) {
+      // Auto-layout demo positions if no canvas_x/y
+      setCells(buildMockCells())
+    } else {
+      setCells(src.map((u, i) => ({
+        ...u,
+        canvas_x: u.canvas_x || (i % 8) * (CELL_W + 8) + 40,
+        canvas_y: u.canvas_y || Math.floor(i / 8) * (CELL_H + 8) + 60,
+      })))
     }
-    return g
-  }, [filtered])
+  }, [mapa])
 
-  // ── MOCK si no hay datos ───────────────────────────────────────────────────
-  const MOCK = useMemo(() => {
-    if (ubicaciones.length > 0) return null
-    const estados = ['ok','ok','ok','bajo','vacio','ok','vacio','bajo']
+  const showToast = (msg, ok=true) => { setToast({ msg, ok }); }
+
+  // ── Mock auto-layout ───────────────────────────────────────────────────────
+  function buildMockCells() {
+    const zonas = [
+      { zona:'Zona A', x:40,  y:60,  color:'#58a6ff' },
+      { zona:'Zona B', x:40,  y:260, color:'#3fb950' },
+      { zona:'Zona C', x:480, y:60,  color:'#f0883e' },
+    ]
     const mock = []
     let id = 1
-    for (const zona of ['A','B','C']) {
-      for (const pasillo of ['01','02']) {
-        for (const nivel of ['1','2','3']) {
-          for (const pos of ['a','b']) {
-            const est = estados[(id-1) % estados.length]
-            mock.push({
-              id, codigo:`${zona}-${pasillo}-${nivel}${pos}`,
-              zona:`Zona ${zona}`, pasillo, nivel, posicion:pos,
-              bodega_id:1, bodega_codigo:'BPR', bodega_nombre:'Bodega Principal',
-              estado: est,
-              cantidad_total: est==='ok'?Math.round(50+Math.random()*200) : est==='bajo'?5 : 0,
-              num_productos: est==='vacio'?0:1,
-              items: est==='vacio'?[]:[{sku:`SKU-${id.toString().padStart(3,'0')}`,nombre:`Producto ${id}`,lote:`L-${id}`,cantidad:est==='ok'?Math.round(50+Math.random()*200):5}],
-            })
-            id++
-          }
+    const estados = ['ok','ok','ok','bajo','vacio','ok','vacio','bajo']
+    for (const z of zonas) {
+      for (let row = 0; row < 2; row++) {
+        for (let col = 0; col < 4; col++) {
+          const est = estados[(id-1) % estados.length]
+          mock.push({
+            id: id++,
+            codigo: `${z.zona.replace('Zona ','')}${String(row+1).padStart(2,'0')}${String.fromCharCode(96+col+1)}`,
+            zona: z.zona, pasillo: String(row+1).padStart(2,'0'),
+            nivel: '1', posicion: String.fromCharCode(96+col+1),
+            canvas_x: z.x + col*(CELL_W+6),
+            canvas_y: z.y + row*(CELL_H+6),
+            estado: est,
+            cantidad_total: est==='ok'?Math.round(50+Math.random()*200):est==='bajo'?5:0,
+            num_productos: est==='vacio'?0:1,
+            items: [],
+            _mock: true,
+          })
         }
       }
     }
     return mock
-  }, [ubicaciones])
+  }
 
-  const displayData = MOCK
-    ? { ubicaciones: MOCK, bodegas: [{ id:1, codigo:'BPR', nombre:'Bodega Principal' }] }
-    : { ubicaciones: filtered, bodegas }
+  const isMock = cells.length > 0 && cells[0]?._mock
 
-  const displayGrouped = useMemo(() => {
-    const src = MOCK ? displayData.ubicaciones : filtered
-    const g = {}
-    for (const u of src) {
-      if (!g[u.zona]) g[u.zona] = {}
-      const p = u.pasillo || '—'
-      if (!g[u.zona][p]) g[u.zona][p] = []
-      g[u.zona][p].push(u)
+  // ── Canvas coords ──────────────────────────────────────────────────────────
+  const getCanvasPos = useCallback((clientX, clientY) => {
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return { x:0, y:0 }
+    return {
+      x: snap(clientX - rect.left),
+      y: snap(clientY - rect.top),
     }
-    return g
-  }, [MOCK, filtered, displayData])
+  }, [])
+
+  // ── Drop plantilla → crear ubicaciones ────────────────────────────────────
+  const handleCanvasDrop = async (e) => {
+    e.preventDefault()
+    if (!dragTpl) return
+    const { x, y } = getCanvasPos(e.clientX, e.clientY)
+    const items = generateFromTemplate(dragTpl, zonaActiva, pasilloActivo, x, y)
+
+    if (isMock) {
+      // Solo visual en mock
+      const newCells = items.map((it, i) => ({
+        ...it, id: Date.now()+i, estado:'vacio',
+        cantidad_total:0, num_productos:0, items:[], _mock:true,
+      }))
+      setCells(prev => [...prev, ...newCells])
+      showToast(`${items.length} ubicación(es) agregada(s) (demo)`)
+      setDragTpl(null)
+      return
+    }
+
+    setSaving(true)
+    try {
+      const created = []
+      for (const it of items) {
+        const res = await createUbicacion({ ...it, bodega_id: 1 })
+        if (res.ok) created.push({ ...it, id: res.id, estado:'vacio', cantidad_total:0, num_productos:0, items:[] })
+      }
+      setCells(prev => [...prev, ...created])
+      showToast(`${created.length} ubicación(es) creada(s)`)
+    } catch(e) {
+      showToast(e.response?.data?.error || 'Error al crear', false)
+    } finally { setSaving(false); setDragTpl(null) }
+  }
+
+  // ── Drag celda existente ───────────────────────────────────────────────────
+  const handleCellDragStart = (e, ub) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    setDraggingCell(ub)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleCellDragEnd = async (e) => {
+    if (!draggingCell) return
+    const { x, y } = getCanvasPos(e.clientX - dragOffset.x + CELL_W/2, e.clientY - dragOffset.y + CELL_H/2)
+    const nx = snap(x - CELL_W/2)
+    const ny = snap(y - CELL_H/2)
+
+    setCells(prev => prev.map(c => c.id === draggingCell.id ? { ...c, canvas_x:nx, canvas_y:ny } : c))
+    setDraggingCell(null)
+
+    if (!isMock) {
+      try {
+        await updateUbicacion({ id: draggingCell.id, canvas_x: nx, canvas_y: ny })
+      } catch(err) { console.error(err) }
+    }
+  }
+
+  // ── Edit save/delete ───────────────────────────────────────────────────────
+  const handleEditSave = (updated) => {
+    setCells(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c))
+    setEditModal(null)
+    showToast('Ubicación actualizada')
+  }
+
+  const handleDelete = (id) => {
+    setCells(prev => prev.filter(c => c.id !== id))
+    setEditModal(null)
+    setSelected(null)
+    showToast('Ubicación eliminada')
+  }
+
+  // ── Canvas size ────────────────────────────────────────────────────────────
+  const canvasSize = useMemo(() => {
+    if (!cells.length) return { w: 800, h: 500 }
+    const maxX = Math.max(...cells.map(c => (c.canvas_x||0) + CELL_W)) + 80
+    const maxY = Math.max(...cells.map(c => (c.canvas_y||0) + CELL_H)) + 80
+    return { w: Math.max(maxX, 800), h: Math.max(maxY, 500) }
+  }, [cells])
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const stats = useMemo(() => ({
+    total: cells.length,
+    ok:    cells.filter(c => c.estado==='ok').length,
+    bajo:  cells.filter(c => c.estado==='bajo').length,
+    vacio: cells.filter(c => c.estado==='vacio').length,
+  }), [cells])
+
+  const selectedCell = cells.find(c => c.id === selected)
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex gap-4 items-start">
 
-      {/* ── Toolbar ── */}
-      <div className="flex flex-wrap items-center gap-2">
-
-        {/* Stats pills */}
-        <div className="flex items-center gap-1 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs">
-          <span className="text-muted">{stats.total} ubic.</span>
-          <span className="text-border mx-1">·</span>
-          <button onClick={() => setFilterEstado(f => f==='ok'?'':'ok')}
-            className={`flex items-center gap-1 transition-colors ${filterEstado==='ok'?'text-green-400':'text-muted hover:text-green-400'}`}>
-            <div className="w-1.5 h-1.5 rounded-full bg-green-400"/>{stats.ok}
-          </button>
-          <span className="text-border mx-1">·</span>
-          <button onClick={() => setFilterEstado(f => f==='bajo'?'':'bajo')}
-            className={`flex items-center gap-1 transition-colors ${filterEstado==='bajo'?'text-orange-400':'text-muted hover:text-orange-400'}`}>
-            <div className="w-1.5 h-1.5 rounded-full bg-orange-400"/>{stats.bajo}
-          </button>
-          <span className="text-border mx-1">·</span>
-          <button onClick={() => setFilterEstado(f => f==='vacio'?'':'vacio')}
-            className={`flex items-center gap-1 transition-colors ${filterEstado==='vacio'?'text-muted':'text-muted/50 hover:text-muted'}`}>
-            <div className="w-1.5 h-1.5 rounded-full bg-muted/40"/>{ stats.vacio}
-          </button>
-        </div>
-
-        {/* Bodega selector */}
-        {displayData.bodegas.length > 1 && (
-          <select value={filterBodega} onChange={e => { setFilterBodega(e.target.value); setFilterZona('') }}
-            className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary/50">
-            <option value="">Todas las bodegas</option>
-            {displayData.bodegas.map(b => (
-              <option key={b.id} value={String(b.id)}>{b.nombre}</option>
-            ))}
-          </select>
-        )}
-
-        {/* Zona selector */}
-        <select value={filterZona} onChange={e => setFilterZona(e.target.value)}
-          className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary/50">
-          <option value="">Todas las zonas</option>
-          {(MOCK ? ['Zona A','Zona B','Zona C'] : zonas).map(z => (
-            <option key={z} value={z}>{z}</option>
-          ))}
-        </select>
-
-        {/* Search */}
-        <div className="relative flex-1 min-w-[160px] max-w-xs">
-          <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none"/>
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar código o SKU…"
-            className="w-full bg-surface border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs text-foreground placeholder-muted focus:outline-none focus:border-primary/50"/>
-        </div>
-
-        {/* Refresh */}
-        <button onClick={fetchMapa}
-          className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground transition-colors">
-          <RefreshCw size={12} className={loadingMapa ? 'animate-spin' : ''}/>
-        </button>
-      </div>
-
-      {/* Mock notice */}
-      {MOCK && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/4 border border-border text-xs text-muted">
-          <Layers size={12} className="shrink-0"/>
-          <span>Vista de demo — aún no hay ubicaciones registradas. El mapa mostrará datos reales una vez que se creen ubicaciones en la base de datos.</span>
-        </div>
+      {/* ── PANEL LATERAL ── */}
+      {editMode && (
+        <SidePanel
+          zonaActiva={zonaActiva}      setZonaActiva={setZonaActiva}
+          pasilloActivo={pasilloActivo} setPasilloActivo={setPasilloActivo}
+          onDragStart={(e, tpl) => { setDragTpl(tpl); e.dataTransfer.effectAllowed='copy' }}
+        />
       )}
 
-      {/* ── Layout principal: mapa + detalle ── */}
-      <div className="flex gap-4 items-start">
+      {/* ── CANVAS ── */}
+      <div className="flex-1 min-w-0 flex flex-col gap-3">
 
-        {/* MAPA */}
-        <div className="flex-1 min-w-0 bg-surface border border-border rounded-xl overflow-hidden">
-          {loadingMapa ? (
-            <div className="flex items-center justify-center py-20 gap-2 text-muted">
-              <RefreshCw size={16} className="animate-spin"/>
-              <span className="text-sm">Cargando mapa…</span>
-            </div>
-          ) : Object.keys(displayGrouped).length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Box size={32} className="text-muted opacity-30"/>
-              <p className="text-sm text-muted">Sin ubicaciones que mostrar</p>
-              {search && (
-                <button onClick={() => setSearch('')}
-                  className="text-xs text-primary hover:underline">Limpiar búsqueda</button>
-              )}
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
-              {Object.entries(displayGrouped).sort(([a],[b])=>a.localeCompare(b)).map(([zona, pasillos]) => (
-                <div key={zona}>
-                  {/* Zona header */}
-                  <div className="flex items-center gap-2 px-4 py-2 bg-white/[0.02] border-b border-border/50">
-                    <div className="w-1.5 h-4 rounded-full bg-primary opacity-60"/>
-                    <span className="text-xs font-bold text-subtle uppercase tracking-widest">{zona}</span>
-                    <span className="text-[10px] text-muted ml-auto">
-                      {Object.values(pasillos).flat().length} ubic.
-                    </span>
-                  </div>
+        {/* Toolbar */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs">
+            <span className="text-muted">{stats.total} ubic.</span>
+            <span className="text-border mx-1">·</span>
+            <span className="text-green-400">{stats.ok} ok</span>
+            <span className="text-border mx-1">·</span>
+            <span className="text-orange-400">{stats.bajo} bajo</span>
+            <span className="text-border mx-1">·</span>
+            <span className="text-muted">{stats.vacio} vacías</span>
+          </div>
 
-                  {/* Pasillos */}
-                  <div className="p-4 space-y-4">
-                    {Object.entries(pasillos).sort(([a],[b])=>a.localeCompare(b)).map(([pasillo, cells]) => (
-                      <div key={pasillo}>
-                        {pasillo !== '—' && (
-                          <p className="text-[10px] text-muted uppercase tracking-wider mb-2 font-semibold">
-                            Pasillo {pasillo}
-                          </p>
-                        )}
-                        {/* Grid de celdas */}
-                        <div className="flex flex-wrap gap-2">
-                          {cells.map(ub => (
-                            <UbicCell
-                              key={ub.id}
-                              ub={ub}
-                              selected={selected?.id === ub.id}
-                              onClick={u => setSelected(sel => sel?.id === u.id ? null : u)}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="flex-1"/>
+
+          {isMock && (
+            <span className="text-[10px] text-muted bg-surface border border-border rounded-lg px-2.5 py-1.5">
+              Vista demo
+            </span>
           )}
+
+          {/* Modo ver / editar */}
+          <div className="flex items-center rounded-lg border border-border bg-surface overflow-hidden">
+            <button onClick={() => setEditMode(false)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${!editMode?'bg-primary/10 text-primary':'text-muted hover:text-foreground'}`}>
+              <Eye size={12}/> Ver
+            </button>
+            <button onClick={() => setEditMode(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${editMode?'bg-primary/10 text-primary':'text-muted hover:text-foreground'}`}>
+              <Settings size={12}/> Editar
+            </button>
+          </div>
+
+          <button onClick={fetchMapa}
+            className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground transition-colors">
+            <RefreshCw size={12} className={loadingMapa?'animate-spin':''}/>
+          </button>
         </div>
 
-        {/* PANEL DETALLE */}
-        {selected && (
-          <div className="shrink-0" style={{ animation: 'slideInRight .2s ease' }}>
-            <DetailPanel ub={selected} onClose={() => setSelected(null)}/>
+        {/* Canvas */}
+        <div className="bg-surface border border-border rounded-xl overflow-auto"
+          style={{ maxHeight:'68vh' }}>
+          <div
+            ref={canvasRef}
+            className="relative"
+            style={{
+              width:  canvasSize.w,
+              height: canvasSize.h,
+              backgroundImage: editMode
+                ? 'radial-gradient(circle, #30363d 1px, transparent 1px)'
+                : 'none',
+              backgroundSize: `${GRID}px ${GRID}px`,
+              cursor: editMode ? 'crosshair' : 'default',
+            }}
+            onDragOver={e => e.preventDefault()}
+            onDrop={handleCanvasDrop}>
+
+            {/* Zona backgrounds + labels */}
+            <ZoneLabels ubicaciones={cells}/>
+
+            {/* Celdas */}
+            {cells.map(ub => (
+              <CanvasCell
+                key={ub.id}
+                ub={ub}
+                selected={selected === ub.id}
+                editMode={editMode}
+                onSelect={u => {
+                  setSelected(s => s===u.id ? null : u.id)
+                  if (editMode && selected===u.id) setEditModal(u)
+                }}
+                onDragStart={handleCellDragStart}
+                onDragEnd={handleCellDragEnd}
+              />
+            ))}
+
+            {/* Saving overlay */}
+            {saving && (
+              <div className="absolute inset-0 rounded-xl flex items-center justify-center"
+                style={{ background:'rgba(13,17,23,0.5)' }}>
+                <div className="flex items-center gap-2 text-sm text-foreground bg-surface border border-border rounded-xl px-4 py-2.5">
+                  <RefreshCw size={14} className="animate-spin text-primary"/>
+                  Guardando…
+                </div>
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Detail bar */}
+        {selectedCell && !editMode && (
+          <div className="bg-surface border border-border rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap"
+            style={{ animation:'slideUp .15s ease' }}>
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: STOCK_STATE[selectedCell.estado] }}/>
+              <span className="text-sm font-bold font-mono text-foreground">{selectedCell.codigo}</span>
+            </div>
+            <div className="h-4 w-px bg-border"/>
+            <span className="text-xs text-muted">{selectedCell.zona} · Pasillo {selectedCell.pasillo}</span>
+            {selectedCell.estado !== 'vacio' && <>
+              <div className="h-4 w-px bg-border"/>
+              <span className="text-sm font-bold tabular-nums" style={{ color: STOCK_STATE[selectedCell.estado] }}>
+                {selectedCell.cantidad_total?.toLocaleString('es-CO')} u.
+              </span>
+              <div className="h-4 w-px bg-border"/>
+              <div className="flex flex-wrap gap-2 flex-1">
+                {selectedCell.items?.slice(0,3).map((it,i) => (
+                  <span key={i} className="text-[10px] bg-white/5 border border-border rounded-lg px-2 py-0.5 font-mono">
+                    {it.sku} · {it.cantidad} u.
+                  </span>
+                ))}
+              </div>
+            </>}
+            {editMode && (
+              <button onClick={() => setEditModal(selectedCell)}
+                className="ml-auto flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors">
+                <Edit2 size={11}/> Editar
+              </button>
+            )}
+            <button onClick={() => setSelected(null)} className="text-muted hover:text-foreground transition-colors">
+              <X size={14}/>
+            </button>
+          </div>
+        )}
+
+        {editMode && (
+          <p className="text-[10px] text-muted text-center">
+            Arrastra plantillas del panel izquierdo al plano · Mueve celdas con drag · Click para seleccionar y editar
+          </p>
         )}
       </div>
 
-      {/* Leyenda */}
-      <div className="flex items-center gap-4 px-1">
-        {Object.entries(ESTADO).map(([k,e]) => (
-          <div key={k} className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full" style={{ background: e.dot }}/>
-            <span className="text-[10px] text-muted">{e.label}</span>
-          </div>
-        ))}
-      </div>
+      {/* ── Modal editar ── */}
+      {editModal && (
+        <EditModal
+          ub={editModal}
+          onSave={handleEditSave}
+          onDelete={handleDelete}
+          onClose={() => setEditModal(null)}
+        />
+      )}
+
+      {/* ── Toast ── */}
+      {toast && <Toast msg={toast.msg} ok={toast.ok} onClose={() => setToast(null)}/>}
 
       <style>{`
-        @keyframes slideInRight {
-          from { opacity:0; transform:translateX(12px) }
-          to   { opacity:1; transform:translateX(0) }
-        }
+        @keyframes slideUp      { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes slideInRight { from{opacity:0;transform:translateX(12px)} to{opacity:1;transform:translateX(0)} }
       `}</style>
     </div>
   )
