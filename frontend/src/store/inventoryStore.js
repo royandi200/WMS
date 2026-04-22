@@ -26,9 +26,11 @@ export const useInventoryStore = create((set) => ({
   lowStock:        [],
   kardex:          [],
   kardexMeta:      { page: 1, total: 0 },
+  mapa:            { ubicaciones: [], bodegas: [] },
   loadingSummary:  false,
   loadingKardex:   false,
   loadingLowStock: false,
+  loadingMapa:     false,
   loading:         false,
   error:           null,
 

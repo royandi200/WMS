@@ -118,7 +118,8 @@ export default function MapaBodega() {
 
   useEffect(() => { fetchMapa() }, [])
 
-  const { ubicaciones, bodegas } = mapa
+  const ubicaciones = mapa?.ubicaciones ?? []
+  const bodegas      = mapa?.bodegas      ?? []
 
   // Zonas únicas de la bodega seleccionada
   const zonas = useMemo(() => {
