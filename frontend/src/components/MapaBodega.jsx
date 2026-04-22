@@ -29,7 +29,7 @@ const ESTADO = {
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const API = '/api/v1'
 const authHeaders = () => {
-  const token = JSON.parse(localStorage.getItem('wms-auth-store')||'{}')?.state?.token || ''
+  const token = JSON.parse(localStorage.getItem('wms_auth')||'{}')?.token || ''
   return { 'Content-Type':'application/json', Authorization:`Bearer ${token}` }
 }
 const apiFetch = (path, opts={}) =>
