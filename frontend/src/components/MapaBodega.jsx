@@ -1,651 +1,613 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
-import { createUbicacion, updateUbicacion, deleteUbicacion } from '../api/inventory.api'
-import { X, RefreshCw, Edit2, Trash2, Check, Plus, Move, Eye, Settings } from 'lucide-react'
+import {
+  X, Plus, Edit2, Trash2, ChevronLeft, Save, RefreshCw,
+  Layers, Box, Package, AlertTriangle, Move, Grid,
+} from 'lucide-react'
 
-// ─── Constantes ───────────────────────────────────────────────────────────────
-const CELL_W = 64
-const CELL_H = 64
-const GRID   = 24   // snap grid px
-
-const ZONA_COLORS = {
-  'Zona A': { bg:'#58a6ff18', border:'#58a6ff50', accent:'#58a6ff', label:'#58a6ff' },
-  'Zona B': { bg:'#3fb95018', border:'#3fb95050', accent:'#3fb950', label:'#3fb950' },
-  'Zona C': { bg:'#f0883e18', border:'#f0883e50', accent:'#f0883e', label:'#f0883e' },
-  'Zona D': { bg:'#d2a8ff18', border:'#d2a8ff50', accent:'#d2a8ff', label:'#d2a8ff' },
-  'Zona E': { bg:'#f8514918', border:'#f8514950', accent:'#f85149', label:'#f85149' },
-}
-const STOCK_STATE = {
-  ok:    '#3fb950',
-  bajo:  '#f0883e',
-  vacio: '#8b949e',
-}
-const snap = v => Math.round(v / GRID) * GRID
-
-// ─── Plantillas del panel lateral ────────────────────────────────────────────
-const TEMPLATES = [
-  { id:'single',  label:'Ubicación',   w:1, h:1, icon:'□' },
-  { id:'row3',    label:'Fila 3',      w:3, h:1, icon:'□□□' },
-  { id:'row5',    label:'Fila 5',      w:5, h:1, icon:'□□□□□' },
-  { id:'rack2x4', label:'Rack 2×4',   w:2, h:4, icon:'▦' },
-  { id:'rack3x3', label:'Rack 3×3',   w:3, h:3, icon:'▦' },
+// ─── Colores de zona ──────────────────────────────────────────────────────────
+const ZONA_COLORS = [
+  { bg:'#58a6ff18', border:'#58a6ff50', dot:'#58a6ff', label:'Azul'   },
+  { bg:'#3fb95018', border:'#3fb95050', dot:'#3fb950', label:'Verde'  },
+  { bg:'#f0883e18', border:'#f0883e50', dot:'#f0883e', label:'Naranja'},
+  { bg:'#d2a8ff18', border:'#d2a8ff50', dot:'#d2a8ff', label:'Violeta'},
+  { bg:'#f8514918', border:'#f8514950', dot:'#f85149', label:'Rojo'   },
+  { bg:'#e3b34118', border:'#e3b34150', dot:'#e3b341', label:'Amarillo'},
 ]
-
-// ─── Genera ubicaciones desde una plantilla ───────────────────────────────────
-function generateFromTemplate(tpl, zona, pasillo, startX, startY) {
-  const items = []
-  for (let row = 0; row < tpl.h; row++) {
-    for (let col = 0; col < tpl.w; col++) {
-      const nivel   = String(row + 1)
-      const posicion= String.fromCharCode(97 + col)
-      items.push({
-        codigo:   `${zona.replace('Zona ','')}-${String(pasillo).padStart(2,'0')}-${nivel}${posicion}`,
-        zona,
-        pasillo:  String(pasillo).padStart(2,'0'),
-        nivel,
-        posicion,
-        canvas_x: startX + col * (CELL_W + 4),
-        canvas_y: startY + row * (CELL_H + 4),
-      })
-    }
-  }
-  return items
+const zoneColor = (zona) => {
+  const idx = (zona||'').charCodeAt(zona?.length-1||0) % ZONA_COLORS.length
+  return ZONA_COLORS[Math.abs(idx)] || ZONA_COLORS[0]
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-function Toast({ msg, ok, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t) }, [])
-  return (
-    <div className="fixed bottom-6 right-6 z-[200] flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium"
-      style={{
-        background: ok ? '#3fb95020' : '#f8514920',
-        borderColor: ok ? '#3fb95060' : '#f8514960',
-        color: ok ? '#3fb950' : '#f85149',
-        animation: 'slideInRight .2s ease',
-      }}>
-      {ok ? <Check size={14}/> : <X size={14}/>}
-      {msg}
-    </div>
-  )
+// ─── Estado de celda ──────────────────────────────────────────────────────────
+const ESTADO = {
+  ok:    { bg:'#3fb95020', border:'#3fb95060', dot:'#3fb950' },
+  bajo:  { bg:'#f0883e20', border:'#f0883e60', dot:'#f0883e' },
+  vacio: { bg:'#ffffff08', border:'#30363d',   dot:'#30363d' },
 }
 
-// ─── Modal editar ubicación ───────────────────────────────────────────────────
-function EditModal({ ub, onSave, onDelete, onClose }) {
-  const [codigo, setCodigo] = useState(ub.codigo)
-  const [zona,   setZona]   = useState(ub.zona)
-  const [saving, setSaving] = useState(false)
+// ─── API helpers ──────────────────────────────────────────────────────────────
+const API = '/api/v1'
+const authHeaders = () => {
+  const token = JSON.parse(localStorage.getItem('wms-auth-store')||'{}')?.state?.token || ''
+  return { 'Content-Type':'application/json', Authorization:`Bearer ${token}` }
+}
+const apiFetch = (path, opts={}) =>
+  fetch(`${API}${path}`, { ...opts, headers: { ...authHeaders(), ...(opts.headers||{}) } })
+    .then(r => r.json())
 
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      await updateUbicacion({ id: ub.id, codigo, zona })
-      onSave({ ...ub, codigo, zona })
-    } catch(e) {
-      console.error(e)
-    } finally { setSaving(false) }
+// ══════════════════════════════════════════════════════════════════════════════
+// VISTA 1 — PLANO DE PLANTA (vista pájaro)
+// ══════════════════════════════════════════════════════════════════════════════
+function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
+  const canvasRef   = useRef(null)
+  const dragging    = useRef(null)
+  const [zones,     setZones]     = useState({})   // { zoneName: {x,y,w,h} }
+  const [draggingZ, setDraggingZ] = useState(null)
+  const [newZone,   setNewZone]   = useState('')
+  const [editMode,  setEditMode]  = useState(false)
+  const [saving,    setSaving]    = useState(false)
+  const STORAGE_KEY = 'wms_plano_zonas'
+
+  // Calcular zonas únicas con posiciones
+  const zonaNames = useMemo(() => [...new Set(ubicaciones.map(u=>u.zona))].sort(), [ubicaciones])
+
+  // Init posiciones desde localStorage o grid automático
+  useEffect(() => {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}')
+    const z = {}
+    zonaNames.forEach((name, i) => {
+      const cols = 3
+      const col  = i % cols, row = Math.floor(i / cols)
+      z[name] = saved[name] || {
+        x: 40 + col * 220, y: 40 + row * 160, w: 180, h: 120
+      }
+    })
+    setZones(z)
+  }, [zonaNames])
+
+  // Drag zona
+  const startDrag = useCallback((e, name) => {
+    if (!editMode) return
+    e.preventDefault()
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    dragging.current = {
+      name,
+      startMouseX: e.clientX - rect.left,
+      startMouseY: e.clientY - rect.top,
+      origX: zones[name]?.x || 0,
+      origY: zones[name]?.y || 0,
+    }
+  }, [editMode, zones])
+
+  const onMouseMove = useCallback((e) => {
+    if (!dragging.current) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const dx = mx - dragging.current.startMouseX
+    const dy = my - dragging.current.startMouseY
+    setZones(prev => ({
+      ...prev,
+      [dragging.current.name]: {
+        ...prev[dragging.current.name],
+        x: Math.max(0, dragging.current.origX + dx),
+        y: Math.max(0, dragging.current.origY + dy),
+      }
+    }))
+  }, [])
+
+  const onMouseUp = useCallback(() => {
+    if (dragging.current) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(zones))
+    }
+    dragging.current = null
+  }, [zones])
+
+  const addZone = () => {
+    const name = newZone.trim()
+    if (!name || zones[name]) return
+    setZones(prev => {
+      const count = Object.keys(prev).length
+      const cols = 3, col = count % cols, row = Math.floor(count / cols)
+      const next = { ...prev, [name]: { x: 40+col*220, y: 40+row*160, w: 180, h: 120 } }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return next
+    })
+    setNewZone('')
   }
 
-  const handleDelete = async () => {
-    if (!confirm(`¿Eliminar ubicación ${ub.codigo}?`)) return
-    try {
-      await deleteUbicacion(ub.id)
-      onDelete(ub.id)
-    } catch(e) {
-      alert(e.response?.data?.error || 'Error al eliminar')
-    }
+  const saveLayout = () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(zones))
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      style={{ background:'rgba(0,0,0,0.6)', backdropFilter:'blur(4px)' }}
-      onClick={onClose}>
-      <div className="bg-[#161b22] border border-border rounded-2xl w-full max-w-sm shadow-2xl p-5"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-sm font-bold text-foreground">Editar ubicación</p>
-          <button onClick={onClose} className="text-muted hover:text-foreground"><X size={14}/></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-[10px] text-muted uppercase tracking-wider block mb-1">Código</label>
-            <input value={codigo} onChange={e => setCodigo(e.target.value)}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 font-mono"/>
-          </div>
-          <div>
-            <label className="text-[10px] text-muted uppercase tracking-wider block mb-1">Zona</label>
-            <select value={zona} onChange={e => setZona(e.target.value)}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50">
-              {Object.keys(ZONA_COLORS).map(z => <option key={z} value={z}>{z}</option>)}
-            </select>
-          </div>
-          {ub.estado !== 'vacio' && (
-            <div className="rounded-lg bg-white/4 border border-border px-3 py-2">
-              <p className="text-[10px] text-muted mb-1">Stock actual</p>
-              <p className="text-sm font-bold tabular-nums"
-                style={{ color: STOCK_STATE[ub.estado] }}>
-                {ub.cantidad_total?.toLocaleString('es-CO')} u. · {ub.num_productos} prod.
-              </p>
+    <div className="flex flex-col gap-3">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={() => setEditMode(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            editMode ? 'bg-primary/15 border-primary/40 text-primary' : 'bg-surface border-border text-muted hover:text-foreground'
+          }`}>
+          <Move size={12}/>{editMode ? 'Modo edición activo' : 'Organizar zonas'}
+        </button>
+
+        {editMode && (
+          <>
+            <div className="flex items-center gap-1">
+              <input value={newZone} onChange={e=>setNewZone(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&addZone()}
+                placeholder="Nueva zona…"
+                className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary/50 w-36"/>
+              <button onClick={addZone} disabled={!newZone.trim()}
+                className="px-3 py-1.5 rounded-lg bg-primary text-black text-xs font-bold disabled:opacity-40 flex items-center gap-1">
+                <Plus size={12}/>Añadir
+              </button>
             </div>
-          )}
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button onClick={handleDelete}
-            className="p-2 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
-            <Trash2 size={14}/>
-          </button>
-          <button onClick={onClose}
-            className="flex-1 py-2 rounded-lg border border-border text-muted text-sm hover:bg-white/5 transition-colors">
-            Cancelar
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex-1 py-2 rounded-lg bg-primary text-black text-sm font-bold hover:bg-primary/80 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5">
-            {saving ? <RefreshCw size={12} className="animate-spin"/> : <Check size={12}/>}
-            Guardar
+            <button onClick={saveLayout}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/25 transition-colors">
+              <Save size={12}/>Guardar
+            </button>
+          </>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[10px] text-muted">Toca una zona para ver sus estantes</span>
+          <button onClick={onRefresh}
+            className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground">
+            <RefreshCw size={12}/>
           </button>
         </div>
       </div>
-    </div>
-  )
-}
 
-// ─── Panel lateral de plantillas ─────────────────────────────────────────────
-function SidePanel({ zonaActiva, setZonaActiva, pasilloActivo, setPasilloActivo, onDragStart }) {
-  return (
-    <div className="flex flex-col gap-4 w-52 shrink-0">
+      {/* Canvas */}
+      <div ref={canvasRef}
+        className="relative bg-surface border border-border rounded-xl overflow-hidden select-none"
+        style={{
+          height: '420px',
+          backgroundImage: 'radial-gradient(circle,#30363d 1px,transparent 1px)',
+          backgroundSize: '24px 24px',
+          cursor: editMode ? 'default' : 'default',
+        }}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}>
 
-      {/* Configuración */}
-      <div className="bg-surface border border-border rounded-xl p-3 space-y-3">
-        <p className="text-[10px] text-muted uppercase tracking-wider font-semibold">Configurar</p>
-        <div>
-          <label className="text-[10px] text-muted block mb-1">Zona</label>
-          <select value={zonaActiva} onChange={e => setZonaActiva(e.target.value)}
-            className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none">
-            {Object.keys(ZONA_COLORS).map(z => (
-              <option key={z} value={z}>{z}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-[10px] text-muted block mb-1">Pasillo</label>
-          <input type="number" min="1" max="99" value={pasilloActivo}
-            onChange={e => setPasilloActivo(e.target.value)}
-            className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none font-mono"/>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-sm" style={{ background: ZONA_COLORS[zonaActiva]?.accent }}/>
-          <span className="text-[10px] text-muted">{zonaActiva} · Pasillo {String(pasilloActivo).padStart(2,'0')}</span>
-        </div>
-      </div>
+        {/* Leyenda modo edición */}
+        {editMode && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-primary/10 border border-primary/30 text-primary text-[10px] font-semibold px-3 py-1.5 rounded-full pointer-events-none">
+            Arrastra las zonas para organizarlas
+          </div>
+        )}
 
-      {/* Plantillas */}
-      <div className="bg-surface border border-border rounded-xl p-3">
-        <p className="text-[10px] text-muted uppercase tracking-wider font-semibold mb-2.5">Plantillas</p>
-        <p className="text-[10px] text-muted/60 mb-3 leading-relaxed">
-          Arrastra al plano para crear ubicaciones
-        </p>
-        <div className="space-y-1.5">
-          {TEMPLATES.map(tpl => (
-            <div key={tpl.id}
-              draggable
-              onDragStart={e => onDragStart(e, tpl)}
-              className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border bg-background hover:border-primary/40 hover:bg-primary/5 cursor-grab active:cursor-grabbing transition-all active:scale-95 select-none">
-              <span className="text-base leading-none font-mono text-muted">{tpl.icon}</span>
-              <div>
-                <p className="text-xs font-medium text-foreground">{tpl.label}</p>
-                <p className="text-[9px] text-muted">{tpl.w}×{tpl.h} celda{tpl.w*tpl.h>1?'s':''}</p>
+        {/* Zonas */}
+        {Object.entries(zones).map(([name, pos]) => {
+          const col   = zoneColor(name)
+          const cells = ubicaciones.filter(u => u.zona === name)
+          const ok    = cells.filter(u=>u.estado==='ok').length
+          const bajo  = cells.filter(u=>u.estado==='bajo').length
+          const vacio = cells.filter(u=>u.estado==='vacio').length
+
+          return (
+            <div key={name}
+              className="absolute rounded-xl border-2 flex flex-col overflow-hidden transition-shadow"
+              style={{
+                left: pos.x, top: pos.y, width: pos.w, height: pos.h,
+                background: col.bg, borderColor: col.border,
+                boxShadow: editMode ? `0 0 0 2px ${col.dot}30` : 'none',
+                cursor: editMode ? 'grab' : 'pointer',
+                zIndex: draggingZ === name ? 10 : 1,
+              }}
+              onMouseDown={e => startDrag(e, name)}
+              onClick={() => !editMode && onZoneClick(name)}>
+
+              {/* Header zona */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b"
+                style={{ borderColor: col.border }}>
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: col.dot }}/>
+                <span className="text-xs font-bold text-foreground truncate flex-1">{name}</span>
+                {editMode && <Move size={10} className="text-muted shrink-0"/>}
               </div>
-              <Move size={11} className="text-muted/40 ml-auto"/>
+
+              {/* Stats */}
+              <div className="flex-1 flex items-center justify-center gap-3 px-3">
+                {cells.length === 0 ? (
+                  <span className="text-[10px] text-muted">Sin ubicaciones</span>
+                ) : (
+                  <>
+                    <div className="text-center">
+                      <p className="text-base font-black text-foreground">{cells.length}</p>
+                      <p className="text-[9px] text-muted">total</p>
+                    </div>
+                    <div className="h-8 w-px bg-border/50"/>
+                    <div className="flex flex-col gap-0.5">
+                      {ok>0    && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/><span className="text-[9px] text-muted">{ok} ok</span></div>}
+                      {bajo>0  && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-orange-400"/><span className="text-[9px] text-muted">{bajo} bajo</span></div>}
+                      {vacio>0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-border"/><span className="text-[9px] text-muted">{vacio} vacía</span></div>}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Footer — hint */}
+              {!editMode && (
+                <div className="px-3 py-1.5 text-center">
+                  <span className="text-[9px]" style={{ color: col.dot }}>→ Ver estantes</span>
+                </div>
+              )}
             </div>
-          ))}
-        </div>
+          )
+        })}
+
+        {/* Canvas vacío */}
+        {Object.keys(zones).length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <Layers size={32} className="text-muted opacity-30"/>
+            <p className="text-sm text-muted">Activa "Organizar zonas" y añade zonas al plano</p>
+          </div>
+        )}
       </div>
 
       {/* Leyenda */}
-      <div className="bg-surface border border-border rounded-xl p-3">
-        <p className="text-[10px] text-muted uppercase tracking-wider font-semibold mb-2">Estado</p>
-        <div className="space-y-1.5">
-          {[['ok','#3fb950','Con stock'],['bajo','#f0883e','Bajo mín.'],['vacio','#8b949e','Vacía']].map(([k,c,l]) => (
-            <div key={k} className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ background:c }}/>
-              <span className="text-[10px] text-muted">{l}</span>
-            </div>
-          ))}
-        </div>
+      <div className="flex items-center gap-4 px-1">
+        {[['#3fb950','Con stock'],['#f0883e','Bajo mínimo'],['#30363d','Vacía']].map(([c,l])=>(
+          <div key={l} className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full" style={{background:c}}/>
+            <span className="text-[10px] text-muted">{l}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-// ─── Celda de ubicación en el canvas ─────────────────────────────────────────
-function CanvasCell({ ub, selected, editMode, onSelect, onDragStart, onDragEnd }) {
-  const color  = STOCK_STATE[ub.estado] || STOCK_STATE.vacio
-  const zc     = ZONA_COLORS[ub.zona]   || ZONA_COLORS['Zona A']
-  const isDrag = useRef(false)
+// ══════════════════════════════════════════════════════════════════════════════
+// VISTA 2 — ESTANTES (vista frontal de rack)
+// ══════════════════════════════════════════════════════════════════════════════
+function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
+  const col          = zoneColor(zona)
+  const [selected,   setSelected]   = useState(null)
+  const [editModal,  setEditModal]  = useState(null)
+  const [dragOver,   setDragOver]   = useState(null)
+  const [saving,     setSaving]     = useState(false)
+  const [toast,      setToast]      = useState(null)
+
+  const showToast = (msg, ok) => {
+    setToast({ msg, ok })
+    setTimeout(() => setToast(null), 3500)
+  }
+
+  // Agrupar por pasillo → nivel
+  const pasillos = useMemo(() => {
+    const p = {}
+    for (const u of ubicaciones) {
+      const pas = u.pasillo || '01'
+      if (!p[pas]) p[pas] = {}
+      const niv = u.nivel || '1'
+      if (!p[pas][niv]) p[pas][niv] = []
+      p[pas][niv].push(u)
+    }
+    return p
+  }, [ubicaciones])
+
+  const pasilloNames = Object.keys(pasillos).sort()
+  const [activePasillo, setActivePasillo] = useState(pasilloNames[0] || '01')
+
+  useEffect(() => {
+    if (pasilloNames.length && !pasillos[activePasillo]) {
+      setActivePasillo(pasilloNames[0])
+    }
+  }, [pasilloNames, activePasillo])
+
+  // Crear ubicación
+  const createUbicacion = async (codigo, pasillo, nivel, posicion) => {
+    setSaving(true)
+    const res = await apiFetch('/inventory/ubicaciones', {
+      method: 'POST',
+      body: JSON.stringify({ codigo, zona, pasillo, nivel, posicion })
+    })
+    setSaving(false)
+    if (res.ok) { onRefresh(); showToast('Ubicación creada', true) }
+    else showToast(res.error || 'Error al crear', false)
+  }
+
+  // Editar ubicación
+  const saveEdit = async () => {
+    if (!editModal) return
+    setSaving(true)
+    const res = await apiFetch('/inventory/ubicaciones', {
+      method: 'PUT',
+      body: JSON.stringify({ id: editModal.id, codigo: editModal.codigo, zona: editModal.zona, pasillo: editModal.pasillo, nivel: editModal.nivel })
+    })
+    setSaving(false)
+    setEditModal(null)
+    if (res.ok) { onRefresh(); showToast('Guardado', true) }
+    else showToast(res.error || 'Error', false)
+  }
+
+  // Eliminar ubicación
+  const deleteUbicacion = async (id) => {
+    if (!confirm('¿Eliminar esta ubicación? Solo es posible si está vacía.')) return
+    const res = await apiFetch(`/inventory/ubicaciones?id=${id}`, { method: 'DELETE' })
+    if (res.ok) { setSelected(null); onRefresh(); showToast('Eliminada', true) }
+    else showToast(res.error || 'No se puede eliminar', false)
+  }
+
+  // Niveles del pasillo activo (de arriba a abajo = nivel alto a bajo)
+  const niveles = pasillos[activePasillo]
+    ? Object.keys(pasillos[activePasillo]).sort((a,b) => Number(b)-Number(a))
+    : []
 
   return (
-    <div
-      draggable={editMode}
-      onDragStart={e => { isDrag.current = true; onDragStart(e, ub) }}
-      onDragEnd={e => { isDrag.current = false; onDragEnd(e) }}
-      onClick={() => { if (!isDrag.current) onSelect(ub) }}
-      className="absolute flex flex-col items-center justify-center rounded-xl border-2 transition-all duration-150 select-none"
-      style={{
-        left:        ub.canvas_x,
-        top:         ub.canvas_y,
-        width:       CELL_W,
-        height:      CELL_H,
-        background:  selected ? `${color}30` : zc.bg,
-        borderColor: selected ? color         : (ub.estado==='vacio' ? '#30363d' : color+'80'),
-        boxShadow:   selected ? `0 0 0 2px ${color}50, 0 4px 16px ${color}20` : `0 2px 8px ${zc.accent}10`,
-        cursor:      editMode ? 'grab' : 'pointer',
-        zIndex:      selected ? 10 : 1,
-      }}>
-      {/* Dot estado */}
-      <div className="w-2 h-2 rounded-full mb-1" style={{ background: color }}/>
-      {/* Código */}
-      <span className="text-[9px] font-mono font-bold leading-none text-center px-1 truncate w-full text-center"
-        style={{ color: ub.estado==='vacio' ? '#8b949e' : '#e6edf3' }}>
-        {ub.codigo.split('-').slice(-2).join('-') || ub.codigo}
-      </span>
-      {/* Cantidad */}
-      {ub.estado !== 'vacio' && (
-        <span className="text-[8px] tabular-nums mt-0.5 font-bold" style={{ color }}>
-          {ub.cantidad_total >= 1000
-            ? (ub.cantidad_total/1000).toFixed(1)+'k'
-            : Math.round(ub.cantidad_total)}
-        </span>
+    <div className="flex flex-col gap-3">
+
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl border text-sm font-medium shadow-xl transition-all ${
+          toast.ok ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' : 'bg-red-500/15 border-red-500/30 text-red-400'
+        }`}>{toast.msg}</div>
       )}
-      {/* Edit icon overlay */}
-      {editMode && (
-        <div className="absolute inset-0 rounded-xl flex items-center justify-center bg-black/0 hover:bg-black/20 transition-colors opacity-0 hover:opacity-100">
-          <Move size={14} className="text-white"/>
+
+      {/* Modal editar */}
+      {editModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{background:'rgba(0,0,0,0.7)',backdropFilter:'blur(6px)'}}
+          onClick={()=>setEditModal(null)}>
+          <div className="bg-surface border border-border rounded-2xl p-5 w-full max-w-sm shadow-2xl"
+            onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-bold text-foreground">Editar ubicación</p>
+              <button onClick={()=>setEditModal(null)} className="text-muted hover:text-foreground"><X size={14}/></button>
+            </div>
+            {[['Código','codigo'],['Zona','zona'],['Pasillo','pasillo'],['Nivel','nivel']].map(([label,field])=>(
+              <div key={field} className="mb-3">
+                <label className="text-[10px] text-muted uppercase tracking-wider block mb-1">{label}</label>
+                <input value={editModal[field]||''} onChange={e=>setEditModal(p=>({...p,[field]:e.target.value}))}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"/>
+              </div>
+            ))}
+            <div className="flex gap-2 mt-4">
+              <button onClick={()=>setEditModal(null)}
+                className="flex-1 py-2.5 rounded-xl border border-border text-muted text-sm">Cancelar</button>
+              <button onClick={saveEdit} disabled={saving}
+                className="flex-1 py-2.5 rounded-xl bg-primary text-black text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-1">
+                {saving ? <RefreshCw size={12} className="animate-spin"/> : <Save size={12}/>}Guardar
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button onClick={onBack}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-border text-muted hover:text-foreground text-xs font-semibold transition-colors">
+          <ChevronLeft size={13}/>Plano
+        </button>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full" style={{background:col.dot}}/>
+          <span className="text-sm font-bold text-foreground">{zona}</span>
+        </div>
+        <span className="text-muted text-xs">— {ubicaciones.length} ubicaciones</span>
+        <button onClick={onRefresh} className="ml-auto w-7 h-7 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground">
+          <RefreshCw size={11}/>
+        </button>
+      </div>
+
+      <div className="flex gap-4 items-start">
+
+        {/* Panel izquierdo — pasillos + estante */}
+        <div className="flex-1 min-w-0">
+
+          {/* Selector pasillo */}
+          {pasilloNames.length > 1 && (
+            <div className="flex gap-1 mb-3 overflow-x-auto pb-1">
+              {pasilloNames.map(p => (
+                <button key={p} onClick={()=>setActivePasillo(p)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-all border ${
+                    activePasillo===p
+                      ? 'text-foreground border-border/80 bg-white/8'
+                      : 'text-muted border-transparent hover:border-border'
+                  }`}>
+                  Pasillo {p}
+                </button>
+              ))}
+              {/* Botón agregar pasillo */}
+              <button onClick={()=>{
+                const next = String(pasilloNames.length+1).padStart(2,'0')
+                createUbicacion(`${zona.replace('Zona ','Z')}-${next}-1a`, next, '1', 'a')
+              }}
+                className="px-3 py-1.5 rounded-lg border border-dashed border-border text-muted hover:text-primary hover:border-primary/40 text-xs shrink-0 flex items-center gap-1 transition-colors">
+                <Plus size={11}/>Pasillo
+              </button>
+            </div>
+          )}
+
+          {/* Rack visual */}
+          <div className="bg-surface border border-border rounded-xl overflow-hidden">
+            {/* Etiqueta pasillo */}
+            <div className="px-4 py-2 border-b border-border/50 flex items-center justify-between">
+              <span className="text-xs font-bold text-muted uppercase tracking-widest">
+                Pasillo {activePasillo}
+              </span>
+              <button onClick={()=>{
+                const niv = String(niveles.length > 0 ? Math.max(...niveles.map(Number))+1 : 1)
+                createUbicacion(`${zona.replace('Zona ','Z')}-${activePasillo}-${niv}a`, activePasillo, niv, 'a')
+              }}
+                className="flex items-center gap-1 text-[10px] text-muted hover:text-primary transition-colors">
+                <Plus size={10}/>Nivel
+              </button>
+            </div>
+
+            {niveles.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <Grid size={24} className="text-muted opacity-30"/>
+                <p className="text-xs text-muted">Sin niveles — añade uno</p>
+              </div>
+            ) : (
+              <div className="p-4 space-y-2">
+                {niveles.map(niv => {
+                  const cells = (pasillos[activePasillo]?.[niv] || []).sort((a,b)=>a.posicion?.localeCompare(b.posicion||'')||0)
+                  return (
+                    <div key={niv} className="flex items-center gap-2">
+                      {/* Etiqueta nivel */}
+                      <div className="w-10 shrink-0 text-center">
+                        <span className="text-[10px] text-muted font-mono font-bold">N{niv}</span>
+                      </div>
+
+                      {/* Celdas */}
+                      <div className="flex gap-1.5 flex-wrap flex-1">
+                        {cells.map(u => {
+                          const e = ESTADO[u.estado] || ESTADO.vacio
+                          return (
+                            <button key={u.id}
+                              onClick={() => setSelected(sel=>sel?.id===u.id?null:u)}
+                              className="relative rounded-lg border-2 flex flex-col items-center justify-center transition-all duration-150 active:scale-95"
+                              style={{
+                                width:'56px', height:'56px',
+                                background: selected?.id===u.id ? e.dot+'30' : e.bg,
+                                borderColor: selected?.id===u.id ? e.dot : e.border,
+                                boxShadow: selected?.id===u.id ? `0 0 0 2px ${e.dot}50` : 'none',
+                              }}>
+                              <div className="w-2 h-2 rounded-full mb-0.5" style={{background:e.dot}}/>
+                              <span className="text-[9px] font-mono font-bold text-foreground/80">
+                                {u.posicion||u.codigo.slice(-2)}
+                              </span>
+                              {u.estado!=='vacio' && (
+                                <span className="text-[8px] tabular-nums" style={{color:e.dot}}>
+                                  {u.cantidad_total>=1000?(u.cantidad_total/1000).toFixed(1)+'k':Math.round(u.cantidad_total)}
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+
+                        {/* Drop zone — añadir posición */}
+                        <button
+                          onClick={() => {
+                            const nextPos = String.fromCharCode(97 + cells.length)
+                            createUbicacion(
+                              `${zona.replace('Zona ','Z')}-${activePasillo}-${niv}${nextPos}`,
+                              activePasillo, niv, nextPos
+                            )
+                          }}
+                          className="w-14 h-14 rounded-lg border-2 border-dashed border-border flex items-center justify-center text-muted hover:border-primary/50 hover:text-primary transition-colors">
+                          <Plus size={14}/>
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Panel derecho — detalle */}
+        {selected && (
+          <div className="shrink-0 w-64 bg-surface border border-border rounded-xl overflow-hidden"
+            style={{animation:'slideIn .15s ease'}}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{background: (ESTADO[selected.estado]||ESTADO.vacio).dot}}/>
+                <span className="text-sm font-bold font-mono text-foreground">{selected.codigo}</span>
+              </div>
+              <button onClick={()=>setSelected(null)} className="text-muted hover:text-foreground"><X size={13}/></button>
+            </div>
+
+            {/* Meta info */}
+            <div className="px-4 py-3 space-y-1.5 border-b border-border/50">
+              {[['Zona',selected.zona],['Pasillo',selected.pasillo],['Nivel',selected.nivel],['Posición',selected.posicion]].map(([k,v])=>(
+                <div key={k} className="flex justify-between">
+                  <span className="text-[10px] text-muted uppercase tracking-wide">{k}</span>
+                  <span className="text-xs font-medium text-subtle">{v||'—'}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Items de stock */}
+            <div className="max-h-48 overflow-y-auto">
+              {selected.items.length === 0 ? (
+                <div className="flex flex-col items-center py-6 gap-1">
+                  <Box size={18} className="text-muted opacity-30"/>
+                  <span className="text-xs text-muted">Vacía</span>
+                </div>
+              ) : selected.items.map((item,i) => (
+                <div key={i} className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border/20 last:border-0 hover:bg-white/3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-mono text-primary truncate">{item.sku}</p>
+                    <p className="text-[10px] text-muted truncate">{item.nombre}</p>
+                    {item.lote!=='—'&&<p className="text-[9px] text-muted/60">Lote: {item.lote}</p>}
+                  </div>
+                  <span className="text-sm font-bold tabular-nums text-foreground shrink-0">
+                    {Number(item.cantidad).toLocaleString('es-CO',{maximumFractionDigits:1})}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Acciones */}
+            <div className="px-4 py-3 border-t border-border flex gap-2">
+              <button onClick={()=>setEditModal({...selected})}
+                className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-muted hover:text-foreground text-xs transition-colors">
+                <Edit2 size={11}/>Editar
+              </button>
+              <button onClick={()=>deleteUbicacion(selected.id)}
+                className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs transition-colors">
+                <Trash2 size={11}/>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style>{`@keyframes slideIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}`}</style>
     </div>
   )
 }
 
-// ─── Etiquetas de zona en el canvas ──────────────────────────────────────────
-function ZoneLabels({ ubicaciones }) {
-  const zones = useMemo(() => {
-    const map = {}
-    for (const u of ubicaciones) {
-      if (!map[u.zona]) map[u.zona] = { minX:Infinity, minY:Infinity, maxX:0, maxY:0 }
-      const z = map[u.zona]
-      z.minX = Math.min(z.minX, u.canvas_x)
-      z.minY = Math.min(z.minY, u.canvas_y - 28)
-      z.maxX = Math.max(z.maxX, u.canvas_x + CELL_W)
-      z.maxY = Math.max(z.maxY, u.canvas_y + CELL_H)
-    }
-    return map
-  }, [ubicaciones])
-
-  return (
-    <>
-      {Object.entries(zones).map(([zona, r]) => {
-        const zc = ZONA_COLORS[zona] || ZONA_COLORS['Zona A']
-        return (
-          <div key={zona}>
-            {/* Area highlight */}
-            <div className="absolute rounded-2xl pointer-events-none"
-              style={{
-                left:   r.minX - 12,
-                top:    r.minY - 8,
-                width:  r.maxX - r.minX + 24,
-                height: r.maxY - r.minY + 20,
-                background: zc.bg,
-                border: `1px dashed ${zc.border}`,
-              }}/>
-            {/* Label */}
-            <div className="absolute pointer-events-none px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-widest"
-              style={{
-                left:       r.minX - 12,
-                top:        r.minY - 26,
-                color:      zc.label,
-                background: zc.bg,
-                border:     `1px solid ${zc.border}`,
-              }}>
-              {zona}
-            </div>
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
-// ─── MAPA PRINCIPAL ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPONENTE PRINCIPAL — orquesta las dos vistas
+// ══════════════════════════════════════════════════════════════════════════════
 export default function MapaBodega() {
   const { mapa, loadingMapa, fetchMapa } = useInventoryStore()
-  const [cells,        setCells]        = useState([])
-  const [selected,     setSelected]     = useState(null)
-  const [editMode,     setEditMode]     = useState(false)
-  const [editModal,    setEditModal]    = useState(null)
-  const [zonaActiva,   setZonaActiva]   = useState('Zona A')
-  const [pasilloActivo,setPasilloActivo]= useState(1)
-  const [dragTpl,      setDragTpl]      = useState(null)
-  const [draggingCell, setDraggingCell] = useState(null)
-  const [dragOffset,   setDragOffset]  = useState({ x:0, y:0 })
-  const [saving,       setSaving]      = useState(false)
-  const [toast,        setToast]       = useState(null)
-  const canvasRef = useRef(null)
+  const [view,       setView]      = useState('plano')   // 'plano' | 'estantes'
+  const [activeZona, setActiveZona] = useState(null)
 
   useEffect(() => { fetchMapa() }, [])
 
-  // Sync cells from store + add mock if empty
-  useEffect(() => {
-    const src = mapa?.ubicaciones ?? []
-    if (src.length === 0) {
-      // Auto-layout demo positions if no canvas_x/y
-      setCells(buildMockCells())
-    } else {
-      setCells(src.map((u, i) => ({
-        ...u,
-        canvas_x: u.canvas_x || (i % 8) * (CELL_W + 8) + 40,
-        canvas_y: u.canvas_y || Math.floor(i / 8) * (CELL_H + 8) + 60,
-      })))
-    }
-  }, [mapa])
+  const ubicaciones = mapa?.ubicaciones ?? []
+  const bodegas     = mapa?.bodegas     ?? []
 
-  const showToast = (msg, ok=true) => { setToast({ msg, ok }); }
-
-  // ── Mock auto-layout ───────────────────────────────────────────────────────
-  function buildMockCells() {
-    const zonas = [
-      { zona:'Zona A', x:40,  y:60,  color:'#58a6ff' },
-      { zona:'Zona B', x:40,  y:260, color:'#3fb950' },
-      { zona:'Zona C', x:480, y:60,  color:'#f0883e' },
-    ]
-    const mock = []
-    let id = 1
-    const estados = ['ok','ok','ok','bajo','vacio','ok','vacio','bajo']
-    for (const z of zonas) {
-      for (let row = 0; row < 2; row++) {
-        for (let col = 0; col < 4; col++) {
-          const est = estados[(id-1) % estados.length]
-          mock.push({
-            id: id++,
-            codigo: `${z.zona.replace('Zona ','')}${String(row+1).padStart(2,'0')}${String.fromCharCode(96+col+1)}`,
-            zona: z.zona, pasillo: String(row+1).padStart(2,'0'),
-            nivel: '1', posicion: String.fromCharCode(96+col+1),
-            canvas_x: z.x + col*(CELL_W+6),
-            canvas_y: z.y + row*(CELL_H+6),
-            estado: est,
-            cantidad_total: est==='ok'?Math.round(50+Math.random()*200):est==='bajo'?5:0,
-            num_productos: est==='vacio'?0:1,
-            items: [],
-            _mock: true,
-          })
-        }
-      }
-    }
-    return mock
+  const handleZoneClick = (zona) => {
+    setActiveZona(zona)
+    setView('estantes')
   }
 
-  const isMock = cells.length > 0 && cells[0]?._mock
-
-  // ── Canvas coords ──────────────────────────────────────────────────────────
-  const getCanvasPos = useCallback((clientX, clientY) => {
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return { x:0, y:0 }
-    return {
-      x: snap(clientX - rect.left),
-      y: snap(clientY - rect.top),
-    }
-  }, [])
-
-  // ── Drop plantilla → crear ubicaciones ────────────────────────────────────
-  const handleCanvasDrop = async (e) => {
-    e.preventDefault()
-    if (!dragTpl) return
-    const { x, y } = getCanvasPos(e.clientX, e.clientY)
-    const items = generateFromTemplate(dragTpl, zonaActiva, pasilloActivo, x, y)
-
-    if (isMock) {
-      // Solo visual en mock
-      const newCells = items.map((it, i) => ({
-        ...it, id: Date.now()+i, estado:'vacio',
-        cantidad_total:0, num_productos:0, items:[], _mock:true,
-      }))
-      setCells(prev => [...prev, ...newCells])
-      showToast(`${items.length} ubicación(es) agregada(s) (demo)`)
-      setDragTpl(null)
-      return
-    }
-
-    setSaving(true)
-    try {
-      const created = []
-      for (const it of items) {
-        const res = await createUbicacion({ ...it, bodega_id: 1 })
-        if (res.ok) created.push({ ...it, id: res.id, estado:'vacio', cantidad_total:0, num_productos:0, items:[] })
-      }
-      setCells(prev => [...prev, ...created])
-      showToast(`${created.length} ubicación(es) creada(s)`)
-    } catch(e) {
-      showToast(e.response?.data?.error || 'Error al crear', false)
-    } finally { setSaving(false); setDragTpl(null) }
-  }
-
-  // ── Drag celda existente ───────────────────────────────────────────────────
-  const handleCellDragStart = (e, ub) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top })
-    setDraggingCell(ub)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-
-  const handleCellDragEnd = async (e) => {
-    if (!draggingCell) return
-    const { x, y } = getCanvasPos(e.clientX - dragOffset.x + CELL_W/2, e.clientY - dragOffset.y + CELL_H/2)
-    const nx = snap(x - CELL_W/2)
-    const ny = snap(y - CELL_H/2)
-
-    setCells(prev => prev.map(c => c.id === draggingCell.id ? { ...c, canvas_x:nx, canvas_y:ny } : c))
-    setDraggingCell(null)
-
-    if (!isMock) {
-      try {
-        await updateUbicacion({ id: draggingCell.id, canvas_x: nx, canvas_y: ny })
-      } catch(err) { console.error(err) }
-    }
-  }
-
-  // ── Edit save/delete ───────────────────────────────────────────────────────
-  const handleEditSave = (updated) => {
-    setCells(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c))
-    setEditModal(null)
-    showToast('Ubicación actualizada')
-  }
-
-  const handleDelete = (id) => {
-    setCells(prev => prev.filter(c => c.id !== id))
-    setEditModal(null)
-    setSelected(null)
-    showToast('Ubicación eliminada')
-  }
-
-  // ── Canvas size ────────────────────────────────────────────────────────────
-  const canvasSize = useMemo(() => {
-    if (!cells.length) return { w: 800, h: 500 }
-    const maxX = Math.max(...cells.map(c => (c.canvas_x||0) + CELL_W)) + 80
-    const maxY = Math.max(...cells.map(c => (c.canvas_y||0) + CELL_H)) + 80
-    return { w: Math.max(maxX, 800), h: Math.max(maxY, 500) }
-  }, [cells])
-
-  // ── Stats ──────────────────────────────────────────────────────────────────
-  const stats = useMemo(() => ({
-    total: cells.length,
-    ok:    cells.filter(c => c.estado==='ok').length,
-    bajo:  cells.filter(c => c.estado==='bajo').length,
-    vacio: cells.filter(c => c.estado==='vacio').length,
-  }), [cells])
-
-  const selectedCell = cells.find(c => c.id === selected)
+  const zonaUbicaciones = ubicaciones.filter(u => u.zona === activeZona)
 
   return (
-    <div className="flex gap-4 items-start">
-
-      {/* ── PANEL LATERAL ── */}
-      {editMode && (
-        <SidePanel
-          zonaActiva={zonaActiva}      setZonaActiva={setZonaActiva}
-          pasilloActivo={pasilloActivo} setPasilloActivo={setPasilloActivo}
-          onDragStart={(e, tpl) => { setDragTpl(tpl); e.dataTransfer.effectAllowed='copy' }}
+    <div>
+      {view === 'plano' ? (
+        <PlanoPajaro
+          ubicaciones={ubicaciones}
+          bodegas={bodegas}
+          onZoneClick={handleZoneClick}
+          onRefresh={fetchMapa}
+        />
+      ) : (
+        <VistaEstantes
+          zona={activeZona}
+          ubicaciones={zonaUbicaciones}
+          onBack={() => setView('plano')}
+          onRefresh={fetchMapa}
         />
       )}
-
-      {/* ── CANVAS ── */}
-      <div className="flex-1 min-w-0 flex flex-col gap-3">
-
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 bg-surface border border-border rounded-lg px-3 py-1.5 text-xs">
-            <span className="text-muted">{stats.total} ubic.</span>
-            <span className="text-border mx-1">·</span>
-            <span className="text-green-400">{stats.ok} ok</span>
-            <span className="text-border mx-1">·</span>
-            <span className="text-orange-400">{stats.bajo} bajo</span>
-            <span className="text-border mx-1">·</span>
-            <span className="text-muted">{stats.vacio} vacías</span>
-          </div>
-
-          <div className="flex-1"/>
-
-          {isMock && (
-            <span className="text-[10px] text-muted bg-surface border border-border rounded-lg px-2.5 py-1.5">
-              Vista demo
-            </span>
-          )}
-
-          {/* Modo ver / editar */}
-          <div className="flex items-center rounded-lg border border-border bg-surface overflow-hidden">
-            <button onClick={() => setEditMode(false)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${!editMode?'bg-primary/10 text-primary':'text-muted hover:text-foreground'}`}>
-              <Eye size={12}/> Ver
-            </button>
-            <button onClick={() => setEditMode(true)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${editMode?'bg-primary/10 text-primary':'text-muted hover:text-foreground'}`}>
-              <Settings size={12}/> Editar
-            </button>
-          </div>
-
-          <button onClick={fetchMapa}
-            className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground transition-colors">
-            <RefreshCw size={12} className={loadingMapa?'animate-spin':''}/>
-          </button>
-        </div>
-
-        {/* Canvas */}
-        <div className="bg-surface border border-border rounded-xl overflow-auto"
-          style={{ maxHeight:'68vh' }}>
-          <div
-            ref={canvasRef}
-            className="relative"
-            style={{
-              width:  canvasSize.w,
-              height: canvasSize.h,
-              backgroundImage: editMode
-                ? 'radial-gradient(circle, #30363d 1px, transparent 1px)'
-                : 'none',
-              backgroundSize: `${GRID}px ${GRID}px`,
-              cursor: editMode ? 'crosshair' : 'default',
-            }}
-            onDragOver={e => e.preventDefault()}
-            onDrop={handleCanvasDrop}>
-
-            {/* Zona backgrounds + labels */}
-            <ZoneLabels ubicaciones={cells}/>
-
-            {/* Celdas */}
-            {cells.map(ub => (
-              <CanvasCell
-                key={ub.id}
-                ub={ub}
-                selected={selected === ub.id}
-                editMode={editMode}
-                onSelect={u => {
-                  setSelected(s => s===u.id ? null : u.id)
-                  if (editMode && selected===u.id) setEditModal(u)
-                }}
-                onDragStart={handleCellDragStart}
-                onDragEnd={handleCellDragEnd}
-              />
-            ))}
-
-            {/* Saving overlay */}
-            {saving && (
-              <div className="absolute inset-0 rounded-xl flex items-center justify-center"
-                style={{ background:'rgba(13,17,23,0.5)' }}>
-                <div className="flex items-center gap-2 text-sm text-foreground bg-surface border border-border rounded-xl px-4 py-2.5">
-                  <RefreshCw size={14} className="animate-spin text-primary"/>
-                  Guardando…
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Detail bar */}
-        {selectedCell && !editMode && (
-          <div className="bg-surface border border-border rounded-xl px-4 py-3 flex items-center gap-4 flex-wrap"
-            style={{ animation:'slideUp .15s ease' }}>
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: STOCK_STATE[selectedCell.estado] }}/>
-              <span className="text-sm font-bold font-mono text-foreground">{selectedCell.codigo}</span>
-            </div>
-            <div className="h-4 w-px bg-border"/>
-            <span className="text-xs text-muted">{selectedCell.zona} · Pasillo {selectedCell.pasillo}</span>
-            {selectedCell.estado !== 'vacio' && <>
-              <div className="h-4 w-px bg-border"/>
-              <span className="text-sm font-bold tabular-nums" style={{ color: STOCK_STATE[selectedCell.estado] }}>
-                {selectedCell.cantidad_total?.toLocaleString('es-CO')} u.
-              </span>
-              <div className="h-4 w-px bg-border"/>
-              <div className="flex flex-wrap gap-2 flex-1">
-                {selectedCell.items?.slice(0,3).map((it,i) => (
-                  <span key={i} className="text-[10px] bg-white/5 border border-border rounded-lg px-2 py-0.5 font-mono">
-                    {it.sku} · {it.cantidad} u.
-                  </span>
-                ))}
-              </div>
-            </>}
-            {editMode && (
-              <button onClick={() => setEditModal(selectedCell)}
-                className="ml-auto flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors">
-                <Edit2 size={11}/> Editar
-              </button>
-            )}
-            <button onClick={() => setSelected(null)} className="text-muted hover:text-foreground transition-colors">
-              <X size={14}/>
-            </button>
-          </div>
-        )}
-
-        {editMode && (
-          <p className="text-[10px] text-muted text-center">
-            Arrastra plantillas del panel izquierdo al plano · Mueve celdas con drag · Click para seleccionar y editar
-          </p>
-        )}
-      </div>
-
-      {/* ── Modal editar ── */}
-      {editModal && (
-        <EditModal
-          ub={editModal}
-          onSave={handleEditSave}
-          onDelete={handleDelete}
-          onClose={() => setEditModal(null)}
-        />
-      )}
-
-      {/* ── Toast ── */}
-      {toast && <Toast msg={toast.msg} ok={toast.ok} onClose={() => setToast(null)}/>}
-
-      <style>{`
-        @keyframes slideUp      { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes slideInRight { from{opacity:0;transform:translateX(12px)} to{opacity:1;transform:translateX(0)} }
-      `}</style>
     </div>
   )
 }

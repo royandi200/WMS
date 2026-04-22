@@ -32,7 +32,7 @@ module.exports = async (req, res) => {
 
     // ── PUT: mover / renombrar zona ──────────────────────────────
     if (req.method === 'PUT') {
-      const { id, zona, canvas_x, canvas_y, codigo } = req.body || {}
+      const { id, zona, canvas_x, canvas_y, codigo, pasillo, nivel, posicion } = req.body || {}
       if (!id) return res.status(400).json({ ok:false, error:'id requerido' })
 
       const fields = []
@@ -41,6 +41,9 @@ module.exports = async (req, res) => {
       if (canvas_x  != null) { fields.push('canvas_x=?'); vals.push(canvas_x) }
       if (canvas_y  != null) { fields.push('canvas_y=?'); vals.push(canvas_y) }
       if (codigo    != null) { fields.push('codigo=?');   vals.push(codigo) }
+      if (pasillo   != null) { fields.push('pasillo=?');  vals.push(pasillo) }
+      if (nivel     != null) { fields.push('nivel=?');    vals.push(nivel) }
+      if (posicion  != null) { fields.push('posicion=?'); vals.push(posicion) }
 
       if (!fields.length) return res.status(400).json({ ok:false, error:'Nada que actualizar' })
       vals.push(id)
