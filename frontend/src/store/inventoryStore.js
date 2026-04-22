@@ -5,6 +5,7 @@ import {
   getLotDetail,
   getKardex,
   getLowStock,
+  getMapaBodega,
 } from '../api/inventory.api'
 
 const unwrap = (res) => {
@@ -85,6 +86,17 @@ export const useInventoryStore = create((set) => ({
     } catch (e) {
       set({ error: e.response?.data?.error || 'Lote no encontrado', loading: false })
       return null
+    }
+  },
+
+  fetchMapa: async () => {
+    set({ loadingMapa: true, error: null })
+    try {
+      const data = await getMapaBodega()
+      const payload = data?.data ?? data
+      set({ mapa: payload, loadingMapa: false })
+    } catch (e) {
+      set({ error: e.response?.data?.error || 'Error al cargar mapa', loadingMapa: false })
     }
   },
 
