@@ -22,11 +22,23 @@ module.exports = async (req, res) => {
       )
       if (exist) return res.status(409).json({ ok:false, error:'Ya existe una ubicación con ese código' })
 
-      const result = await query(
-        `INSERT INTO ubicaciones (bodega_id, codigo, zona, pasillo, nivel, posicion, canvas_x, canvas_y, activa)
-         VALUES (?,?,?,?,?,?,?,?,1)`,
-        [bodega_id, codigo, zona, pasillo||null, nivel, posicion, canvas_x||0, canvas_y||0]
-      )
+      // Intentar con canvas_x/canvas_y, si no existen usar INSERT básico
+      let result
+      try {
+        result = await query(
+          `INSERT INTO ubicaciones (bodega_id, codigo, zona, pasillo, nivel, posicion, canvas_x, canvas_y, activa)
+           VALUES (?,?,?,?,?,?,?,?,1)`,
+          [bodega_id, codigo, zona, pasillo||null, nivel, posicion, canvas_x||0, canvas_y||0]
+        )
+      } catch(e) {
+        if (e.message.includes('canvas_x') || e.message.includes('canvas_y')) {
+          result = await query(
+            `INSERT INTO ubicaciones (bodega_id, codigo, zona, pasillo, nivel, posicion, activa)
+             VALUES (?,?,?,?,?,?,1)`,
+            [bodega_id, codigo, zona, pasillo||null, nivel, posicion]
+          )
+        } else throw e
+      }
       return res.status(201).json({ ok:true, id: result.insertId })
     }
 
