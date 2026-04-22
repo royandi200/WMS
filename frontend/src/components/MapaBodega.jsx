@@ -272,9 +272,9 @@ export default function MapaBodega() {
 
       {/* Mock notice */}
       {MOCK && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/8 border border-primary/20 text-xs text-primary/80">
-          <Layers size={12}/>
-          <span>Vista de ejemplo — no hay ubicaciones en la BD todavía. Crea ubicaciones para ver datos reales.</span>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/4 border border-border text-xs text-muted">
+          <Layers size={12} className="shrink-0"/>
+          <span>Vista de demo — aún no hay ubicaciones registradas. El mapa mostrará datos reales una vez que se creen ubicaciones en la base de datos.</span>
         </div>
       )}
 

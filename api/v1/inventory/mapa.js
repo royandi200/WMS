@@ -45,7 +45,7 @@ module.exports = async (req, res) => {
           ORDER BY s.cantidad DESC
           SEPARATOR ';;'
         ) AS detalle_raw,
-        MIN(p.min_stock) AS min_stock_ref
+        MIN(p.stock_minimo) AS min_stock_ref
       FROM stock s
       JOIN productos p ON p.id = s.producto_id
       WHERE s.ubicacion_id IS NOT NULL AND s.cantidad > 0
