@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
+import MapaBodega from '../components/MapaBodega'
 
-const TABS = ['Resumen', 'Stock Bajo', 'Buscar Producto', 'Buscar Lote']
+const TABS = ['Resumen', 'Stock Bajo', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
 
 export default function InventarioPage() {
   const [tab, setTab] = useState(0)
@@ -34,12 +35,12 @@ export default function InventarioPage() {
       <h1 className="text-xl font-semibold text-foreground mb-6">Inventario</h1>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-border">
+      <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
         {TABS.map((t, i) => (
           <button
             key={t}
             onClick={() => setTab(i)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === i
                 ? 'border-primary text-primary'
                 : 'border-transparent text-muted hover:text-foreground'
@@ -124,6 +125,9 @@ export default function InventarioPage() {
           {searched && !result && !loading && <EmptyState icon="▦" text="Lote no encontrado" />}
         </SearchPane>
       )}
+
+      {/* TAB 4 — Mapa Bodega */}
+      {tab === 4 && <MapaBodega />}
     </div>
   )
 }
@@ -158,7 +162,6 @@ function JsonCard({ data }) {
   )
 }
 
-// ── Helpers de estado ───────────────────────────────────────────────────────
 const HOY = () => { const d = new Date(); d.setHours(0,0,0,0); return d; }
 
 const calcEstado = (row) => {
@@ -177,7 +180,6 @@ const BADGE = {
   DISPONIBLE: 'bg-green-500/15 text-green-400 border-green-500/30',
 }
 
-// ── LotDetailCard ────────────────────────────────────────────────────────────
 function LotDetailCard({ data }) {
   const row = data?.data || data;
   if (!row || typeof row !== 'object' || Array.isArray(row)) return <JsonCard data={data} />;
@@ -243,12 +245,10 @@ function LotDetailCard({ data }) {
   );
 }
 
-// ── ProductStockCard ─────────────────────────────────────────────────────────
 function ProductStockCard({ data }) {
   const rows = data?.data || data;
   if (!Array.isArray(rows)) return <LotDetailCard data={data} />;
 
-  const hoy = HOY();
   const enriched = rows.map(r => ({ ...r, _estado: calcEstado(r) }));
   const totalDisp = enriched.reduce((s, r) =>
     s + parseFloat(r.disponible ?? ((r.cantidad ?? 0) - (r.reservada ?? 0))), 0
@@ -306,14 +306,10 @@ function ProductStockCard({ data }) {
                 </div>
               </div>
               {isV && (
-                <p className="mt-1.5 text-[10px] text-red-400 font-medium">
-                  🚨 VENCIDO — requiere disposición inmediata
-                </p>
+                <p className="mt-1.5 text-[10px] text-red-400 font-medium">🚨 VENCIDO — requiere disposición inmediata</p>
               )}
               {isCQ && (
-                <p className="mt-1.5 text-[10px] text-yellow-400 font-medium">
-                  ⚠️ En cuarentena — pendiente liberación
-                </p>
+                <p className="mt-1.5 text-[10px] text-yellow-400 font-medium">⚠️ En cuarentena — pendiente liberación</p>
               )}
             </div>
           );
