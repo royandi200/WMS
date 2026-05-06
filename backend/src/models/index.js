@@ -20,6 +20,7 @@ const ProductionOrder = require('./ProductionOrder');
 const BOM             = require('./BOM');
 const WebhookLog      = require('./WebhookLog');
 const SystemLog       = require('./SystemLog');
+const SyscafeSync     = require('./SyscafeSync');     // integración SysCafé
 
 // ── Asociaciones ─────────────────────────────────────────────────────────────
 
@@ -113,6 +114,10 @@ Lot.hasMany(WasteRecord,               { foreignKey: 'lot_id',        as: 'merma
 ApprovalQueue.belongsTo(User, { foreignKey: 'solicitado_por', as: 'solicitante' });
 ApprovalQueue.belongsTo(User, { foreignKey: 'procesado_por',  as: 'procesador' });
 
+// SyscafeSync ↔ Despachos
+Despacho.hasOne(SyscafeSync,    { foreignKey: 'despacho_id', as: 'syscafe_sync' });
+SyscafeSync.belongsTo(Despacho, { foreignKey: 'despacho_id', as: 'despacho' });
+
 module.exports = {
   sequelize,
   // Auth
@@ -128,5 +133,7 @@ module.exports = {
   // Operaciones
   ProductionOrder, WasteRecord, ApprovalQueue,
   // Sistema
-  WebhookLog, SystemLog
+  WebhookLog, SystemLog,
+  // Integraciones
+  SyscafeSync
 };

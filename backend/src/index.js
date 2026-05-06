@@ -24,6 +24,7 @@ const approvalsRouter = require('./modules/approvals/approvals.routes');
 const bomRouter = require('./modules/bom/bom.routes');
 const siigoRouter = require('./modules/siigo/siigo.routes');
 const webhookRouter = require('./modules/webhook/webhook.routes');
+const syscafeRouter = require('./modules/syscafe/syscafe.routes');
 
 // Jobs
 require('./jobs/siigo.sync.job');
@@ -70,6 +71,7 @@ app.use(`${API}/approvals`,  approvalsRouter);
 app.use(`${API}/bom`,        bomRouter);
 app.use(`${API}/siigo`,      siigoRouter);
 app.use(`${API}/webhook`,    webhookRouter);
+app.use(`${API}/syscafe`,    syscafeRouter);
 
 // ── Error handler (siempre al final) ────────────────────────────────────────
 app.use(errorHandler);
