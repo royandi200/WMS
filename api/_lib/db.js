@@ -21,7 +21,7 @@ async function getConnection() {
 
 async function query(sql, params = []) {
   const conn = await getConnection();
-  const [rows] = await conn.execute(sql, params);
+  const [rows] = await conn.query(sql, params);
   return rows;
 }
 
