@@ -1,14 +1,15 @@
 const { query } = require('../_lib/db');
+const { cors, requireRole } = require('../_lib/auth');
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  cors(res, 'GET');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
+    await requireRole(req, ['Admin', 'Validador', 'Supervisor']);
+
     const estado = String(req.query?.estado || 'PENDIENTE').toUpperCase();
     const limit = Number(req.query?.limit || 50);
 
@@ -62,6 +63,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({ ok: true, data: { rows: data, total: data.length } });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
     console.error('[api/v1/approvals]', err.message);
     return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
   }

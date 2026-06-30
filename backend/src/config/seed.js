@@ -8,39 +8,41 @@ const logger = require('./logger');
 async function seed() {
   await sequelize.authenticate();
 
-  // Roles
-  const roles = ['Admin', 'Validador', 'Operario', 'Consulta'];
-  const permissions = {
-    Admin:     ['*'],
-    Validador: ['APROBAR_SOLICITUD','RECHAZAR_SOLICITUD','CONSULTAR_*','INGRESO_RECEPCION','SOLICITAR_DESPACHO','REPORTE_MERMA','SOLICITAR_CIERRE_PRODUCCION'],
-    Operario:  ['INGRESO_RECEPCION','SOLICITAR_INICIO_PRODUCCION','CONFIRMAR_MATERIALES','AVANCE_FASES','SOLICITAR_CIERRE_PRODUCCION','SOLICITAR_DESPACHO','REPORTE_MERMA','EXCEPCION_PICKING','GESTION_DEVOLUCION','CONSULTAR_*'],
-    Consulta:  ['CONSULTAR_*']
-  };
-
-  for (const name of roles) {
+  for (const nombre of ['Admin', 'Validador', 'Supervisor', 'Operario', 'Consulta']) {
     await Role.findOrCreate({
-      where: { name },
-      defaults: { name, permissions: JSON.stringify(permissions[name]), description: `Rol ${name}` }
+      where: { nombre },
+      defaults: { nombre },
     });
   }
 
-  // Usuario admin por defecto
-  const hash = await bcrypt.hash('Admin123!', 12);
-  const adminRole = await Role.findOne({ where: { name: 'Admin' } });
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword) {
+    logger.warn('Seed admin omitido: define SEED_ADMIN_PASSWORD para crear el usuario inicial.');
+    process.exit(0);
+  }
+
+  const adminRole = await Role.findOne({ where: { nombre: 'Admin' } });
+  const hash = await bcrypt.hash(adminPassword, 12);
+  const email = process.env.SEED_ADMIN_EMAIL || 'admin@wms.local';
+  const telefono = process.env.SEED_ADMIN_PHONE || null;
+
   await User.findOrCreate({
-    where: { phone: '0000000000' },
+    where: { email },
     defaults: {
-      name: 'Administrador WMS',
-      phone: '0000000000',
-      email: 'admin@wms.local',
+      nombre: 'Administrador WMS',
+      telefono,
+      email,
       password_hash: hash,
-      role_id: adminRole.id,
-      active: true
-    }
+      rol_id: adminRole.id,
+      activo: true,
+    },
   });
 
-  logger.info('✅ Seed completado — admin/Admin123!');
+  logger.info(`Seed completado. Admin inicial: ${email}`);
   process.exit(0);
 }
 
-seed().catch(err => { logger.error(err); process.exit(1); });
+seed().catch((err) => {
+  logger.error(err);
+  process.exit(1);
+});

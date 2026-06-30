@@ -1,16 +1,17 @@
 // POST /api/v1/approvals/approve
 const https = require('https');
 const { query } = require('../../_lib/db');
-const { cors, verifyToken } = require('../../_lib/auth');
+const { cors, requireRole } = require('../../_lib/auth');
 
-const BB_TOKEN = 'bb-78e67fdf-098a-499a-805d-68bb23e897bb';
-const BB_BOT_ID = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
+const BB_TOKEN = process.env.BUILDERBOT_API_TOKEN || '';
+const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
 async function pushWA(phone, text) {
   return new Promise((resolve) => {
     try {
       const number = String(phone || '').replace(/[^\d]/g, '');
       if (!number) return resolve(null);
+      if (!BB_TOKEN || !BB_BOT_ID) return resolve(null);
 
       const body = JSON.stringify({
         number,
@@ -77,9 +78,9 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  let decoded;
+  let user;
   try {
-    decoded = verifyToken(req);
+    user = await requireRole(req, ['Admin', 'Validador']);
   } catch (e) {
     return res.status(e.status || 401).json({ ok: false, error: e.message });
   }
@@ -113,7 +114,7 @@ module.exports = async (req, res) => {
       `UPDATE aprobaciones
        SET estado = 'APROBADO', procesado_por = ?, procesado_en = NOW()
        WHERE codigo_solicitud = ? AND estado = 'PENDIENTE'`,
-      [decoded.id, requestCode]
+      [user.id, requestCode]
     );
 
     if (payload?.operario_phone) {

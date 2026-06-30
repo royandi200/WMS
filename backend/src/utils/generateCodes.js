@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 /**
  * Genera un LPN único para lotes de recepción.
@@ -23,7 +23,7 @@ function generateOrderCode() {
  * Formato: REQ-XXXXXXXXXX
  */
 function generateRequestCode() {
-  return 'REQ-' + uuidv4().replace(/-/g, '').substring(0, 10).toUpperCase();
+  return 'REQ-' + randomUUID().replace(/-/g, '').substring(0, 10).toUpperCase();
 }
 
 /**
@@ -31,7 +31,7 @@ function generateRequestCode() {
  * Formato: MER-XXXXXXXXXX
  */
 function generateWasteCode() {
-  return 'MER-' + uuidv4().replace(/-/g, '').substring(0, 10).toUpperCase();
+  return 'MER-' + randomUUID().replace(/-/g, '').substring(0, 10).toUpperCase();
 }
 
 /**
@@ -39,7 +39,7 @@ function generateWasteCode() {
  * Formato: TX-XXXXXXXXXXXXXXXXXX
  */
 function generateTxId() {
-  return 'TX-' + uuidv4().replace(/-/g, '').toUpperCase();
+  return 'TX-' + randomUUID().replace(/-/g, '').toUpperCase();
 }
 
 module.exports = { generateLPN, generateOrderCode, generateRequestCode, generateWasteCode, generateTxId };

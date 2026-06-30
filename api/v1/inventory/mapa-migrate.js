@@ -1,25 +1,37 @@
-// GET /api/v1/inventory/mapa-migrate
-// Agrega columnas canvas_x/canvas_y a ubicaciones si no existen
-const { query } = require('../../_lib/db')
-const { cors, verifyToken } = require('../../_lib/auth')
+const { query } = require('../../_lib/db');
+const { cors, requireRole } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
-  cors(res, 'GET')
-  if (req.method === 'OPTIONS') return res.status(200).end()
-  try { verifyToken(req) } catch(e) { return res.status(401).json({ ok:false, error:e.message }) }
+  cors(res, 'POST');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  const log = []
+  if (process.env.ENABLE_HTTP_MIGRATIONS !== 'true') {
+    return res.status(404).json({ ok: false, error: 'Not found' });
+  }
+
   try {
-    for (const col of ['canvas_x','canvas_y']) {
+    await requireRole(req, ['Admin']);
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message });
+  }
+
+  const log = [];
+  try {
+    for (const col of ['canvas_x', 'canvas_y']) {
       try {
-        await query(`ALTER TABLE ubicaciones ADD COLUMN ${col} INT NOT NULL DEFAULT 0`)
-        log.push(`✅ ${col} — creada`)
-      } catch(e) {
-        log.push(`ℹ️ ${col} — ya existe`)
+        await query(`ALTER TABLE ubicaciones ADD COLUMN ${col} INT NOT NULL DEFAULT 0`);
+        log.push(`${col}: created`);
+      } catch (err) {
+        if (err.code === 'ER_DUP_FIELDNAME') {
+          log.push(`${col}: already exists`);
+          continue;
+        }
+        throw err;
       }
     }
-    return res.json({ ok:true, log })
-  } catch(err) {
-    return res.status(500).json({ ok:false, error:err.message, log })
+    return res.json({ ok: true, log });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Migration failed', log });
   }
-}
+};

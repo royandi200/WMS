@@ -1,9 +1,9 @@
-const { sequelize, Producto, OrdenProduccion, Lot, BOM } = require('../../models');
+const { sequelize, Product: Producto, ProductionOrder: OrdenProduccion, Lot, BOM } = require('../../models');
 const { Op } = require('sequelize');
 const { generateOrderCode, generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 // Bodegas por convención
 const BODEGA = { PPAL: 1, CUARENTENA: 2, DEVOL: 3, PROD: 4 };
@@ -89,7 +89,7 @@ exports.confirmMaterials = async ({ order_id, exception_lot_id }, usuario) => {
       const necesario = parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada);
 
       const orderClause = exception_lot_id
-        ? sequelize.literal(`CASE WHEN id = '${exception_lot_id}' THEN 0 ELSE 1 END, created_at ASC`)
+        ? sequelize.literal(`CASE WHEN id = ${sequelize.escape(exception_lot_id)} THEN 0 ELSE 1 END, created_at ASC`)
         : [['created_at', 'ASC']];
 
       const lots = await Lot.findAll({
@@ -130,7 +130,7 @@ exports.confirmMaterials = async ({ order_id, exception_lot_id }, usuario) => {
     await orden.update({
       fase:                     'F1',
       estado:                   'EN_PROCESO',
-      materiales_confirmados_en: new Date(),
+      materiales_conf_en:       new Date(),
     }, { transaction: t });
 
     return { order_code: orden.codigo_orden, phase: 'F1', consumed: consumido };
@@ -177,7 +177,7 @@ exports.close = async ({ order_id, qty_real }, usuario) => {
 
     const lpn = `LPN-${orden.codigo_orden}`;
     const lot = await Lot.create({
-      id:                  uuidv4(),
+      id:                  randomUUID(),
       lpn,
       product_id:          orden.producto_id,
       bodega_id:           BODEGA.PPAL,

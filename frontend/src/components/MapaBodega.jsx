@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
+import { useAuthStore } from '../store/authStore'
 import {
   X, Plus, Edit2, Trash2, ChevronLeft, Save, RefreshCw,
   Layers, Box, Package, AlertTriangle, Move, Grid,
@@ -29,7 +30,7 @@ const ESTADO = {
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const API = '/api/v1'
 const authHeaders = () => {
-  const token = JSON.parse(localStorage.getItem('wms_auth')||'{}')?.token || ''
+  const token = useAuthStore.getState().token || ''
   return { 'Content-Type':'application/json', Authorization:`Bearer ${token}` }
 }
 const apiFetch = (path, opts={}) =>

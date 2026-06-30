@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 
 export const useAuthStore = create(
   persist(
@@ -16,6 +16,7 @@ export const useAuthStore = create(
     }),
     {
       name: 'wms-auth',
+      storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         token:           state.token,
         user:            state.user,

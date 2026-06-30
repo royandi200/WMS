@@ -1,20 +1,27 @@
 const router = require('express').Router();
-const ctrl   = require('./builderbot.controller');
+const ctrl = require('./builderbot.controller');
 const { validateKw } = require('./builderbot.middleware');
 
-// CORS preflight — igual que bardj-ai/api/webhook.js
-router.options('/', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function setWebhookCors(res) {
+  const origin = process.env.BUILDERBOT_ALLOWED_ORIGIN
+    || (process.env.CORS_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean)[0]
+    || 'https://app.builderbot.cloud';
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-BuilderBot-Secret, X-Webhook-Secret');
+}
+
+router.options('/', (req, res) => {
+  setWebhookCors(res);
   res.status(200).end();
 });
 
-// POST /api/v1/webhook/builderbot
 router.post(
   '/',
   (req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    setWebhookCors(res);
     next();
   },
   validateKw,

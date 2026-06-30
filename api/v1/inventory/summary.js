@@ -1,12 +1,12 @@
 // GET /api/v1/inventory/summary
 const { query } = require('../../_lib/db');
-const { cors, verifyToken } = require('../../_lib/auth');
+const { cors, requireAuth } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  try { verifyToken(req); } catch (e) { return res.status(401).json({ ok: false, error: e.message }); }
+  try { await requireAuth(req); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
 
   try {
     const totalsRows = await query(

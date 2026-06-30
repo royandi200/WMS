@@ -1,4 +1,4 @@
-const { sequelize, Lot, WasteRecord, Producto } = require('../../models');
+const { sequelize, Lot, WasteRecord, Product: Producto } = require('../../models');
 const { generateWasteCode } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');

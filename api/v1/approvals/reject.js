@@ -1,15 +1,15 @@
 // POST /api/v1/approvals/reject
 const { query } = require('../../_lib/db');
-const { cors, verifyToken } = require('../../_lib/auth');
+const { cors, requireRole } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
   cors(res, 'POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  let decoded;
+  let user;
   try {
-    decoded = verifyToken(req);
+    user = await requireRole(req, ['Admin', 'Validador']);
   } catch (e) {
     return res.status(e.status || 401).json({ ok: false, error: e.message });
   }
@@ -39,7 +39,7 @@ module.exports = async (req, res) => {
       `UPDATE aprobaciones
        SET estado = 'RECHAZADO', procesado_por = ?, procesado_en = NOW(), motivo_rechazo = ?
        WHERE codigo_solicitud = ? AND estado = 'PENDIENTE'`,
-      [decoded.id, reason, requestCode]
+      [user.id, reason, requestCode]
     );
 
     return res.status(200).json({ ok: true, data: { codigo_solicitud: requestCode, estado: 'RECHAZADO' } });

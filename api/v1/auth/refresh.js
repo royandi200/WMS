@@ -2,23 +2,26 @@
 // POST /api/v1/auth/refresh  { refresh_token }
 const jwt = require('jsonwebtoken');
 const { query } = require('../../_lib/db');
+const { cors } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  cors(res, 'POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
+    if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+      return res.status(500).json({ ok: false, error: 'Auth no configurada' });
+    }
+
     const { refresh_token } = req.body || {};
     if (!refresh_token)
       return res.status(400).json({ ok: false, error: 'refresh_token requerido' });
 
     const decoded = jwt.verify(
       refresh_token,
-      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+      process.env.JWT_REFRESH_SECRET
     );
 
     const rows = await query(

@@ -1,12 +1,12 @@
-const { BOM, Producto } = require('../../models');
+const { BOM, Product: Producto } = require('../../models');
 const AppError = require('../../utils/AppError');
 
 exports.getByProduct = async (producto_final_id) => {
   const bom = await BOM.findAll({
     where: { producto_final_id },
     include: [
-      { model: Producto, as: 'producto_final', attributes: ['siigo_code','nombre','unidad'] },
-      { model: Producto, as: 'insumo',         attributes: ['siigo_code','nombre','unidad'] }
+      { model: Producto, as: 'producto_final', attributes: ['siigo_code','nombre','unit_label'] },
+      { model: Producto, as: 'insumo',         attributes: ['siigo_code','nombre','unit_label'] }
     ]
   });
   if (!bom.length) throw new AppError('No se encontró BOM para este producto', 404);

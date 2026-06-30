@@ -1,7 +1,7 @@
 // GET  /api/v1/products  — listar productos
 // POST /api/v1/products  — crear producto
 const { query } = require('../../_lib/db');
-const { cors, verifyToken } = require('../../_lib/auth');
+const { cors, requireAuth, requireRole } = require('../../_lib/auth');
 
 // Mapea una fila de producto + métricas dashboard al contrato que espera el frontend.
 const toRow = (row) => ({
@@ -39,11 +39,12 @@ const toRow = (row) => ({
 module.exports = async (req, res) => {
   cors(res, 'GET, POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  try { verifyToken(req); } catch (e) { return res.status(401).json({ ok: false, error: e.message }); }
 
   // ── GET ──────────────────────────────────────────────────────────────────
   if (req.method === 'GET') {
     try {
+      await requireAuth(req);
+
       const { search = '', type = '', active = 'true', page = 1, limit = 50 } = req.query;
       const offset = (Number(page) - 1) * Number(limit);
 
@@ -104,6 +105,7 @@ module.exports = async (req, res) => {
         data: { rows: rows.map(toRow), total: Number(countRows[0]?.total ?? 0) }
       });
     } catch (err) {
+      if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
       console.error('[products GET]', err.message);
       return res.status(500).json({ ok: false, error: err.message });
     }
@@ -112,6 +114,8 @@ module.exports = async (req, res) => {
   // ── POST ─────────────────────────────────────────────────────────────────
   if (req.method === 'POST') {
     try {
+      await requireRole(req, ['Admin', 'Supervisor']);
+
       // El frontend envía `sku` — lo aceptamos como alias de siigo_code
       const {
         sku, siigo_code,
@@ -141,6 +145,7 @@ module.exports = async (req, res) => {
       const [row] = await query(`SELECT * FROM productos WHERE siigo_code = ? LIMIT 1`, [code]);
       return res.status(201).json({ ok: true, data: toRow(row) });
     } catch (err) {
+      if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
       if (err.code === 'ER_DUP_ENTRY')
         return res.status(409).json({ ok: false, error: 'El código SKU ya existe' });
       console.error('[products POST]', err.message);

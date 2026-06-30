@@ -2,7 +2,7 @@
 // GET  /api/v1/products/:id  — obtener producto por ID
 // PUT  /api/v1/products/:id  — actualizar producto
 const { query }             = require('../../_lib/db');
-const { cors, verifyToken } = require('../../_lib/auth');
+const { cors, requireAuth, requireRole } = require('../../_lib/auth');
 
 function mapRow(row) {
   return {
@@ -35,14 +35,13 @@ module.exports = async (req, res) => {
   res.setHeader('Expires', '0');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  try { verifyToken(req); }
-  catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
-
   const { id } = req.query;
 
   // ── GET
   if (req.method === 'GET') {
     try {
+      await requireAuth(req);
+
       const rows = await query(`SELECT * FROM productos WHERE id = ? LIMIT 1`, [id]);
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
 
@@ -89,6 +88,7 @@ module.exports = async (req, res) => {
         }
       });
     } catch (err) {
+      if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
       console.error('[products/:id GET]', err.message);
       return res.status(500).json({ ok: false, error: 'Error al obtener producto' });
     }
@@ -97,6 +97,8 @@ module.exports = async (req, res) => {
   // ── PUT
   if (req.method === 'PUT') {
     try {
+      await requireRole(req, ['Admin', 'Supervisor']);
+
       const { name, description, type, unit } = req.body || {};
       if (!name || !type)
         return res.status(400).json({ ok: false, error: 'name y type son requeridos' });
@@ -112,6 +114,7 @@ module.exports = async (req, res) => {
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
       return res.status(200).json({ ok: true, data: mapRow(rows[0]) });
     } catch (err) {
+      if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
       console.error('[products/:id PUT]', err.message);
       return res.status(500).json({ ok: false, error: 'Error al actualizar producto' });
     }

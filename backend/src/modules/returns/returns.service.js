@@ -1,7 +1,7 @@
 const { Lot } = require('../../models');
 const { generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 const BODEGA = { PPAL: 1, CUARENTENA: 2, DEVOL: 3 };
 
@@ -14,7 +14,7 @@ exports.processReturn = async (
   const lpn      = generateLPN('DEV');
 
   const lot = await Lot.create({
-    id:          uuidv4(),
+    id:          randomUUID(),
     lpn,
     product_id,
     bodega_id,

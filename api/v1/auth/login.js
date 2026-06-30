@@ -3,16 +3,19 @@
 const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
 const { query } = require('../../_lib/db');
+const { cors } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  cors(res, 'POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
+    if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+      return res.status(500).json({ ok: false, error: 'Auth no configurada' });
+    }
+
     const { email, password } = req.body || {};
     if (!email || !password)
       return res.status(400).json({ ok: false, error: 'Email y password requeridos' });
@@ -46,8 +49,8 @@ module.exports = async (req, res) => {
 
     const refresh_token = jwt.sign(
       { id: user.id },
-      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
     );
 
     return res.status(200).json({

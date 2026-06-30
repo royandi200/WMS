@@ -3,10 +3,16 @@ const jwt = require('jsonwebtoken');
 const { User, Role } = require('../../models');
 const AppError = require('../../utils/AppError');
 
+function requireSecret(name) {
+  const value = process.env[name];
+  if (!value) throw new AppError('Autenticacion no configurada', 500);
+  return value;
+}
+
 function signAccess(usuario) {
   return jwt.sign(
     { id: usuario.id, email: usuario.email, rol: usuario.rol?.nombre },
-    process.env.JWT_SECRET,
+    requireSecret('JWT_SECRET'),
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
   );
 }
@@ -14,12 +20,15 @@ function signAccess(usuario) {
 function signRefresh(usuario) {
   return jwt.sign(
     { id: usuario.id },
-    process.env.JWT_REFRESH_SECRET,
+    requireSecret('JWT_REFRESH_SECRET'),
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
   );
 }
 
 exports.login = async ({ email, password }) => {
+  requireSecret('JWT_SECRET');
+  requireSecret('JWT_REFRESH_SECRET');
+
   const usuario = await User.findOne({
     where: { email, activo: true },
     include: [{ model: Role, as: 'rol' }]
@@ -39,7 +48,7 @@ exports.login = async ({ email, password }) => {
 
 exports.refresh = async (refreshToken) => {
   try {
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const decoded = jwt.verify(refreshToken, requireSecret('JWT_REFRESH_SECRET'));
     const usuario = await User.findOne({
       where: { id: decoded.id, activo: true },
       include: [{ model: Role, as: 'rol' }]

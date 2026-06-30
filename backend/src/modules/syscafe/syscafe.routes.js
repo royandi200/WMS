@@ -1,7 +1,8 @@
 const router       = require('express').Router();
 const ctrl         = require('./syscafe.controller');
 const syscafeAuth  = require('./syscafe.middleware');
-const { verifyToken } = require('../auth/auth.middleware');
+const authenticate = require('../../middleware/authenticate');
+const authorize = require('../../middleware/authorize');
 
 /**
  * Rutas del módulo SysCafé.
@@ -15,6 +16,6 @@ router.get('/GetFacturas', syscafeAuth, ctrl.getFacturas);
 router.post('/confirmar', syscafeAuth, ctrl.confirmar);
 
 // ── Estado de sincronización (para dashboard WMS, requiere JWT) ──────────────
-router.get('/sync-status', verifyToken, ctrl.syncStatus);
+router.get('/sync-status', authenticate, authorize('Admin', 'Validador'), ctrl.syncStatus);
 
 module.exports = router;
