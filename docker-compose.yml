@@ -7,10 +7,10 @@ services:
     container_name: wms_db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: wms_db
-      MYSQL_USER: wms_user
-      MYSQL_PASSWORD: wms_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wms_db}
+      MYSQL_USER: ${MYSQL_USER:-wms_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
     ports:
       - '3306:3306'
     volumes:

@@ -1,7 +1,7 @@
 // api/v1/products/[id]/toggle.js
 // PATCH /api/v1/products/:id/toggle  — activa / inactiva un producto
 const { query }             = require('../../../_lib/db');
-const { cors, verifyToken } = require('../../../_lib/auth');
+const { cors, requireRole } = require('../../../_lib/auth');
 
 module.exports = async (req, res) => {
   cors(res, 'PATCH');
@@ -9,7 +9,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'PATCH')
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  try { verifyToken(req); }
+  try { await requireRole(req, ['Admin', 'Supervisor']); }
   catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
 
   const { id } = req.query;

@@ -22,22 +22,40 @@ const wasteRouter = require('./modules/waste/waste.routes');
 const returnsRouter = require('./modules/returns/returns.routes');
 const approvalsRouter = require('./modules/approvals/approvals.routes');
 const bomRouter = require('./modules/bom/bom.routes');
-const siigoRouter = require('./modules/siigo/siigo.routes');
 const webhookRouter = require('./modules/webhook/webhook.routes');
 const syscafeRouter = require('./modules/syscafe/syscafe.routes');
+let siigoRouter = null;
+try {
+  siigoRouter = require('./modules/siigo/siigo.routes');
+} catch (err) {
+  if (err.code !== 'MODULE_NOT_FOUND') throw err;
+  logger.warn('Router SIIGO no disponible; se omite /api/v1/siigo.');
+}
 
 // Jobs
-require('./jobs/siigo.sync.job');
+try {
+  require('./jobs/siigo.sync.job');
+} catch (err) {
+  if (err.code !== 'MODULE_NOT_FOUND') throw err;
+  logger.warn('Job de sincronizacion SIIGO no disponible; se omite.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ── Seguridad y utilidades ──────────────────────────────────────────────
 app.use(helmet());
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 app.use(cors({
-  origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : '*',
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origen CORS no permitido'));
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-BuilderBot-Secret', 'X-Webhook-Secret']
 }));
 app.use(compression());
 app.use(express.json({ limit: '1mb' }));
@@ -69,7 +87,7 @@ app.use(`${API}/waste`,      wasteRouter);
 app.use(`${API}/returns`,    returnsRouter);
 app.use(`${API}/approvals`,  approvalsRouter);
 app.use(`${API}/bom`,        bomRouter);
-app.use(`${API}/siigo`,      siigoRouter);
+if (siigoRouter) app.use(`${API}/siigo`, siigoRouter);
 app.use(`${API}/webhook`,    webhookRouter);
 app.use(`${API}/syscafe`,    syscafeRouter);
 

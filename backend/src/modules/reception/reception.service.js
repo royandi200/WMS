@@ -2,7 +2,7 @@ const { sequelize, Product, Lot, Recepcion } = require('../../models');
 const { generateLPN } = require('../../utils/generateCodes');
 const { logKardex } = require('../../utils/kardexHelper');
 const AppError = require('../../utils/AppError');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 const BODEGA = { PPAL: 1, CUARENTENA: 2 };
 
@@ -36,7 +36,7 @@ exports.receive = async (
       const lpn = generateLPN('L');
 
       const lot = await Lot.create({
-        id:          uuidv4(),
+        id:          randomUUID(),
         lpn,
         product_id:  producto_id,
         bodega_id:   BODEGA.PPAL,
@@ -70,7 +70,7 @@ exports.receive = async (
       const lpnNov = generateLPN('L') + '-NOV';
 
       const lotNov = await Lot.create({
-        id:          uuidv4(),
+        id:          randomUUID(),
         lpn:         lpnNov,
         product_id:  producto_id,
         bodega_id:   BODEGA.CUARENTENA,

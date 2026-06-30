@@ -1,5 +1,5 @@
 const { Kardex } = require('../models');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 
 /**
  * Mapeo de tipos legacy (español) → ENUM action de kardex.
@@ -61,8 +61,8 @@ async function logKardex(
 
   return Kardex.create(
     {
-      id:            uuidv4(),
-      tx_id:         uuidv4(),
+      id:            randomUUID(),
+      tx_id:         randomUUID(),
       lot_id:        loteId        || null,
       product_id:    productoId,
       user_id:       usuarioId,

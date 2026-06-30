@@ -81,6 +81,7 @@
 const mysql  = require('mysql2/promise');
 const https  = require('https');
 const { randomUUID } = require('crypto');
+const { requireWebhookSecret } = require('../../_lib/auth');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -92,8 +93,8 @@ const DB = () => mysql.createConnection({
 });
 
 // BB Cloud API token y Bot ID
-const BB_TOKEN  = 'bb-78e67fdf-098a-499a-805d-68bb23e897bb';
-const BB_BOT_ID = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
+const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
+const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
 // ─────────────────────────────────────────────────────────────
 // RBAC
@@ -373,6 +374,11 @@ async function pushWA(phone, text) {
 
       if (!number) {
         console.warn('[pushWA] ⚠️  Número vacío tras sanitizar — se omite envío.');
+        return resolve(null);
+      }
+
+      if (!BB_TOKEN || !BB_BOT_ID) {
+        console.warn('[pushWA] BuilderBot no configurado; se omite envio.');
         return resolve(null);
       }
 
@@ -727,18 +733,24 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
   const lotIdDesp = await lotIdByLpn(db, payload.lpn);
 
   if (payload.lpn) {
-    await db.execute(
-      `UPDATE stock SET cantidad = GREATEST(0, cantidad - ?)
-       WHERE producto_id=? AND bodega_id=? AND lote=? LIMIT 1`,
-      [cantDesp, payload.product_id, bodegaId, payload.lpn]
+    const [stockUpdate] = await db.execute(
+      `UPDATE stock SET cantidad = cantidad - ?
+       WHERE producto_id=? AND bodega_id=? AND lote=? AND cantidad >= ? LIMIT 1`,
+      [cantDesp, payload.product_id, bodegaId, payload.lpn, cantDesp]
     );
+    if (stockUpdate.affectedRows !== 1) {
+      throw { status: 409, message: `Stock insuficiente para despachar lote ${payload.lpn}` };
+    }
 
     // [FIX 27b] Dos queries separadas: primero actualizar qty, luego evaluar status
     // con el valor ya actualizado. Un solo SET doble tiene ambigüedad en MySQL.
-    await db.execute(
-      `UPDATE lots SET qty_current = GREATEST(0, qty_current - ?) WHERE lpn = ?`,
-      [cantDesp, payload.lpn]
-    ).catch(() => {});
+    const [lotUpdate] = await db.execute(
+      `UPDATE lots SET qty_current = qty_current - ? WHERE lpn = ? AND qty_current >= ?`,
+      [cantDesp, payload.lpn, cantDesp]
+    );
+    if (lotUpdate.affectedRows !== 1) {
+      throw { status: 409, message: `Stock insuficiente para despachar lote ${payload.lpn}` };
+    }
     await db.execute(
       `UPDATE lots SET status = IF(qty_current <= 0, 'DESPACHADO', 'DISPONIBLE') WHERE lpn = ?`,
       [payload.lpn]
@@ -812,11 +824,17 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
 // ─────────────────────────────────────────────────────────────
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', process.env.BUILDERBOT_ALLOWED_ORIGIN || 'https://app.builderbot.cloud');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-BuilderBot-Secret, X-Webhook-Secret');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
+
+  try {
+    requireWebhookSecret(req);
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message });
+  }
 
   const rawBody = req.body || {};
   let info = rawBody.info;
@@ -1094,6 +1112,9 @@ module.exports = async (req, res) => {
       case 'REPORTE_MERMA': {
   const p = await findProductBySku(db, params.id_item);
   const cantMerma = Math.abs(Number(params.cantidad));
+  if (!Number.isFinite(cantMerma) || cantMerma <= 0) {
+    throw { status: 400, message: 'REPORTE_MERMA requiere cantidad positiva' };
+  }
   const lotIdMerma = await lotIdByLpn(db, params.id_lote);
 
   let ordenId = null;
@@ -1125,6 +1146,16 @@ module.exports = async (req, res) => {
     }
   }
 
+  if (params.id_lote) {
+    const [stockRows] = await db.execute(
+      `SELECT cantidad FROM stock WHERE producto_id = ? AND lote = ? LIMIT 1`,
+      [p.id, params.id_lote]
+    );
+    if (!stockRows.length || Number(stockRows[0].cantidad) < cantMerma) {
+      throw { status: 409, message: `Stock insuficiente para merma de lote ${params.id_lote}` };
+    }
+  }
+
   const numeroMerma = `MER-${Date.now()}`;
 
   await db.execute(
@@ -1150,20 +1181,29 @@ module.exports = async (req, res) => {
   );
 
   if (params.id_lote) {
-    await db.execute(
+    const [stockUpdate] = await db.execute(
       `UPDATE stock
-       SET cantidad = GREATEST(0, cantidad - ?)
-       WHERE producto_id = ? AND lote = ?`,
-      [cantMerma, p.id, params.id_lote]
+       SET cantidad = cantidad - ?
+       WHERE producto_id = ? AND lote = ? AND cantidad >= ?`,
+      [cantMerma, p.id, params.id_lote, cantMerma]
     );
+    if (stockUpdate.affectedRows !== 1) {
+      throw { status: 409, message: `Stock insuficiente para merma de lote ${params.id_lote}` };
+    }
 
-    await db.execute(
+    const [lotUpdate] = await db.execute(
       `UPDATE lots
-       SET qty_current = GREATEST(0, qty_current - ?),
-           status = IF(GREATEST(0, qty_current - ?) <= 0, 'AGOTADO', 'DISPONIBLE')
-       WHERE lpn = ?`,
-      [cantMerma, cantMerma, params.id_lote]
-    ).catch(() => {});
+       SET qty_current = qty_current - ?
+       WHERE lpn = ? AND qty_current >= ?`,
+      [cantMerma, params.id_lote, cantMerma]
+    );
+    if (lotUpdate.affectedRows !== 1) {
+      throw { status: 409, message: `Lote insuficiente para merma ${params.id_lote}` };
+    }
+    await db.execute(
+      `UPDATE lots SET status = IF(qty_current <= 0, 'AGOTADO', 'DISPONIBLE') WHERE lpn = ?`,
+      [params.id_lote]
+    );
   }
 
   const balance = await getStockBalance(db, p.id, bodegaId);
@@ -1427,8 +1467,12 @@ module.exports = async (req, res) => {
 
       // ── 8. APROBAR_SOLICITUD ──────────────────────────────────
       case 'APROBAR_SOLICITUD': {
+        let solicitud;
+        let execResult;
+        await db.beginTransaction();
+        try {
         const [rows] = await db.execute(
-          `SELECT * FROM aprobaciones WHERE codigo_solicitud = ? AND estado = 'PENDIENTE' LIMIT 1`,
+          `SELECT * FROM aprobaciones WHERE codigo_solicitud = ? AND estado = 'PENDIENTE' LIMIT 1 FOR UPDATE`,
           [params.id_solicitud]
         );
         if (!rows.length) {
@@ -1453,20 +1497,28 @@ module.exports = async (req, res) => {
           }
           throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada` };
         }
-        const solicitud = rows[0];
+        solicitud = rows[0];
         const payload   = typeof solicitud.payload === 'string'
           ? JSON.parse(solicitud.payload) : solicitud.payload;
         console.log(`[APROBAR_SOLICITUD] Procesando solicitud="${params.id_solicitud}" accion="${solicitud.accion}"`);
-        const execResult = await executeApprovedPayload(db, {
+        execResult = await executeApprovedPayload(db, {
           accion: solicitud.accion, payload, aprobador_id: user.id, bodegaId,
         });
-        await db.execute(
-          `UPDATE aprobaciones SET estado='APROBADO', procesado_por=?, procesado_en=NOW() WHERE codigo_solicitud=?`,
+        const [approvalUpdate] = await db.execute(
+          `UPDATE aprobaciones SET estado='APROBADO', procesado_por=?, procesado_en=NOW() WHERE codigo_solicitud=? AND estado='PENDIENTE'`,
           [user.id, params.id_solicitud]
         );
+        if (approvalUpdate.affectedRows !== 1) {
+          throw { status: 409, message: 'La solicitud cambio de estado durante la aprobacion' };
+        }
         await logSystemEvent(db, { modulo: 'aprobaciones', nivel: 'INFO',
           mensaje: `Solicitud ${params.id_solicitud} aprobada`,
           usuario_id: user.id, payload: execResult });
+        await db.commit();
+        } catch (err) {
+          try { await db.rollback(); } catch (_) {}
+          throw err;
+        }
         mensaje = [
           `✅ *${params.id_solicitud} Aprobada*`,
           `Acción: ${solicitud.accion.replace(/_/g,' ')}`,
@@ -1533,21 +1585,46 @@ module.exports = async (req, res) => {
       case 'AJUSTE_INVENTARIO': {
         const p    = await findProductBySku(db, params.id_item);
         const diff = Number(params.cantidad);
+        if (!Number.isFinite(diff) || diff === 0) {
+          throw { status: 400, message: 'AJUSTE_INVENTARIO requiere cantidad numerica distinta de cero' };
+        }
         const lotIdAjuste = await lotIdByLpn(db, params.id_lote);
         if (params.id_lote) {
-          await db.execute(
-            `UPDATE stock SET cantidad = GREATEST(0, cantidad + ?) WHERE producto_id=? AND lote=?`,
-            [diff, p.id, params.id_lote]
+          const needed = Math.abs(Math.min(diff, 0));
+          const [stockUpdate] = await db.execute(
+            `UPDATE stock
+             SET cantidad = cantidad + ?
+             WHERE producto_id=? AND lote=? AND (? >= 0 OR cantidad >= ?)`,
+            [diff, p.id, params.id_lote, diff, needed]
           );
+          if (stockUpdate.affectedRows !== 1) {
+            throw { status: 409, message: `Stock insuficiente para ajustar lote ${params.id_lote}` };
+          }
+          const [lotUpdate] = await db.execute(
+            `UPDATE lots
+             SET qty_current = qty_current + ?
+             WHERE lpn = ? AND (? >= 0 OR qty_current >= ?)`,
+            [diff, params.id_lote, diff, needed]
+          );
+          if (lotUpdate.affectedRows !== 1) {
+            throw { status: 409, message: `Lote insuficiente para ajuste ${params.id_lote}` };
+          }
           await db.execute(
-            `UPDATE lots SET qty_current = GREATEST(0, qty_current + ?) WHERE lpn = ?`,
-            [diff, params.id_lote]
-          ).catch(() => {});
+            `UPDATE lots SET status = IF(qty_current <= 0, 'AGOTADO', 'DISPONIBLE') WHERE lpn = ?`,
+            [params.id_lote]
+          );
         } else {
-          await db.execute(
-            `UPDATE stock SET cantidad = GREATEST(0, cantidad + ?) WHERE producto_id=? AND bodega_id=? LIMIT 1`,
-            [diff, p.id, bodegaId]
+          const needed = Math.abs(Math.min(diff, 0));
+          const [stockUpdate] = await db.execute(
+            `UPDATE stock
+             SET cantidad = cantidad + ?
+             WHERE producto_id=? AND bodega_id=? AND (? >= 0 OR cantidad >= ?)
+             ORDER BY id ASC LIMIT 1`,
+            [diff, p.id, bodegaId, diff, needed]
           );
+          if (stockUpdate.affectedRows !== 1) {
+            throw { status: 409, message: `Stock insuficiente para ajustar ${params.id_item}` };
+          }
         }
         await db.execute(
           `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
@@ -1837,14 +1914,17 @@ module.exports = async (req, res) => {
           const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
           if (cantInsumo <= 0) continue;
 
-          await db.execute(
+          const [stockUpdate] = await db.execute(
             `UPDATE stock
-             SET cantidad  = GREATEST(0, cantidad  - ?),
-                 reservada = GREATEST(0, reservada - ?)
-             WHERE producto_id = ? AND bodega_id = ?
+             SET cantidad  = cantidad - ?,
+                 reservada = CASE WHEN reservada >= ? THEN reservada - ? ELSE 0 END
+             WHERE producto_id = ? AND bodega_id = ? AND cantidad >= ?
              ORDER BY id ASC LIMIT 1`,
-            [cantInsumo, cantInsumo, item.insumo_id, bodegaId]
-          ).catch(() => {});
+            [cantInsumo, cantInsumo, cantInsumo, item.insumo_id, bodegaId, cantInsumo]
+          );
+          if (stockUpdate.affectedRows !== 1) {
+            throw { status: 409, message: `Stock insuficiente para confirmar ${item.siigo_code}` };
+          }
 
           await db.execute(
             `INSERT INTO movimientos

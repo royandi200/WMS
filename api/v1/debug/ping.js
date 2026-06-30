@@ -1,56 +1,43 @@
-// api/v1/debug/ping.js — TEMPORAL, borrar después del diagnóstico
-const mysql = require('mysql2/promise');
+const { createConnection } = require('../../_lib/db');
+const { cors, requireRole } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  cors(res, 'GET');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
+  if (process.env.ENABLE_DEBUG_ENDPOINTS !== 'true') {
+    return res.status(404).json({ ok: false, error: 'Not found' });
+  }
+
+  try {
+    await requireRole(req, ['Admin']);
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message });
+  }
+
+  let conn;
   const report = {
+    ok: true,
     timestamp: new Date().toISOString(),
-    env: {
-      DB_HOST:    process.env.DB_HOST     ? '✅ definida' : '❌ FALTA',
-      DB_PORT:    process.env.DB_PORT     ? '✅ ' + process.env.DB_PORT : '⚠️ usando 3306',
-      DB_USER:    process.env.DB_USER     ? '✅ definida' : '❌ FALTA',
-      DB_PASSWORD:process.env.DB_PASSWORD ? '✅ definida' : '❌ FALTA',
-      DB_NAME:    process.env.DB_NAME     ? '✅ ' + process.env.DB_NAME : '❌ FALTA',
-      JWT_SECRET: process.env.JWT_SECRET  ? '✅ definida (' + process.env.JWT_SECRET.length + ' chars)' : '❌ FALTA',
+    checks: {
+      database: false,
     },
-    db: null,
-    tables: null,
-    usuarios_count: null,
-    error: null,
   };
 
   try {
-    const conn = await mysql.createConnection({
-      host:     process.env.DB_HOST,
-      port:     parseInt(process.env.DB_PORT || '3306'),
-      user:     process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      connectTimeout: 8000,
-    });
-
-    // Ping
+    conn = await createConnection();
     await conn.ping();
-    report.db = '✅ Conectado a ' + process.env.DB_NAME;
-
-    // Listar tablas
-    const [tables] = await conn.execute('SHOW TABLES');
-    report.tables = tables.map(t => Object.values(t)[0]);
-
-    // Contar usuarios si existe la tabla
-    if (report.tables.includes('usuarios')) {
-      const [rows] = await conn.execute('SELECT COUNT(*) as total FROM usuarios');
-      report.usuarios_count = rows[0].total;
-    } else {
-      report.usuarios_count = '❌ tabla usuarios NO existe';
-    }
-
-    await conn.end();
+    report.checks.database = true;
+    return res.status(200).json(report);
   } catch (err) {
-    report.db = '❌ Fallo';
-    report.error = err.message;
+    return res.status(503).json({
+      ok: false,
+      timestamp: report.timestamp,
+      checks: { database: false },
+      error: 'Database check failed',
+    });
+  } finally {
+    if (conn) await conn.end();
   }
-
-  return res.status(200).json(report);
 };

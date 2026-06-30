@@ -3,11 +3,8 @@ const mysql = require('mysql2/promise');
 
 let _conn = null;
 
-async function getConnection() {
-  if (_conn) {
-    try { await _conn.ping(); return _conn; } catch { _conn = null; }
-  }
-  _conn = await mysql.createConnection({
+function connectionConfig() {
+  return {
     host:     process.env.DB_HOST,
     port:     parseInt(process.env.DB_PORT || '3306'),
     user:     process.env.DB_USER,
@@ -15,7 +12,18 @@ async function getConnection() {
     database: process.env.DB_NAME,
     connectTimeout: 10000,
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-  });
+  };
+}
+
+async function createConnection() {
+  return mysql.createConnection(connectionConfig());
+}
+
+async function getConnection() {
+  if (_conn) {
+    try { await _conn.ping(); return _conn; } catch { _conn = null; }
+  }
+  _conn = await createConnection();
   return _conn;
 }
 
@@ -25,4 +33,23 @@ async function query(sql, params = []) {
   return rows;
 }
 
-module.exports = { query };
+async function withTransaction(work) {
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const txQuery = async (sql, params = []) => {
+      const [rows] = await conn.query(sql, params);
+      return rows;
+    };
+    const result = await work(txQuery, conn);
+    await conn.commit();
+    return result;
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    try { await conn.end(); } catch {}
+  }
+}
+
+module.exports = { query, withTransaction, createConnection };

@@ -8,7 +8,8 @@ const safeReadAuth = () => {
   }
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    window.localStorage.removeItem(STORAGE_KEY)
+    const raw = window.sessionStorage.getItem(STORAGE_KEY)
     if (!raw) return { token: null, user: null, isAuthenticated: false }
 
     const parsed = JSON.parse(raw)
@@ -29,10 +30,10 @@ const persistAuth = (token, user) => {
   if (typeof window === 'undefined') return
   try {
     if (!token) {
-      window.localStorage.removeItem(STORAGE_KEY)
+      window.sessionStorage.removeItem(STORAGE_KEY)
       return
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user }))
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user }))
   } catch {}
 }
 

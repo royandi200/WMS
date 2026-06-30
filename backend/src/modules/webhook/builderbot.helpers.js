@@ -1,4 +1,4 @@
-const { Usuario, Rol, Producto, Stock } = require('../../models');
+const { User: Usuario, Role: Rol, Product: Producto, Stock } = require('../../models');
 const AppError = require('../../utils/AppError');
 
 /**

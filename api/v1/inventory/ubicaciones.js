@@ -2,12 +2,12 @@
 // PUT    /api/v1/inventory/ubicaciones        → actualizar posición/zona (drag)
 // DELETE /api/v1/inventory/ubicaciones?id=X  → eliminar (solo si sin stock)
 const { query } = require('../../_lib/db')
-const { cors, verifyToken } = require('../../_lib/auth')
+const { cors, requireRole } = require('../../_lib/auth')
 
 module.exports = async (req, res) => {
   cors(res, 'GET, POST, PUT, DELETE')
   if (req.method === 'OPTIONS') return res.status(200).end()
-  try { verifyToken(req) } catch(e) { return res.status(401).json({ ok:false, error:e.message }) }
+  try { await requireRole(req, ['Admin', 'Supervisor']) } catch(e) { return res.status(e.status || 401).json({ ok:false, error:e.message }) }
 
   try {
     // ── POST: crear ──────────────────────────────────────────────
