@@ -14,7 +14,15 @@ client.interceptors.request.use((config) => {
 })
 
 client.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const contentType = String(response.headers?.['content-type'] || '')
+    if (contentType.includes('text/html') || (typeof response.data === 'string' && response.data.trim().startsWith('<!doctype html'))) {
+      const err = new Error('La API devolvio HTML en vez de JSON')
+      err.response = { ...response, data: { error: 'Ruta de API no encontrada o mal configurada' } }
+      return Promise.reject(err)
+    }
+    return response
+  },
   (error) => {
     // Solo cerrar sesión si el 401 viene con mensaje de token inválido/expirado
     // NOT en 404 de endpoints no implementados aún
