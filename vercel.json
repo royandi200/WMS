@@ -5,6 +5,8 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     { "source": "/api/v1/products/:id", "destination": "/api/v1/products/[id]" },
+    { "source": "/api/v1/inventory/product/:id", "destination": "/api/v1/inventory/product/[id]" },
+    { "source": "/api/v1/inventory/lot/:lpn", "destination": "/api/v1/inventory/lot/[lpn]" },
     { "source": "/api/v1/:path*", "destination": "/api/v1/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
