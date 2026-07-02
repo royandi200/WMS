@@ -828,12 +828,23 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-BuilderBot-Secret, X-Webhook-Secret');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
+  if (req.method !== 'POST') {
+    const msg = 'Metodo no permitido';
+    return res.status(200).json({ ok: false, message: msg, mensaje: msg, error: 'METHOD_NOT_ALLOWED' });
+  }
 
   try {
     requireWebhookSecret(req);
   } catch (err) {
-    return res.status(err.status || 401).json({ ok: false, error: err.message });
+    const msg = err.status === 500
+      ? 'Auth no configurada'
+      : 'Webhook no autorizado';
+    return res.status(200).json({
+      ok: false,
+      message: msg,
+      mensaje: msg,
+      error: err.message,
+    });
   }
 
   const rawBody = req.body || {};
@@ -1993,7 +2004,13 @@ module.exports = async (req, res) => {
       }
 
       case 'MODO_CHARLA': {
-        mensaje = params.texto || 'No entendí tu mensaje. ¿Puedes ser más específico?';
+        mensaje = params.texto ||
+                  params.mensaje ||
+                  params.message ||
+                  info.texto ||
+                  info.mensaje ||
+                  info.message ||
+                  'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos, trazabilidad y aprobaciones. ¿Que necesitas?';
         break;
       }
 
