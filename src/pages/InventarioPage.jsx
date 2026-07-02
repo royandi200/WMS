@@ -100,7 +100,7 @@ export default function InventarioPage() {
       {tab === 2 && (
         <SearchPane
           label="SKU o ID del producto"
-          placeholder="Ej: PT-VITC-30"
+          placeholder="Ej: 00102-PTASH60"
           query={query}
           setQuery={setQuery}
           onSearch={handleSearch}

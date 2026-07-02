@@ -96,6 +96,85 @@ const DB = () => mysql.createConnection({
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
+function builderbotResponse(res, status, body) {
+  const msg = body.mensaje || body.message || '';
+  return res.status(status).json({
+    ...body,
+    message: msg,
+    mensaje: msg,
+    buttons: Array.isArray(body.buttons) ? body.buttons : [],
+    context: body.context && typeof body.context === 'object' ? body.context : {},
+  });
+}
+
+function parseBuilderBotInfo(rawBody) {
+  const candidates = [
+    rawBody.info,
+    rawBody.aiResponse,
+    rawBody.ai_response,
+    rawBody.response,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (typeof candidate === 'string') {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch {
+        return {};
+      }
+    }
+    if (typeof candidate === 'object') return candidate;
+  }
+
+  return rawBody && typeof rawBody === 'object' ? rawBody : {};
+}
+
+function getUserText(rawBody, info) {
+  return info.body ||
+         info.text ||
+         info.query ||
+         info.texto ||
+         info.content ||
+         info.message ||
+         rawBody.body ||
+         rawBody.text ||
+         rawBody.query ||
+         '';
+}
+
+function isGreeting(text) {
+  return /^(hola|buenas|buenos dias|buenos d[ií]as|buenas tardes|buenas noches|hello|hi)\b/i
+    .test(String(text || '').trim());
+}
+
+function builderbotKw(info, rawBody) {
+  return info.kw ||
+         info.keyword ||
+         rawBody.kw ||
+         rawBody.keyword ||
+         '';
+}
+
+function requireBuilderBotAccess(req, info, rawBody) {
+  try {
+    requireWebhookSecret(req);
+    return;
+  } catch (err) {
+    const expectedKw = process.env.BUILDERBOT_KW || 'g0m@s';
+    const receivedKw = builderbotKw(info, rawBody);
+    if (receivedKw && expectedKw && safeKwEqual(receivedKw, expectedKw)) {
+      return;
+    }
+    throw err;
+  }
+}
+
+function safeKwEqual(a, b) {
+  return String(a || '') === String(b || '');
+}
+
 // ─────────────────────────────────────────────────────────────
 // RBAC
 // ─────────────────────────────────────────────────────────────
@@ -828,31 +907,50 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-BuilderBot-Secret, X-Webhook-Secret');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
-
-  try {
-    requireWebhookSecret(req);
-  } catch (err) {
-    return res.status(err.status || 401).json({ ok: false, error: err.message });
+  if (req.method !== 'POST') {
+    const msg = 'Metodo no permitido';
+    return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'METHOD_NOT_ALLOWED' });
   }
 
   const rawBody = req.body || {};
-  let info = rawBody.info;
-  if (typeof info === 'string') { try { info = JSON.parse(info); } catch { info = {}; } }
+  let info = parseBuilderBotInfo(rawBody);
   if (!info || typeof info !== 'object') info = {};
 
-  const from     = rawBody.from;
-  let action     = info['@ction'] || info.action || 'UNKNOWN';
+  try {
+    requireBuilderBotAccess(req, info, rawBody);
+  } catch (err) {
+    const msg = err.status === 500
+      ? 'Auth no configurada'
+      : 'Webhook no autorizado';
+    return builderbotResponse(res, 200, {
+      ok: false,
+      message: msg,
+      mensaje: msg,
+      error: err.message,
+    });
+  }
+
+  const from     = rawBody.from || info.from || rawBody.number || info.number;
+  let action     = info['@ction'] || info.action || rawBody['@ction'] || rawBody.action || 'UNKNOWN';
   let params     = info.params || {};
   const priority = info.priority || 'baja';
+  const rawText  = getUserText(rawBody, info);
+
+  if ((action === 'UNKNOWN' || action === 'accion_correspondiente') && rawText) {
+    action = 'MODO_CHARLA';
+    params = {
+      ...params,
+      texto: isGreeting(rawText)
+        ? 'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos, trazabilidad y aprobaciones. ¿Que necesitas?'
+        : (params.texto || params.mensaje || params.message || 'No entendi tu mensaje. ¿Puedes ser mas especifico?'),
+    };
+  }
 
   // ── [FIX 17] Interceptor de lenguaje natural ──────────────
   // Si BuilderBot no pudo extraer una acción estructurada (UNKNOWN o
   // MODO_CHARLA), intentamos detectar aprobación/rechazo en el texto
   // libre del mensaje original antes de entrar al switch.
   if (action === 'UNKNOWN' || action === 'MODO_CHARLA') {
-    const rawText = info.texto || info.content || info.message ||
-                    rawBody.body || rawBody.text || '';
     const detectado = parsearAprobacionNatural(rawText);
     if (detectado) {
       console.log(`[webhook] 🔄 Redirigiendo "${action}" → "${detectado.action}" por lenguaje natural`);
@@ -875,7 +973,7 @@ module.exports = async (req, res) => {
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'UNREGISTERED_PHONE', mensaje: msg }, status: 'REJECTED' });
       // Retornar 200 para que BuilderBot Cloud pueda renderizar el mensaje en WhatsApp.
       // El 4xx impide que BBC lea el body y muestra el placeholder {mensaje} literal.
-      return res.status(200).json({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
+      return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
     const bodegaId = await getDefaultBodega(db);
@@ -886,7 +984,7 @@ module.exports = async (req, res) => {
     if (rolesPermitidos && !rolesPermitidos.includes(rolNorm)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'DENIED' });
-      return res.status(403).json({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
+      return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
     }
 
     let mensaje = '';
@@ -1993,7 +2091,13 @@ module.exports = async (req, res) => {
       }
 
       case 'MODO_CHARLA': {
-        mensaje = params.texto || 'No entendí tu mensaje. ¿Puedes ser más específico?';
+        mensaje = params.texto ||
+                  params.mensaje ||
+                  params.message ||
+                  info.texto ||
+                  info.mensaje ||
+                  info.message ||
+                  'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos, trazabilidad y aprobaciones. ¿Que necesitas?';
         break;
       }
 
@@ -2003,7 +2107,7 @@ module.exports = async (req, res) => {
 
     await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje }, status: 'PROCESSED' });
     console.log(`[webhook] ✅ action="${action}" completado OK`);
-    return res.json({ ok: true, message: mensaje, mensaje });
+    return builderbotResponse(res, 200, { ok: true, message: mensaje, mensaje });
 
 } catch (err) {
   const errMsg = err.message || 'Error interno';
@@ -2030,10 +2134,10 @@ module.exports = async (req, res) => {
   };
 
   if (isBusinessError) {
-    return res.status(200).json(body);
+    return builderbotResponse(res, 200, body);
   }
 
-  return res.status(500).json(body);
+  return builderbotResponse(res, 200, body);
 } finally {
     await db.end().catch(() => {});
   }
