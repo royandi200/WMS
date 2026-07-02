@@ -149,6 +149,32 @@ function isGreeting(text) {
     .test(String(text || '').trim());
 }
 
+function builderbotKw(info, rawBody) {
+  return info.kw ||
+         info.keyword ||
+         rawBody.kw ||
+         rawBody.keyword ||
+         '';
+}
+
+function requireBuilderBotAccess(req, info, rawBody) {
+  try {
+    requireWebhookSecret(req);
+    return;
+  } catch (err) {
+    const expectedKw = process.env.BUILDERBOT_KW || 'g0m@s';
+    const receivedKw = builderbotKw(info, rawBody);
+    if (receivedKw && expectedKw && safeKwEqual(receivedKw, expectedKw)) {
+      return;
+    }
+    throw err;
+  }
+}
+
+function safeKwEqual(a, b) {
+  return String(a || '') === String(b || '');
+}
+
 // ─────────────────────────────────────────────────────────────
 // RBAC
 // ─────────────────────────────────────────────────────────────
@@ -886,8 +912,12 @@ module.exports = async (req, res) => {
     return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'METHOD_NOT_ALLOWED' });
   }
 
+  const rawBody = req.body || {};
+  let info = parseBuilderBotInfo(rawBody);
+  if (!info || typeof info !== 'object') info = {};
+
   try {
-    requireWebhookSecret(req);
+    requireBuilderBotAccess(req, info, rawBody);
   } catch (err) {
     const msg = err.status === 500
       ? 'Auth no configurada'
@@ -899,10 +929,6 @@ module.exports = async (req, res) => {
       error: err.message,
     });
   }
-
-  const rawBody = req.body || {};
-  let info = parseBuilderBotInfo(rawBody);
-  if (!info || typeof info !== 'object') info = {};
 
   const from     = rawBody.from || info.from || rawBody.number || info.number;
   let action     = info['@ction'] || info.action || rawBody['@ction'] || rawBody.action || 'UNKNOWN';
