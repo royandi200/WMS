@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 
 // ─── Datos demo (se reemplazarán por API) ────────────────────────────────────
 const PRODUCTOS_DEMO = [
-  { sku: 'PT-VITC-30', nombre: 'Vitamina C 1000mg', qty: 240, lote: 'LOT-2026-01', estado: 'DISPONIBLE' },
+  { sku: '00102-PTASH60', nombre: 'Producto terminado Ashwagandha x 60', qty: 240, lote: 'LOT-2026-01', estado: 'DISPONIBLE' },
   { sku: 'PT-OMEG-60', nombre: 'Omega 3 Fish Oil',  qty: 180, lote: 'LOT-2026-02', estado: 'DISPONIBLE' },
   { sku: 'PT-CALC-90', nombre: 'Calcio + D3',        qty: 95,  lote: 'LOT-2026-03', estado: 'CUARENTENA' },
   { sku: 'PT-MAGN-60', nombre: 'Magnesio 400mg',    qty: 320, lote: 'LOT-2026-04', estado: 'DISPONIBLE' },

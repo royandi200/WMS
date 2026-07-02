@@ -63,7 +63,7 @@ export default function KardexPage() {
           <input
             value={skuInput}
             onChange={(e) => setSkuInput(e.target.value)}
-            placeholder="Ej: EM-BOT-500"
+            placeholder="Ej: 00007-TRG"
             className="input-field"
           />
         </div>
