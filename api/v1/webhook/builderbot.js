@@ -1121,6 +1121,18 @@ module.exports = async (req, res) => {
         );
         const orderId = ins.insertId;
 
+        const mermaDeclaradaRaw = params.merma ?? params.qty_waste ?? params.cantidad_merma ?? params.cantidad_no_conforme;
+        if (mermaDeclaradaRaw == null) {
+          throw { status: 400, message: 'Para cerrar produccion debes declarar la merma/no conforme, incluso si es 0.' };
+        }
+        const mermaDeclarada = Number(mermaDeclaradaRaw);
+        if (!Number.isFinite(mermaDeclarada) || mermaDeclarada < 0) {
+          throw { status: 400, message: 'La merma/no conforme debe ser un numero mayor o igual a 0.' };
+        }
+        if (mermaDeclarada > 0 && !(params.motivo_merma || params.motivo)) {
+          throw { status: 400, message: 'Si hay merma de cierre, debes indicar el motivo.' };
+        }
+
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
@@ -1359,6 +1371,8 @@ module.exports = async (req, res) => {
             order_id:       orden.id,
             codigo_orden:   orden.codigo_orden,
             qty_real:       params.cantidad_real != null ? params.cantidad_real : null,
+            qty_waste:      mermaDeclarada,
+            motivo_merma:   params.motivo_merma || params.motivo || null,
             operario_phone: from,
           }), user.id]
         );
@@ -1368,7 +1382,7 @@ module.exports = async (req, res) => {
         if (supPhones2.length) {
           const cantPlan2  = parseFloat(orden.cantidad_planeada) || 0;
           const cantReal2  = params.cantidad_real != null ? parseFloat(params.cantidad_real) : cantPlan2;
-          const merma2     = cantPlan2 - cantReal2;
+          const merma2     = mermaDeclarada;
           const mermaLinea = merma2 > 0
             ? `📉 *Merma: ${merma2.toFixed(1)} und (${((merma2 / cantPlan2) * 100).toFixed(1)}%) — REQUIERE REVISIÓN*`
             : merma2 < 0
@@ -1380,6 +1394,7 @@ module.exports = async (req, res) => {
             `Estado actual: ${orden.estado}`,
             `Planeado: ${cantPlan2} und | Real: ${cantReal2} und`,
             mermaLinea,
+            mermaDeclarada > 0 ? `Motivo merma: ${params.motivo_merma || params.motivo}` : '',
             `Operario: ${user.nombre}`,
             ``,
             `Para aprobar responde: *apruebo ${codigo}*`,
@@ -1394,6 +1409,7 @@ module.exports = async (req, res) => {
           `⏳ *Solicitud enviada: ${codigo}*`,
           `Orden: ${orden.codigo_orden}`,
           `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
+          `Merma declarada: ${mermaDeclarada}`,
           `El supervisor fue notificado.`
         ].join('\n');
         break;
@@ -1503,12 +1519,12 @@ module.exports = async (req, res) => {
   });
 
   // Si la devolución queda en cuarentena, NO suma stock disponible
-  if (estadoNorm === 'CUARENTENA') {
+  if (estadoNorm !== 'RECUPERABLE') {
     await db.execute(
       `UPDATE lots
-       SET status = 'CUARENTENA'
+       SET status = ?
        WHERE id = ?`,
-      [lotIdDev]
+      [estadoNorm, lotIdDev]
     ).catch(() => {});
   } else {
     await upsertStock(db, {
@@ -1556,9 +1572,9 @@ module.exports = async (req, res) => {
     `Cantidad: ${params.cantidad}`,
     `Estado: ${estadoNorm}`,
     `Lote: ${lpnDev}`,
-    estadoNorm === 'CUARENTENA'
-      ? `Destino: Cuarentena (no suma stock disponible)`
-      : `Destino: Stock disponible`
+    estadoNorm === 'RECUPERABLE'
+      ? `Destino: Stock disponible`
+      : `Destino: ${estadoNorm} (no suma stock disponible)`
   ].join('\n');
   break;
 }
@@ -1752,14 +1768,27 @@ module.exports = async (req, res) => {
       // ── 11. CONSULTAR_SOLICITUDES_PENDIENTES ──────────────────
       case 'CONSULTAR_SOLICITUDES_PENDIENTES': {
         const [rows] = await db.execute(
-          `SELECT a.codigo_solicitud, a.accion, a.creado_en, u.nombre AS operario
+          `SELECT a.codigo_solicitud, a.accion, a.payload, a.creado_en, u.nombre AS operario
            FROM aprobaciones a
            LEFT JOIN usuarios u ON u.id = a.solicitado_por
            WHERE a.estado = 'PENDIENTE'
            ORDER BY a.creado_en ASC LIMIT 10`
         );
         const lines = rows.length
-          ? rows.map(r => `  • ${r.codigo_solicitud} — ${r.accion.replace(/_/g,' ')} (${r.operario || 'N/A'})`).join('\n')
+          ? rows.map(r => {
+              const payload = typeof r.payload === 'string'
+                ? (() => { try { return JSON.parse(r.payload); } catch { return {}; } })()
+                : (r.payload || {});
+              return [
+                `  - ${r.codigo_solicitud}: ${r.accion.replace(/_/g,' ')}`,
+                payload.id_item || payload.sku ? `Producto: ${payload.id_item || payload.sku}` : null,
+                payload.qty || payload.cantidad || payload.cantidad_real ? `Cantidad: ${payload.qty || payload.cantidad || payload.cantidad_real}` : null,
+                payload.lpn || payload.id_lote || payload.lote ? `Lote: ${payload.lpn || payload.id_lote || payload.lote}` : null,
+                payload.customer || payload.cliente_destino ? `Cliente: ${payload.customer || payload.cliente_destino}` : null,
+                payload.codigo_orden || payload.id_orden ? `Orden: ${payload.codigo_orden || payload.id_orden}` : null,
+                r.operario ? `Solicita: ${r.operario}` : null,
+              ].filter(Boolean).join(' | ');
+            }).join('\n')
           : '  (No hay solicitudes pendientes)';
         mensaje = `📋 *Solicitudes pendientes:*\n${lines}`;
         break;
@@ -1879,10 +1908,9 @@ module.exports = async (req, res) => {
       // ── Trazabilidad de lote ──────────────────────────────────
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
   const [lotRows] = await db.execute(
-    `SELECT l.*, p.nombre, p.siigo_code, op.codigo_orden
+    `SELECT l.*, p.nombre, p.siigo_code
      FROM lots l
      JOIN productos p ON p.id = l.product_id
-     LEFT JOIN ordenes_produccion op ON op.id = l.production_order_id
      WHERE l.lpn = ?
      LIMIT 1`,
     [params.id_lote]
@@ -1918,10 +1946,48 @@ module.exports = async (req, res) => {
         }).join('\n')
       : '  (Sin movimientos en kardex)';
 
+    const [dispatchRows] = await db.execute(
+      `SELECT d.numero, d.cliente_nombre, d.despachado_en, di.cantidad_des AS cantidad
+       FROM despacho_items di
+       JOIN despachos d ON d.id = di.despacho_id
+       WHERE di.lote = ?
+       ORDER BY COALESCE(d.despachado_en, d.creado_en) ASC
+       LIMIT 10`,
+      [params.id_lote]
+    ).catch(() => [[]]);
+    const dispatchHistory = dispatchRows.length
+      ? dispatchRows.map(d => `  - ${d.numero}: ${d.cantidad} und -> ${d.cliente_nombre || 'Cliente N/A'} (${d.despachado_en ? new Date(d.despachado_en).toLocaleString('es-CO') : 'sin fecha'})`).join('\n')
+      : '  (Sin despachos registrados)';
+
+    const [returnRows] = await db.execute(
+      `SELECT numero, cliente_origen, cantidad, estado, creado_en
+       FROM devoluciones
+       WHERE lote = ?
+       ORDER BY creado_en ASC
+       LIMIT 10`,
+      [params.id_lote]
+    ).catch(() => [[]]);
+    const returnHistory = returnRows.length
+      ? returnRows.map(d => `  - ${d.numero}: ${d.cantidad} und desde ${d.cliente_origen || 'N/A'} | ${d.estado}`).join('\n')
+      : '  (Sin devoluciones registradas)';
+
+    const [bomRows] = await db.execute(
+      `SELECT i.siigo_code, i.nombre, b.cantidad_por_unidad, b.unidad
+       FROM bom b
+       JOIN productos i ON i.id = b.insumo_id
+       WHERE b.producto_final_id = ? AND b.activo = 1
+       ORDER BY i.siigo_code ASC
+       LIMIT 12`,
+      [l.product_id]
+    ).catch(() => [[]]);
+    const bomHistory = bomRows.length
+      ? bomRows.map(b => `  - ${b.siigo_code}: ${b.cantidad_por_unidad} ${b.unidad}/und`).join('\n')
+      : '  (Sin BOM registrado para este producto)';
+
     mensaje = [
       `🔎 *Lote: ${params.id_lote}*`,
       `Producto: ${l.nombre} (${l.siigo_code})`,
-      l.codigo_orden ? `Orden origen: ${l.codigo_orden}` : (l.notes ? `Referencia: ${l.notes}` : ''),
+      l.notes ? `Referencia: ${l.notes}` : '',
       `Inicial: ${l.qty_initial} und`,
       `Actual: ${l.qty_current} und`,
       `Estado: ${l.status}  |  Origen: ${l.origin}`,
@@ -1929,7 +1995,16 @@ module.exports = async (req, res) => {
       `Vence: ${l.expiry_date || 'N/A'}`,
       ``,
       `📋 *Historial:*`,
-      history
+      history,
+      ``,
+      `*Despachos / clientes:*`,
+      dispatchHistory,
+      ``,
+      `*Devoluciones:*`,
+      returnHistory,
+      ``,
+      `*Materias primas esperadas segun BOM:*`,
+      bomHistory
     ].filter(Boolean).join('\n');
 
   } else {
@@ -2068,6 +2143,17 @@ module.exports = async (req, res) => {
         if (!params.lote_sugerido || !params.lote_usado) {
           throw { status: 400, message: 'EXCEPCION_PICKING requiere lote_sugerido y lote_usado' };
         }
+        const [lotInfoRows] = await db.execute(
+          `SELECT l.lpn, l.status, l.qty_current, p.siigo_code, p.nombre
+           FROM lots l
+           JOIN productos p ON p.id = l.product_id
+           WHERE l.lpn IN (?, ?)
+           ORDER BY FIELD(l.lpn, ?, ?)`,
+          [params.lote_sugerido, params.lote_usado, params.lote_sugerido, params.lote_usado]
+        ).catch(() => [[]]);
+        const lotDetails = lotInfoRows.length
+          ? lotInfoRows.map(l => `Lote ${l.lpn}: ${l.nombre} (${l.siigo_code}), estado ${l.status}, saldo ${l.qty_current} und`).join('\n')
+          : 'No se encontro detalle de los lotes en maestro de lots.';
         await logSystemEvent(db, {
           modulo: 'picking', nivel: 'WARN',
           mensaje: `Excepción picking: lote ${params.lote_sugerido} reemplazado por ${params.lote_usado}`,
@@ -2084,6 +2170,7 @@ module.exports = async (req, res) => {
           `⚠️ *Excepción de picking registrada*`,
           `Lote sugerido: ${params.lote_sugerido}`,
           `Lote usado:    ${params.lote_usado}`,
+          lotDetails,
           params.id_orden ? `Orden: ${params.id_orden}` : '',
           params.id_item  ? `Producto: ${params.id_item}` : ''
         ].filter(Boolean).join('\n');

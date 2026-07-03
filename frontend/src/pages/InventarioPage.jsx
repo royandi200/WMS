@@ -102,7 +102,7 @@ export default function InventarioPage() {
           onSearch={handleSearch}
           loading={loading}
         >
-          {searched && result && <JsonCard data={result} />}
+          {searched && result && <ProductResult data={result} />}
           {searched && !result && !loading && <EmptyState icon="▦" text="Producto no encontrado" />}
         </SearchPane>
       )}
@@ -116,7 +116,7 @@ export default function InventarioPage() {
           onSearch={handleSearch}
           loading={loading}
         >
-          {searched && result && <JsonCard data={result} />}
+          {searched && result && <LotResult data={result} />}
           {searched && !result && !loading && <EmptyState icon="▦" text="Lote no encontrado" />}
         </SearchPane>
       )}
@@ -149,12 +149,102 @@ function SearchPane({ label, placeholder, query, setQuery, onSearch, loading, ch
   )
 }
 
-function JsonCard({ data }) {
+function ProductResult({ data }) {
+  const product = data.product || {}
+  const totals = data.totals || {}
+  const rows = Array.isArray(data.rows) ? data.rows : []
+  const availableRows = rows.filter((r) => Number(r.disponible || 0) > 0)
+  const blockedRows = rows.filter((r) => ['CUARENTENA', 'VENCIDO', 'DESTRUCCION'].includes(String(r.estado_calculado || r.lot_status || '').toUpperCase()))
+
   return (
-    <pre className="bg-surface border border-border rounded-lg p-4 text-xs text-foreground overflow-auto max-h-96">
-      {JSON.stringify(data, null, 2)}
-    </pre>
+    <div className="space-y-4">
+      <div className="bg-surface border border-border rounded-lg p-5">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div>
+            <p className="text-xs text-muted mb-1">Producto</p>
+            <h2 className="text-lg font-semibold text-foreground">{product.name || '-'}</h2>
+            <p className="text-xs font-mono text-muted mt-1">{product.sku || product.id || '-'}</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 min-w-[280px]">
+            <Metric label="Disponible" value={totals.disponible} tone="text-green-400" />
+            <Metric label="Reservado" value={totals.reservada} tone="text-yellow-400" />
+            <Metric label="Total" value={totals.cantidad} tone="text-primary" />
+          </div>
+        </div>
+        {blockedRows.length > 0 && (
+          <div className="mt-4 px-3 py-2 rounded border border-danger/30 bg-danger/10 text-danger text-sm">
+            {blockedRows.length} lote(s) requieren revision: cuarentena, vencido o destruccion.
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-sm min-w-[780px]">
+          <thead>
+            <tr className="bg-surface border-b border-border">
+              {['Lote', 'Bodega', 'Ubicacion', 'Estado', 'Vence', 'Cantidad', 'Reservado', 'Disponible'].map((c) => (
+                <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {availableRows.concat(blockedRows.filter((r) => !availableRows.includes(r))).map((r) => (
+              <tr key={r.stock_id || r.lote || r.lpn} className="border-b border-border/50 hover:bg-white/[0.02]">
+                <td className="px-4 py-3 font-mono text-xs">{r.lote || r.lpn || '-'}</td>
+                <td className="px-4 py-3">{r.bodega_codigo || r.bodega_nombre || '-'}</td>
+                <td className="px-4 py-3">{r.ubicacion_codigo || r.ubicacion_zona || '-'}</td>
+                <td className="px-4 py-3"><StatusBadge value={r.estado_calculado || r.lot_status || 'DISPONIBLE'} /></td>
+                <td className="px-4 py-3 text-muted text-xs">{formatDate(r.expiry_date || r.fecha_venc)}</td>
+                <td className="px-4 py-3 tabular-nums">{r.cantidad ?? '-'}</td>
+                <td className="px-4 py-3 tabular-nums">{r.reservada ?? '-'}</td>
+                <td className="px-4 py-3 tabular-nums font-semibold text-foreground">{r.disponible ?? '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
+}
+
+function LotResult({ data }) {
+  const lot = data.lot || data
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5 max-w-2xl">
+      <p className="text-xs text-muted mb-1">Lote</p>
+      <h2 className="text-lg font-semibold font-mono text-foreground">{lot.lpn || lot.lote || '-'}</h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+        <Metric label="SKU" value={lot.sku || lot.siigo_code || '-'} />
+        <Metric label="Cantidad" value={lot.qty_current ?? lot.cantidad ?? '-'} />
+        <Metric label="Estado" value={lot.status || lot.estado_calculado || '-'} />
+        <Metric label="Vence" value={formatDate(lot.expiry_date || lot.fecha_venc)} />
+      </div>
+    </div>
+  )
+}
+
+function Metric({ label, value, tone = 'text-foreground' }) {
+  return (
+    <div className="rounded border border-border bg-background/30 px-3 py-2">
+      <p className="text-[11px] uppercase tracking-wider text-muted">{label}</p>
+      <p className={`text-base font-semibold tabular-nums ${tone}`}>{value ?? '-'}</p>
+    </div>
+  )
+}
+
+function StatusBadge({ value }) {
+  const status = String(value || '').toUpperCase()
+  const css = status === 'DISPONIBLE'
+    ? 'text-green-400 bg-green-400/10'
+    : status === 'CUARENTENA'
+      ? 'text-yellow-400 bg-yellow-400/10'
+      : 'text-danger bg-danger/10'
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${css}`}>{status}</span>
+}
+
+function formatDate(value) {
+  if (!value) return '-'
+  return String(value).slice(0, 10)
 }
 
 function Table({ cols, rows }) {

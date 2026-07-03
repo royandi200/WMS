@@ -20,10 +20,14 @@ module.exports = async (req, res) => {
     return res.status(err.status || 401).json({ ok: false, error: err.message });
   }
 
-  const { order_id, qty_real } = req.body || {};
+  const { order_id, qty_real, qty_waste, waste_reason } = req.body || {};
   const qtyReal = Number(qty_real);
-  if (!order_id || !Number.isFinite(qtyReal) || qtyReal <= 0) {
-    return res.status(400).json({ ok: false, error: 'order_id y qty_real positivo son requeridos' });
+  const qtyWaste = Number(qty_waste);
+  if (!order_id || !Number.isFinite(qtyReal) || qtyReal < 0 || !Number.isFinite(qtyWaste) || qtyWaste < 0) {
+    return res.status(400).json({ ok: false, error: 'order_id, qty_real y qty_waste son requeridos' });
+  }
+  if (qtyWaste > 0 && !String(waste_reason || '').trim()) {
+    return res.status(400).json({ ok: false, error: 'El motivo de merma es requerido cuando qty_waste es mayor a 0' });
   }
 
   try {
@@ -37,6 +41,9 @@ module.exports = async (req, res) => {
       const orden = rows[0];
       if (orden.estado === 'CERRADA') throw httpError(409, 'La orden ya esta cerrada');
       if (orden.fase === 'F0') throw httpError(409, 'Debes confirmar materiales antes de cerrar');
+      if (qtyReal === 0 && qtyWaste === 0) {
+        throw httpError(400, 'Debes confirmar unidades conformes o merma antes de cerrar');
+      }
 
       const lpn = `LPN-${orden.codigo_orden}`;
       const lotId = crypto.randomUUID();
@@ -45,17 +52,28 @@ module.exports = async (req, res) => {
       await tx(
         `INSERT INTO lots
            (id, lpn, product_id, bodega_id, qty_initial, qty_current, origin, status,
-            production_order_id, received_by, created_at)
+            received_by, notes, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 'PRODUCCION', 'DISPONIBLE', ?, ?, NOW())`,
-        [lotId, lpn, orden.producto_id, bodegaId, qtyReal, qtyReal, orden.id, user.id]
+        [
+          lotId,
+          lpn,
+          orden.producto_id,
+          bodegaId,
+          qtyReal,
+          qtyReal,
+          user.id,
+          `Orden ${orden.codigo_orden} | Merma cierre: ${qtyWaste} | ${waste_reason || 'Sin merma'}`,
+        ]
       );
 
-      await tx(
-        `INSERT INTO stock
-           (producto_id, bodega_id, ubicacion_id, lote, cantidad, reservada, actualizado_en)
-         VALUES (?, ?, NULL, ?, ?, 0, NOW())`,
-        [orden.producto_id, bodegaId, lpn, qtyReal]
-      );
+      if (qtyReal > 0) {
+        await tx(
+          `INSERT INTO stock
+             (producto_id, bodega_id, ubicacion_id, lote, cantidad, reservada, actualizado_en)
+           VALUES (?, ?, NULL, ?, ?, 0, NOW())`,
+          [orden.producto_id, bodegaId, lpn, qtyReal]
+        );
+      }
 
       const orderUpdate = await tx(
         `UPDATE ordenes_produccion
@@ -67,15 +85,30 @@ module.exports = async (req, res) => {
         throw httpError(409, 'La orden cambio de estado durante el cierre');
       }
 
-      const diff = Number(orden.cantidad_planeada) - qtyReal;
-      const mermaMsg = diff > 0 ? `Merma de cierre: ${diff} unidades`
-        : diff < 0 ? `Sobreproduccion: ${Math.abs(diff)} unidades extra`
-        : 'Sin diferencia';
+      const planned = Number(orden.cantidad_planeada || 0);
+      const diff = planned - qtyReal;
+      const mermaMsg = qtyWaste > 0
+        ? `Merma declarada: ${qtyWaste} unidades`
+        : diff > 0
+          ? `Diferencia contra plan: ${diff} unidades`
+          : diff < 0
+            ? `Sobreproduccion: ${Math.abs(diff)} unidades extra`
+            : 'Sin diferencia';
+
+      if (qtyWaste > 0) {
+        await tx(
+          `INSERT INTO mermas
+             (numero, tipo, producto_id, lote, orden_produccion_id, cantidad, motivo, usuario_id, creado_en)
+           VALUES (?, 'CIERRE_PRODUCCION', ?, NULL, ?, ?, ?, ?, NOW())`,
+          [`MER-${Date.now()}`, orden.producto_id, orden.id, qtyWaste, waste_reason, user.id]
+        ).catch(() => {});
+      }
 
       return {
         order_code: orden.codigo_orden,
         qty_planned: orden.cantidad_planeada,
         qty_real: qtyReal,
+        qty_waste: qtyWaste,
         lpn_terminado: lpn,
         mermaMsg,
       };

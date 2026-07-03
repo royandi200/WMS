@@ -12,6 +12,7 @@ import ProductosPage from './pages/ProductosPage'
 // Resto: lazy
 const RecepcionPage    = lazy(() => import('./pages/RecepcionPage'))
 const DespachoPage     = lazy(() => import('./pages/DespachoPage'))
+const DevolucionesPage = lazy(() => import('./pages/DevolucionesPage'))
 const InventarioPage   = lazy(() => import('./pages/InventarioPage'))
 const ProduccionPage   = lazy(() => import('./pages/ProduccionPage'))
 const MermasPage       = lazy(() => import('./pages/MermasPage'))
@@ -77,6 +78,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="recepciones"  element={<ErrorBoundary><Suspense fallback={<PageLoader />}><RecepcionPage /></Suspense></ErrorBoundary>} />
             <Route path="despachos"    element={<ErrorBoundary><Suspense fallback={<PageLoader />}><DespachoPage /></Suspense></ErrorBoundary>} />
+            <Route path="devoluciones" element={<ErrorBoundary><Suspense fallback={<PageLoader />}><DevolucionesPage /></Suspense></ErrorBoundary>} />
             <Route path="inventario"   element={<ErrorBoundary><Suspense fallback={<PageLoader />}><InventarioPage /></Suspense></ErrorBoundary>} />
             <Route path="produccion"   element={<ErrorBoundary><Suspense fallback={<PageLoader />}><ProduccionPage /></Suspense></ErrorBoundary>} />
             <Route path="mermas"       element={<ErrorBoundary><Suspense fallback={<PageLoader />}><MermasPage /></Suspense></ErrorBoundary>} />

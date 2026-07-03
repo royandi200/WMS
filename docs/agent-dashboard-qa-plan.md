@@ -116,3 +116,30 @@ SOURCE database/06_test_fixtures_infinity_agent.sql;
 ```
 
 Esto limpia y recrea solo datos `TEST_AGENT`.
+
+## Correcciones funcionales agregadas
+
+- Aprobaciones desde dashboard deben ejecutar la misma operacion real que WhatsApp: reservar produccion, cerrar produccion o despachar con descuento de stock, kardex y despacho.
+- Si una solicitud ya fue procesada, la API debe responder quien la proceso, fecha/hora, estado y payload base.
+- En despacho, el lote queda siempre resuelto antes de aprobar. Si no viene lote en el payload, se selecciona FIFO y se soporta multilote.
+- En cierre de produccion, el usuario debe declarar unidades conformes y merma/no conforme. Si hay merma, el motivo es obligatorio.
+- Devoluciones: solo `RECUPERABLE` vuelve a stock disponible. `CUARENTENA` y `DESTRUCCION` quedan fuera del disponible.
+- Trazabilidad de lote incluye kardex, despachos/clientes, devoluciones y BOM esperado.
+- Excepcion de picking responde con detalle de lote sugerido/usado, producto, estado y saldo cuando existe en `lots`.
+- `CONSULTAR_SOLICITUDES_PENDIENTES` lista REQ con accion, producto, cantidad, lote, cliente, orden y solicitante.
+- Dashboard:
+  - `Produccion > Listado` muestra fecha y hora.
+  - `Produccion > Cerrar orden` pide conformes, merma y motivo.
+  - `Despachos` tiene registro e historico.
+  - Sidebar incluye `Devoluciones`.
+  - `Inventario > Buscar Producto` muestra ficha profesional en vez de JSON crudo.
+
+## Validaciones recomendadas para regresion
+
+1. Aprobar una solicitud ya aprobada y confirmar que no vuelve a ejecutar stock.
+2. Crear despacho de `00110-PTCG120` por dashboard y confirmar descuento del lote.
+3. Crear solicitud de despacho por WhatsApp sin lote y confirmar que la respuesta muestra lote FIFO.
+4. Cerrar produccion con `0` merma y con merma mayor a `0`.
+5. Registrar devolucion en `CUARENTENA`, `DESTRUCCION` y `RECUPERABLE`.
+6. Consultar trazabilidad de `TEST_AGENT-PTASH-DISP`.
+7. Preguntar `que solicitudes pendientes hay`.
