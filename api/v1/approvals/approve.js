@@ -277,7 +277,7 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
       `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad, p.siigo_code
        FROM bom b
        JOIN productos p ON p.id = b.insumo_id
-       WHERE b.producto_final_id = ? AND b.activo = 1`,
+       WHERE b.producto_final_id = ?`,
       [order.producto_id]
     );
 

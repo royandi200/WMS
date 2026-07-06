@@ -1497,6 +1497,17 @@ module.exports = async (req, res) => {
 
       // ── 6. SOLICITAR_DESPACHO → encolar (FIFO auto si no viene id_lote) ────
       case 'SOLICITAR_DESPACHO': {
+        if (!params.id_item && params.id_lote) {
+          const [lotProductRows] = await db.execute(
+            `SELECT p.siigo_code
+             FROM lots l
+             JOIN productos p ON p.id = l.product_id
+             WHERE l.lpn = ?
+             LIMIT 1`,
+            [params.id_lote]
+          ).catch(() => [[]]);
+          params.id_item = lotProductRows[0]?.siigo_code || null;
+        }
         if (!params.id_item) throw { status: 400, message: 'id_item es obligatorio para SOLICITAR_DESPACHO' };
         const p = await findProductBySku(db, params.id_item);
 
