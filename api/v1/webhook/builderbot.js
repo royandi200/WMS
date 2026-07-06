@@ -364,7 +364,7 @@ async function findRecentProductionCloseReason(db, from, orderId) {
 
   for (const row of rows) {
     const payload = asObject(row.payload);
-    const info = parseInfo(payload);
+    const info = parseBuilderBotInfo(payload);
     const action = info['@ction'] || info.action || payload['@ction'] || payload.action || '';
     const params = normalizeOperationalParams(action, info.params || {});
     const rawText = getUserText(payload, info);
