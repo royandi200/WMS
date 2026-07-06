@@ -1620,7 +1620,10 @@ module.exports = async (req, res) => {
           }
         }
         if (mermaDeclarada > 0 && !(params.motivo_merma || params.motivo)) {
-          throw { status: 400, message: 'Si hay merma de cierre, debes indicar el motivo.' };
+          const detalle = rawText
+            ? 'Si hay merma de cierre, debes indicar el motivo.'
+            : 'BuilderBot no envio motivo_merma ni el mensaje original en body/text/query. Ajusta el JSON del agente para incluir motivo_merma cuando merma > 0.';
+          throw { status: 400, message: detalle };
         }
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(

@@ -24,6 +24,8 @@
    - Tambien son validos: "cerramos produccion OP-123 con 77 conformes y 3 merma por control de calidad", "cerrar OP-123 salieron 80 unidades y 0 no conformes", "finalizamos OP-123 con 75 resultantes, merma 5 por empaque".
    - Extrae "conformes", "resultantes", "salieron" o "producidas" como cantidad_real.
    - Extrae "merma", "no conforme", "no conformes" o "rechazo" como merma.
+   - Si merma > 0 y el usuario dice "por ...", "debido a ...", "causa ..." o "motivo ...", extrae ese texto exacto como motivo_merma. NUNCA lo omitas.
+   - Para cierre de produccion, body, text y query son obligatorios y deben contener el mensaje real completo del usuario.
 6. Despacho:
    - Si el usuario dice "despacha", "enviar", "sacar", "mandar" o "salida", prioriza SIEMPRE SOLICITAR_DESPACHO sobre CONSULTAR_TRAZABILIDAD_LOTE.
    - No uses CONSULTAR_TRAZABILIDAD_LOTE si el verbo principal es despachar, aunque el usuario mencione un lote.
@@ -106,10 +108,29 @@ JSON esperado:
   "kw": "g0m@s",
   "@ction": "SOLICITAR_CIERRE_PRODUCCION",
   "priority": "alta",
+  "body": "cerramos produccion de OP-20260418-0001 con 90 conformes y 0 merma",
+  "text": "cerramos produccion de OP-20260418-0001 con 90 conformes y 0 merma",
+  "query": "cerramos produccion de OP-20260418-0001 con 90 conformes y 0 merma",
   "params": {
     "id_orden": "OP-20260418-0001",
     "cantidad_real": 90,
     "merma": 0
+  }
+}
+
+JSON esperado con merma:
+{
+  "kw": "g0m@s",
+  "@ction": "SOLICITAR_CIERRE_PRODUCCION",
+  "priority": "alta",
+  "body": "cerramos produccion de OP-20260418-0001 con 77 conformes y 3 merma por control de calidad",
+  "text": "cerramos produccion de OP-20260418-0001 con 77 conformes y 3 merma por control de calidad",
+  "query": "cerramos produccion de OP-20260418-0001 con 77 conformes y 3 merma por control de calidad",
+  "params": {
+    "id_orden": "OP-20260418-0001",
+    "cantidad_real": 77,
+    "merma": 3,
+    "motivo_merma": "control de calidad"
   }
 }
 
