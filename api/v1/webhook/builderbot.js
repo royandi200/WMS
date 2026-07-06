@@ -685,12 +685,13 @@ async function findFifoLot(db, sku, bodegaId) {
       [sku, bodCod]
     );
 
-    return rows.map(r => ({
+    const lots = rows.map(r => ({
       lpn: r.lote,
       disponible: parseFloat(r.disponible || 0),
       vence: r.vence || null,
       modo: 'vista'
     }));
+    if (lots.length) return lots[0];
   } catch (_) {}
 
   const [rows] = await db.execute(
@@ -710,12 +711,13 @@ async function findFifoLot(db, sku, bodegaId) {
     [sku, bodegaId]
   ).catch(() => [[]]);
 
-  return rows.map(r => ({
+  const lots = rows.map(r => ({
     lpn: r.lote,
     disponible: parseFloat(r.disponible || 0),
     vence: r.vence || null,
     modo: 'fallback'
   }));
+  return lots[0] || null;
 }
 
 // ─────────────────────────────────────────────────────────────

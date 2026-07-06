@@ -129,9 +129,12 @@ export default function MermasPage() {
                   {list.map((r, i) => (
                     <tr key={i} className="border-b border-border/50 hover:bg-white/[0.02]">
                       <td className="px-4 py-3"><span className="text-xs bg-danger/10 text-danger px-2 py-0.5 rounded-full">{r.type}</span></td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted">{r.product_id?.slice(0,8)}…</td>
+                      <td className="px-4 py-3">
+                        <div className="font-mono text-xs text-foreground">{r.sku || String(r.product_id || '').slice(0, 12)}</div>
+                        {r.product_name && <div className="text-xs text-muted truncate max-w-[220px]">{r.product_name}</div>}
+                      </td>
                       <td className="px-4 py-3 tabular-nums text-danger font-semibold">{r.qty}</td>
-                      <td className="px-4 py-3 text-muted text-xs">{r.lot_id?.slice(0,8) || '—'}</td>
+                      <td className="px-4 py-3 text-muted text-xs">{r.lot_id ? String(r.lot_id).slice(0, 24) : (r.production_order_code || '—')}</td>
                       <td className="px-4 py-3 text-muted max-w-xs truncate">{r.reason || '—'}</td>
                       <td className="px-4 py-3 text-muted text-xs">{r.created_at?.slice(0,10)}</td>
                     </tr>

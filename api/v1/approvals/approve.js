@@ -597,7 +597,11 @@ module.exports = async (req, res) => {
       return res.status(err.status).json({ ok: false, error: err.message, data: err.data || null });
     }
     console.error('[approvals/approve]', err.message);
-    return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Error interno del servidor',
+      code: err.code || null,
+    });
   } finally {
     if (conn) {
       try { await conn.end(); } catch (_) {}

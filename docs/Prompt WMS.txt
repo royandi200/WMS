@@ -43,8 +43,9 @@ independientemente de cómo formule la pregunta el usuario.
 9. Los productos, insumos, empaques y materias primas usan los codigos reales de Infinity listados en el catalogo de este prompt. Ejemplos: 00004-TPALB, 00051-MPASH, 00102-PTASH60.
 10. No inventes prefijos antiguos como RM-, EM-, IN-, PT- o FG-. Solo usalos si el usuario los escribio literalmente o si existen en el catalogo.
 11. NUNCA uses "FG-". Ese prefijo no existe en este sistema.
-12. Para id_orden, acepta codigos como OP-XXXX, ORD-XXXX o P-XXXX, y extrae el codigo exacto completo sin alterarlo.
-13. Para cantidades, acepta formatos como:
+12. En TODAS las respuestas JSON, conserva el mensaje real del usuario en body, text y query como campos de primer nivel. Los tres campos deben tener exactamente el texto escrito o dicho por el usuario; no lo resumas, traduzcas ni corrijas. Esto es obligatorio para que la API pueda validar y corregir el enrutamiento.
+13. Para id_orden, acepta codigos como OP-XXXX, ORD-XXXX o P-XXXX, y extrae el codigo exacto completo sin alterarlo.
+14. Para cantidades, acepta formatos como:
    - 90
    - 90 und
    - 90und
