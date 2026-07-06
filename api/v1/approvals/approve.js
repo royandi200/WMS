@@ -72,6 +72,23 @@ async function getDefaultBodega(conn, payload) {
   return rows[0].id;
 }
 
+async function findProductId(conn, value) {
+  const term = String(value || '').trim();
+  if (!term) return null;
+  if (Number.isFinite(Number(term)) && Number(term) > 0) return Number(term);
+
+  const [rows] = await conn.execute(
+    `SELECT p.id
+     FROM productos p
+     LEFT JOIN skus s ON s.producto_id = p.id
+     WHERE (p.siigo_code = ? OR s.sku = ?)
+       AND p.activo = 1
+     LIMIT 1`,
+    [term, term]
+  );
+  return rows[0]?.id || null;
+}
+
 async function lotIdByLpn(conn, lpn) {
   if (!lpn) return null;
   const [rows] = await conn.execute(`SELECT id FROM lots WHERE lpn = ? LIMIT 1`, [lpn]);
@@ -172,6 +189,7 @@ async function resolveDispatchAllocations(conn, { productId, bodegaId, qty, lpn 
      FROM stock s
      LEFT JOIN lots l ON BINARY l.lpn = BINARY s.lote
      WHERE s.producto_id = ? AND s.bodega_id = ?
+       AND s.lote IS NOT NULL
        AND (s.cantidad - COALESCE(s.reservada, 0)) > 0
        AND COALESCE(l.status, 'DISPONIBLE') = 'DISPONIBLE'
      ORDER BY CASE WHEN COALESCE(l.expiry_date, s.fecha_venc) IS NULL THEN 1 ELSE 0 END,
@@ -194,7 +212,9 @@ async function resolveDispatchAllocations(conn, { productId, bodegaId, qty, lpn 
 
   if (remaining > 0) {
     const total = requested - remaining;
-    throw httpError(409, `Stock insuficiente para despacho. Disponible FIFO: ${fmtNumber(total)} und`);
+    throw httpError(409, total > 0
+      ? `Stock insuficiente para despacho. Disponible FIFO trazable: ${fmtNumber(total)} und`
+      : 'No hay lote disponible para despacho FIFO. El producto puede estar sin stock o con stock sin lote trazable.');
   }
   return allocations;
 }
@@ -356,7 +376,7 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
   }
 
   if (accion === 'SOLICITAR_DESPACHO') {
-    const productId = Number(payload.product_id || payload.id_item || payload.producto_id);
+    const productId = await findProductId(conn, payload.product_id || payload.id_item || payload.producto_id || payload.sku);
     const qty = Number(payload.qty || payload.cantidad);
     if (!productId) throw httpError(400, 'La solicitud de despacho no tiene producto');
 

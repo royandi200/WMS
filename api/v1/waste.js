@@ -31,9 +31,36 @@ async function findOrder(conn, value) {
   return rows[0] || null;
 }
 
+async function ensureWasteTable(conn) {
+  await conn.execute(
+    `CREATE TABLE IF NOT EXISTS mermas (
+       id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+       numero VARCHAR(40) NOT NULL UNIQUE,
+       tipo VARCHAR(60) NOT NULL,
+       producto_id INT UNSIGNED NOT NULL,
+       lote VARCHAR(100) NULL,
+       orden_produccion_id INT UNSIGNED NULL,
+       cantidad DECIMAL(15,4) NOT NULL,
+       motivo TEXT NULL,
+       usuario_id INT UNSIGNED NULL,
+       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_mermas_creado_en (creado_en),
+       INDEX idx_mermas_producto (producto_id),
+       INDEX idx_mermas_lote (lote),
+       INDEX idx_mermas_op (orden_produccion_id)
+     )`
+  );
+}
+
 async function handleGet(req, res) {
   await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
   const limit = Math.min(Number(req.query?.limit || 100), 200);
+  const conn = await createConnection();
+  try {
+    await ensureWasteTable(conn);
+  } finally {
+    try { await conn.end(); } catch (_) {}
+  }
   const rows = await query(
     `SELECT
        m.id,
@@ -72,6 +99,7 @@ async function handlePost(req, res) {
   try {
     conn = await createConnection();
     await conn.beginTransaction();
+    await ensureWasteTable(conn);
     const product = await findProduct(conn, body.product_id || body.sku);
     const order = await findOrder(conn, body.production_order_id);
     const type = body.type || (order ? 'PROCESO' : 'BODEGA');
@@ -134,6 +162,7 @@ module.exports = async (req, res) => {
   } catch (err) {
     if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
     console.error('[waste]', err.message);
-    return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
+    const detail = process.env.NODE_ENV === 'production' ? null : err.message;
+    return res.status(500).json({ ok: false, error: detail || 'Error interno del servidor' });
   }
 };

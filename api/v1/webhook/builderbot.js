@@ -277,6 +277,47 @@ function parsearAprobacionNatural(rawText) {
 // HELPERS
 // ─────────────────────────────────────────────────────────────
 
+function hasDispatchIntent(text) {
+  return /\b(despach|envi|mandar|sacar|salida)\w*\b/i.test(String(text || ''));
+}
+
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function normalizeOperationalParams(action, params) {
+  const next = { ...(params || {}) };
+  if (action === 'SOLICITAR_CIERRE_PRODUCCION') {
+    next.cantidad_real = firstDefined(
+      next.cantidad_real,
+      next.qty_real,
+      next.cantidad_conforme,
+      next.cantidad_conformes,
+      next.conformes,
+      next.unidades_conformes,
+      next.unidades_resultantes,
+      next.resultantes,
+      next.producidas
+    );
+    next.merma = firstDefined(
+      next.merma,
+      next.qty_waste,
+      next.cantidad_merma,
+      next.cantidad_no_conforme,
+      next.no_conformes,
+      next.merma_declarada,
+      next.unidades_merma
+    );
+    next.motivo_merma = firstDefined(next.motivo_merma, next.motivo, next.razon_merma, next.causa_merma);
+  }
+  if (action === 'SOLICITAR_DESPACHO') {
+    next.id_lote = firstDefined(next.id_lote, next.lote, next.lpn);
+    next.id_item = firstDefined(next.id_item, next.sku, next.producto, next.product_id, next.producto_id);
+    next.cliente_destino = firstDefined(next.cliente_destino, next.cliente, next.customer);
+  }
+  return next;
+}
+
 async function saveLog(db, { from, action, priority, payload, response, status }) {
   await db.execute(
     `INSERT INTO webhook_logs (from_phone, action, priority, payload, response, status)
@@ -979,6 +1020,42 @@ module.exports = async (req, res) => {
     }
 
     const bodegaId = await getDefaultBodega(db);
+
+    params = normalizeOperationalParams(action, params);
+
+    if (action === 'CONSULTAR_TRAZABILIDAD_LOTE' && hasDispatchIntent(rawText)) {
+      const lpn = params.id_lote || params.lote || params.lpn;
+      const qtyFromText = rawText?.match(/\b(\d+(?:[.,]\d+)?)\b/);
+      const cantidad = firstDefined(params.cantidad, params.qty, qtyFromText ? qtyFromText[1].replace(',', '.') : null);
+      const [lotRows] = lpn
+        ? await db.execute(
+          `SELECT l.lpn, p.siigo_code
+           FROM lots l
+           JOIN productos p ON p.id = l.product_id
+           WHERE l.lpn = ?
+           LIMIT 1`,
+          [lpn]
+        ).catch(() => [[]])
+        : [[]];
+      const skuFromLot = lotRows[0]?.siigo_code || null;
+      const cliente = firstDefined(params.cliente_destino, params.cliente, params.customer);
+
+      if (!cliente) {
+        action = 'MODO_CHARLA';
+        params = {
+          texto: `Entendido. Ya tengo lote ${lpn || 'pendiente'}, producto ${skuFromLot || 'pendiente'} y cantidad ${cantidad || 'pendiente'}. ¿Para qué cliente es el despacho?`,
+        };
+      } else {
+        action = 'SOLICITAR_DESPACHO';
+        params = normalizeOperationalParams(action, {
+          ...params,
+          id_lote: lpn,
+          id_item: firstDefined(params.id_item, skuFromLot),
+          cantidad,
+          cliente_destino: cliente,
+        });
+      }
+    }
 
     const rolRaw  = user.rol_nombre || '';
     const rolNorm = rolRaw.charAt(0).toUpperCase() + rolRaw.slice(1).toLowerCase();

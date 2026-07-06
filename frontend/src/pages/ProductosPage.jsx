@@ -1,17 +1,40 @@
 import { useEffect, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
 
-const TYPES = ['Product']
+const TYPES = [
+  { value: 'PT', label: 'Producto terminado' },
+  { value: 'MP', label: 'Materia prima' },
+  { value: 'EMPAQUE', label: 'Empaque' },
+  { value: 'INSUMO', label: 'Insumo' },
+  { value: 'OTRO', label: 'Otro' },
+]
 const TYPE_COLOR = {
   Product:           'text-green-400 bg-green-400/10',
+  PT:                'text-green-400 bg-green-400/10',
+  MP:                'text-blue-400  bg-blue-400/10',
+  OTRO:              'text-muted bg-white/5',
   MATERIA_PRIMA:     'text-blue-400  bg-blue-400/10',
   PRODUCTO_TERMINADO:'text-green-400 bg-green-400/10',
   INSUMO:            'text-yellow-400 bg-yellow-400/10',
   EMPAQUE:           'text-purple-400 bg-purple-400/10',
 }
 
+function classifyProduct(p) {
+  const sku = String(p.sku || '').toUpperCase()
+  const name = String(p.name || '').toUpperCase()
+  if (sku.includes('-PT') || name.includes('PRODUCTO TERMINADO')) return 'PT'
+  if (sku.includes('-MP') || name.includes('MATERIA PRIMA')) return 'MP'
+  if (sku.includes('-TP') || sku.includes('-TR') || sku.includes('-ET') || name.includes('TAPA') || name.includes('TARRO') || name.includes('ETIQUETA')) return 'EMPAQUE'
+  if (sku.includes('-IN') || sku.includes('-EM') || name.includes('INSUMO')) return 'INSUMO'
+  return 'OTRO'
+}
+
+function typeLabel(value) {
+  return TYPES.find((t) => t.value === value)?.label || value || 'Otro'
+}
+
 const EMPTY_FORM = {
-  sku: '', name: '', description: '', type: TYPES[0],
+  sku: '', name: '', description: '', type: 'Product',
   unit: 'und', min_stock: '0', max_stock: '0',
 }
 
@@ -41,8 +64,6 @@ export default function ProductosPage() {
   const [toast,    setToast]    = useState(null)
 
   const { list, detail, loading, error, fetchList, fetchOne, create, update, toggle, clearError } = useProductsStore()
-  const typeOptions = Array.from(new Set(list.map((p) => p.type).filter(Boolean))).sort()
-
   useEffect(() => { fetchList() }, [])
 
   const showToast = (msg, ok) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 4000) }
@@ -51,7 +72,7 @@ export default function ProductosPage() {
   const filtered = list.filter((p) => {
     const q = search.toLowerCase()
     const matchSearch = !q || p.sku?.toLowerCase().includes(q) || p.name?.toLowerCase().includes(q)
-    const matchType = !typeF || p.type === typeF
+    const matchType = !typeF || classifyProduct(p) === typeF
     return matchSearch && matchType
   })
 
@@ -139,7 +160,7 @@ export default function ProductosPage() {
               <label className="block text-xs text-muted mb-1">Tipo</label>
               <select value={typeF} onChange={(e) => setTypeF(e.target.value)} className="input-field py-1.5 pr-8">
                 <option value="">Todos</option>
-                {(typeOptions.length ? typeOptions : TYPES).map((t) => <option key={t}>{t}</option>)}
+                {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
             <div className="self-end">
@@ -174,9 +195,9 @@ export default function ProductosPage() {
                       </button>
 
                       <span className={`hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        TYPE_COLOR[p.type] || 'text-muted bg-white/5'
+                        TYPE_COLOR[classifyProduct(p)] || 'text-muted bg-white/5'
                       }`}>
-                        {p.type?.replace('_', ' ')}
+                        {typeLabel(classifyProduct(p))}
                       </span>
 
                       <div className="flex-1 min-w-0">
@@ -318,7 +339,7 @@ export default function ProductosPage() {
           <Field label="Nombre *"><input value={form.name} onChange={set('name')} placeholder="Nombre del producto" className="input-field" required /></Field>
           <Field label="Tipo *">
             <select value={form.type} onChange={set('type')} className="input-field">
-              {TYPES.map((t) => <option key={t}>{t}</option>)}
+              <option value="Product">Product</option>
             </select>
           </Field>
           <Field label="Descripción">
