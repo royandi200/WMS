@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
 
-const TYPES = ['MATERIA_PRIMA','PRODUCTO_TERMINADO','INSUMO','EMPAQUE']
+const TYPES = ['Product']
 const TYPE_COLOR = {
+  Product:           'text-green-400 bg-green-400/10',
   MATERIA_PRIMA:     'text-blue-400  bg-blue-400/10',
   PRODUCTO_TERMINADO:'text-green-400 bg-green-400/10',
   INSUMO:            'text-yellow-400 bg-yellow-400/10',
@@ -40,6 +41,7 @@ export default function ProductosPage() {
   const [toast,    setToast]    = useState(null)
 
   const { list, detail, loading, error, fetchList, fetchOne, create, update, toggle, clearError } = useProductsStore()
+  const typeOptions = Array.from(new Set(list.map((p) => p.type).filter(Boolean))).sort()
 
   useEffect(() => { fetchList() }, [])
 
@@ -137,7 +139,7 @@ export default function ProductosPage() {
               <label className="block text-xs text-muted mb-1">Tipo</label>
               <select value={typeF} onChange={(e) => setTypeF(e.target.value)} className="input-field py-1.5 pr-8">
                 <option value="">Todos</option>
-                {TYPES.map((t) => <option key={t}>{t}</option>)}
+                {(typeOptions.length ? typeOptions : TYPES).map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div className="self-end">

@@ -638,6 +638,7 @@ async function findFifoLot(db, sku, bodegaId) {
        FROM v_stock_disponible
        WHERE sku = ? AND bodega = ?
          AND estado_lote = 'DISPONIBLE'
+         AND lote IS NOT NULL
          AND disponible > 0
        ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC`,
       [sku, bodCod]
@@ -660,6 +661,7 @@ async function findFifoLot(db, sku, bodegaId) {
      LEFT JOIN lots l ON l.lpn = s.lote
      WHERE p.siigo_code = ?
        AND s.bodega_id = ?
+       AND s.lote IS NOT NULL
        AND (s.cantidad - s.reservada) > 0
        AND COALESCE(l.status, 'DISPONIBLE') = 'DISPONIBLE'
      ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
@@ -1121,18 +1123,6 @@ module.exports = async (req, res) => {
         );
         const orderId = ins.insertId;
 
-        const mermaDeclaradaRaw = params.merma ?? params.qty_waste ?? params.cantidad_merma ?? params.cantidad_no_conforme;
-        if (mermaDeclaradaRaw == null) {
-          throw { status: 400, message: 'Para cerrar produccion debes declarar la merma/no conforme, incluso si es 0.' };
-        }
-        const mermaDeclarada = Number(mermaDeclaradaRaw);
-        if (!Number.isFinite(mermaDeclarada) || mermaDeclarada < 0) {
-          throw { status: 400, message: 'La merma/no conforme debe ser un numero mayor o igual a 0.' };
-        }
-        if (mermaDeclarada > 0 && !(params.motivo_merma || params.motivo)) {
-          throw { status: 400, message: 'Si hay merma de cierre, debes indicar el motivo.' };
-        }
-
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
@@ -1363,6 +1353,17 @@ module.exports = async (req, res) => {
           throw { status: 409, message: `La orden ${orden.codigo_orden} ya está en estado "${orden.estado}" y no puede cerrarse nuevamente.` };
         }
 
+        const mermaDeclaradaRaw = params.merma ?? params.qty_waste ?? params.cantidad_merma ?? params.cantidad_no_conforme;
+        if (mermaDeclaradaRaw == null) {
+          throw { status: 400, message: 'Para cerrar produccion debes declarar la merma/no conforme, incluso si es 0.' };
+        }
+        const mermaDeclarada = Number(mermaDeclaradaRaw);
+        if (!Number.isFinite(mermaDeclarada) || mermaDeclarada < 0) {
+          throw { status: 400, message: 'La merma/no conforme debe ser un numero mayor o igual a 0.' };
+        }
+        if (mermaDeclarada > 0 && !(params.motivo_merma || params.motivo)) {
+          throw { status: 400, message: 'Si hay merma de cierre, debes indicar el motivo.' };
+        }
         const codigo = await nextSolicitudCodigo(db);
         await db.execute(
           `INSERT INTO aprobaciones (codigo_solicitud, accion, payload, solicitado_por, estado, creado_en)
@@ -1425,7 +1426,7 @@ module.exports = async (req, res) => {
         let fifoAuto    = false;
         if (!lpnDespacho) {
           const fifoLot = await findFifoLot(db, p.siigo_code, bodegaId);
-          if (!fifoLot) throw { status: 409, message: `Sin stock disponible para ${params.id_item}` };
+          if (!fifoLot || !fifoLot.lpn) throw { status: 409, message: `Sin lote disponible para ${params.id_item}. El stock existe sin LPN o no hay lote FIFO disponible.` };
           const cantSol = Number(params.cantidad) || 0;
           if (cantSol > fifoLot.disponible) {
             throw { status: 409, message: `Stock insuficiente. Disponible en lote FIFO: ${fifoLot.disponible} und (${fifoLot.lpn})` };
@@ -1636,7 +1637,16 @@ module.exports = async (req, res) => {
         mensaje = [
           `✅ *${params.id_solicitud} Aprobada*`,
           `Acción: ${solicitud.accion.replace(/_/g,' ')}`,
-          JSON.stringify(execResult)
+          [
+            execResult?.orden ? `Orden: ${execResult.orden}` : '',
+            execResult?.estado ? `Estado: ${execResult.estado}` : '',
+            execResult?.numero_despacho ? `Despacho: ${execResult.numero_despacho}` : '',
+            execResult?.despachado ? `Cantidad despachada: ${execResult.despachado} und` : '',
+            execResult?.lote ? `Lote: ${execResult.lote}` : '',
+            execResult?.cantidad ? `Cantidad: ${execResult.cantidad} und` : '',
+            execResult?.reservados != null ? `Materiales reservados: ${execResult.reservados}` : '',
+            ...(Array.isArray(execResult?.lotes) ? execResult.lotes.map(l => `Lote ${l.lpn}: ${l.qty} und${l.saldo_lote != null ? ` | saldo ${l.saldo_lote}` : ''}`) : [])
+          ].filter(Boolean).join('\n')
         ].join('\n');
         break;
       }

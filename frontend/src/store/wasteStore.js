@@ -10,9 +10,10 @@ export const useWasteStore = create((set) => ({
     set({ loading: true, error: null })
     try {
       const data = await listWaste(params)
-      set({ list: data.rows || data, loading: false })
+      const payload = data?.data ?? data
+      set({ list: payload?.rows || (Array.isArray(payload) ? payload : []), loading: false })
     } catch (e) {
-      set({ error: e.response?.data?.message || 'Error al cargar mermas', loading: false })
+      set({ error: e.response?.data?.error || e.response?.data?.message || 'Error al cargar mermas', loading: false })
     }
   },
 
@@ -23,7 +24,7 @@ export const useWasteStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data }
     } catch (e) {
-      const msg = e.response?.data?.message || 'Error al reportar merma'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al reportar merma'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
