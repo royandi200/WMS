@@ -138,9 +138,16 @@ function getUserText(rawBody, info) {
          info.texto ||
          info.content ||
          info.message ||
+         info.params?.body ||
+         info.params?.text ||
+         info.params?.query ||
+         info.params?.texto ||
+         info.params?.message ||
          rawBody.body ||
          rawBody.text ||
          rawBody.query ||
+         rawBody.texto ||
+         rawBody.message ||
          '';
 }
 
@@ -309,6 +316,75 @@ function parseProductionCloseFromText(text) {
   const reasonMatch = raw.match(/(?:por|porque|motivo|causa)\s+(.+)$/i);
   if (reasonMatch && params.merma > 0) params.motivo_merma = reasonMatch[1].trim();
   return { action: 'SOLICITAR_CIERRE_PRODUCCION', params };
+}
+
+function inferProductionCloseReasonFromText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  const explicit = raw.match(/(?:por|porque|motivo|causa)\s+(.+)$/i);
+  if (explicit) return explicit[1].trim();
+
+  const clean = raw
+    .replace(/^(?:motivo|causa|raz[oó]n)\s*[:\-]?\s*/i, '')
+    .trim();
+  if (!clean) return null;
+  if (/^\d+(?:[.,]\d+)?\s*(?:und|unidad(?:es)?|uds?|u)?$/i.test(clean)) return null;
+  if (/\b(?:OP|ORD|P)-[A-Z0-9-]+\b/i.test(clean)) return null;
+  if (/\b(cerr|cierre|cerramos|finaliz|termin|producci[oó]n|produccion|conforme|resultante|merma)\w*\b/i.test(clean)) return null;
+  if (clean.length < 4) return null;
+  return clean;
+}
+
+function asObject(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+async function findRecentProductionCloseReason(db, from, orderId) {
+  if (!from) return null;
+  const [rows] = await db.execute(
+    `SELECT payload
+     FROM webhook_logs
+     WHERE from_phone = ?
+       AND created_at >= DATE_SUB(NOW(), INTERVAL 20 MINUTE)
+     ORDER BY created_at DESC
+     LIMIT 12`,
+    [from]
+  ).catch(() => [[]]);
+
+  for (const row of rows) {
+    const payload = asObject(row.payload);
+    const info = parseInfo(payload);
+    const action = info['@ction'] || info.action || payload['@ction'] || payload.action || '';
+    const params = normalizeOperationalParams(action, info.params || {});
+    const rawText = getUserText(payload, info);
+
+    if (params.motivo_merma || params.motivo) return params.motivo_merma || params.motivo;
+
+    const parsedClose = parseProductionCloseFromText(rawText);
+    if (parsedClose?.params?.motivo_merma) {
+      if (!orderId || parsedClose.params.id_orden === String(orderId).toUpperCase()) {
+        return parsedClose.params.motivo_merma;
+      }
+    }
+
+    const inferred = inferProductionCloseReasonFromText(rawText);
+    if (inferred && (action === 'SOLICITAR_CIERRE_PRODUCCION' || action === 'MODO_CHARLA' || action === 'UNKNOWN' || !action)) {
+      return inferred;
+    }
+  }
+
+  return null;
 }
 
 function firstDefined(...values) {
@@ -1534,6 +1610,14 @@ module.exports = async (req, res) => {
         const mermaDeclarada = Number(mermaDeclaradaRaw);
         if (!Number.isFinite(mermaDeclarada) || mermaDeclarada < 0) {
           throw { status: 400, message: 'La merma/no conforme debe ser un numero mayor o igual a 0.' };
+        }
+        if (mermaDeclarada > 0 && !(params.motivo_merma || params.motivo)) {
+          const inferredReason =
+            inferProductionCloseReasonFromText(rawText) ||
+            await findRecentProductionCloseReason(db, from, orden.codigo_orden);
+          if (inferredReason) {
+            params.motivo_merma = inferredReason;
+          }
         }
         if (mermaDeclarada > 0 && !(params.motivo_merma || params.motivo)) {
           throw { status: 400, message: 'Si hay merma de cierre, debes indicar el motivo.' };
