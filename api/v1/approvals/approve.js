@@ -132,6 +132,40 @@ async function logSystemEvent(conn, { modulo, nivel = 'INFO', mensaje, usuarioId
   ).catch(() => {});
 }
 
+async function ensureWasteTable(conn) {
+  await conn.execute(
+    `CREATE TABLE IF NOT EXISTS mermas (
+       id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+       numero VARCHAR(40) NOT NULL UNIQUE,
+       tipo VARCHAR(60) NOT NULL,
+       producto_id INT UNSIGNED NOT NULL,
+       lote VARCHAR(100) NULL,
+       orden_produccion_id INT UNSIGNED NULL,
+       cantidad DECIMAL(15,4) NOT NULL,
+       motivo TEXT NULL,
+       usuario_id INT UNSIGNED NULL,
+       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_mermas_creado_en (creado_en),
+       INDEX idx_mermas_producto (producto_id),
+       INDEX idx_mermas_lote (lote),
+       INDEX idx_mermas_op (orden_produccion_id)
+     )`
+  );
+}
+
+async function recordProductionCloseWaste(conn, { order, qtyWaste, reason, userId }) {
+  if (!(Number(qtyWaste) > 0)) return null;
+  await ensureWasteTable(conn);
+  const numero = `MER-${Date.now()}`;
+  await conn.execute(
+    `INSERT INTO mermas
+       (numero, tipo, producto_id, lote, orden_produccion_id, cantidad, motivo, usuario_id, creado_en)
+     VALUES (?, 'MERMA_CIERRE_WIP', ?, NULL, ?, ?, ?, ?, NOW())`,
+    [numero, order.producto_id, order.id, qtyWaste, reason || null, userId]
+  );
+  return numero;
+}
+
 async function createLot(conn, { lpn, productId, bodegaId, qty, userId, notes }) {
   const id = crypto.randomUUID();
   await conn.execute(
@@ -370,6 +404,13 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
       notes: qtyWaste > 0 ? `Merma cierre: ${fmtNumber(qtyWaste)} | Motivo: ${payload.motivo_merma || payload.motivo}` : 'Cierre sin merma',
     });
 
+    const numeroMerma = await recordProductionCloseWaste(conn, {
+      order,
+      qtyWaste,
+      reason: payload.motivo_merma || payload.motivo || null,
+      userId,
+    });
+
     return {
       tipo: 'produccion_cierre',
       orden: order.codigo_orden,
@@ -377,6 +418,7 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
       cantidad_real: qtyReal,
       merma: qtyWaste,
       motivo_merma: payload.motivo_merma || payload.motivo || null,
+      numero_merma: numeroMerma,
     };
   }
 

@@ -336,6 +336,40 @@ async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload 
   ).catch(() => {});
 }
 
+async function ensureWasteTable(db) {
+  await db.execute(
+    `CREATE TABLE IF NOT EXISTS mermas (
+       id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+       numero VARCHAR(40) NOT NULL UNIQUE,
+       tipo VARCHAR(60) NOT NULL,
+       producto_id INT UNSIGNED NOT NULL,
+       lote VARCHAR(100) NULL,
+       orden_produccion_id INT UNSIGNED NULL,
+       cantidad DECIMAL(15,4) NOT NULL,
+       motivo TEXT NULL,
+       usuario_id INT UNSIGNED NULL,
+       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_mermas_creado_en (creado_en),
+       INDEX idx_mermas_producto (producto_id),
+       INDEX idx_mermas_lote (lote),
+       INDEX idx_mermas_op (orden_produccion_id)
+     )`
+  );
+}
+
+async function recordProductionCloseWaste(db, { orden, qtyWaste, reason, userId }) {
+  if (!(Number(qtyWaste) > 0)) return null;
+  await ensureWasteTable(db);
+  const numero = `MER-${Date.now()}`;
+  await db.execute(
+    `INSERT INTO mermas
+       (numero, tipo, producto_id, lote, orden_produccion_id, cantidad, motivo, usuario_id, creado_en)
+     VALUES (?, 'MERMA_CIERRE_WIP', ?, NULL, ?, ?, ?, ?, NOW())`,
+    [numero, orden.producto_id, orden.id, qtyWaste, reason || null, userId]
+  );
+  return numero;
+}
+
 async function createLot(db, { lpn, product_id, bodega_id, qty, supplier, origin, received_by, notes, expiry_date }) {
   const id = randomUUID();
   await db.execute(
@@ -802,6 +836,8 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       const cantReal = payload.qty_real != null
         ? Number(payload.qty_real)
         : Number(orden.cantidad_planeada);
+      const qtyWaste = Number(payload.qty_waste ?? payload.merma ?? 0);
+      const motivoMerma = payload.motivo_merma || payload.motivo || null;
 
       await db.execute(
         `UPDATE ordenes_produccion
@@ -832,13 +868,20 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
         product_id: orden.producto_id, user_id: aprobador_id,
         action: 'CIERRE_PRODUCCION', qty: cantReal, lot_id: lotId,
         balance_after: balance, reference: `orden_produccion:${orden.id}`,
+        notes: qtyWaste > 0 ? `Merma cierre: ${qtyWaste} | Motivo: ${motivoMerma || 'No especificado'}` : 'Cierre sin merma',
         approved_by: aprobador_id,
+      });
+      const numeroMerma = await recordProductionCloseWaste(db, {
+        orden,
+        qtyWaste,
+        reason: motivoMerma,
+        userId: aprobador_id,
       });
       await logSystemEvent(db, {
         modulo: 'produccion', nivel: 'INFO',
         mensaje: `Orden ${orden.codigo_orden} CERRADA — ${cantReal} und producidas`,
         usuario_id: aprobador_id,
-        payload: { orden_id: orden.id, codigo_orden: orden.codigo_orden, cantReal, lote: lpnOP },
+        payload: { orden_id: orden.id, codigo_orden: orden.codigo_orden, cantReal, lote: lpnOP, merma: qtyWaste, numero_merma: numeroMerma },
       });
       if (payload.operario_phone) {
         console.log(`[CIERRE_PRODUCCION] Enviando WA confirmación al operario: "${payload.operario_phone}"`);
@@ -849,7 +892,7 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
       } else {
         console.warn(`[CIERRE_PRODUCCION] operario_phone no está en el payload — no se notificará al operario.`);
       }
-      return { orden: orden.codigo_orden, lote: lpnOP, cantidad: cantReal };
+      return { orden: orden.codigo_orden, lote: lpnOP, cantidad: cantReal, merma: qtyWaste, numero_merma: numeroMerma };
     }
 
     case 'SOLICITAR_DESPACHO': {
