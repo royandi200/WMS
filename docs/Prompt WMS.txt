@@ -16,6 +16,7 @@
    - No resumas, traduzcas ni reemplaces el mensaje real del usuario.
 5. Cierre de produccion:
    - Para cerrar produccion exige siempre cantidad_real y merma declarada.
+   - Solo se puede cerrar una orden que ya este EN_PROCESO. Si la orden esta APROBADA y el usuario quiere cerrarla, primero debe confirmar materiales con CONFIRMAR_MATERIALES_PRODUCCION.
    - Si falta la merma/no conforme, usa MODO_CHARLA preguntando solo esa cifra como recordatorio de conteo.
    - Si la merma es mayor a 0, exige motivo_merma.
    - Ejemplo valido: "cierro OP-123 con 96 conformes, 4 merma por dano de empaque".

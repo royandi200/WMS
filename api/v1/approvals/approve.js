@@ -312,7 +312,12 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
     if (!orders.length) throw httpError(404, `Orden #${payload.order_id} no encontrada`);
     const order = orders[0];
     if (order.estado !== 'EN_PROCESO') {
-      throw httpError(409, `La orden ${order.codigo_orden} esta en estado ${order.estado} y debe estar EN_PROCESO`);
+      throw httpError(
+        409,
+        order.estado === 'APROBADA'
+          ? `La orden ${order.codigo_orden} esta APROBADA, pero aun no esta EN_PROCESO. Antes de aprobar el cierre confirma materiales para que el sistema descuente insumos y marque la OP en proceso.`
+          : `La orden ${order.codigo_orden} esta en estado ${order.estado} y debe estar EN_PROCESO`
+      );
     }
 
     const qtyReal = Number(payload.qty_real ?? payload.cantidad_real);

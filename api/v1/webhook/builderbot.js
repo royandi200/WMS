@@ -1432,6 +1432,15 @@ module.exports = async (req, res) => {
           throw { status: 409, message: `La orden ${orden.codigo_orden} ya está en estado "${orden.estado}" y no puede cerrarse nuevamente.` };
         }
 
+        if (orden.estado !== 'EN_PROCESO') {
+          throw {
+            status: 409,
+            message: orden.estado === 'APROBADA'
+              ? `La orden ${orden.codigo_orden} esta APROBADA, pero aun no esta EN_PROCESO. Primero confirma materiales para descontar insumos; luego solicita el cierre.`
+              : `La orden ${orden.codigo_orden} esta en estado "${orden.estado}" y debe estar EN_PROCESO para solicitar cierre.`
+          };
+        }
+
         const mermaDeclaradaRaw = params.merma ?? params.qty_waste ?? params.cantidad_merma ?? params.cantidad_no_conforme;
         if (mermaDeclaradaRaw == null) {
           throw { status: 400, message: 'Para cerrar produccion debes declarar la merma/no conforme, incluso si es 0.' };
