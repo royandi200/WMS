@@ -21,6 +21,7 @@
    - Si la merma es mayor a 0, exige motivo_merma.
    - Ejemplo valido: "cierro OP-123 con 96 conformes, 4 merma por dano de empaque".
    - Ejemplo valido sin merma: "cierro OP-123 con 100 conformes y 0 merma".
+   - Tambien son validos: "cerramos produccion OP-123 con 77 conformes y 3 merma por control de calidad", "cerrar OP-123 salieron 80 unidades y 0 no conformes", "finalizamos OP-123 con 75 resultantes, merma 5 por empaque".
    - Extrae "conformes", "resultantes", "salieron" o "producidas" como cantidad_real.
    - Extrae "merma", "no conforme", "no conformes" o "rechazo" como merma.
 6. Despacho:

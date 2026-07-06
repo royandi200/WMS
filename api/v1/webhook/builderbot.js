@@ -281,6 +281,36 @@ function hasDispatchIntent(text) {
   return /\b(despach|envi|mandar|sacar|salida)\w*\b/i.test(String(text || ''));
 }
 
+function hasProductionCloseIntent(text) {
+  return /\b(cerr|cierre|cerramos|finaliz|termin)\w*\b/i.test(String(text || '')) &&
+    /\b(op|orden|producci[oó]n|produccion)\b/i.test(String(text || ''));
+}
+
+function parseProductionCloseFromText(text) {
+  const raw = String(text || '');
+  if (!hasProductionCloseIntent(raw)) return null;
+
+  const orderMatch = raw.match(/\b(?:OP|ORD|P)-[A-Z0-9-]+\b/i);
+  if (!orderMatch) return null;
+
+  const normalized = raw.toLowerCase().replace(/,/g, '.');
+  const conformes =
+    normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)?\s*(?:conforme(?:s)?|resultante(?:s)?|buen(?:a|as|o|os)|producid(?:a|as|o|os))/i) ||
+    normalized.match(/(?:conforme(?:s)?|resultante(?:s)?|salieron|producid(?:a|as|o|os))\s*(?:con|:)?\s*(\d+(?:\.\d+)?)/i) ||
+    normalized.match(/\bcon\s+(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)\b/i);
+  const merma =
+    normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)?\s*(?:de\s+)?(?:merma|mermas|no conforme(?:s)?|rechazo(?:s)?|desperdicio(?:s)?)/i) ||
+    normalized.match(/(?:merma|mermas|no conforme(?:s)?|rechazo(?:s)?|desperdicio(?:s)?)\s*(?:de|:)?\s*(\d+(?:\.\d+)?)/i);
+
+  const params = { id_orden: orderMatch[0].toUpperCase() };
+  if (conformes) params.cantidad_real = Number(conformes[1]);
+  if (merma) params.merma = Number(merma[1]);
+
+  const reasonMatch = raw.match(/(?:por|porque|motivo|causa)\s+(.+)$/i);
+  if (reasonMatch && params.merma > 0) params.motivo_merma = reasonMatch[1].trim();
+  return { action: 'SOLICITAR_CIERRE_PRODUCCION', params };
+}
+
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== '');
 }
@@ -1067,6 +1097,19 @@ module.exports = async (req, res) => {
     const bodegaId = await getDefaultBodega(db);
 
     params = normalizeOperationalParams(action, params);
+
+    const cierreDetectado = parseProductionCloseFromText(rawText);
+    if (cierreDetectado && (action === 'UNKNOWN' || action === 'MODO_CHARLA' || action === 'SOLICITAR_CIERRE_PRODUCCION')) {
+      action = 'SOLICITAR_CIERRE_PRODUCCION';
+      params = normalizeOperationalParams(action, {
+        ...cierreDetectado.params,
+        ...params,
+        id_orden: firstDefined(cierreDetectado.params.id_orden, params.id_orden),
+        cantidad_real: firstDefined(cierreDetectado.params.cantidad_real, params.cantidad_real),
+        merma: firstDefined(cierreDetectado.params.merma, params.merma),
+        motivo_merma: firstDefined(cierreDetectado.params.motivo_merma, params.motivo_merma),
+      });
+    }
 
     if (action === 'CONSULTAR_TRAZABILIDAD_LOTE' && hasDispatchIntent(rawText)) {
       const lpn = params.id_lote || params.lote || params.lpn;
