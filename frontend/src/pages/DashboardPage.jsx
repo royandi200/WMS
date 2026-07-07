@@ -1,435 +1,696 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useInventoryStore }  from '../store/inventoryStore'
-import { useApprovalsStore }  from '../store/approvalsStore'
-import { useAuthStore }       from '../store/authStore'
-import { useProductionStore } from '../store/productionStore'
 import {
-  Package, TrendingUp, TrendingDown, AlertTriangle,
-  CheckCircle, Clock, ArrowRight, RefreshCw,
-  BarChart3, Truck, Warehouse, ClipboardList,
-  Activity, ChevronRight, Zap, Factory, Trash2,
-  ShieldCheck, Wifi, WifiOff,
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  Factory,
+  PackageCheck,
+  Radio,
+  RefreshCw,
+  ShieldCheck,
+  Truck,
+  Warehouse,
+  Trash2,
+  Zap,
 } from 'lucide-react'
+import { useAuthStore } from '../store/authStore'
+import { useInventoryStore } from '../store/inventoryStore'
+import { useApprovalsStore } from '../store/approvalsStore'
+import { useProductionStore } from '../store/productionStore'
+import { useWasteStore } from '../store/wasteStore'
+import { useReceptionStore } from '../store/receptionStore'
+import { useDispatchStore } from '../store/dispatchStore'
 
-// ─── Utils ────────────────────────────────────────────────────────────────────
+const PERIODS = [
+  { key: 'today', label: 'Hoy' },
+  { key: 'week', label: '7 dias' },
+  { key: 'month', label: '30 dias' },
+]
+
+const STATUS_LABEL = {
+  PLANEADA: 'Planeadas',
+  APROBADA: 'Aprobadas',
+  EN_PROCESO: 'En proceso',
+  CERRADA: 'Cerradas',
+  CANCELADA: 'Canceladas',
+}
+
+const APPROVAL_LABEL = {
+  SOLICITAR_INICIO_PRODUCCION: 'Inicio produccion',
+  SOLICITAR_CIERRE_PRODUCCION: 'Cierre produccion',
+  SOLICITAR_DESPACHO: 'Despacho',
+  REPORTAR_MERMA: 'Merma',
+  REPORTE_MERMA: 'Merma',
+  INGRESO_RECEPCION: 'Recepcion',
+}
+
 function periodStart(period) {
   const d = new Date()
-  if (period === 'today') { d.setHours(0,0,0,0); return d }
+  if (period === 'today') {
+    d.setHours(0, 0, 0, 0)
+    return d
+  }
   d.setDate(d.getDate() - (period === 'week' ? 7 : 30))
-  d.setHours(0,0,0,0); return d
-}
-function fmtN(v, dec=0) {
-  return v != null ? Number(v).toLocaleString('es-CO', {maximumFractionDigits:dec}) : '—'
+  d.setHours(0, 0, 0, 0)
+  return d
 }
 
-// ─── AnimatedNumber ───────────────────────────────────────────────────────────
-function AnimatedNumber({ value, duration=900 }) {
-  const [display, setDisplay] = useState(0)
-  const rafRef = useRef(null), prevRef = useRef(0)
-  useEffect(() => {
-    if (value == null) return
-    const start = prevRef.current, end = Number(value)||0, t0 = performance.now()
-    const ease = t => t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2
-    const tick = now => {
-      const p = Math.min((now-t0)/duration,1)
-      setDisplay(Math.round(start+(end-start)*ease(p)))
-      if (p<1) rafRef.current = requestAnimationFrame(tick)
-      else prevRef.current = end
-    }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [value, duration])
-  return <span>{display.toLocaleString('es-CO')}</span>
+function fmtN(value, decimals = 0) {
+  if (value == null || Number.isNaN(Number(value))) return '-'
+  return Number(value).toLocaleString('es-CO', { maximumFractionDigits: decimals })
 }
 
-function Sparkline({ data=[], color='#f0883e', h=36 }) {
-  if (!data.length || data.every(v=>v===0)) return (
-    <div className="flex items-end gap-0.5" style={{height:h}}>
-      {Array.from({length:7}).map((_,i)=>(
-        <div key={i} className="flex-1 rounded-sm bg-border/40" style={{height:'20%'}}/>
+function toDate(value) {
+  const d = value ? new Date(value) : null
+  return d && !Number.isNaN(d.getTime()) ? d : null
+}
+
+function inPeriod(value, period) {
+  const d = toDate(value)
+  return d ? d >= periodStart(period) : false
+}
+
+function hoursSince(value) {
+  const d = toDate(value)
+  if (!d) return null
+  return Math.max(0, Math.round((Date.now() - d.getTime()) / 36e5))
+}
+
+function sum(rows, selector) {
+  return rows.reduce((acc, row) => acc + Math.abs(Number(selector(row) || 0)), 0)
+}
+
+function groupCount(rows, selector) {
+  return rows.reduce((acc, row) => {
+    const key = selector(row) || 'SIN_DATO'
+    acc[key] = (acc[key] || 0) + 1
+    return acc
+  }, {})
+}
+
+function SpinnerBlock({ rows = 3 }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-9 rounded-lg bg-white/5 animate-pulse" />
       ))}
     </div>
   )
-  const w=100, min=Math.min(...data), max=Math.max(...data), range=max-min||1
-  const pts = data.map((v,i)=>{
-    const x=(i/(data.length-1))*w
-    const y=h-((v-min)/range)*(h-2)-1
-    return `${x},${y}`
-  }).join(' ')
-  const gid=`sg${color.replace('#','')}`
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="opacity-80">
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.4"/>
-          <stop offset="100%" stopColor={color} stopOpacity="0"/>
-        </linearGradient>
-      </defs>
-      <polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" points={pts}/>
-      <polygon fill={`url(#${gid})`} points={`0,${h} ${pts} ${w},${h}`}/>
-    </svg>
-  )
 }
 
-function Sk({ className='', style={} }) {
-  return <div className={`animate-pulse bg-white/5 rounded-md ${className}`} style={style}/>
-}
-
-function KpiCard({ icon:Icon, label, value, sub, color, trend, sparkData, delay=0, loading }) {
-  const [vis, setVis] = useState(false)
-  useEffect(()=>{ const t=setTimeout(()=>setVis(true),delay); return()=>clearTimeout(t) },[delay])
-  if (loading) return (
-    <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
-      <Sk className="h-3 w-20"/><Sk className="h-7 w-14"/><Sk className="h-3 w-28"/>
-    </div>
-  )
+function MiniBar({ value, max, color }) {
+  const pct = max > 0 ? Math.max(4, Math.min(100, (Number(value || 0) / max) * 100)) : 0
   return (
-    <div className="relative bg-surface border border-border rounded-xl p-5 flex flex-col gap-3 overflow-hidden group"
-      style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(14px)',transition:`opacity .5s ease ${delay}ms,transform .5s ease ${delay}ms`}}
-      onMouseEnter={e=>{
-        e.currentTarget.style.borderColor=`${color}50`
-        e.currentTarget.style.boxShadow=`0 0 0 1px ${color}20,0 8px 32px ${color}12`
-      }}
-      onMouseLeave={e=>{e.currentTarget.style.borderColor='';e.currentTarget.style.boxShadow=''}}>
-      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" style={{background:`radial-gradient(ellipse at top right,${color}08 0%,transparent 60%)`}}/>
-      <div className="flex items-center justify-between relative z-10">
-        <span className="text-muted text-[10px] font-semibold uppercase tracking-widest">{label}</span>
-        <div className="p-1.5 rounded-lg" style={{background:`${color}15`}}>
-          <Icon size={13} style={{color}}/>
-        </div>
-      </div>
-      <div className="flex items-end justify-between gap-2 relative z-10">
-        <div>
-          <div className="text-foreground text-2xl font-bold tabular-nums leading-none">
-            <AnimatedNumber value={value??0}/>
-          </div>
-          {sub && (
-            <div className={`flex items-center gap-1 mt-1.5 text-xs ${trend==='up'?'text-emerald-400':trend==='down'?'text-red-400':'text-muted'}`}>
-              {trend==='up'&&<TrendingUp size={10}/>}
-              {trend==='down'&&<TrendingDown size={10}/>}
-              {sub}
-            </div>
-          )}
-        </div>
-        {sparkData && <Sparkline data={sparkData} color={color}/>}
-      </div>
+    <div className="h-1.5 rounded-full bg-border/70 overflow-hidden">
+      <div
+        className="h-full rounded-full transition-all duration-700"
+        style={{ width: `${pct}%`, background: color }}
+      />
     </div>
   )
 }
 
-function FlowNode({ icon:Icon, label, sublabel, color, count, countLabel, alert, pulse, href, delay=0 }) {
+function PeriodTabs({ period, setPeriod }) {
+  return (
+    <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1">
+      {PERIODS.map((p) => (
+        <button
+          key={p.key}
+          onClick={() => setPeriod(p.key)}
+          className="text-xs px-3 py-1 rounded-md transition-colors"
+          style={{
+            background: period === p.key ? '#f0883e22' : 'transparent',
+            color: period === p.key ? '#f0883e' : '#8b949e',
+            fontWeight: period === p.key ? 700 : 500,
+          }}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function StageCard({
+  icon: Icon,
+  title,
+  subtitle,
+  color,
+  href,
+  primary,
+  primaryLabel,
+  metrics,
+  footer,
+  alert,
+  loading,
+}) {
   const navigate = useNavigate()
-  const [vis, setVis] = useState(false)
-  useEffect(()=>{ const t=setTimeout(()=>setVis(true),delay); return()=>clearTimeout(t) },[delay])
   return (
-    <button onClick={()=>navigate(href)} className="relative flex flex-col items-center gap-2 group" style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(10px)',transition:`opacity .4s ease ${delay}ms,transform .4s ease ${delay}ms`,minWidth:'64px'}}>
-      {alert && <span className="absolute top-0 right-0 z-20 w-2.5 h-2.5 rounded-full border-2 border-background" style={{background:color,animation:'liveDot 1.5s ease-in-out infinite'}}/>}
-      <div className="relative w-12 h-12 md:w-16 md:h-16 rounded-2xl border-2 flex items-center justify-center transition-all duration-200 group-hover:scale-110 overflow-hidden" style={{background:`linear-gradient(135deg,${color}20,${color}08)`,borderColor:`${color}50`,boxShadow:`0 0 20px ${color}20`}}>
-        {pulse && <div className="absolute inset-0 rounded-2xl animate-pulse opacity-30" style={{background:color}}/>}
-        <Icon size={18} className="md:hidden" style={{color}}/>
-        <Icon size={22} className="hidden md:block" style={{color}}/>
-      </div>
-      {count != null && (
-        <div className="absolute -bottom-1 -right-1 z-10 min-w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black px-1.5" style={{background:count>0?color:'#30363d',color:count>0?'#0d1117':'#8b949e'}}>
-          {count}
+    <button
+      type="button"
+      onClick={() => navigate(href)}
+      className="group text-left bg-surface border border-border rounded-xl p-4 min-w-[220px] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
+      style={{
+        boxShadow: alert ? `0 0 0 1px ${color}28` : undefined,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = `${color}70`
+        e.currentTarget.style.boxShadow = `0 0 0 1px ${color}25, 0 12px 30px ${color}12`
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = ''
+        e.currentTarget.style.boxShadow = alert ? `0 0 0 1px ${color}28` : ''
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}18` }}>
+            <Icon size={20} style={{ color }} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground truncate">{title}</p>
+            <p className="text-[11px] text-muted truncate">{subtitle}</p>
+          </div>
         </div>
-      )}
-      <div className="text-center">
-        <p className="text-xs font-semibold text-foreground leading-tight">{label}</p>
-        {sublabel && <p className="text-[9px] text-muted mt-0.5 leading-tight">{sublabel}</p>}
-        {countLabel && count > 0 && <p className="text-[9px] font-bold mt-0.5" style={{color}}>{countLabel}</p>}
+        {alert && <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ background: color }} />}
       </div>
+
+      {loading ? (
+        <div className="mt-4"><SpinnerBlock rows={2} /></div>
+      ) : (
+        <>
+          <div className="mt-4 flex items-baseline gap-2">
+            <span className="text-3xl font-bold tabular-nums text-foreground">{primary}</span>
+            <span className="text-xs text-muted">{primaryLabel}</span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {metrics.map((m) => (
+              <div key={m.label} className="rounded-lg border border-border/70 bg-background/30 px-3 py-2">
+                <p className="text-[10px] text-muted truncate">{m.label}</p>
+                <p className="text-sm font-semibold tabular-nums truncate" style={{ color: m.color || '#e6edf3' }}>
+                  {m.value}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-[11px] text-muted truncate">{footer}</p>
+            <ArrowRight size={13} className="text-muted group-hover:text-primary transition-colors shrink-0" />
+          </div>
+        </>
+      )}
     </button>
   )
 }
 
-function FlowLine({ animated=false, color='#30363d' }) {
+function Section({ icon: Icon, title, action, children }) {
   return (
-    <div className="flex items-center justify-center flex-1 px-1" style={{marginBottom:'0px'}}>
-      <div className="relative h-px flex-1" style={{background:color}}>
-        {animated && <div className="absolute inset-y-0 left-0 w-4 rounded-full" style={{background:`linear-gradient(90deg,transparent,${color},transparent)`,animation:'flowPulse 2s ease-in-out infinite'}}/>}
-        <div className="absolute right-0 top-1/2 -translate-y-1/2" style={{width:0,height:0,borderTop:'4px solid transparent',borderBottom:'4px solid transparent',borderLeft:`6px solid ${color}`}}/>
-      </div>
-    </div>
-  )
-}
-
-const TIPOS = ['entrada','salida','ajuste']
-const COLORES = { entrada:'#3fb950', salida:'#f0883e', ajuste:'#d2a8ff' }
-const LABELS  = { entrada:'Entrada', salida:'Salida',  ajuste:'Ajuste'  }
-
-function ActivityChart({ data=[], loading }) {
-  const [anim, setAnim] = useState(false)
-  useEffect(()=>{
-    setAnim(false)
-    if (!loading&&data.length) { const t=setTimeout(()=>setAnim(true),150); return()=>clearTimeout(t) }
-  },[loading,data])
-  const days = Array.from({length:7},(_,i)=>{
-    const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().split('T')[0]
-  })
-  const grouped = days.map(day=>{
-    const rows = data.filter(r=>(r.fecha||'').startsWith(day))
-    return {
-      day: day.slice(5),
-      entrada: rows.filter(r=>r.tipo==='entrada').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
-      salida: rows.filter(r=>r.tipo==='salida').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
-      ajuste: rows.filter(r=>r.tipo==='ajuste').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),
-    }
-  })
-  const maxVal = Math.max(...grouped.flatMap(g=>TIPOS.map(t=>g[t])),1)
-  if (loading) return <div className="flex items-end gap-2 h-28">{[40,70,55,80,45,65,90].map((h,i)=><Sk key={i} className="flex-1" style={{height:`${h}%`}}/>)} </div>
-  return (
-    <div className="space-y-3">
-      <div className="flex items-end gap-1.5" style={{height:'112px'}}>
-        {grouped.map((g,gi)=>(
-          <div key={g.day} className="flex-1 flex flex-col items-center" style={{height:'112px'}}>
-            <div className="w-full flex flex-col-reverse gap-0.5 overflow-hidden" style={{height:'88px',justifyContent:'flex-end',display:'flex',flexDirection:'column-reverse'}}>
-              {TIPOS.map(tipo=>(
-                <div key={tipo} title={`${LABELS[tipo]}: ${g[tipo]}`} className="w-full rounded-sm transition-all duration-700 flex-shrink-0" style={{height:anim?`${Math.max((g[tipo]/maxVal)*88,g[tipo]>0?3:0)}px`:'0px',maxHeight:'88px',background:COLORES[tipo],opacity:g[tipo]>0?.9:0,transitionDelay:`${gi*60}ms`,boxShadow:g[tipo]>0?`0 0 6px ${COLORES[tipo]}50`:'none'}}/>
-              ))}
-            </div>
-            <span className="text-muted text-[10px] mt-1.5 shrink-0">{g.day}</span>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-4 pt-1 border-t border-border/40">{TIPOS.map(t=>(<div key={t} className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-sm" style={{background:COLORES[t]}}/><span className="text-muted text-[10px]">{LABELS[t]}</span></div>))}</div>
-    </div>
-  )
-}
-
-const TIPO_META = {
-  entrada:  {label:'Entrada',  color:'#3fb950',bg:'#3fb95018'},
-  salida:   {label:'Salida',   color:'#f0883e',bg:'#f0883e18'},
-  merma:    {label:'Merma',    color:'#f85149',bg:'#f8514918'},
-  traslado: {label:'Traslado', color:'#79c0ff',bg:'#79c0ff18'},
-  ajuste:   {label:'Ajuste',   color:'#d2a8ff',bg:'#d2a8ff18'},
-}
-function KardexRow({ row, index }) {
-  const [vis, setVis] = useState(false)
-  useEffect(()=>{ const t=setTimeout(()=>setVis(true),50*index); return()=>clearTimeout(t) },[index])
-  const meta  = TIPO_META[(row.tipo||'').toLowerCase()] || {label:row.tipo,color:'#8b949e',bg:'#8b949e18'}
-  const fecha = row.fecha ? new Date(row.fecha).toLocaleDateString('es-CO',{day:'2-digit',month:'short'}) : '--'
-  const label = row.sku || row.producto || row.producto_id || '—'
-  return (
-    <div className="flex items-center gap-3 py-2.5 border-b border-border/30 last:border-0" style={{opacity:vis?1:0,transform:vis?'translateX(0)':'translateX(-8px)',transition:`opacity .3s ease ${50*index}ms,transform .3s ease ${50*index}ms`}}>
-      <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{background:meta.color}}/>
-      <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{color:meta.color,background:meta.bg}}>{meta.label}</span>
-      <span className="text-subtle text-xs flex-1 truncate font-mono">{label}</span>
-      <span className="text-muted text-xs tabular-nums font-mono">{Number(row.cantidad)>0?'+':''}{fmtN(row.cantidad)}</span>
-      <span className="text-muted text-[10px] w-12 text-right shrink-0">{fecha}</span>
-    </div>
-  )
-}
-
-function StockAlert({ item, index }) {
-  const [vis, setVis] = useState(false)
-  useEffect(()=>{ const t=setTimeout(()=>setVis(true),70*index); return()=>clearTimeout(t) },[index])
-  const nombre   = item.name || item.sku || '—'
-  const stockMin = parseFloat(item.min_stock||0)
-  const stockAct = parseFloat(item.disponible||item.stock||0)
-  const pct      = stockMin>0 ? Math.min((stockAct/stockMin)*100,100) : 0
-  const critical = pct<30
-  return (
-    <div className="flex items-center gap-3 py-2.5 border-b border-border/30 last:border-0" style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(6px)',transition:`opacity .4s ease ${70*index}ms,transform .4s ease ${70*index}ms`}}>
-      <AlertTriangle size={12} className={critical?'text-red-400 shrink-0':'text-amber-400 shrink-0'}/>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-subtle text-xs truncate font-medium">{nombre}</span>
-          <span className="text-muted text-[10px] tabular-nums font-mono shrink-0 ml-2">{fmtN(stockAct)} / {fmtN(stockMin)}</span>
+    <section className="bg-surface border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
+          <Icon size={14} className="text-primary shrink-0" />
+          <h2 className="text-sm font-semibold text-foreground truncate">{title}</h2>
         </div>
-        <div className="h-1 bg-border rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{width:`${pct}%`,background:critical?'#f85149':'#f0883e',boxShadow:`0 0 6px ${critical?'#f85149':'#f0883e'}60`}}/></div>
+        {action}
       </div>
-    </div>
+      <div className="p-4">{children}</div>
+    </section>
   )
 }
 
-function ApprovalRow({ item, index, onNavigate }) {
-  const [vis, setVis] = useState(false)
-  useEffect(()=>{ const t=setTimeout(()=>setVis(true),60*index); return()=>clearTimeout(t) },[index])
-  const color = '#d2a8ff'
-  const label = item.producto_nombre || item.producto || item.siigo_code || item.codigo_solicitud || `Ajuste #${String(item.id).slice(0,8)}`
-  const sub   = item.bodega_orig_nombre ? `${item.bodega_orig_nombre}` : item.usuario_nombre || 'ajuste'
+function ExceptionRow({ severity = 'media', title, detail, to }) {
+  const navigate = useNavigate()
+  const color = severity === 'alta' ? '#f85149' : severity === 'media' ? '#e3b341' : '#58a6ff'
   return (
-    <div className="flex items-center gap-3 py-2.5 border-b border-border/30 last:border-0 cursor-pointer group" style={{opacity:vis?1:0,transform:vis?'translateX(0)':'translateX(8px)',transition:`opacity .4s ease ${60*index}ms,transform .4s ease ${60*index}ms`}} onClick={onNavigate}>
-      <div className="w-2 h-2 rounded-full shrink-0 animate-pulse" style={{background:color}}/>
-      <div className="flex-1 min-w-0">
-        <div className="text-subtle text-xs font-medium truncate">{label}</div>
-        <div className="text-muted text-[10px]">{sub} · {Number(item.cantidad||0).toLocaleString('es-CO')} u.</div>
+    <button
+      type="button"
+      onClick={() => navigate(to)}
+      className="w-full flex items-center gap-3 py-2.5 border-b border-border/40 last:border-b-0 text-left hover:bg-white/[0.03] transition-colors"
+    >
+      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-foreground truncate">{title}</p>
+        <p className="text-[11px] text-muted truncate">{detail}</p>
       </div>
-      <ChevronRight size={11} className="text-muted group-hover:text-primary transition-colors"/>
-    </div>
+      <ArrowRight size={12} className="text-muted shrink-0" />
+    </button>
   )
 }
 
-function LiveTicker({ lastUpdate, refreshing }) {
-  const [tick, setTick] = useState(0)
-  useEffect(()=>{ const iv=setInterval(()=>setTick(t=>t+1),1000); return()=>clearInterval(iv) },[])
-  const secs = Math.floor((Date.now() - lastUpdate)/1000)
+function RecentRow({ title, detail, amount, color }) {
   return (
-    <div className="flex items-center gap-1.5 text-[10px] text-muted">
-      {refreshing
-        ? <><RefreshCw size={10} className="animate-spin text-primary"/><span className="text-primary">Actualizando…</span></>
-        : <><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{animation:'liveDot 2s ease-in-out infinite'}}/><span>hace {secs<5?'ahora':secs<60?`${secs}s`:`${Math.floor(secs/60)}m`}</span></>
-      }
+    <div className="flex items-center gap-3 py-2.5 border-b border-border/40 last:border-b-0">
+      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-foreground truncate">{title}</p>
+        <p className="text-[11px] text-muted truncate">{detail}</p>
+      </div>
+      <span className="text-xs font-semibold tabular-nums text-muted shrink-0">{amount}</span>
     </div>
   )
 }
-
-const PERIODS = [{key:'today',label:'Hoy'},{key:'week',label:'7 días'},{key:'month',label:'30 días'}]
 
 export default function DashboardPage() {
+  const { user } = useAuthStore()
   const navigate = useNavigate()
-  const { user }  = useAuthStore()
-  const { summary, lowStock, kardex, loadingSummary, loadingKardex, loadingLowStock, fetchSummary, fetchLowStock, fetchKardex } = useInventoryStore()
-  const { pendingList: approvals, loadingPending: appLoading, fetchPending: fetchApprovals } = useApprovalsStore()
-  const { list:prodList, loading:prodLoading, fetchList:fetchProd } = useProductionStore()
+  const {
+    summary,
+    lowStock,
+    kardex,
+    loadingSummary,
+    loadingKardex,
+    loadingLowStock,
+    fetchSummary,
+    fetchLowStock,
+    fetchKardex,
+  } = useInventoryStore()
+  const {
+    pendingList,
+    loadingPending,
+    fetchPending,
+  } = useApprovalsStore()
+  const {
+    list: productionList,
+    loading: productionLoading,
+    fetchList: fetchProduction,
+  } = useProductionStore()
+  const {
+    list: wasteList,
+    loading: wasteLoading,
+    fetchList: fetchWaste,
+  } = useWasteStore()
+  const {
+    list: receptionList,
+    loading: receptionLoading,
+    fetchList: fetchReceptions,
+  } = useReceptionStore()
+  const {
+    list: dispatchList,
+    loading: dispatchLoading,
+    fetchList: fetchDispatches,
+  } = useDispatchStore()
 
   const [period, setPeriod] = useState('week')
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(Date.now())
-  const [headerVis, setHeaderVis] = useState(false)
 
   const loadAll = useCallback(async () => {
     await Promise.all([
       fetchSummary(),
       fetchLowStock(),
-      fetchKardex({ limit:200, page:1 }),
-      fetchApprovals({ limit:10 }),
-      fetchProd({}).catch(()=>{}),
+      fetchKardex({ limit: 200, page: 1 }),
+      fetchPending({ limit: 50 }),
+      fetchProduction({ limit: 100 }).catch(() => {}),
+      fetchWaste({ limit: 100 }).catch(() => {}),
+      fetchReceptions({ limit: 100 }).catch(() => {}),
+      fetchDispatches({ limit: 100 }).catch(() => {}),
     ])
     setLastUpdate(Date.now())
-  }, [fetchSummary,fetchLowStock,fetchKardex,fetchApprovals,fetchProd])
+  }, [
+    fetchSummary,
+    fetchLowStock,
+    fetchKardex,
+    fetchPending,
+    fetchProduction,
+    fetchWaste,
+    fetchReceptions,
+    fetchDispatches,
+  ])
 
-  useEffect(()=>{ loadAll(); setTimeout(()=>setHeaderVis(true),50) },[])
-  useEffect(()=>{ const iv = setInterval(()=>{ loadAll() }, 30000); return ()=>clearInterval(iv) },[loadAll])
+  useEffect(() => {
+    loadAll()
+    const id = window.setInterval(loadAll, 30000)
+    return () => window.clearInterval(id)
+  }, [loadAll])
 
-  const handleRefresh = async () => { setRefreshing(true); await loadAll(); setRefreshing(false) }
+  const refresh = async () => {
+    setRefreshing(true)
+    await loadAll()
+    setRefreshing(false)
+  }
 
-  const filteredKardex = useMemo(()=>{
-    if (!Array.isArray(kardex)||!kardex.length) return []
-    const since = periodStart(period)
-    return kardex.filter(r=>r.fecha && new Date(r.fecha)>=since)
-  },[kardex,period])
+  const safeKardex = Array.isArray(kardex) ? kardex : []
+  const safeLowStock = Array.isArray(lowStock) ? lowStock : []
+  const safeApprovals = Array.isArray(pendingList) ? pendingList : []
+  const safeProductions = Array.isArray(productionList) ? productionList : []
+  const safeWaste = Array.isArray(wasteList) ? wasteList : []
+  const safeReceptions = Array.isArray(receptionList) ? receptionList : []
+  const safeDispatches = Array.isArray(dispatchList) ? dispatchList : []
 
-  const totalProducts = useMemo(()=>summary?(summary.productos_activos??summary.total_productos??0):null,[summary])
-  const totalStock    = useMemo(()=>summary?(summary.disponible??summary.total_unidades??0):null,[summary])
-  const totalEntradas = useMemo(()=>filteredKardex.filter(r=>r.tipo==='entrada').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),[filteredKardex])
-  const totalSalidas  = useMemo(()=>filteredKardex.filter(r=>r.tipo==='salida').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0),[filteredKardex])
-  const sparkEntrada  = useMemo(()=>Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]; return (kardex||[]).filter(r=>r.tipo==='entrada'&&(r.fecha||'').startsWith(day)).reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) }),[kardex])
-  const sparkSalida   = useMemo(()=>Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); const day=d.toISOString().split('T')[0]; return (kardex||[]).filter(r=>r.tipo==='salida'&&(r.fecha||'').startsWith(day)).reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) }),[kardex])
+  const periodLabel = PERIODS.find((p) => p.key === period)?.label || 'Periodo'
+  const scopedReceptions = useMemo(
+    () => safeReceptions.filter((r) => inPeriod(r.completado_en || r.creado_en, period)),
+    [safeReceptions, period]
+  )
+  const scopedDispatches = useMemo(
+    () => safeDispatches.filter((r) => inPeriod(r.despachado_en || r.creado_en, period)),
+    [safeDispatches, period]
+  )
+  const scopedWaste = useMemo(
+    () => safeWaste.filter((r) => inPeriod(r.created_at || r.creado_en, period)),
+    [safeWaste, period]
+  )
+  const scopedKardex = useMemo(
+    () => safeKardex.filter((r) => inPeriod(r.fecha || r.created_at, period)),
+    [safeKardex, period]
+  )
 
-  const safeProd = Array.isArray(prodList) ? prodList : []
-  const safeApprovals = Array.isArray(approvals) ? approvals : []
-  const prodActivas = safeProd.filter(o=>['en_proceso','pendiente'].includes(o.status)).length
-  const today = new Date().toISOString().split('T')[0]
-  const wasteTotalHoy = Array.isArray(kardex) ? kardex.filter(r=>r.tipo==='merma'&&(r.fecha||'').startsWith(today)).length : 0
-  const wasteTotal = Array.isArray(kardex) ? kardex.filter(r=>r.tipo==='merma').reduce((s,r)=>s+Math.abs(Number(r.cantidad||0)),0) : 0
+  const productionByStatus = useMemo(
+    () => groupCount(safeProductions, (o) => String(o.status || o.estado || '').toUpperCase()),
+    [safeProductions]
+  )
+  const activeProductions =
+    (productionByStatus.EN_PROCESO || 0) +
+    (productionByStatus.APROBADA || 0) +
+    (productionByStatus.PLANEADA || 0)
+  const closedInPeriod = safeProductions.filter((o) => inPeriod(o.cerrado_en || o.closed_at, period)).length
 
-  const periodLabel = PERIODS.find(p=>p.key===period)?.label
-  const hora = new Date().getHours()
-  const saludo = hora<12?'Buenos días':hora<18?'Buenas tardes':'Buenas noches'
+  const approvalByType = useMemo(
+    () => groupCount(safeApprovals, (a) => a.accion || a.tipo || a.type),
+    [safeApprovals]
+  )
+  const oldestApprovalHours = safeApprovals.reduce((max, a) => {
+    const h = hoursSince(a.creado_en || a.created_at)
+    return h == null ? max : Math.max(max, h)
+  }, 0)
 
-  const flowNodes = [
-    { icon:Truck, label:'Recepciones', sublabel:'Entrada de mercancía', color:'#58a6ff', count:Array.isArray(kardex)?kardex.filter(r=>r.tipo==='entrada'&&(r.fecha||'').startsWith(today)).length||null:null, countLabel:'hoy', alert:false, pulse:totalEntradas>0, href:'/recepciones', delay:100 },
-    { icon:Warehouse, label:'Almacén', sublabel:'Stock disponible', color:'#3fb950', count:lowStock.length||null, countLabel:'bajo mínimo', alert:lowStock.length>0, pulse:lowStock.length>0, href:'/inventario', delay:180 },
-    { icon:Factory, label:'Producción', sublabel:'Órdenes activas', color:'#f0883e', count:prodActivas||null, countLabel:'en proceso', alert:false, pulse:prodActivas>0, href:'/produccion', delay:260 },
-    { icon:Trash2, label:'Mermas', sublabel:`Total: ${fmtN(wasteTotal)} u.`, color:'#f85149', count:wasteTotalHoy||null, countLabel:'mov. hoy', alert:wasteTotalHoy>0, pulse:false, href:'/mermas', delay:340 },
-    { icon:ClipboardList, label:'Aprobaciones', sublabel:'Ajustes pendientes SIIGO', color:'#d2a8ff', count:safeApprovals.length||null, countLabel:'pendientes', alert:safeApprovals.length>0, pulse:safeApprovals.length>0, href:'/aprobaciones', delay:420 },
-  ]
+  const totalStock = Number(summary?.disponible ?? summary?.total_unidades ?? 0)
+  const reservedStock = Number(summary?.reservado ?? 0)
+  const expiringLots = Number(summary?.vencimientos_proximos ?? 0)
+  const stockAlerts = Number(summary?.bajo_stock ?? safeLowStock.length)
+  const receptionUnits = sum(scopedReceptions, (r) => r.cantidad_rec)
+  const damagedUnits = sum(scopedReceptions, (r) => Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0))
+  const dispatchUnits = sum(scopedDispatches, (r) => r.cantidad)
+  const wasteUnits = sum(scopedWaste, (r) => r.qty ?? r.cantidad)
+  const entryUnits = sum(scopedKardex.filter((r) => r.tipo === 'entrada'), (r) => r.cantidad)
+  const exitUnits = sum(scopedKardex.filter((r) => r.tipo === 'salida'), (r) => r.cantidad)
+
+  const maxFlow = Math.max(entryUnits, exitUnits, wasteUnits, 1)
+
+  const exceptions = [
+    ...safeLowStock.slice(0, 3).map((item) => ({
+      severity: Number(item.disponible ?? item.stock ?? 0) <= Number(item.min_stock ?? 0) * 0.35 ? 'alta' : 'media',
+      title: `${item.sku || item.iditem || 'SKU'} bajo minimo`,
+      detail: `${item.name || item.nombre || 'Producto'}: ${fmtN(item.disponible ?? item.stock)} / min ${fmtN(item.min_stock)}`,
+      to: '/inventario',
+    })),
+    ...(safeApprovals.length ? [{
+      severity: oldestApprovalHours >= 6 ? 'alta' : 'media',
+      title: `${safeApprovals.length} aprobaciones pendientes`,
+      detail: oldestApprovalHours ? `Mas antigua: ${oldestApprovalHours} h` : 'Requieren decision del supervisor',
+      to: '/aprobaciones',
+    }] : []),
+    ...(expiringLots ? [{
+      severity: 'media',
+      title: `${expiringLots} lotes proximos a vencer`,
+      detail: 'Revisar FEFO, cuarentena o disposicion',
+      to: '/inventario',
+    }] : []),
+    ...(scopedWaste.length ? [{
+      severity: 'media',
+      title: `${fmtN(wasteUnits, 1)} u. en mermas`,
+      detail: `${scopedWaste.length} registros en ${periodLabel.toLowerCase()}`,
+      to: '/mermas',
+    }] : []),
+  ].slice(0, 6)
+
+  const recentEvents = [
+    ...scopedReceptions.slice(0, 4).map((r) => ({
+      title: r.numero || 'Recepcion',
+      detail: `${r.sku || '-'} - ${r.proveedor_nombre || 'Proveedor N/A'}`,
+      amount: `+${fmtN(r.cantidad_rec)} u`,
+      color: '#3fb950',
+      date: toDate(r.completado_en || r.creado_en)?.getTime() || 0,
+    })),
+    ...scopedDispatches.slice(0, 4).map((r) => ({
+      title: r.numero || 'Despacho',
+      detail: `${r.sku || '-'} - ${r.cliente_nombre || 'Cliente N/A'}`,
+      amount: `-${fmtN(r.cantidad)} u`,
+      color: '#f0883e',
+      date: toDate(r.despachado_en || r.creado_en)?.getTime() || 0,
+    })),
+    ...scopedWaste.slice(0, 4).map((r) => ({
+      title: r.numero || 'Merma',
+      detail: `${r.sku || '-'} - ${r.reason || r.motivo || 'Sin motivo'}`,
+      amount: `-${fmtN(r.qty ?? r.cantidad)} u`,
+      color: '#f85149',
+      date: toDate(r.created_at || r.creado_en)?.getTime() || 0,
+    })),
+  ].sort((a, b) => b.date - a.date).slice(0, 8)
+
+  const isLoadingCore = loadingSummary || loadingKardex || loadingLowStock
+  const greetingHour = new Date().getHours()
+  const greeting = greetingHour < 12 ? 'Buenos dias' : greetingHour < 18 ? 'Buenas tardes' : 'Buenas noches'
 
   return (
-    <div>
+    <div className="px-4 md:px-6 py-5 space-y-5">
       <style>{`
-        @keyframes fadeSlideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes alertPing   { 0%,100%{box-shadow:0 0 0 0 currentColor} 50%{box-shadow:0 0 0 6px transparent} }
-        @keyframes flowPulse   { 0%{left:0;opacity:0} 50%{opacity:1} 100%{left:100%;opacity:0} }
-        @keyframes liveDot     { 0%,100%{opacity:1} 50%{opacity:.3} }
-        @keyframes scanline    { 0%{transform:translateY(-100%)} 100%{transform:translateY(400%)} }
-        .flow-active { animation: flowPulse 2s ease-in-out infinite; }
+        @keyframes liveDot { 0%,100%{opacity:1} 50%{opacity:.35} }
+        @keyframes flowLine { 0%{transform:translateX(-100%);opacity:0} 50%{opacity:1} 100%{transform:translateX(260%);opacity:0} }
       `}</style>
 
-      <div className="px-6 pt-6 pb-4 flex items-center justify-between" style={{opacity:headerVis?1:0,transform:headerVis?'translateY(0)':'translateY(-10px)',transition:'opacity .4s ease,transform .4s ease'}}>
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2"><Zap size={14} className="text-primary"/><h1 className="text-foreground font-semibold text-base">{saludo}, {user?.nombre?.split(' ')[0]||'Admin'}</h1></div>
-          <p className="text-muted text-xs mt-0.5">{new Date().toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</p>
+          <div className="flex items-center gap-2">
+            <Zap size={15} className="text-primary" />
+            <h1 className="text-lg font-semibold text-foreground">{greeting}, {user?.nombre?.split(' ')[0] || 'Admin'}</h1>
+          </div>
+          <p className="text-xs text-muted mt-1">
+            {new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <LiveTicker lastUpdate={lastUpdate} refreshing={refreshing}/>
-          <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1">{PERIODS.map(p=>(<button key={p.key} onClick={()=>setPeriod(p.key)} className="text-xs px-2.5 md:px-3 py-1 rounded-md transition-all duration-200" style={{background:period===p.key?'#f0883e15':'transparent',color:period===p.key?'#f0883e':'#8b949e',fontWeight:period===p.key?600:400}}>{p.label}</button>))}</div>
-          <button onClick={handleRefresh} className="p-2 rounded-lg bg-surface border border-border text-muted hover:text-foreground hover:border-primary/40 transition-all"><RefreshCw size={13} className={refreshing?'animate-spin':''}/></button>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted px-2 py-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ animation: 'liveDot 2s infinite' }} />
+            <span>actualizado {Math.max(0, Math.floor((Date.now() - lastUpdate) / 1000))}s</span>
+          </div>
+          <PeriodTabs period={period} setPeriod={setPeriod} />
+          <button
+            type="button"
+            onClick={refresh}
+            className="p-2 rounded-lg bg-surface border border-border text-muted hover:text-foreground hover:border-primary/50 transition-colors"
+            title="Actualizar"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
         </div>
+      </header>
+
+      <section className="bg-surface border border-border rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShieldCheck size={15} className="text-primary shrink-0" />
+            <h2 className="text-sm font-semibold text-foreground truncate">Plano de operaciones</h2>
+            <span className="text-[9px] text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded-full font-semibold">LIVE</span>
+          </div>
+          <div className="hidden sm:flex items-center gap-1 text-[11px] text-muted">
+            <Radio size={12} className="text-emerald-400" />
+            En tiempo real
+          </div>
+        </div>
+
+        <div className="p-4 overflow-x-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 min-w-0">
+            <StageCard
+              icon={Truck}
+              title="Recepciones"
+              subtitle="Entrada y calidad"
+              color="#58a6ff"
+              href="/recepciones"
+              primary={fmtN(scopedReceptions.length)}
+              primaryLabel={`rec. ${periodLabel.toLowerCase()}`}
+              loading={receptionLoading}
+              alert={damagedUnits > 0}
+              metrics={[
+                { label: 'Unidades recibidas', value: fmtN(receptionUnits) },
+                { label: 'Daniadas', value: fmtN(damagedUnits), color: damagedUnits ? '#f85149' : '#8b949e' },
+              ]}
+              footer={scopedReceptions[0]?.numero ? `Ultima: ${scopedReceptions[0].numero}` : 'Sin recepciones en periodo'}
+            />
+            <StageCard
+              icon={Warehouse}
+              title="Almacen"
+              subtitle="Stock, reserva y riesgo"
+              color="#3fb950"
+              href="/inventario"
+              primary={fmtN(totalStock)}
+              primaryLabel="u. disponibles"
+              loading={isLoadingCore}
+              alert={stockAlerts > 0 || expiringLots > 0}
+              metrics={[
+                { label: 'Reservado', value: fmtN(reservedStock) },
+                { label: 'Bajo minimo', value: fmtN(stockAlerts), color: stockAlerts ? '#f85149' : '#8b949e' },
+              ]}
+              footer={expiringLots ? `${expiringLots} lotes proximos a vencer` : 'Sin vencimientos criticos'}
+            />
+            <StageCard
+              icon={Factory}
+              title="Produccion"
+              subtitle="Ordenes y cierre"
+              color="#f0883e"
+              href="/produccion"
+              primary={fmtN(activeProductions)}
+              primaryLabel="ordenes activas"
+              loading={productionLoading}
+              alert={(productionByStatus.EN_PROCESO || 0) > 0}
+              metrics={[
+                { label: 'En proceso', value: fmtN(productionByStatus.EN_PROCESO || 0), color: '#f0883e' },
+                { label: 'Cerradas', value: fmtN(closedInPeriod), color: '#3fb950' },
+              ]}
+              footer={`${fmtN(productionByStatus.APROBADA || 0)} aprobadas, ${fmtN(productionByStatus.PLANEADA || 0)} planeadas`}
+            />
+            <StageCard
+              icon={Trash2}
+              title="Mermas"
+              subtitle="Perdidas y causa raiz"
+              color="#f85149"
+              href="/mermas"
+              primary={fmtN(wasteUnits, 1)}
+              primaryLabel={`u. ${periodLabel.toLowerCase()}`}
+              loading={wasteLoading}
+              alert={wasteUnits > 0}
+              metrics={[
+                { label: 'Registros', value: fmtN(scopedWaste.length) },
+                { label: 'Ordenes afectadas', value: fmtN(new Set(scopedWaste.map((w) => w.production_order_code || w.production_order_id).filter(Boolean)).size) },
+              ]}
+              footer={scopedWaste[0]?.reason ? `Ultimo motivo: ${scopedWaste[0].reason}` : 'Sin mermas en periodo'}
+            />
+            <StageCard
+              icon={ClipboardList}
+              title="Aprobaciones"
+              subtitle="Bloqueos operativos"
+              color="#d2a8ff"
+              href="/aprobaciones"
+              primary={fmtN(safeApprovals.length)}
+              primaryLabel="pendientes"
+              loading={loadingPending}
+              alert={safeApprovals.length > 0}
+              metrics={[
+                { label: 'Mas antigua', value: oldestApprovalHours ? `${oldestApprovalHours} h` : '-' },
+                { label: 'Produccion', value: fmtN((approvalByType.SOLICITAR_INICIO_PRODUCCION || 0) + (approvalByType.SOLICITAR_CIERRE_PRODUCCION || 0)) },
+              ]}
+              footer={safeApprovals[0]?.codigo_solicitud ? `Siguiente: ${safeApprovals[0].codigo_solicitud}` : 'Sin aprobaciones pendientes'}
+            />
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-border/50 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <p className="text-[10px] text-muted uppercase">Entradas</p>
+              <p className="text-sm font-semibold text-foreground">{fmtN(entryUnits)} u.</p>
+              <MiniBar value={entryUnits} max={maxFlow} color="#3fb950" />
+            </div>
+            <div>
+              <p className="text-[10px] text-muted uppercase">Salidas</p>
+              <p className="text-sm font-semibold text-foreground">{fmtN(exitUnits || dispatchUnits)} u.</p>
+              <MiniBar value={exitUnits || dispatchUnits} max={maxFlow} color="#f0883e" />
+            </div>
+            <div>
+              <p className="text-[10px] text-muted uppercase">Mermas</p>
+              <p className="text-sm font-semibold text-foreground">{fmtN(wasteUnits, 1)} u.</p>
+              <MiniBar value={wasteUnits} max={maxFlow} color="#f85149" />
+            </div>
+            <div>
+              <p className="text-[10px] text-muted uppercase">Pendientes</p>
+              <p className="text-sm font-semibold text-foreground">{fmtN(safeApprovals.length)} aprobaciones</p>
+              <MiniBar value={safeApprovals.length} max={Math.max(safeApprovals.length, 10)} color="#d2a8ff" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <Section
+          icon={AlertTriangle}
+          title="Excepciones que requieren atencion"
+          action={<button onClick={() => navigate('/inventario')} className="text-xs text-primary hover:underline">Ver modulo</button>}
+        >
+          {exceptions.length === 0 ? (
+            <div className="py-10 text-center">
+              <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
+              <p className="text-sm text-foreground">Sin excepciones criticas</p>
+              <p className="text-xs text-muted">Stock, aprobaciones y mermas bajo control</p>
+            </div>
+          ) : (
+            <div>
+              {exceptions.map((item, i) => <ExceptionRow key={`${item.title}-${i}`} {...item} />)}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          icon={BarChart3}
+          title={`Actividad reciente (${periodLabel})`}
+          action={<button onClick={() => navigate('/kardex')} className="text-xs text-primary hover:underline">Kardex</button>}
+        >
+          {loadingKardex && !recentEvents.length ? (
+            <SpinnerBlock rows={6} />
+          ) : recentEvents.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted">Sin eventos recientes</div>
+          ) : (
+            <div>{recentEvents.map((event, i) => <RecentRow key={`${event.title}-${i}`} {...event} />)}</div>
+          )}
+        </Section>
+
+        <Section
+          icon={Clock3}
+          title="Aprobaciones por tipo"
+          action={<button onClick={() => navigate('/aprobaciones')} className="text-xs text-primary hover:underline">Gestionar</button>}
+        >
+          {loadingPending && !safeApprovals.length ? (
+            <SpinnerBlock rows={4} />
+          ) : safeApprovals.length === 0 ? (
+            <div className="py-10 text-center">
+              <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
+              <p className="text-sm text-foreground">Nada pendiente</p>
+              <p className="text-xs text-muted">No hay solicitudes bloqueando la operacion</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {Object.entries(approvalByType).map(([type, count]) => (
+                <div key={type}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-xs text-foreground truncate">{APPROVAL_LABEL[type] || type.replace(/_/g, ' ')}</p>
+                    <p className="text-xs font-semibold text-muted">{count}</p>
+                  </div>
+                  <MiniBar value={count} max={safeApprovals.length} color="#d2a8ff" />
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
       </div>
 
-      <div className="px-6 pb-8 space-y-5">
-        <div className="bg-surface border border-border rounded-xl" style={{animation:'fadeSlideUp .5s ease .1s both'}}>
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-            <div className="flex items-center gap-2"><ShieldCheck size={13} className="text-primary"/><span className="text-subtle text-sm font-semibold">Plano de operaciones</span><span className="text-[9px] text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider">LIVE</span></div>
-            <div className="flex items-center gap-1 text-[10px] text-muted"><Wifi size={10} className="text-emerald-400"/><span>En tiempo real</span></div>
-          </div>
-          <div className="px-5 py-6" style={{minHeight:'140px'}}>
-            <div className="flex items-center justify-between overflow-x-auto pb-2 gap-1 md:gap-0">{flowNodes.map((node, i) => (<div key={node.label} className="flex items-start" style={{flex:1}}><FlowNode {...node}/>{i < flowNodes.length-1 && <FlowLine animated={node.pulse || node.count > 0} color={node.count>0 ? node.color+'60' : '#30363d'} />}</div>))}</div>
-            <div className="flex items-center gap-3 mt-5 pt-4 border-t border-border/40">
-              <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-400" style={{animation:'liveDot 2s ease-in-out infinite'}}/><span className="text-[10px] text-muted">Sistema operativo</span></div>
-              <div className="h-3 w-px bg-border"/>
-              <span className="hidden sm:inline text-[10px] text-muted">{prodActivas} órdenes activas</span>
-              <div className="hidden sm:block h-3 w-px bg-border"/>
-              <span className="text-[10px] text-muted">{fmtN(totalStock)} u. en stock</span>
-              {lowStock.length > 0 && <><div className="h-3 w-px bg-border"/><span className="text-[10px] text-red-400 font-semibold">⚠ {lowStock.length} bajo mínimo</span></>}
-              {safeApprovals.length > 0 && <><div className="h-3 w-px bg-border"/><span className="text-[10px] text-amber-400 font-semibold">{safeApprovals.length} aprobaciones pendientes</span></>}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard icon={Package} label="Productos activos" value={totalProducts} sub="en catálogo" color="#f0883e" delay={0} loading={loadingSummary&&totalProducts===null}/>
-          <KpiCard icon={Warehouse} label="Unidades en stock" value={totalStock!=null?Math.round(totalStock):null} sub="disponible neto" color="#3fb950" delay={80} loading={loadingSummary&&totalStock===null}/>
-          <KpiCard icon={TrendingUp} label="Entradas" value={Math.round(totalEntradas)} sub={`en ${periodLabel}`} trend="up" color="#79c0ff" delay={160} loading={loadingKardex&&!kardex?.length} sparkData={sparkEntrada}/>
-          <KpiCard icon={TrendingDown} label="Salidas" value={Math.round(totalSalidas)} sub={`en ${periodLabel}`} trend="down" color="#d2a8ff" delay={240} loading={loadingKardex&&!kardex?.length} sparkData={sparkSalida}/>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
-          <div className="lg:col-span-2 bg-surface border border-border rounded-xl p-5" style={{animation:'fadeSlideUp .5s ease .35s both'}}>
-            <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2"><Activity size={13} className="text-primary"/><span className="text-subtle text-sm font-semibold">Actividad del inventario</span></div><span className="text-muted text-xs">{periodLabel}</span></div>
-            <ActivityChart data={filteredKardex} loading={loadingKardex&&!kardex?.length}/>
-          </div>
-
-          <div className="bg-surface border border-border rounded-xl p-5 flex flex-col" style={{animation:'fadeSlideUp .5s ease .45s both'}}>
-            <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><Clock size={13} className="text-amber-400"/><span className="text-subtle text-sm font-semibold">Aprobaciones</span></div>{safeApprovals.length>0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-400/15 text-amber-400 font-bold">{safeApprovals.length}</span>}</div>
-            <div className="flex-1 overflow-y-auto max-h-44 min-h-0">
-              {appLoading&&!safeApprovals.length ? <div className="space-y-2">{[1,2,3].map(i=><Sk key={i} className="h-8 w-full"/>)}</div> : safeApprovals.length===0 ? <div className="flex flex-col items-center justify-center h-24 gap-2"><CheckCircle size={20} className="text-emerald-400/50"/><span className="text-muted text-xs">Sin pendientes</span></div> : safeApprovals.slice(0,8).map((item,i)=><ApprovalRow key={item.codigo_solicitud || item.id} item={item} index={i} onNavigate={()=>navigate('/aprobaciones')}/>)}
-            </div>
-            {safeApprovals.length>0 && <button onClick={()=>navigate('/aprobaciones')} className="mt-3 flex items-center justify-center gap-1.5 text-xs text-primary hover:text-primary-hover transition-colors py-1.5 border-t border-border/40">Ver todas <ArrowRight size={11}/></button>}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-surface border border-border rounded-xl p-5" style={{animation:'fadeSlideUp .5s ease .55s both'}}>
-            <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><BarChart3 size={13} className="text-primary"/><span className="text-subtle text-sm font-semibold">Movimientos recientes</span></div><span className="text-muted text-[10px] font-mono">{filteredKardex.length} mov.</span></div>
-            {loadingKardex&&!kardex?.length ? <div className="space-y-2">{[1,2,3,4,5].map(i=><Sk key={i} className="h-7 w-full"/>)}</div> : filteredKardex.length===0 ? <div className="text-center text-muted text-xs py-8">Sin movimientos en el período</div> : filteredKardex.slice(0,8).map((row,i)=><KardexRow key={row.movimiento_id||i} row={row} index={i}/>)}
-          </div>
-
-          <div className="bg-surface border border-border rounded-xl p-5" style={{animation:'fadeSlideUp .5s ease .65s both'}}>
-            <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><AlertTriangle size={13} className="text-amber-400"/><span className="text-subtle text-sm font-semibold">Stock bajo mínimo</span></div>{lowStock.length>0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-400/15 text-red-400 font-bold">{lowStock.length}</span>}</div>
-            {loadingLowStock&&!lowStock.length ? <div className="space-y-2">{[1,2,3].map(i=><Sk key={i} className="h-10 w-full"/>)}</div> : lowStock.length===0 ? <div className="flex flex-col items-center justify-center h-24 gap-2"><CheckCircle size={20} className="text-emerald-400/50"/><span className="text-muted text-xs">Todo el stock en niveles normales</span></div> : lowStock.slice(0,6).map((item,i)=><StockAlert key={item.id||i} item={item} index={i}/>)}
-            {lowStock.length>0 && <button onClick={()=>navigate('/inventario')} className="mt-3 flex items-center justify-center gap-1.5 text-xs text-primary hover:text-primary-hover transition-colors py-1.5 border-t border-border/40">Ver inventario <ArrowRight size={11}/></button>}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" style={{animation:'fadeSlideUp .5s ease .75s both'}}>
-          {[
-            {icon:Warehouse, label:'Recepciones', to:'/recepciones', color:'#3fb950'},
-            {icon:Truck, label:'Despachos', to:'/despachos', color:'#f0883e'},
-            {icon:Package, label:'Inventario', to:'/inventario', color:'#79c0ff'},
-            {icon:ClipboardList, label:'Aprobaciones', to:'/aprobaciones', color:'#d2a8ff', badge:safeApprovals.length||null},
-          ].map(({icon:Icon,label,to,color,badge})=>(
-            <button key={to} onClick={()=>navigate(to)} className="flex items-center gap-2.5 p-3.5 bg-surface border border-border rounded-xl text-muted hover:text-foreground group transition-all duration-200" onMouseEnter={e=>{e.currentTarget.style.borderColor=`${color}60`;e.currentTarget.style.boxShadow=`0 0 16px ${color}10`}} onMouseLeave={e=>{e.currentTarget.style.borderColor='';e.currentTarget.style.boxShadow=''}}>
-              <div className="p-1.5 rounded-lg shrink-0" style={{background:`${color}15`}}><Icon size={13} style={{color}}/></div>
-              <span className="text-xs font-medium flex-1 text-left">{label}</span>
-              {badge ? <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{background:`${color}20`,color}}>{badge}</span> : <ArrowRight size={11} className="opacity-0 group-hover:opacity-100 transition-opacity" style={{color}}/>}
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {[
+          { icon: PackageCheck, label: 'Recepciones', to: '/recepciones', color: '#58a6ff' },
+          { icon: Truck, label: 'Despachos', to: '/despachos', color: '#f0883e' },
+          { icon: Warehouse, label: 'Inventario', to: '/inventario', color: '#3fb950' },
+          { icon: ClipboardList, label: 'Aprobaciones', to: '/aprobaciones', color: '#d2a8ff', badge: safeApprovals.length },
+        ].map(({ icon: Icon, label, to, color, badge }) => (
+          <button
+            key={to}
+            type="button"
+            onClick={() => navigate(to)}
+            className="flex items-center gap-2.5 p-3 bg-surface border border-border rounded-xl text-muted hover:text-foreground transition-colors"
+          >
+            <span className="p-1.5 rounded-lg shrink-0" style={{ background: `${color}18` }}>
+              <Icon size={14} style={{ color }} />
+            </span>
+            <span className="text-xs font-medium flex-1 text-left">{label}</span>
+            {badge ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: `${color}20`, color }}>{badge}</span>
+            ) : (
+              <ArrowRight size={12} className="text-muted" />
+            )}
+          </button>
+        ))}
       </div>
     </div>
   )
