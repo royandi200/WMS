@@ -1124,6 +1124,13 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
 );
 
   await db.execute(
+    `INSERT INTO despacho_items
+       (despacho_id, producto_id, ubicacion_id, lote, cantidad_sol, cantidad_des)
+     VALUES (?, ?, NULL, ?, ?, ?)`,
+    [despIns.insertId, payload.product_id, payload.lpn || null, cantDesp, cantDesp]
+  ).catch(() => {});
+
+  await db.execute(
     `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_id, referencia_tipo, usuario_id)
      VALUES ('salida',?,?,?,?,?,'despacho_aprobado',?)`,
     [payload.product_id, bodegaId, payload.lpn || null, cantDesp, despIns.insertId, aprobador_id]
@@ -2567,7 +2574,7 @@ module.exports = async (req, res) => {
     priority,
     payload: rawBody,
     response: { error: errMsg, statusCode },
-    status: isBusinessError ? 'BUSINESS_ERROR' : 'ERROR'
+    status: isBusinessError ? 'REJECTED' : 'ERROR'
   }).catch(() => {});
 
   const body = {
