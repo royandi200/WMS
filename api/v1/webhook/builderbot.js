@@ -96,6 +96,13 @@ const DB = () => mysql.createConnection({
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
+function normalizeWhatsAppPhone(phone) {
+  const digits = String(phone || '').replace(/[^\d]/g, '');
+  if (/^3\d{9}$/.test(digits)) return `57${digits}`;
+  if (/^573\d{9}$/.test(digits)) return digits;
+  return null;
+}
+
 function builderbotResponse(res, status, body) {
   const msg = body.mensaje || body.message || '';
   return res.status(status).json({
@@ -624,7 +631,7 @@ async function pushWA(phone, text) {
   return new Promise((resolve) => {
     try {
       const rawPhone = String(phone);
-      const number   = rawPhone.replace(/[^\d]/g, '');
+      const number   = normalizeWhatsAppPhone(rawPhone);
 
       console.log(`[pushWA] Intentando enviar WA`);
       console.log(`[pushWA]   phone original  : "${rawPhone}"`);
@@ -721,10 +728,10 @@ async function getSupervisorPhone(db) {
        AND u.email NOT LIKE '%@wa.bot'
      ORDER BY FIELD(LOWER(r.nombre), 'supervisor', 'admin') ASC,
               u.id ASC
-     LIMIT 1`
+     LIMIT 20`
   ).catch(() => [[]]);
 
-  const phone = rows[0]?.telefono || null;
+  const phone = rows.map(r => normalizeWhatsAppPhone(r.telefono)).find(Boolean) || null;
   if (phone) {
     console.log(`[getSupervisorPhone] ✅ Teléfono seleccionado: "${phone}"`);
   } else {
@@ -745,7 +752,7 @@ async function getSupervisorPhones(db) {
      ORDER BY FIELD(LOWER(r.nombre), 'supervisor', 'admin') ASC,
               u.id ASC`
   ).catch(() => [[]]);
-  const phones = rows.map(r => r.telefono).filter(Boolean);
+  const phones = [...new Set(rows.map(r => normalizeWhatsAppPhone(r.telefono)).filter(Boolean))];
   console.log(`[getSupervisorPhones] ${phones.length} destinatario(s): [${phones.join(', ')}]`);
   return phones;
 }

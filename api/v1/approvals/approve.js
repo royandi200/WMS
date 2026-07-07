@@ -7,6 +7,13 @@ const { cors, requireRole } = require('../../_lib/auth');
 const BB_TOKEN = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
+function normalizeWhatsAppPhone(phone) {
+  const digits = String(phone || '').replace(/[^\d]/g, '');
+  if (/^3\d{9}$/.test(digits)) return `57${digits}`;
+  if (/^573\d{9}$/.test(digits)) return digits;
+  return null;
+}
+
 function httpError(status, message, data = undefined) {
   const err = new Error(message);
   err.status = status;
@@ -37,7 +44,7 @@ function fmtDate(value) {
 async function pushWA(phone, text) {
   return new Promise((resolve) => {
     try {
-      const number = String(phone || '').replace(/[^\d]/g, '');
+      const number = normalizeWhatsAppPhone(phone);
       if (!number || !BB_TOKEN || !BB_BOT_ID) return resolve(null);
 
       const body = JSON.stringify({ number, messages: { content: text } });
