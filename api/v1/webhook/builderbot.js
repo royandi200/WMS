@@ -442,6 +442,20 @@ async function saveLog(db, { from, action, priority, payload, response, status }
 
 async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload }) {
   await db.execute(
+    `CREATE TABLE IF NOT EXISTS system_logs (
+       id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+       nivel ENUM('INFO','WARN','ERROR','DEBUG') NOT NULL DEFAULT 'INFO',
+       modulo VARCHAR(50) NOT NULL DEFAULT 'webhook',
+       mensaje TEXT NOT NULL,
+       usuario_id INT UNSIGNED NULL,
+       payload JSON NULL,
+       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_syslogs_nivel (nivel),
+       INDEX idx_syslogs_modulo (modulo),
+       INDEX idx_syslogs_created (created_at)
+     )`
+  ).catch(() => {});
+  await db.execute(
     `INSERT INTO system_logs (nivel, modulo, mensaje, usuario_id, payload, created_at)
      VALUES (?, ?, ?, ?, ?, NOW())`,
     [nivel || 'INFO', modulo || 'webhook', mensaje, usuario_id || null,
@@ -641,12 +655,15 @@ async function pushWA(phone, text) {
 
       if (!number) {
         console.warn('[pushWA] ⚠️  Número vacío tras sanitizar — se omite envío.');
-        return resolve(null);
+        return resolve({ status: 'INVALID_PHONE', body: `Telefono invalido: ${rawPhone}` });
       }
 
       if (!BB_TOKEN || !BB_BOT_ID) {
         console.warn('[pushWA] BuilderBot no configurado; se omite envio.');
-        return resolve(null);
+        return resolve({
+          status: 'CONFIG_MISSING',
+          body: JSON.stringify({ hasToken: Boolean(BB_TOKEN), hasBotId: Boolean(BB_BOT_ID) }),
+        });
       }
 
       const body = JSON.stringify({
@@ -680,16 +697,16 @@ async function pushWA(phone, text) {
       });
 
       req.on('error', e => {
-        console.error('[pushWA] ❌ Error de red:', e.message);
-        resolve(null);
+        console.error('[pushWA] Error de red:', e.message);
+        resolve({ status: 'NETWORK_ERROR', body: e.message });
       });
 
       req.write(body);
       req.end();
 
     } catch (e) {
-      console.error('[pushWA] ❌ Excepción:', e.message);
-      resolve(null);
+      console.error('[pushWA] Excepcion:', e.message);
+      resolve({ status: 'EXCEPTION', body: e.message });
     }
   });
 }
@@ -1181,6 +1198,7 @@ module.exports = async (req, res) => {
   let params     = info.params || {};
   const priority = info.priority || 'baja';
   const rawText  = getUserText(rawBody, info);
+  const responseContext = {};
 
   if ((action === 'UNKNOWN' || action === 'accion_correspondiente') && rawText) {
     action = 'MODO_CHARLA';
@@ -1442,6 +1460,7 @@ module.exports = async (req, res) => {
             `Para rechazar responde: *rechazo ${codigo}*`
           ].join('\n');
           supervisorNotification1 = await notifySupervisorPhones(db, { phones: supPhones1, text: textoWA1, action: 'SOLICITAR_INICIO_PRODUCCION', codigo, userId: user.id });
+          responseContext.notification = supervisorNotification1;
         } else {
           console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
@@ -1717,6 +1736,7 @@ module.exports = async (req, res) => {
             `Para rechazar responde: *rechazo ${codigo}*`
           ].join('\n');
           supervisorNotification2 = await notifySupervisorPhones(db, { phones: supPhones2, text: textoWA2, action: 'SOLICITAR_CIERRE_PRODUCCION', codigo, userId: user.id });
+          responseContext.notification = supervisorNotification2;
         } else {
           console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
@@ -1793,6 +1813,7 @@ module.exports = async (req, res) => {
             `Para rechazar responde: *rechazo ${codigo}*`
           ].join('\n');
           supervisorNotification3 = await notifySupervisorPhones(db, { phones: supPhones3, text: textoWA3, action: 'SOLICITAR_DESPACHO', codigo, userId: user.id });
+          responseContext.notification = supervisorNotification3;
         } else {
           console.warn(`[SOLICITAR_DESPACHO] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
@@ -2529,9 +2550,9 @@ module.exports = async (req, res) => {
         throw { status: 400, message: `Acción desconocida: ${action}` };
     }
 
-    await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje }, status: 'PROCESSED' });
+    await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje, context: responseContext }, status: 'PROCESSED' });
     console.log(`[webhook] ✅ action="${action}" completado OK`);
-    return builderbotResponse(res, 200, { ok: true, message: mensaje, mensaje });
+    return builderbotResponse(res, 200, { ok: true, message: mensaje, mensaje, context: responseContext });
 
 } catch (err) {
   const errMsg = err.message || 'Error interno';
@@ -2566,3 +2587,4 @@ module.exports = async (req, res) => {
     await db.end().catch(() => {});
   }
 };
+
