@@ -663,6 +663,7 @@ async function pushWA(phone, text) {
         headers:  {
           'Content-Type':     'application/json',
           'x-api-builderbot': BB_TOKEN,
+          'Authorization':    `Bearer ${BB_TOKEN}`,
           'Content-Length':   Buffer.byteLength(body),
         },
       }, res => {
@@ -755,6 +756,50 @@ async function getSupervisorPhones(db) {
   const phones = [...new Set(rows.map(r => normalizeWhatsAppPhone(r.telefono)).filter(Boolean))];
   console.log(`[getSupervisorPhones] ${phones.length} destinatario(s): [${phones.join(', ')}]`);
   return phones;
+}
+
+function pushWasAccepted(result) {
+  return result && Number(result.status) >= 200 && Number(result.status) < 300;
+}
+
+async function notifySupervisorPhones(db, { phones, text, action, codigo, userId }) {
+  if (!phones.length) {
+    await logSystemEvent(db, {
+      modulo: 'whatsapp',
+      nivel: 'WARN',
+      mensaje: `Sin destinatarios para notificar ${codigo || action}`,
+      usuario_id: userId,
+      payload: { action, codigo, phones: [] },
+    });
+    return { ok: false, accepted: [], failed: [], results: [] };
+  }
+
+  const results = await Promise.all(phones.map(async (phone) => {
+    const result = await pushWA(phone, text);
+    return {
+      phone,
+      status: result?.status || null,
+      ok: pushWasAccepted(result),
+      body: result?.body || null,
+    };
+  }));
+  const accepted = results.filter(r => r.ok).map(r => r.phone);
+  const failed = results.filter(r => !r.ok).map(r => ({ phone: r.phone, status: r.status, body: String(r.body || '').slice(0, 300) }));
+
+  await logSystemEvent(db, {
+    modulo: 'whatsapp',
+    nivel: accepted.length ? 'INFO' : 'ERROR',
+    mensaje: `Notificacion ${codigo || action}: ${accepted.length}/${phones.length} aceptada(s) por BuilderBot`,
+    usuario_id: userId,
+    payload: { action, codigo, accepted, failed },
+  });
+
+  return { ok: accepted.length > 0, accepted, failed, results };
+}
+
+function supervisorNotificationLine(notification) {
+  if (notification?.ok) return 'El supervisor fue notificado.';
+  return 'No pude confirmar la notificacion al supervisor. La solicitud quedo pendiente en dashboard.';
 }
 
 async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
@@ -1383,6 +1428,7 @@ module.exports = async (req, res) => {
 
         const supPhones1 = await getSupervisorPhones(db);
         console.log(`[SOLICITAR_INICIO_PRODUCCION] supPhones=[${supPhones1.join(',')}] | solicitud="${codigo}" | orden="${codigoOrden}"`);
+        let supervisorNotification1 = { ok: false };
         if (supPhones1.length) {
           const textoWA1 = [
             `🏭 *Solicitud de inicio de producción: ${codigo}*`,
@@ -1395,7 +1441,7 @@ module.exports = async (req, res) => {
             `Para aprobar responde: *apruebo ${codigo}*`,
             `Para rechazar responde: *rechazo ${codigo}*`
           ].join('\n');
-          await Promise.all(supPhones1.map(p => pushWA(p, textoWA1)));
+          supervisorNotification1 = await notifySupervisorPhones(db, { phones: supPhones1, text: textoWA1, action: 'SOLICITAR_INICIO_PRODUCCION', codigo, userId: user.id });
         } else {
           console.warn(`[SOLICITAR_INICIO_PRODUCCION] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
@@ -1410,7 +1456,7 @@ module.exports = async (req, res) => {
           `Producto: ${params.id_producto_final} — ${cantPlan} uds`,
           ``, `📋 *Disponibilidad verificada:*`,
           ...picking,
-          ``, `El supervisor fue notificado. Espera su aprobación.`
+          ``, supervisorNotificationLine(supervisorNotification1)
         ].join('\n');
         break;
       }
@@ -1648,6 +1694,7 @@ module.exports = async (req, res) => {
 
         const supPhones2 = await getSupervisorPhones(db);
         console.log(`[SOLICITAR_CIERRE_PRODUCCION] supPhones=[${supPhones2.join(',')}] | solicitud="${codigo}" | orden="${orden.codigo_orden}"`);
+        let supervisorNotification2 = { ok: false };
         if (supPhones2.length) {
           const cantPlan2  = parseFloat(orden.cantidad_planeada) || 0;
           const cantReal2  = params.cantidad_real != null ? parseFloat(params.cantidad_real) : cantPlan2;
@@ -1669,7 +1716,7 @@ module.exports = async (req, res) => {
             `Para aprobar responde: *apruebo ${codigo}*`,
             `Para rechazar responde: *rechazo ${codigo}*`
           ].join('\n');
-          await Promise.all(supPhones2.map(p => pushWA(p, textoWA2)));
+          supervisorNotification2 = await notifySupervisorPhones(db, { phones: supPhones2, text: textoWA2, action: 'SOLICITAR_CIERRE_PRODUCCION', codigo, userId: user.id });
         } else {
           console.warn(`[SOLICITAR_CIERRE_PRODUCCION] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
@@ -1679,7 +1726,7 @@ module.exports = async (req, res) => {
           `Orden: ${orden.codigo_orden}`,
           `Cantidad real: ${params.cantidad_real ?? orden.cantidad_planeada}`,
           `Merma declarada: ${mermaDeclarada}`,
-          `El supervisor fue notificado.`
+          supervisorNotificationLine(supervisorNotification2)
         ].join('\n');
         break;
       }
@@ -1734,6 +1781,7 @@ module.exports = async (req, res) => {
         const loteModo  = fifoAuto ? `${lpnDespacho} ⤵️ FIFO auto` : lpnDespacho;
         const supPhones3 = await getSupervisorPhones(db);
         console.log(`[SOLICITAR_DESPACHO] supPhones=[${supPhones3.join(',')}] | solicitud="${codigo}" | lote="${lpnDespacho}" | fifoAuto=${fifoAuto}`);
+        let supervisorNotification3 = { ok: false };
         if (supPhones3.length) {
           const textoWA3 = [
             `📦 *Solicitud de despacho: ${codigo}*`,
@@ -1744,7 +1792,7 @@ module.exports = async (req, res) => {
             `Para aprobar responde: *apruebo ${codigo}*`,
             `Para rechazar responde: *rechazo ${codigo}*`
           ].join('\n');
-          await Promise.all(supPhones3.map(p => pushWA(p, textoWA3)));
+          supervisorNotification3 = await notifySupervisorPhones(db, { phones: supPhones3, text: textoWA3, action: 'SOLICITAR_DESPACHO', codigo, userId: user.id });
         } else {
           console.warn(`[SOLICITAR_DESPACHO] ⚠️  No hay supervisores activos — no se enviará WA.`);
         }
@@ -1757,7 +1805,7 @@ module.exports = async (req, res) => {
           `Producto: ${params.id_item}`,
           `Lote: ${lpnCortoDisp}${fifoAuto ? ' (FIFO auto)' : ''}`,
           `Cantidad: ${params.cantidad}`,
-          `El supervisor fue notificado.`
+          supervisorNotificationLine(supervisorNotification3)
         ].join('\n');
         break;
       }

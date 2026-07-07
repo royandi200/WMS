@@ -55,6 +55,7 @@ async function pushWA(phone, text) {
         headers: {
           'Content-Type': 'application/json',
           'x-api-builderbot': BB_TOKEN,
+          'Authorization': `Bearer ${BB_TOKEN}`,
           'Content-Length': Buffer.byteLength(body),
         },
       }, (response) => {
