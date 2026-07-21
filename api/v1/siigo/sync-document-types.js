@@ -10,6 +10,8 @@ const { cors, requireRole } = require('../../_lib/auth');
 const { query }             = require('../../_lib/db');
 const { siigoGet }          = require('../../_lib/siigo.service');
 
+const DOCUMENT_TYPES = ['FV', 'FC', 'NC'];
+
 async function setConfigValue(clave, valor) {
   await query(
     `INSERT INTO siigo_config (clave, valor)
@@ -29,19 +31,24 @@ module.exports = async (req, res) => {
       return res.status(405).json({ ok: false, error: 'Method not allowed' });
     }
 
-    const docTypes = await siigoGet('/v1/document-types', { entidad: 'document-type' });
-    const types    = docTypes?.results ?? (Array.isArray(docTypes) ? docTypes : []);
+    const types = [];
+    for (const requestedType of DOCUMENT_TYPES) {
+      const response = await siigoGet('/v1/document-types', {
+        params: { type: requestedType },
+        entidad: 'document-type',
+      });
+      const results = response?.results ?? (Array.isArray(response) ? response : []);
+      types.push(...results.map(document => ({ ...document, requestedType })));
+    }
 
     let synced = 0;
     let docFV = null, docFC = null, docAJ = null;
 
     for (const d of types) {
       const code = String(d.code || d.keyword || '');
-      const tipo = code.startsWith('FV') ? 'FV'
-                 : code.startsWith('FC') ? 'FC'
-                 : code.startsWith('AJ') ? 'AJ'
-                 : code.startsWith('NC') ? 'NC'
-                 : code.substring(0, 5);
+      const tipo = String(d.type || d.requestedType || '').toUpperCase();
+      const isElectronic = d.electronic === true ||
+        (d.electronic_type && d.electronic_type !== 'NoElectronic');
 
       await query(
         `INSERT INTO siigo_documentos
@@ -64,15 +71,15 @@ module.exports = async (req, res) => {
           tipo,
           d.active !== false ? 1 : 0,
           d.automatic_number ? 1 : 0,
-          d.next_consecutive ?? null,
-          d.electronic ? 1 : 0,
+          d.consecutive ?? d.next_consecutive ?? null,
+          isElectronic ? 1 : 0,
         ]
       );
       synced++;
 
       // Guardar IDs por defecto en siigo_config para uso en fases 3-4
-      if (!docFV && tipo === 'FV') docFV = d.id;
-      if (!docFC && tipo === 'FC') docFC = d.id;
+      if (!docFV && tipo === 'FV' && d.active !== false) docFV = d.id;
+      if (!docFC && tipo === 'FC' && d.active !== false) docFC = d.id;
       if (!docAJ && tipo === 'AJ') docAJ = d.id;
     }
 
@@ -87,7 +94,14 @@ module.exports = async (req, res) => {
         doc_id_factura_vta:  docFV,
         doc_id_factura_cmp:  docFC,
         doc_id_ajuste:       docAJ,
-        tipos:               types.map(d => ({ id: d.id, code: d.code, name: d.name })),
+        tipos:               types.map(d => ({
+          id: d.id,
+          type: d.type || d.requestedType,
+          code: d.code,
+          name: d.name,
+          active: d.active !== false,
+          electronic_type: d.electronic_type || null,
+        })),
       },
     });
   } catch (err) {

@@ -18,6 +18,35 @@ const SIIGO_PARTNER_ID = process.env.SIIGO_PARTNER_ID || 'wms-integration';
 
 // Margen de seguridad antes de expiración real (5 minutos)
 const TOKEN_SAFETY_MARGIN_MS = 5 * 60 * 1000;
+const MAX_RATE_LIMIT_RETRIES = 2;
+const DEFAULT_RATE_LIMIT_DELAY_MS = 3000;
+const MAX_RATE_LIMIT_DELAY_MS = 10000;
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+function getRateLimitDelayMs(err) {
+  const retryAfter = err.response?.headers?.['retry-after'];
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return Math.min(MAX_RATE_LIMIT_DELAY_MS, Math.max(0, seconds * 1000));
+    }
+
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) {
+      return Math.min(MAX_RATE_LIMIT_DELAY_MS, Math.max(0, retryAt - Date.now()));
+    }
+  }
+
+  const errors = err.response?.data?.Errors || err.response?.data?.errors || [];
+  const message = errors.map(item => item?.Message || item?.message || '').join(' ');
+  const match = message.match(/try again in\s+(\d+(?:\.\d+)?)\s+seconds?/i);
+  if (match) {
+    return Math.min(MAX_RATE_LIMIT_DELAY_MS, Number(match[1]) * 1000);
+  }
+
+  return DEFAULT_RATE_LIMIT_DELAY_MS;
+}
 
 function assertCredentials() {
   if (!SIIGO_USERNAME || !SIIGO_ACCESS_KEY) {
@@ -145,7 +174,14 @@ async function logSync({
  */
 async function siigoRequest(
   method, path,
-  { params = null, data = null, entidad = 'generic', entidad_id = null, retry = true } = {}
+  {
+    params = null,
+    data = null,
+    entidad = 'generic',
+    entidad_id = null,
+    authRetry = true,
+    rateLimitRetries = MAX_RATE_LIMIT_RETRIES,
+  } = {}
 ) {
   const startedAt   = Date.now();
   const token       = await getValidToken();
@@ -170,9 +206,30 @@ async function siigoRequest(
     errorMsg   = err.response?.data ? JSON.stringify(err.response.data) : err.message;
 
     // Reintento único tras 401 (token inválido — fuerza re-login)
-    if (statusCode === 401 && retry) {
+    if (statusCode === 401 && authRetry) {
       await loginSiigo();
-      return siigoRequest(method, path, { params, data, entidad, entidad_id, retry: false });
+      return siigoRequest(method, path, {
+        params,
+        data,
+        entidad,
+        entidad_id,
+        authRetry: false,
+        rateLimitRetries,
+      });
+    }
+
+    // Only retry reads. Replaying POST/PUT without an idempotency key can
+    // create duplicate accounting documents if SIIGO processed the request.
+    if (statusCode === 429 && method.toLowerCase() === 'get' && rateLimitRetries > 0) {
+      await sleep(getRateLimitDelayMs(err));
+      return siigoRequest(method, path, {
+        params,
+        data,
+        entidad,
+        entidad_id,
+        authRetry,
+        rateLimitRetries: rateLimitRetries - 1,
+      });
     }
     throw err;
   } finally {

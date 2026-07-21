@@ -25,7 +25,10 @@ module.exports = async (req, res) => {
     const token = await getValidToken();
 
     // 2. Llamada de prueba a SIIGO — /v1/document-types es liviano y no modifica datos
-    const docTypes = await siigoGet('/v1/document-types', { entidad: 'health-check' });
+    const docTypes = await siigoGet('/v1/document-types', {
+      params: { type: 'FV' },
+      entidad: 'health-check',
+    });
 
     const count = Array.isArray(docTypes)
       ? docTypes.length
@@ -36,6 +39,7 @@ module.exports = async (req, res) => {
       data: {
         mensaje:              'Conexión con SIIGO exitosa ✅',
         token_presente:       Boolean(token),
+        document_type:        'FV',
         document_types_count: count,
         latencia_ms:          Date.now() - startedAt,
         siigo_base_url:       process.env.SIIGO_BASE_URL || 'https://api.siigo.com',
