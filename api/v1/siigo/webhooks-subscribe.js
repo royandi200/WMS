@@ -7,7 +7,7 @@
 // Body: { application_id, topic, url }
 
 const { cors, requireRole } = require('../../_lib/auth');
-const { siigoPost }         = require('../../_lib/siigo.service');
+const { siigoGet, siigoPost, siigoPut } = require('../../_lib/siigo.service');
 
 const TOPICS = [
   {
@@ -25,6 +25,46 @@ function getPublicBaseUrl() {
     throw Object.assign(new Error('WMS_PUBLIC_URL debe usar HTTPS'), { status: 500 });
   }
   return url.toString().replace(/\/$/, '');
+}
+
+function getWebhookItems(response) {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.results)) return response.results;
+  if (Array.isArray(response?.data)) return response.data;
+  return [];
+}
+
+function isAlreadyExistsError(err) {
+  const errors = err.response?.data?.errors || err.response?.data?.Errors || [];
+  return err.response?.status === 400 && errors.some(item =>
+    String(item?.code || item?.Code || '').toLowerCase() === 'already_exists'
+  );
+}
+
+async function upsertWebhook(payload) {
+  const current = await siigoGet('/v1/webhooks', { entidad: 'webhook-subscribe' });
+  const exists = getWebhookItems(current).some(item => item?.topic === payload.topic);
+
+  if (exists) {
+    return {
+      action: 'updated',
+      response: await siigoPut('/v1/webhooks', payload, { entidad: 'webhook-subscribe' }),
+    };
+  }
+
+  try {
+    return {
+      action: 'created',
+      response: await siigoPost('/v1/webhooks', payload, { entidad: 'webhook-subscribe' }),
+    };
+  } catch (err) {
+    // Another request may have created the topic after the list operation.
+    if (!isAlreadyExistsError(err)) throw err;
+    return {
+      action: 'updated',
+      response: await siigoPut('/v1/webhooks', payload, { entidad: 'webhook-subscribe' }),
+    };
+  }
 }
 
 module.exports = async (req, res) => {
@@ -49,16 +89,18 @@ module.exports = async (req, res) => {
 
     for (const t of TOPICS) {
       try {
-        const resp = await siigoPost('/v1/webhooks', {
+        const payload = {
           application_id: appId,
           topic:          t.topic,
           url:            `${baseUrl}${t.path}?secret=${encodeURIComponent(secret)}`,
-        }, { entidad: 'webhook-subscribe' });
+        };
+        const { action, response } = await upsertWebhook(payload);
 
         resultados.push({
           label:   t.label,
           ok:      true,
-          siigo_id: resp?.id || null,
+          action,
+          siigo_id: response?.id || null,
           url:     `${baseUrl}${t.path}`,
         });
       } catch (err) {
