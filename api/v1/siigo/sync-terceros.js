@@ -10,6 +10,51 @@ const { query }             = require('../../_lib/db');
 const { siigoGet }          = require('../../_lib/siigo.service');
 
 const PAGE_SIZE = 100;
+const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
+const DEFAULT_TEST_PREFIX = 'WMSQA260721';
+
+function isSharedSandbox() {
+  return String(process.env.SIIGO_USERNAME || '').toLowerCase() === SHARED_SANDBOX_USERNAME;
+}
+
+function getTestPrefix() {
+  return String(process.env.SIIGO_TEST_PREFIX || DEFAULT_TEST_PREFIX).trim().toUpperCase();
+}
+
+function getRequestedIdentifications(req) {
+  const values = Array.isArray(req.body?.identifications)
+    ? req.body.identifications
+    : (req.body?.identification ? [req.body.identification] : []);
+  return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
+}
+
+function customerName(c) {
+  return Array.isArray(c.name)
+    ? c.name.map(value => String(value || '').trim()).filter(Boolean).join(' ')
+    : String(c.name || '').trim();
+}
+
+function validateSandboxCustomers(customers, identifications) {
+  if (!isSharedSandbox()) return;
+  const prefix = getTestPrefix();
+  if (!identifications.length) {
+    throw Object.assign(
+      new Error(`En sandbox debes indicar identifications para registros ${prefix}`),
+      { status: 400 }
+    );
+  }
+
+  const invalid = customers.find(customer => {
+    const names = `${customerName(customer)} ${customer.commercial_name || ''}`.toUpperCase();
+    return !names.includes(prefix);
+  });
+  if (invalid) {
+    throw Object.assign(
+      new Error(`El tercero ${invalid.identification || ''} no pertenece a ${prefix}`),
+      { status: 400 }
+    );
+  }
+}
 
 async function fetchAllCustomers() {
   const all = [];
@@ -34,28 +79,69 @@ async function fetchAllCustomers() {
   return all;
 }
 
+async function fetchCustomersByIdentification(identifications) {
+  const customers = [];
+  for (const identification of identifications) {
+    const response = await siigoGet('/v1/customers', {
+      params: { identification, page: 1, page_size: PAGE_SIZE },
+      entidad: 'tercero',
+    });
+    const results = response?.results ?? (Array.isArray(response) ? response : []);
+    customers.push(...results.filter(customer =>
+      String(customer.identification || '') === identification
+    ));
+  }
+  return customers;
+}
+
 async function upsertTercero(c) {
   const siigoId         = String(c.id              || '');
-  const personType      = c.person_type            || 'company';
-  const idType          = String(c.id_type?.id     || '13');
+  const rawPersonType   = String(c.person_type || 'company').replace(/['"]/g, '').toLowerCase();
+  const personType      = ['person', 'company'].includes(rawPersonType) ? rawPersonType : 'company';
+  const idType          = String(c.id_type?.code || c.id_type?.id || c.id_type || '13');
   const identification  = String(c.identification  || '').trim();
   const checkDigit      = c.check_digit            || null;
-  const nombre          = String(c.name            || '').trim();
+  const nombre          = customerName(c);
   const nombreComercial = c.commercial_name        || null;
   const branchOffice    = c.branch_office          ?? 0;
   const vatResponsible  = c.vat_responsible ? 1 : 0;
-  const respFiscal      = c.fiscal_responsibilities?.[0]?.id || 'R-99-PN';
-  const direccion       = c.addresses?.[0]?.address       || null;
-  const cityCode        = String(c.addresses?.[0]?.city?.country_code || '');
+  const respFiscal      = c.fiscal_responsibilities?.[0]?.code ||
+                          c.fiscal_responsibilities?.[0]?.id || 'R-99-PN';
+  const address         = c.address || c.addresses?.[0] || {};
+  const direccion       = address.address || null;
   const telefono        = c.contacts?.[0]?.phone          || null;
   const emailContacto   = c.contacts?.[0]?.email          || null;
   const sellerId        = c.seller_id                      || null;
   const activo          = c.active !== false ? 1 : 0;
 
-  // tipo: si tiene tipo de comprobante de compra es Supplier, por defecto Customer
-  const tipo = c.type === 'Supplier' ? 'Supplier' : 'Customer';
+  const tipo = ['Customer', 'Supplier', 'Other'].includes(c.type) ? c.type : 'Customer';
 
   if (!identification) return 'skip';
+
+  const existing = await query(
+    `SELECT id FROM terceros
+     WHERE siigo_id = ? OR (identification = ? AND branch_office = ?)
+     ORDER BY siigo_id IS NOT NULL DESC
+     LIMIT 1`,
+    [siigoId, identification, branchOffice]
+  );
+
+  if (existing.length) {
+    await query(
+      `UPDATE terceros
+       SET siigo_id = ?, tipo = ?, person_type = ?, id_type = ?,
+           identification = ?, check_digit = ?, nombre = ?, nombre_comercial = ?,
+           branch_office = ?, activo = ?, vat_responsible = ?,
+           responsabilidad_fiscal = ?, direccion = ?, telefono = ?,
+           email_contacto = ?, siigo_seller_id = ?, siigo_synced_at = NOW(),
+           actualizado_en = NOW()
+       WHERE id = ?`,
+      [siigoId, tipo, personType, idType, identification, checkDigit,
+       nombre, nombreComercial, branchOffice, activo, vatResponsible,
+       respFiscal, direccion, telefono, emailContacto, sellerId, existing[0].id]
+    );
+    return 'updated';
+  }
 
   await query(
     `INSERT INTO terceros
@@ -82,7 +168,7 @@ async function upsertTercero(c) {
      nombre, nombreComercial, branchOffice, activo, vatResponsible,
      respFiscal, direccion, telefono, emailContacto, sellerId]
   );
-  return 'ok';
+  return 'created';
 }
 
 module.exports = async (req, res) => {
@@ -96,18 +182,25 @@ module.exports = async (req, res) => {
     }
 
     const startedAt = Date.now();
-    const customers = await fetchAllCustomers();
+    const requestedIdentifications = getRequestedIdentifications(req);
+    if (isSharedSandbox() && !requestedIdentifications.length) {
+      return res.status(400).json({
+        ok: false,
+        error: `En sandbox debes indicar identifications para registros ${getTestPrefix()}`,
+      });
+    }
+    const customers = requestedIdentifications.length
+      ? await fetchCustomersByIdentification(requestedIdentifications)
+      : await fetchAllCustomers();
+    validateSandboxCustomers(customers, requestedIdentifications);
 
     let creados = 0, actualizados = 0, errores = 0;
 
     for (const c of customers) {
       try {
-        const existing = await query(
-          `SELECT id FROM terceros WHERE identification = ? LIMIT 1`,
-          [String(c.identification || '').trim()]
-        );
-        await upsertTercero(c);
-        existing.length ? actualizados++ : creados++;
+        const result = await upsertTercero(c);
+        if (result === 'updated') actualizados++;
+        if (result === 'created') creados++;
       } catch (err) {
         console.error('[sync-terceros] error en tercero', c.identification, err.message);
         errores++;
@@ -118,6 +211,8 @@ module.exports = async (req, res) => {
       ok: true,
       data: {
         total_siigo:  customers.length,
+        filtro_identifications: requestedIdentifications,
+        test_prefix:  isSharedSandbox() ? getTestPrefix() : null,
         creados,
         actualizados,
         errores,

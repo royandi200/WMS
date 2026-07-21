@@ -11,6 +11,40 @@ const { query }             = require('../../_lib/db');
 const { siigoGet }          = require('../../_lib/siigo.service');
 
 const PAGE_SIZE = 100;
+const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
+const DEFAULT_TEST_PREFIX = 'WMSQA260721';
+
+function isSharedSandbox() {
+  return String(process.env.SIIGO_USERNAME || '').toLowerCase() === SHARED_SANDBOX_USERNAME;
+}
+
+function getTestPrefix() {
+  return String(process.env.SIIGO_TEST_PREFIX || DEFAULT_TEST_PREFIX).trim().toUpperCase();
+}
+
+function getRequestedCodes(req) {
+  const values = Array.isArray(req.body?.codes)
+    ? req.body.codes
+    : (req.body?.code ? [req.body.code] : []);
+  return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
+}
+
+function validateSandboxCodes(codes) {
+  if (!isSharedSandbox()) return;
+  const prefix = getTestPrefix();
+  if (!codes.length) {
+    throw Object.assign(
+      new Error(`En sandbox debes indicar codes y usar el prefijo ${prefix}`),
+      { status: 400 }
+    );
+  }
+  if (codes.some(code => !code.toUpperCase().startsWith(prefix))) {
+    throw Object.assign(
+      new Error(`Solo se permiten productos con prefijo ${prefix} en sandbox`),
+      { status: 400 }
+    );
+  }
+}
 
 /**
  * Trae todos los productos de SIIGO iterando por páginas.
@@ -40,6 +74,19 @@ async function fetchAllProducts() {
   return all;
 }
 
+async function fetchProductsByCode(codes) {
+  const products = [];
+  for (const code of codes) {
+    const response = await siigoGet('/v1/products', {
+      params: { code, page: 1, page_size: PAGE_SIZE },
+      entidad: 'producto',
+    });
+    const results = response?.results ?? (Array.isArray(response) ? response : []);
+    products.push(...results.filter(product => String(product.code || '') === code));
+  }
+  return products;
+}
+
 async function upsertProduct(p) {
   // Mapeo campos SIIGO → columnas tabla `productos`
   const siigoId      = String(p.id              || '');
@@ -49,12 +96,12 @@ async function upsertProduct(p) {
   const accountGroup = p.account_group?.id ?? null;
   const controlStock = p.stock_control ? 1 : 0;
   const precio       = p.prices?.[0]?.price_list?.[0]?.value ?? null;
-  const unitCode     = String(p.unit?.id     || '94');
+  const unitCode     = String(p.unit?.code || p.unit?.id || '94');
   const unitLabel    = String(p.unit?.name   || '');
   const taxClass     = p.tax_classification  || 'Taxed';
   const taxIncluded  = p.tax_included ? 1 : 0;
   const activo       = p.active !== false ? 1 : 0;
-  const barcode      = p.reference           || null;
+  const barcode      = p.additional_fields?.barcode || p.barcode || null;
 
   if (!siigoCode) return 'skip';
 
@@ -97,7 +144,11 @@ module.exports = async (req, res) => {
     }
 
     const startedAt = Date.now();
-    const products  = await fetchAllProducts();
+    const requestedCodes = getRequestedCodes(req);
+    validateSandboxCodes(requestedCodes);
+    const products = requestedCodes.length
+      ? await fetchProductsByCode(requestedCodes)
+      : await fetchAllProducts();
 
     let creados = 0, actualizados = 0, errores = 0;
 
@@ -120,6 +171,8 @@ module.exports = async (req, res) => {
       ok: true,
       data: {
         total_siigo:  products.length,
+        filtro_codes: requestedCodes,
+        test_prefix:  isSharedSandbox() ? getTestPrefix() : null,
         creados,
         actualizados,
         errores,
