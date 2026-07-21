@@ -7,7 +7,7 @@
 // Body: { application_id, topic, url }
 
 const { cors, requireRole } = require('../../_lib/auth');
-const { siigoGet, siigoPost, siigoPut } = require('../../_lib/siigo.service');
+const { siigoPost, siigoPut } = require('../../_lib/siigo.service');
 
 const TOPICS = [
   {
@@ -27,42 +27,28 @@ function getPublicBaseUrl() {
   return url.toString().replace(/\/$/, '');
 }
 
-function getWebhookItems(response) {
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.results)) return response.results;
-  if (Array.isArray(response?.data)) return response.data;
-  return [];
+function getSiigoErrorCodes(err) {
+  const errors = err.response?.data?.errors || err.response?.data?.Errors || [];
+  return errors.map(item => String(item?.code || item?.Code || '').toLowerCase());
 }
 
-function isAlreadyExistsError(err) {
-  const errors = err.response?.data?.errors || err.response?.data?.Errors || [];
-  return err.response?.status === 400 && errors.some(item =>
-    String(item?.code || item?.Code || '').toLowerCase() === 'already_exists'
-  );
+function isWebhookMissingError(err) {
+  if (err.response?.status === 404) return true;
+  const codes = getSiigoErrorCodes(err);
+  return codes.some(code => ['not_found', 'does_not_exist'].includes(code));
 }
 
 async function upsertWebhook(payload) {
-  const current = await siigoGet('/v1/webhooks', { entidad: 'webhook-subscribe' });
-  const exists = getWebhookItems(current).some(item => item?.topic === payload.topic);
-
-  if (exists) {
+  try {
     return {
       action: 'updated',
       response: await siigoPut('/v1/webhooks', payload, { entidad: 'webhook-subscribe' }),
     };
-  }
-
-  try {
+  } catch (err) {
+    if (!isWebhookMissingError(err)) throw err;
     return {
       action: 'created',
       response: await siigoPost('/v1/webhooks', payload, { entidad: 'webhook-subscribe' }),
-    };
-  } catch (err) {
-    // Another request may have created the topic after the list operation.
-    if (!isAlreadyExistsError(err)) throw err;
-    return {
-      action: 'updated',
-      response: await siigoPut('/v1/webhooks', payload, { entidad: 'webhook-subscribe' }),
     };
   }
 }
