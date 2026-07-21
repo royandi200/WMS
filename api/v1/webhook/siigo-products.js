@@ -7,19 +7,29 @@
 // Hacemos upsert en la tabla local `productos` igual que sync-products.js
 // pero para un solo registro en tiempo real.
 
+const crypto = require('crypto');
 const { query } = require('../../_lib/db');
 const { cors }  = require('../../_lib/auth');
 
-// Valida que el request viene de SIIGO verificando el Partner-Id header
 function validateSiigoWebhook(req) {
-  const partnerId = process.env.SIIGO_PARTNER_ID || 'wms-integration';
-  const header = req.headers?.['partner-id'] || req.headers?.['Partner-Id'] || '';
-  // En sandbox no siempre viene el header — solo validar en produccion
-  if (process.env.NODE_ENV === 'production' && header !== partnerId) {
-    const err = new Error('Webhook no autorizado: Partner-Id invalido');
+  const expected = String(process.env.SIIGO_WEBHOOK_SECRET || '');
+  const received = String(req.headers?.['x-siigo-webhook-secret'] || req.query?.secret || '');
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(received);
+  if (!expected || expectedBuffer.length !== receivedBuffer.length ||
+      !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)) {
+    const err = new Error('Webhook no autorizado');
     err.status = 401;
     throw err;
   }
+}
+
+function shouldIgnoreSandboxProduct(product) {
+  if (String(process.env.SIIGO_USERNAME || '').toLowerCase() !== 'sandbox@siigoapi.com') {
+    return false;
+  }
+  const prefix = String(process.env.SIIGO_TEST_PREFIX || 'WMSQA260721').toUpperCase();
+  return !String(product.code || '').toUpperCase().startsWith(prefix);
 }
 
 async function upsertProductFromWebhook(p) {
@@ -32,12 +42,12 @@ async function upsertProductFromWebhook(p) {
   const accountGroup = p.account_group?.id ?? null;
   const controlStock = p.stock_control ? 1 : 0;
   const precio       = p.prices?.[0]?.price_list?.[0]?.value ?? null;
-  const unitCode     = String(p.unit?.id   || '94');
+  const unitCode     = String(p.unit?.code || p.unit?.id || '94');
   const unitLabel    = String(p.unit?.name || '');
   const taxClass     = p.tax_classification || 'Taxed';
   const taxIncluded  = p.tax_included ? 1 : 0;
   const activo       = p.active !== false ? 1 : 0;
-  const barcode      = p.reference || null;
+  const barcode      = p.additional_fields?.barcode || p.barcode || null;
 
   await query(
     `INSERT INTO productos
@@ -78,6 +88,9 @@ module.exports = async (req, res) => {
     const product = body.data || body;
     if (!product?.code) {
       return res.status(400).json({ ok: false, error: 'Payload sin campo code' });
+    }
+    if (shouldIgnoreSandboxProduct(product)) {
+      return res.status(200).json({ ok: true, data: { ignored: true } });
     }
 
     await upsertProductFromWebhook(product);

@@ -144,6 +144,22 @@ function defaultHeaders(token) {
   };
 }
 
+function redactSensitive(value) {
+  if (Array.isArray(value)) return value.map(redactSensitive);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      key,
+      /(access[_-]?key|authorization|secret|token)/i.test(key)
+        ? '***redacted***'
+        : redactSensitive(item),
+    ]));
+  }
+  if (typeof value === 'string') {
+    return value.replace(/([?&](?:secret|token)=)[^&]+/gi, '$1***redacted***');
+  }
+  return value;
+}
+
 /**
  * Registra cada llamada a SIIGO en siigo_sync_log.
  */
@@ -159,8 +175,8 @@ async function logSync({
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       entidad, entidad_id, operacion, endpoint, metodo_http, siigo_id,
-      request_body  ? JSON.stringify(request_body)  : null,
-      response_body ? JSON.stringify(response_body) : null,
+      request_body  ? JSON.stringify(redactSensitive(request_body))  : null,
+      response_body ? JSON.stringify(redactSensitive(response_body)) : null,
       status_code, error_msg, duracion_ms,
     ]
   );

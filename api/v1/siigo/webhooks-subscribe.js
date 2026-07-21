@@ -1,5 +1,5 @@
 // POST /api/v1/siigo/webhooks-subscribe
-// Fase 6 — Suscribe los 4 topics de SIIGO en un solo disparo.
+// Fase 6 — Suscribe topics SIIGO confirmados para esta integracion.
 // Ejecutar UNA SOLA VEZ al poner en producción (o al cambiar la URL del WMS).
 // Solo Admin.
 //
@@ -15,32 +15,17 @@ const TOPICS = [
     path:  '/api/v1/webhook/siigo-products',
     label: 'products.create',
   },
-  {
-    topic: 'public.siigoapi.products.update',
-    path:  '/api/v1/webhook/siigo-products',
-    label: 'products.update',
-  },
-  {
-    topic: 'public.siigoapi.invoices.create',
-    path:  '/api/v1/webhook/siigo-invoices',
-    label: 'invoices.create',
-  },
-  {
-    topic: 'public.siigoapi.invoices.void',
-    path:  '/api/v1/webhook/siigo-invoices',
-    label: 'invoices.void',
-  },
-  {
-    topic: 'public.siigoapi.purchases.create',
-    path:  '/api/v1/webhook/siigo-purchases',
-    label: 'purchases.create',
-  },
-  {
-    topic: 'public.siigoapi.credit-notes.create',
-    path:  '/api/v1/webhook/siigo-credit-notes',
-    label: 'credit-notes.create',
-  },
 ];
+
+function getPublicBaseUrl() {
+  const raw = process.env.WMS_PUBLIC_URL || process.env.FRONTEND_URL?.replace('/app', '');
+  if (!raw) throw Object.assign(new Error('WMS_PUBLIC_URL no configurada'), { status: 500 });
+  const url = new URL(raw);
+  if (url.protocol !== 'https:') {
+    throw Object.assign(new Error('WMS_PUBLIC_URL debe usar HTTPS'), { status: 500 });
+  }
+  return url.toString().replace(/\/$/, '');
+}
 
 module.exports = async (req, res) => {
   cors(res, 'POST');
@@ -52,10 +37,14 @@ module.exports = async (req, res) => {
       return res.status(405).json({ ok: false, error: 'Method not allowed' });
     }
 
-    const baseUrl    = process.env.FRONTEND_URL?.replace('/app', '') ||
-                       process.env.WMS_PUBLIC_URL ||
-                       'https://tu-wms.com';
-    const appId      = process.env.SIIGO_PARTNER_ID || 'wms-integration';
+    const baseUrl    = getPublicBaseUrl();
+    const secret     = process.env.SIIGO_WEBHOOK_SECRET;
+    if (!secret || secret.length < 24) {
+      return res.status(500).json({ ok: false, error: 'SIIGO_WEBHOOK_SECRET no configurado o muy corto' });
+    }
+    const appId      = process.env.SIIGO_WEBHOOK_APPLICATION_ID ||
+                       process.env.SIIGO_TEST_PREFIX ||
+                       'WMSQASandbox';
     const resultados = [];
 
     for (const t of TOPICS) {
@@ -63,7 +52,7 @@ module.exports = async (req, res) => {
         const resp = await siigoPost('/v1/webhooks', {
           application_id: appId,
           topic:          t.topic,
-          url:            `${baseUrl}${t.path}`,
+          url:            `${baseUrl}${t.path}?secret=${encodeURIComponent(secret)}`,
         }, { entidad: 'webhook-subscribe' });
 
         resultados.push({
