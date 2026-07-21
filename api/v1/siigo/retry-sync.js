@@ -12,7 +12,7 @@ const { query }                    = require('../../_lib/db');
 const { pushCompraToSiigo }        = require('../../_lib/siigo.purchases');
 const { pushFacturaToSiigo }       = require('../../_lib/siigo.invoices');
 
-const BATCH_LIMIT = 20;
+const BATCH_LIMIT = 5;
 
 module.exports = async (req, res) => {
   cors(res, 'POST');
@@ -28,7 +28,9 @@ module.exports = async (req, res) => {
     const pending = await query(
       `SELECT DISTINCT referencia_id, referencia_tipo, tipo
        FROM movimientos
-       WHERE siigo_sync = 0 AND referencia_id IS NOT NULL
+       WHERE siigo_sync = 0
+         AND referencia_id IS NOT NULL
+         AND referencia_tipo IN ('recepcion_siigo', 'despacho_siigo')
        ORDER BY id ASC
        LIMIT ?`,
       [BATCH_LIMIT]
@@ -44,17 +46,12 @@ module.exports = async (req, res) => {
     for (const mov of pending) {
       try {
         let result;
-        if (mov.tipo === 'entrada' || (mov.referencia_tipo || '').includes('recepcion')) {
+        if (mov.referencia_tipo === 'recepcion_siigo') {
           result = await pushCompraToSiigo(mov.referencia_id);
-        } else if (mov.tipo === 'salida' || (mov.referencia_tipo || '').includes('despacho')) {
+        } else if (mov.referencia_tipo === 'despacho_siigo') {
           result = await pushFacturaToSiigo(mov.referencia_id);
         } else {
-          // Tipo no manejado — marcar como sync=1 para no bloquear la cola
-          await query(
-            `UPDATE movimientos SET siigo_sync = 1 WHERE referencia_id = ? AND referencia_tipo = ?`,
-            [mov.referencia_id, mov.referencia_tipo]
-          );
-          result = { skipped: true };
+          throw new Error(`Tipo de referencia SIIGO no soportado: ${mov.referencia_tipo}`);
         }
         procesados++;
         detalle.push({ ...mov, resultado: result });

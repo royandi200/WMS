@@ -19,6 +19,26 @@ async function getConfigValue(clave) {
   return rows[0]?.valor ?? null;
 }
 
+async function getRequiredConfig(clave) {
+  const value = await getConfigValue(clave);
+  if (!value) throw new Error(`${clave} no configurado`);
+  return value;
+}
+
+function calculateInvoiceTotal(items, taxPercentage) {
+  return Number(items.reduce((total, item) => {
+    const quantity = Number(item.cantidad_des ?? item.cantidad_sol ?? 0);
+    const price = Number(item.precio_unitario ?? item.precio_venta ?? 0);
+    const discount = Number(item.descuento || 0);
+    if (quantity <= 0 || price <= 0) {
+      throw new Error(`Item ${item.siigo_code || ''} sin cantidad o precio valido`);
+    }
+    const base = quantity * price * (1 - discount / 100);
+    const tax = item.tax_classification === 'Taxed' ? base * taxPercentage / 100 : 0;
+    return total + base + tax;
+  }, 0).toFixed(2));
+}
+
 async function pushFacturaToSiigo(despachoId, conn) {
   const q = conn
     ? (sql, p) => conn.query(sql, p).then(([r]) => r)
@@ -55,9 +75,16 @@ async function pushFacturaToSiigo(despachoId, conn) {
   if (!items.length) throw new Error('Despacho sin items');
 
   // 3. ID del tipo de comprobante FV
-  const docId    = await getConfigValue('doc_id_factura_vta');
-  const sellerId = await getConfigValue('default_seller_id');
+  const docId       = await getRequiredConfig('doc_id_factura_vta');
+  const sellerId    = await getRequiredConfig('default_seller_id');
+  const paymentId   = await getRequiredConfig('default_payment_fv_id');
+  const taxId       = await getRequiredConfig('default_tax_id');
+  const taxPercent  = Number(await getConfigValue('default_tax_percentage') || 19);
+  const warehouseId = await getConfigValue('default_warehouse_id');
   if (!docId) throw new Error('doc_id_factura_vta no configurado. Ejecutar sync-document-types primero.');
+  if (!desp.identification) throw new Error('El despacho requiere un cliente sincronizado con SIIGO');
+
+  const total = calculateInvoiceTotal(items, taxPercent);
 
   // 4. Construir payload SIIGO
   const payload = {
@@ -65,29 +92,27 @@ async function pushFacturaToSiigo(despachoId, conn) {
     date: (desp.despachado_en || desp.creado_en)
       ? new Date(desp.despachado_en || desp.creado_en).toISOString().substring(0, 10)
       : new Date().toISOString().substring(0, 10),
-    customer: desp.tercero_siigo_id
-      ? { id: desp.tercero_siigo_id }
-      : {
-          person_type:    desp.person_type    || 'company',
-          id_type:        { id: desp.id_type  || '13' },
-          identification: desp.identification || desp.cliente_nombre || '',
-          name:           desp.tercero_nombre || desp.cliente_nombre || 'CLIENTE',
-          branch_office:  desp.branch_office  || 0,
-        },
-    seller: sellerId ? { id: Number(sellerId) } : undefined,
+    customer: {
+      identification: desp.identification,
+      branch_office: Number(desp.branch_office || 0),
+    },
+    seller: Number(sellerId),
     items: items.map(i => ({
       code:      i.siigo_code,
-      quantity:  Number(i.cantidad_des || i.cantidad_sol || 1),
+      quantity:  Number(i.cantidad_des ?? i.cantidad_sol ?? 0),
       price:     Number(i.precio_unitario ?? i.precio_venta ?? 0),
       discount:  Number(i.descuento || 0),
+      ...(i.bodega_siigo_id || warehouseId
+        ? { warehouse: Number(i.bodega_siigo_id || warehouseId) }
+        : {}),
       taxes: i.tax_classification === 'Taxed'
-        ? [{ id: 8187 }]  // IVA 19% sandbox — ajustar según producción
+        ? [{ id: Number(taxId) }]
         : [],
     })),
     observations: desp.observaciones || `Despacho WMS ${desp.numero}`,
-    // Facturación electrónica DIAN
-    stamp: { send: true },
-    send_email: false,
+    payments: [{ id: Number(paymentId), value: total }],
+    stamp: { send: process.env.SIIGO_STAMP_SEND === 'true' },
+    mail: { send: false },
   };
 
   // 5. Enviar a SIIGO
@@ -101,7 +126,7 @@ async function pushFacturaToSiigo(despachoId, conn) {
     // Marcar movimiento para reintento
     await query(
       `UPDATE movimientos SET siigo_sync = 0
-       WHERE referencia_id = ? AND referencia_tipo LIKE 'despacho%' LIMIT 5`,
+       WHERE referencia_id = ? AND referencia_tipo = 'despacho_siigo' LIMIT 5`,
       [despachoId]
     ).catch(() => {});
     throw err;
@@ -125,11 +150,18 @@ async function pushFacturaToSiigo(despachoId, conn) {
   await query(
     `UPDATE movimientos
      SET siigo_sync = 1, siigo_voucher_id = ?
-     WHERE referencia_id = ? AND referencia_tipo LIKE 'despacho%'`,
+     WHERE referencia_id = ? AND referencia_tipo = 'despacho_siigo'`,
     [siigoId, despachoId]
   ).catch(() => {});
 
-  return { ok: true, siigo_id: siigoId, siigo_name: siigoName, cufe, stamp_status: stampStatus };
+  return {
+    ok: true,
+    siigo_id: siigoId,
+    siigo_name: siigoName,
+    cufe,
+    stamp_status: stampStatus,
+    total,
+  };
 }
 
 module.exports = { pushFacturaToSiigo };
