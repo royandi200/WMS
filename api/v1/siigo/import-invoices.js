@@ -253,7 +253,7 @@ function signatureQuantity(signature) {
   return signature.reduce((sum, [, quantity]) => sum + Number(quantity || 0), 0);
 }
 
-async function reconcileCompleted(user, invoiceIds = []) {
+async function reconcileCompleted(user, invoiceIds = [], cachedInvoices = new Map()) {
   await ensureDispatchIssuesTable();
   const ids = [...new Set(invoiceIds.map(value => String(value || '').trim()).filter(Boolean))];
   const idFilter = ids.length ? ` AND d.siigo_invoice_id IN (${ids.map(() => '?').join(',')})` : '';
@@ -270,10 +270,11 @@ async function reconcileCompleted(user, invoiceIds = []) {
   const results = [];
   for (const dispatch of dispatches) {
     try {
-      const invoice = await siigoGet(`/v1/invoices/${encodeURIComponent(dispatch.siigo_invoice_id)}`, {
-        entidad: 'factura_completada_reconciliada',
-        entidad_id: dispatch.id,
-      });
+      const invoice = cachedInvoices.get(String(dispatch.siigo_invoice_id))
+        || await siigoGet(`/v1/invoices/${encodeURIComponent(dispatch.siigo_invoice_id)}`, {
+          entidad: 'factura_completada_reconciliada',
+          entidad_id: dispatch.id,
+        });
       validateSandboxInvoice(invoice);
       if (invoice.annulled === true) {
         const created = await addCompletedIssue(
@@ -370,7 +371,10 @@ module.exports = async (req, res) => {
       || req.query?.reconcile_completed === 'true';
     let completedReconciliation = [];
     if (await shouldReconcileCompleted(forceCompleted)) {
-      completedReconciliation = await reconcileCompleted(user, ids);
+      const cachedInvoices = new Map(
+        invoices.filter(invoice => invoice?.id).map(invoice => [String(invoice.id), invoice])
+      );
+      completedReconciliation = await reconcileCompleted(user, ids, cachedInvoices);
       if (!completedReconciliation.some(result => result.status === 'error')) {
         await setConfigValue('invoices_completed_reconcile_at', new Date().toISOString());
       }
