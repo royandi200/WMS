@@ -1,463 +1,194 @@
-# Plan de Pruebas — Integración SIIGO API
-> Guía operativa paso a paso para validar la integración del WMS con SIIGO API sandbox.
-> Ejecutar en orden. Cada prueba depende de la anterior.
+# Plan de pruebas - Integracion SIIGO API
 
----
+Guia para validar la integracion WMS-SIIGO sin contaminar el sandbox compartido ni duplicar documentos contables.
 
-## Preparación previa
+## Reglas de seguridad
 
-Antes de empezar, asegúrate de tener estas variables en tu archivo `.env`:
+- Ejecutar solamente contra la cuenta sandbox hasta aprobar todo el plan.
+- Usar el prefijo `WMSQA260721` en productos, terceros, lotes y observaciones.
+- No enviar nombres, marcas ni referencias del cliente real a SIIGO sandbox.
+- No sincronizar catalogos completos de la cuenta compartida.
+- No crear una segunda recepcion o despacho para compensar un error de SIIGO. Usar la cola.
+- Reintentar escrituras solo cuando SIIGO haya rechazado explicitamente la operacion, por ejemplo con HTTP 429.
+- No reintentar automaticamente POST o PUT ante timeout o respuesta ambigua.
+- No modificar webhooks de `sandbox@siigoapi.com`: la suscripcion existente puede pertenecer a otro integrador.
+- No guardar credenciales, tokens ni secretos en este documento o en Git.
+
+## Configuracion requerida
+
+Variables de Vercel:
 
 ```env
 SIIGO_BASE_URL=https://api.siigo.com
-SIIGO_USERNAME=sandbox@siigoapi.com
-SIIGO_ACCESS_KEY=YmEzYTcyOGYtN2JhZi00OTIzLWE5ZjktYTgxNTVhNWUxZDM2Ojc0ODllKUZrSFM=
-SIIGO_PARTNER_ID=wms-integration
+SIIGO_USERNAME=<usuario-api>
+SIIGO_ACCESS_KEY=<secreto>
+SIIGO_PARTNER_ID=<partner-id-asignado>
+SIIGO_TEST_PREFIX=WMSQA260721
+SIIGO_STAMP_SEND=false
+WMS_PUBLIC_URL=https://wms-seven-ebon.vercel.app
+SIIGO_WEBHOOK_SECRET=<secreto-aleatorio-de-al-menos-24-caracteres>
 ```
 
-Ten abiertos en el navegador:
-- **Siigo Nube sandbox:** https://siigonube.siigo.com → usuario `sandbox@siigoapi.com` / contraseña `111111`
-- **Tu WMS local o de pruebas** corriendo en `http://localhost:3000` (o la URL que uses)
-- **Postman o Thunder Client** para enviar las peticiones
+Despues de modificar variables se debe redesplegar Vercel.
 
-En todas las peticiones al WMS agrega el header:
+## Datos de prueba aislados
+
+| Entidad | Valor |
+| --- | --- |
+| Producto | `WMSQA260721P01` |
+| Lote | `WMSQA260721LOT01` |
+| Cliente | `WMSQA260721 Cliente` |
+| Proveedor | `WMSQA260721 Proveedor` |
+| Identificacion cliente | `999260721001` |
+| Identificacion proveedor | `999260721002` |
+
+Todos deben existir primero en SIIGO y luego sincronizarse selectivamente al WMS.
+
+## PT-01 - Autenticacion y health
+
+1. Iniciar sesion como Admin en el WMS.
+2. Ejecutar `GET /api/v1/siigo/health`.
+3. Confirmar `ok: true`, token presente y tipos de documento mayores que cero.
+
+Resultado actual: **APROBADO**.
+
+## PT-02 - Reutilizacion del token
+
+1. Consultar dos veces el health.
+2. Confirmar en `siigo_sync_log` que no se genero un `/auth` adicional mientras el token seguia vigente.
+
+Resultado actual: **APROBADO**.
+
+## PT-03 - Renovacion del token
+
+1. En un entorno controlado, vencer `token_expiry`.
+2. Consultar health.
+3. Confirmar un solo `/auth` nuevo y una expiracion futura.
+
+Resultado actual: **APROBADO**.
+
+## PT-04 - Tipos de documento
+
+Ejecutar `POST /api/v1/siigo/sync-document-types` y verificar:
+
+- FV: 255 registros; predeterminado `2372`.
+- FC: 31 registros; predeterminado `2377`.
+- NC: 53 registros.
+- AJ puede no estar disponible en el sandbox y no bloquea FV/FC.
+
+Resultado actual: **APROBADO**.
+
+## PT-05 - Producto selectivo
+
+```http
+POST /api/v1/siigo/sync-products
+Content-Type: application/json
+
+{"codes":["WMSQA260721P01"]}
 ```
-Authorization: Bearer <tu-token-de-admin-del-WMS>
+
+Repetir la operacion y confirmar `creados: 0`, `actualizados: 1`.
+
+Resultado actual: **APROBADO**. Producto WMS ID 110.
+
+## PT-06 - Terceros selectivos
+
+```http
+POST /api/v1/siigo/sync-terceros
+Content-Type: application/json
+
+{"identifications":["999260721001","999260721002"]}
 ```
 
----
+Confirmar que los nombres contienen `WMSQA260721` y que la segunda ejecucion no duplica registros.
 
-## PT-01 — Verificar conexión con SIIGO (health check)
+Resultado actual: **APROBADO**. Cliente WMS ID 8; proveedor WMS ID 9.
 
-**Objetivo:** Confirmar que el WMS puede autenticarse contra SIIGO y el token queda cacheado en la base de datos.
+## PT-07 - Recepcion y factura de compra
 
-**Pasos:**
+Recepcion controlada:
 
-1. Abre Postman (o Thunder Client).
-2. Crea una petición `GET` a:
-   ```
-   http://localhost:3000/api/v1/siigo/health
-   ```
-3. Agrega el header `Authorization: Bearer <tu-token-admin>`.
-4. Haz clic en **Send**.
+- WMS: `REC-DASH-000002`, ID 33.
+- Producto: `WMSQA260721P01`.
+- Lote: `WMSQA260721LOT01`.
+- Cantidad: 5.
+- Precio unitario: 5.000.
+- Factura proveedor: prefijo `WQA`, numero `2607210001`.
 
-**Qué esperar:**
+Validaciones:
+
+- La recepcion queda completada aunque SIIGO falle.
+- El lote y `stock` muestran 5 unidades, no 10.
+- Un HTTP 429 deja exactamente un `recepcion_siigo` pendiente.
+- `POST /api/v1/siigo/retry-sync` procesa la misma recepcion, no crea otra.
+- SIIGO devuelve `FC-1-8687`, total 25.000.
+- `GET /api/v1/siigo/retry-sync` queda en cero.
+
+Resultado actual: **APROBADO**.
+
+## PT-08 - Despacho y factura de venta
+
+Despacho controlado:
+
+- WMS: `DSP-1784678282822`, ID 33.
+- Lote: `WMSQA260721LOT01`.
+- Cantidad: 2.
+- Precio unitario: 10.000.
+- Saldo esperado: 3.
+
+Validaciones:
+
+- `stock.cantidad` y `lots.qty_current` quedan ambos en 3.
+- Un HTTP 429 deja exactamente un `despacho_siigo` pendiente.
+- El reintento procesa el mismo despacho sin descontar inventario otra vez.
+- SIIGO devuelve `FV-1-10000003569`, total 20.000.
+- La cola queda en cero.
+- CUFE y `stamp_status` deben ser nulos mientras `SIIGO_STAMP_SEND=false`.
+
+Resultado actual: **APROBADO**.
+
+## PT-09 - Cola y observabilidad
+
+`GET /api/v1/siigo/retry-sync` es solo lectura y debe mostrar:
+
 ```json
-{
-  "ok": true,
-  "data": {
-    "mensaje": "Conexión con SIIGO exitosa ✅",
-    "token_presente": true,
-    "document_types_count": 15,
-    "latencia_ms": 320
-  }
-}
-```
-- `ok` debe ser `true`.
-- `token_presente` debe ser `true`.
-- `document_types_count` debe ser mayor a 0 (SIIGO sandbox tiene varios tipos).
-
-**Verificar en base de datos:**
-```sql
-SELECT clave, valor FROM siigo_config WHERE clave IN ('access_token','token_expiry');
-```
-- `access_token` debe tener un JWT largo (empieza con `eyJ...`).
-- `token_expiry` debe ser una fecha futura (aprox. 24 horas desde ahora).
-
-**Verificar en log:**
-```sql
-SELECT endpoint, status_code, duracion_ms, creado_en
-FROM siigo_sync_log
-ORDEN BY id DESC LIMIT 5;
-```
-- Debe aparecer una fila con `endpoint = '/auth'` y `status_code = 200`.
-
----
-
-## PT-02 — Confirmar que el token se reutiliza (no hace login doble)
-
-**Objetivo:** Verificar que el sistema usa el token cacheado y no llama a `/auth` en cada petición.
-
-**Pasos:**
-
-1. Anota cuántas filas hay en `siigo_sync_log` con `endpoint = '/auth'`:
-   ```sql
-   SELECT COUNT(*) FROM siigo_sync_log WHERE endpoint = '/auth';
-   ```
-   Guarda ese número (ej. `1`).
-2. Vuelve a llamar `GET /api/v1/siigo/health` desde Postman.
-3. Vuelve a contar:
-   ```sql
-   SELECT COUNT(*) FROM siigo_sync_log WHERE endpoint = '/auth';
-   ```
-
-**Qué esperar:**
-- El conteo **no debe aumentar**. Debe seguir siendo `1` (reutilizó el token cacheado).
-
----
-
-## PT-03 — Forzar refresco automático de token
-
-**Objetivo:** Confirmar que si el token está a punto de expirar, el sistema hace re-login solo.
-
-**Pasos:**
-
-1. Simula token vencido actualizando la fecha de expiración en la base de datos:
-   ```sql
-   UPDATE siigo_config
-   SET valor = '2020-01-01T00:00:00.000Z'
-   WHERE clave = 'token_expiry';
-   ```
-2. Llama de nuevo a `GET /api/v1/siigo/health`.
-3. Verifica en la base de datos:
-   ```sql
-   SELECT valor FROM siigo_config WHERE clave = 'token_expiry';
-   ```
-
-**Qué esperar:**
-- La fecha de `token_expiry` debe ser nueva (fecha futura de hoy).
-- En `siigo_sync_log` debe aparecer un nuevo registro con `endpoint = '/auth'`.
-- La respuesta del endpoint sigue siendo `ok: true`.
-
----
-
-## PT-04 — Sincronizar tipos de comprobante
-
-**Objetivo:** Traer de SIIGO los IDs de los tipos de documento (FV, FC, AJ) que se usarán para crear facturas.
-
-**Pasos:**
-
-1. En Postman, crea una petición `POST` a:
-   ```
-   http://localhost:3000/api/v1/siigo/sync-document-types
-   ```
-2. Header: `Authorization: Bearer <tu-token-admin>`.
-3. Body: vacío (no requiere body).
-4. Haz clic en **Send**.
-
-**Qué esperar:**
-```json
-{
-  "ok": true,
-  "data": {
-    "total_synced": 12,
-    "doc_id_factura_vta": 29,
-    "doc_id_factura_cmp": 30,
-    "doc_id_ajuste": 45,
-    "tipos": [...]
-  }
-}
-```
-- `doc_id_factura_vta` y `doc_id_factura_cmp` **no deben ser null**. Si son null, las fases de facturas van a fallar.
-
-**Verificar en base de datos:**
-```sql
-SELECT clave, valor FROM siigo_config
-WHERE clave IN ('doc_id_factura_vta','doc_id_factura_cmp','doc_id_ajuste');
-
-SELECT siigo_id, codigo, nombre, tipo FROM siigo_documentos LIMIT 20;
-```
-- La tabla `siigo_documentos` debe tener registros con tipos `FV`, `FC`, `AJ`, `NC`.
-
----
-
-## PT-05 — Sincronizar catálogo de productos
-
-**Objetivo:** Importar todos los productos del sandbox de SIIGO a la tabla local `productos`.
-
-**Pasos:**
-
-1. Anota cuántos productos hay antes:
-   ```sql
-   SELECT COUNT(*) FROM productos WHERE siigo_id IS NOT NULL;
-   ```
-2. En Postman, `POST` a:
-   ```
-   http://localhost:3000/api/v1/siigo/sync-products
-   ```
-3. Header: `Authorization: Bearer <tu-token-admin>`. Body: vacío.
-4. Envía la petición. **Puede tardar varios segundos** si hay muchos productos.
-
-**Qué esperar:**
-```json
-{
-  "ok": true,
-  "data": {
-    "total_siigo": 25,
-    "creados": 25,
-    "actualizados": 0,
-    "errores": 0,
-    "duracion_ms": 1800
-  }
-}
-```
-- `errores` debe ser `0`.
-- `creados` debe coincidir con los productos que ves en Siigo Nube → Inventario → Productos.
-
-**Verificar idempotencia** (que no duplique):
-1. Envía la misma petición una segunda vez.
-2. Ahora `creados` debe ser `0` y `actualizados` debe ser igual al total.
-
-**Verificar en base de datos:**
-```sql
-SELECT siigo_code, siigo_id, nombre, precio_venta, siigo_synced_at
-FROM productos
-WHERE siigo_id IS NOT NULL
-LIMIT 10;
+{"ok":true,"data":{"pendientes":0,"detalle":[]}}
 ```
 
----
+`POST /api/v1/siigo/retry-sync` procesa hasta cinco referencias. Si alguna falla:
 
-## PT-06 — Sincronizar clientes y proveedores (terceros)
+- `ok` debe ser `false`.
+- `errores` debe ser mayor que cero.
+- El detalle debe incluir status y respuesta estructurada de SIIGO.
+- El movimiento debe conservar `siigo_sync=0`.
+- El saldo de inventario no debe cambiar durante el reintento contable.
 
-**Objetivo:** Importar todos los terceros del sandbox a la tabla `terceros`.
+Resultado actual: **APROBADO** para rechazo 429, persistencia y recuperacion posterior.
 
-**Pasos:**
+## PT-10 - Webhook de productos
 
-1. En Postman, `POST` a:
-   ```
-   http://localhost:3000/api/v1/siigo/sync-terceros
-   ```
-2. Header: `Authorization: Bearer <tu-token-admin>`. Body: vacío.
-3. Envía la petición.
+En la cuenta compartida no se ejecuta `webhooks-subscribe`. El endpoint debe devolver HTTP 409 para impedir reemplazar la URL de otro integrador.
 
-**Qué esperar:**
-```json
-{
-  "ok": true,
-  "data": {
-    "total_siigo": 10,
-    "creados": 10,
-    "actualizados": 0,
-    "errores": 0
-  }
-}
-```
+Validaciones disponibles ahora:
 
-**Verificar en base de datos:**
-```sql
-SELECT identification, nombre, tipo, siigo_id, siigo_synced_at
-FROM terceros
-WHERE siigo_id IS NOT NULL
-LIMIT 10;
-```
-- Cada fila debe tener `siigo_id` (UUID de SIIGO) e `identification` (NIT o cédula).
+- Secreto incorrecto contra `/api/v1/webhook/siigo-products`: HTTP 401.
+- Secreto correcto y producto fuera de `WMSQA260721`: HTTP 200 con `ignored: true`.
+- El secreto no aparece en logs ni respuestas.
 
----
+La prueba extremo a extremo queda para credenciales sandbox propias o produccion controlada:
 
-## PT-07 — Crear una Factura de Compra en SIIGO desde una recepción
+1. Ejecutar una vez `POST /api/v1/siigo/webhooks-subscribe`.
+2. Crear un producto con prefijo de prueba en SIIGO.
+3. Confirmar su upsert en WMS y `siigo_synced_at` reciente.
+4. Repetir el evento y confirmar que actualiza, no duplica.
 
-**Objetivo:** Completar una recepción en el WMS y verificar que crea la FC en SIIGO automáticamente.
+Resultado actual: **PARCIALMENTE APROBADO**. Receptor y seguridad aprobados; suscripcion externa bloqueada deliberadamente en sandbox compartido.
 
-**Pasos:**
+## Criterio final
 
-1. Entra al WMS en el navegador e ingresa al módulo de **Recepciones**.
-2. Crea una recepción nueva:
-   - Selecciona un proveedor (debe ser un tercero sincronizado en PT-06).
-   - Agrega al menos 1 ítem con un producto sincronizado en PT-05.
-   - Ingresa precio unitario (ej. `50000`).
-   - Guarda la recepción.
-3. Cambia el estado de la recepción a **Completada** (esto dispara `pushCompraToSiigo`).
-4. Espera la respuesta del sistema.
-
-**Qué esperar:**
-- El sistema muestra `siigo_purchase_name` con un código tipo `FC-001-000012`.
-
-**Verificar en base de datos:**
-```sql
-SELECT numero, estado, siigo_purchase_id, siigo_purchase_name, siigo_synced_at
-FROM recepciones
-ORDER BY id DESC LIMIT 1;
-```
-- `siigo_purchase_id` no debe ser null.
-- `siigo_synced_at` debe tener la fecha de hoy.
-
-**Verificar en Siigo Nube:**
-1. Ve a https://siigonube.siigo.com → **Compras** → **Facturas de Compra**.
-2. Busca la factura con el nombre `FC-XXX-XXX` que aparece en el WMS.
-3. Debe existir con los mismos ítems y montos.
-
----
-
-## PT-08 — Crear una Factura de Venta en SIIGO desde un despacho
-
-**Objetivo:** Confirmar un despacho en el WMS y verificar que crea la FV en SIIGO con CUFE de la DIAN.
-
-**Pasos:**
-
-1. Entra al módulo de **Despachos** en el WMS.
-2. Crea un despacho nuevo:
-   - Selecciona un cliente (tercero sincronizado en PT-06).
-   - Agrega al menos 1 ítem con producto y precio (ej. `120000`).
-   - Guarda el despacho.
-3. Cambia el estado del despacho a **Despachado** (esto dispara `pushFacturaToSiigo`).
-4. Espera la respuesta del sistema.
-
-**Qué esperar:**
-- El sistema muestra `siigo_invoice_name` tipo `FV-001-000034` y un CUFE largo.
-
-**Verificar en base de datos:**
-```sql
-SELECT numero, estado, siigo_invoice_id, siigo_invoice_name,
-       cufe, stamp_status, siigo_synced_at
-FROM despachos
-ORDER BY id DESC LIMIT 1;
-```
-- `siigo_invoice_id` no debe ser null.
-- `cufe` debe tener un hash largo (confirma que fue a la DIAN).
-- `stamp_status` debe ser `Accepted` o `Draft` (en sandbox puede ser Draft).
-
-**Verificar en Siigo Nube:**
-1. Ve a https://siigonube.siigo.com → **Ventas** → **Facturas de Venta**.
-2. Busca la factura `FV-XXX-XXX`.
-3. Debe existir con los ítems, cliente y monto correctos.
-
----
-
-## PT-09 — Simular fallo y verificar reintento automático
-
-**Objetivo:** Confirmar que si SIIGO falla, el movimiento queda pendiente y el retry lo resuelve.
-
-**Pasos:**
-
-1. Temporalmente rompe las credenciales en `.env`:
-   ```env
-   SIIGO_ACCESS_KEY=CLAVE_INCORRECTA
-   ```
-   Reinicia el servidor WMS.
-2. Crea un nuevo despacho y cámbialo a **Despachado**.
-3. El sistema debe mostrar un error (no pudo conectar con SIIGO).
-4. Verifica en base de datos que quedó marcado para reintento:
-   ```sql
-   SELECT id, tipo, referencia_tipo, referencia_id, siigo_sync
-   FROM movimientos
-   WHERE siigo_sync = 0
-   ORDER BY id DESC LIMIT 5;
-   ```
-   - Debe aparecer el movimiento con `siigo_sync = 0`.
-5. Restaura la clave correcta en `.env` y reinicia el servidor.
-6. Ahora llama el endpoint de reintentos en Postman, `POST` a:
-   ```
-   http://localhost:3000/api/v1/siigo/retry-sync
-   ```
-7. Envía la petición.
-
-**Qué esperar:**
-```json
-{
-  "ok": true,
-  "data": {
-    "pendientes": 1,
-    "procesados": 1,
-    "errores": 0
-  }
-}
-```
-- Vuelve a consultar `movimientos`: el registro debe tener `siigo_sync = 1` ahora.
-
----
-
-## PT-10 — Probar webhooks en tiempo real (requiere URL pública)
-
-**Objetivo:** Verificar que SIIGO puede notificar al WMS cuando ocurren eventos.
-
-**Preparación:**
-
-Si estás en local, usa [ngrok](https://ngrok.com) para exponer el WMS:
-```bash
-ngrok http 3000
-```
-Copia la URL pública que ngrok genera (ej. `https://abc123.ngrok.io`) y agrégala al `.env`:
-```env
-WMS_PUBLIC_URL=https://abc123.ngrok.io
-```
-Reinicia el servidor.
-
-**Paso 1 — Suscribir los webhooks:**
-1. En Postman, `POST` a:
-   ```
-   http://localhost:3000/api/v1/siigo/webhooks-subscribe
-   ```
-2. Header: `Authorization: Bearer <tu-token-admin>`. Body: vacío.
-3. Envía.
-
-**Qué esperar:**
-```json
-{
-  "ok": true,
-  "data": {
-    "exitosos": 6,
-    "total": 6,
-    "resultados": [
-      { "label": "products.create", "ok": true, "siigo_id": "abc-123" },
-      ...
-    ]
-  }
-}
-```
-- `exitosos` debe ser `6`. Si alguno falla, revisa que `WMS_PUBLIC_URL` sea accesible desde internet.
-
-**Paso 2 — Probar webhook de producto:**
-1. Ve a Siigo Nube → **Inventario** → **Productos** → **Nuevo Producto**.
-2. Crea un producto de prueba y guárdalo.
-3. Espera 5–10 segundos.
-4. Verifica en base de datos del WMS:
-   ```sql
-   SELECT siigo_code, nombre, siigo_synced_at
-   FROM productos
-   ORDER BY siigo_synced_at DESC LIMIT 3;
-   ```
-   - El producto nuevo debe aparecer con `siigo_synced_at` reciente.
-
-**Paso 3 — Probar webhook de factura de venta:**
-1. Ve a Siigo Nube → **Ventas** → **Nueva Factura de Venta**.
-2. Crea una factura con un cliente y al menos 1 producto. Guárdala.
-3. Espera 5–10 segundos.
-4. Verifica en el WMS:
-   ```sql
-   SELECT numero, estado, siigo_invoice_id, siigo_invoice_name, creado_en
-   FROM despachos
-   ORDER BY id DESC LIMIT 3;
-   ```
-   - Debe aparecer un nuevo despacho en estado `borrador` con el `siigo_invoice_name` de la FV creada.
-
-**Paso 4 — Probar webhook de anulación:**
-1. En Siigo Nube, anula la factura de venta que acabas de crear.
-2. Espera 5–10 segundos.
-3. Verifica en el WMS:
-   ```sql
-   SELECT numero, estado FROM despachos ORDER BY id DESC LIMIT 3;
-   ```
-   - El despacho correspondiente debe estar en estado `anulado`.
-
----
-
-## Checklist final antes de pasar a producción
-
-Marca cada punto antes de solicitar credenciales de producción a SIIGO:
-
-- [ ] PT-01 a PT-03: autenticación y token cache funcionando
-- [ ] PT-04: IDs de comprobantes FV y FC guardados en `siigo_config`
-- [ ] PT-05 a PT-06: catálogo de productos y terceros importado sin errores
-- [ ] PT-07: FC creada en SIIGO y visible en Siigo Nube → Compras
-- [ ] PT-08: FV creada en SIIGO con CUFE, visible en Siigo Nube → Ventas
-- [ ] PT-09: fallo simulado y reintento exitoso con `retry-sync`
-- [ ] PT-10: webhooks suscritos y eventos recibidos en tiempo real
-- [ ] `siigo_sync_log` sin registros con `status_code` 5xx
-- [ ] Tabla `movimientos` sin registros con `siigo_sync = 0` pendientes
-
-**Cuando todo esté en verde**, solicita las credenciales de producción en:
-https://siigonube.portaldeclientes.siigo.com/generar-credenciales-api/
-
-Actualiza el `.env` de producción y corre de nuevo:
-1. `POST /api/v1/siigo/health` — verificar conexión prod
-2. `POST /api/v1/siigo/sync-document-types` — IDs de comprobantes prod
-3. `POST /api/v1/siigo/sync-products` — catálogo prod
-4. `POST /api/v1/siigo/sync-terceros` — terceros prod
-5. `POST /api/v1/siigo/webhooks-subscribe` — activar webhooks prod
-
----
-
-**Soporte SIIGO API:** soporteapi@siigo.com
-**Documentación:** https://developers.siigolatam.com/docs/siigoapi/
-**Colección Postman oficial:** https://saprodcentralassets.blob.core.windows.net/siigoapi/documentation/SiigoAPI_Pruebas.postman_collection
+- PT-01 a PT-09 aprobadas.
+- PT-10 completada con una cuenta no compartida.
+- Cola SIIGO en cero.
+- Inventario WMS conciliado con sus movimientos.
+- Ningun dato real del cliente presente en el sandbox.
+- `SIIGO_STAMP_SEND` continua en `false` hasta aprobar expresamente facturacion electronica.

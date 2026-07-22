@@ -9,6 +9,8 @@
 const { cors, requireRole } = require('../../_lib/auth');
 const { siigoPost, siigoPut } = require('../../_lib/siigo.service');
 
+const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
+
 const TOPICS = [
   {
     topic: 'public.siigoapi.products.create',
@@ -61,6 +63,16 @@ module.exports = async (req, res) => {
     await requireRole(req, ['Admin']);
     if (req.method !== 'POST') {
       return res.status(405).json({ ok: false, error: 'Method not allowed' });
+    }
+
+    const isSharedSandbox = String(process.env.SIIGO_USERNAME || '').trim().toLowerCase() ===
+      SHARED_SANDBOX_USERNAME;
+    if (isSharedSandbox && process.env.SIIGO_ALLOW_SHARED_SANDBOX_WEBHOOK_UPDATE !== 'true') {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se modifican webhooks de la cuenta sandbox compartida de SIIGO',
+        data: { shared_sandbox: true, receptor_listo: true },
+      });
     }
 
     const baseUrl    = getPublicBaseUrl();
