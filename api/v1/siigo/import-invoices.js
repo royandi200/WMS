@@ -395,6 +395,7 @@ module.exports = async (req, res) => {
         fetched: invoices.length,
         created: results.filter(result => result.status === 'created').length,
         updated: results.filter(result => result.status === 'updated').length,
+        converted: results.filter(result => result.status === 'converted').length,
         duplicates: results.filter(result => result.status === 'duplicate').length,
         cancelled: results.filter(result => result.status === 'cancelled').length,
         errors,

@@ -6,6 +6,13 @@ function httpError(status, message) {
 
 function normalizeInvoice(invoice) {
   const customer = invoice?.customer || {};
+  const observations = String(invoice?.observations || '').trim();
+  const purchaseOrder = invoice?.additional_fields?.purchase_order || {};
+  const quotationPrefix = String(
+    process.env.SIIGO_QUOTATION_REFERENCE_PREFIX || 'WMSCOT'
+  ).trim().toUpperCase();
+  const purchaseOrderReference = String(purchaseOrder.number || '').trim();
+  const markerReference = observations.match(/\[WMS-COT:([A-Za-z0-9-]+)\]/i)?.[1] || '';
   return {
     id: String(invoice?.id || '').trim(),
     name: String(invoice?.name || '').trim(),
@@ -14,7 +21,10 @@ function normalizeInvoice(invoice) {
     customerIdentification: String(customer.identification || '').trim(),
     customerName: String(customer.name || customer.commercial_name || '').trim(),
     total: Number(invoice?.total || 0),
-    observations: String(invoice?.observations || '').trim(),
+    observations,
+    quotationReference: String(purchaseOrder.prefix || '').trim().toUpperCase() === quotationPrefix
+      ? purchaseOrderReference
+      : markerReference,
     annulled: invoice?.annulled === true,
     cufe: String(invoice?.stamp?.cufe || invoice?.cufe || '').trim(),
     stampStatus: ['Draft', 'Accepted', 'Rejected'].includes(String(invoice?.stamp?.status || '').trim())
@@ -149,6 +159,103 @@ async function releaseReservations(conn, dispatchId, bodegaId) {
   return released;
 }
 
+async function convertQuotationReservation(conn, {
+  data,
+  customer,
+  customerName,
+  bodegaId,
+  numero,
+  userId,
+}) {
+  if (!data.quotationReference) return null;
+
+  const [reservations] = await conn.execute(
+    `SELECT r.id AS reservation_id, r.despacho_id, r.estado, r.expira_en,
+            (r.expira_en IS NOT NULL AND r.expira_en < NOW()) AS reserva_vencida,
+            d.numero, d.estado AS despacho_estado, d.bodega_id, d.tercero_id
+     FROM siigo_cotizacion_reservas r
+     JOIN despachos d ON d.id = r.despacho_id
+     WHERE BINARY r.siigo_quotation_name = BINARY ?
+     LIMIT 2 FOR UPDATE`,
+    [data.quotationReference]
+  );
+  if (!reservations.length) {
+    throw httpError(409, `Cotizacion ${data.quotationReference} sin reserva WMS`);
+  }
+  if (reservations.length > 1) {
+    throw httpError(409, `Cotizacion ${data.quotationReference} tiene reservas ambiguas`);
+  }
+
+  const reservation = reservations[0];
+  if (reservation.estado !== 'RESERVADA' || reservation.despacho_estado !== 'picking') {
+    throw httpError(
+      409,
+      `Cotizacion ${data.quotationReference} no tiene una reserva activa en picking`
+    );
+  }
+  if (Number(reservation.reserva_vencida) === 1) {
+    throw httpError(409, `La reserva de ${data.quotationReference} esta vencida`);
+  }
+  if (Number(reservation.tercero_id) !== Number(customer.id)) {
+    throw httpError(409, `El cliente de la factura no coincide con ${data.quotationReference}`);
+  }
+  if (Number(reservation.bodega_id) !== Number(bodegaId)) {
+    throw httpError(409, `La bodega de la factura no coincide con ${data.quotationReference}`);
+  }
+
+  const [currentItems] = await conn.execute(
+    `SELECT p.siigo_code, di.cantidad_sol, di.precio_unitario,
+            di.descuento, di.bodega_siigo_id, di.lote
+     FROM despacho_items di
+     JOIN productos p ON p.id = di.producto_id
+     WHERE di.despacho_id = ?
+     ORDER BY di.id ASC`,
+    [reservation.despacho_id]
+  );
+  if (JSON.stringify(invoiceSignature(currentItems)) !== JSON.stringify(invoiceSignature(data.items))) {
+    throw httpError(
+      409,
+      `La factura ${data.name} no coincide en productos, cantidades, precios o bodega con ${data.quotationReference}`
+    );
+  }
+
+  const [updated] = await conn.execute(
+    `UPDATE despachos
+     SET numero = ?, tercero_id = ?, cliente_nombre = ?, bodega_id = ?, usuario_id = ?,
+         observaciones = ?, siigo_invoice_id = ?, siigo_invoice_name = ?, cufe = ?,
+         stamp_status = ?, total_factura = ?, siigo_synced_at = NOW()
+     WHERE id = ? AND estado = 'picking' AND siigo_invoice_id IS NULL`,
+    [numero, customer.id, customerName, bodegaId, userId,
+     data.observations || `Convertido desde cotizacion ${data.quotationReference} a ${data.name}`,
+     data.id, data.name, data.cufe || null, data.stampStatus || null,
+     data.total || null, reservation.despacho_id]
+  );
+  if (updated.affectedRows !== 1) {
+    throw httpError(409, `No se pudo convertir la reserva de ${data.quotationReference}`);
+  }
+  await conn.execute(
+    `UPDATE siigo_cotizacion_reservas
+     SET estado = 'CONVERTIDA', motivo = ?, expira_en = NULL, actualizado_en = NOW()
+     WHERE id = ? AND estado = 'RESERVADA'`,
+    [`Convertida a factura ${data.name}`, reservation.reservation_id]
+  );
+
+  return {
+    status: 'converted',
+    id: reservation.despacho_id,
+    numero,
+    estado: 'picking',
+    siigo_invoice_id: data.id,
+    siigo_invoice_name: data.name,
+    siigo_quotation_name: data.quotationReference,
+    reserved: currentItems.map(item => ({
+      sku: item.siigo_code,
+      lote: item.lote,
+      cantidad: Number(item.cantidad_sol),
+    })),
+  };
+}
+
 async function importInvoice(invoice, userId) {
   const data = normalizeInvoice(invoice);
   if (!data.id || !data.name) throw httpError(400, 'Factura SIIGO sin id o nombre');
@@ -223,6 +330,18 @@ async function importInvoice(invoice, userId) {
     const numero = `DSP-SIIGO-${safeName}`.slice(0, 30);
     const customer = customerRows[0];
     const customerName = data.customerName || customer.nombre_comercial || customer.nombre || 'CLIENTE SIIGO';
+    if (!existing.length && data.quotationReference) {
+      const converted = await convertQuotationReservation(conn, {
+        data,
+        customer,
+        customerName,
+        bodegaId,
+        numero,
+        userId,
+      });
+      await conn.commit();
+      return converted;
+    }
     let dispatchId;
     let status;
     if (existing.length) {
