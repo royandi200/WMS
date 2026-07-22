@@ -78,6 +78,8 @@ async function handleGet(req, res) {
        r.numero,
        r.proveedor_nombre,
        r.estado,
+       r.siigo_purchase_id,
+       r.siigo_purchase_name,
        r.observaciones,
        r.creado_en,
        r.completado_en,
@@ -98,6 +100,171 @@ async function handleGet(req, res) {
     [limit]
   );
   return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
+}
+
+function receivedItemInput(body, item, totalItems) {
+  const inputs = Array.isArray(body.items) ? body.items : [];
+  const match = inputs.find(input => Number(input.item_id) === Number(item.id))
+    || inputs.find(input => Number(input.product_id) === Number(item.producto_id));
+  if (match) return match;
+  return totalItems === 1 ? body : null;
+}
+
+async function handlePut(req, res) {
+  const user = await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  const body = req.body || {};
+  const receptionId = Number(body.reception_id || body.recepcion_id || 0);
+  if (!Number.isInteger(receptionId) || receptionId <= 0) {
+    throw httpError(400, 'recepcion_id es obligatorio');
+  }
+
+  let conn;
+  try {
+    conn = await createConnection();
+    await conn.beginTransaction();
+
+    const [receptions] = await conn.execute(
+      `SELECT * FROM recepciones WHERE id = ? LIMIT 1 FOR UPDATE`,
+      [receptionId]
+    );
+    if (!receptions.length) throw httpError(404, 'Recepcion no encontrada');
+    const reception = receptions[0];
+    if (reception.estado === 'completada') {
+      await conn.commit();
+      return res.status(200).json({
+        ok: true,
+        data: {
+          recepcion_id: receptionId,
+          numero: reception.numero,
+          estado: reception.estado,
+          already_completed: true,
+        },
+      });
+    }
+    if (!['borrador', 'en_proceso'].includes(reception.estado)) {
+      throw httpError(409, `La recepcion esta ${reception.estado} y no puede completarse`);
+    }
+
+    const [items] = await conn.execute(
+      `SELECT ri.*, p.siigo_code
+       FROM recepcion_items ri
+       JOIN productos p ON p.id = ri.producto_id
+       WHERE ri.recepcion_id = ?
+       ORDER BY ri.id ASC
+       FOR UPDATE`,
+      [receptionId]
+    );
+    if (!items.length) throw httpError(409, 'La recepcion no tiene items importados');
+
+    const results = [];
+    let hasDifference = false;
+    for (const item of items) {
+      const input = receivedItemInput(body, item, items.length);
+      if (!input) throw httpError(400, `Falta confirmar el item ${item.siigo_code}`);
+
+      const received = Number(input.qty_received ?? input.cantidad_recibida ?? input.qty_total);
+      const damaged = Number(input.qty_damaged ?? input.cantidad_danada ?? 0);
+      const lot = String(input.lot_id || input.lpn || input.lote || '').trim();
+      const expiryDate = input.expiry_date || input.fecha_vencimiento || null;
+      if (!Number.isFinite(received) || received < 0) {
+        throw httpError(400, `Cantidad recibida invalida para ${item.siigo_code}`);
+      }
+      if (!Number.isFinite(damaged) || damaged < 0 || damaged > received) {
+        throw httpError(400, `Cantidad danada invalida para ${item.siigo_code}`);
+      }
+
+      const accepted = received - damaged;
+      if (accepted > 0 && !lot) throw httpError(400, `Lote requerido para ${item.siigo_code}`);
+      hasDifference = hasDifference
+        || received !== Number(item.cantidad_esp)
+        || damaged > 0;
+
+      await conn.execute(
+        `UPDATE recepcion_items
+         SET lote = ?, fecha_venc = ?, cantidad_rec = ?
+         WHERE id = ?`,
+        [lot || null, expiryDate, received, item.id]
+      );
+
+      if (accepted > 0) {
+        const [existingLots] = await conn.execute(
+          `SELECT id FROM lots WHERE lpn = ? LIMIT 1`,
+          [lot]
+        );
+        if (existingLots.length) throw httpError(409, `El lote ${lot} ya existe`);
+
+        const lotId = crypto.randomUUID();
+        await conn.execute(
+          `INSERT INTO lots
+             (id, lpn, product_id, bodega_id, qty_initial, qty_current,
+              supplier, origin, status, received_by, notes, expiry_date, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', 'DISPONIBLE', ?, ?, ?, NOW())`,
+          [lotId, lot, item.producto_id, reception.bodega_id, accepted, accepted,
+           reception.proveedor_nombre || null, user.id,
+           body.notes || `Recepcion desde SIIGO ${reception.siigo_purchase_name || ''}`,
+           expiryDate]
+        );
+
+        await conn.execute(
+          `INSERT INTO stock
+             (producto_id, bodega_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
+           VALUES (?, ?, ?, ?, ?, 0, NOW())`,
+          [item.producto_id, reception.bodega_id, lot, expiryDate, accepted]
+        );
+
+        await conn.execute(
+          `INSERT INTO movimientos
+             (tipo, producto_id, bodega_dest, lote, cantidad, referencia_id,
+              referencia_tipo, usuario_id, siigo_sync)
+           VALUES ('entrada', ?, ?, ?, ?, ?, 'recepcion_siigo_import', ?, 1)`,
+          [item.producto_id, reception.bodega_id, lot, accepted, receptionId, user.id]
+        );
+      }
+
+      results.push({
+        item_id: item.id,
+        sku: item.siigo_code,
+        esperado: Number(item.cantidad_esp),
+        recibido: received,
+        danado: damaged,
+        aceptado: accepted,
+        lote: lot || null,
+      });
+    }
+
+    const discrepancy = hasDifference
+      ? `Diferencia fisica confirmada ${new Date().toISOString()}`
+      : null;
+    await conn.execute(
+      `UPDATE recepciones
+       SET estado = 'completada', completado_en = NOW(), usuario_id = ?,
+           observaciones = CASE
+             WHEN ? IS NULL THEN observaciones
+             WHEN observaciones IS NULL OR observaciones = '' THEN ?
+             ELSE CONCAT(observaciones, '\n', ?)
+           END
+       WHERE id = ?`,
+      [user.id, discrepancy, discrepancy, discrepancy, receptionId]
+    );
+
+    await conn.commit();
+    return res.status(200).json({
+      ok: true,
+      data: {
+        recepcion_id: receptionId,
+        numero: reception.numero,
+        estado: 'completada',
+        siigo_purchase_id: reception.siigo_purchase_id,
+        diferencia: hasDifference,
+        items: results,
+      },
+    });
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    if (conn) await conn.end().catch(() => {});
+  }
 }
 
 async function handlePost(req, res) {
@@ -225,11 +392,12 @@ async function handlePost(req, res) {
 }
 
 module.exports = async (req, res) => {
-  cors(res, 'GET,POST');
+  cors(res, 'GET,POST,PUT');
   if (req.method === 'OPTIONS') return res.status(200).end();
   try {
     if (req.method === 'GET') return await handleGet(req, res);
     if (req.method === 'POST') return await handlePost(req, res);
+    if (req.method === 'PUT') return await handlePut(req, res);
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
