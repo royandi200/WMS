@@ -344,12 +344,68 @@ Pendientes antes de produccion:
 - Agregar handlers de WhatsApp para consultar/sincronizar facturas; las excepciones requieren Admin o Supervisor.
 - Configurar explicitamente `SIIGO_WMS_WAREHOUSE_CODE=BG-PPAL` y verificar el ID de bodega de la cuenta productiva.
 
+## PT-14 - Excepciones y reconciliacion de ventas
+
+Pruebas ejecutadas el 22 de julio de 2026 sobre el producto `WMSQA260721P01`.
+
+### Venta superior al stock
+
+- Saldo inicial en SIIGO y WMS: 9.
+- SIIGO acepto `FV-1-10000003580` por 10 unidades y permitio inventario negativo.
+- WMS rechazo la importacion: solicitado 10, disponible trazable 9.
+- WMS permanecio en 9 fisicas, 0 reservadas y 9 disponibles.
+- La factura de sobreventa se elimino del sandbox.
+
+Resultado: **FALLO EN SIIGO / APROBADO EN WMS**. Con esta configuracion, la garantia de stock no puede depender exclusivamente de SIIGO.
+
+### Importacion automatica
+
+- Factura: `FV-1-10000003581`.
+- El filtro remoto `updated_start` devolvio cero resultados aun con una factura dentro de la ventana.
+- El fallback de sandbox se ajusto para leer hasta tres paginas recientes, filtrar exclusivamente `WMSQA` y evitar llamadas de detalle redundantes.
+- El cron creo automaticamente el despacho 37 en `picking` y reservo 1 unidad.
+- Tiempo observado dentro de la ventana final: 32 segundos.
+
+Resultado: **APROBADO**.
+
+### Modificacion antes del despacho
+
+- La factura cambio de 1 a 2 unidades.
+- El mismo despacho 37 se actualizo sin duplicarse.
+- La reserva anterior se libero y reconstruyo atomicamente.
+- Reserva final: 2, distribuida por FEFO entre `WMSQA260721LOT01` y `WMSQA260722LOT01`.
+- WMS quedo en 9 fisicas, 2 reservadas y 7 disponibles.
+
+Resultado: **APROBADO**.
+
+### Eliminacion antes del despacho
+
+- La factura se elimino en SIIGO mientras el despacho estaba en `picking`.
+- El cron detecto el 404, cambio el despacho a `anulado` y libero ambas reservas.
+- WMS regreso a 9 fisicas, 0 reservadas y 9 disponibles.
+- Latencia observada con rate limit activo: 156 segundos.
+
+Resultado: **APROBADO**.
+
+### Modificacion despues del despacho
+
+- `FV-1-10000003576`, asociada al despacho completado 35, se cambio temporalmente de 2 a 1 unidad.
+- WMS creo una alerta persistente `FACTURA_MODIFICADA`.
+- La segunda conciliacion devolvio `alert_exists`; no duplico la alerta.
+- WMS no altero stock ni lotes y permanecio en 9.
+- La factura se restauro documentalmente a 2 unidades.
+
+Resultado: **APROBADO EN WMS** para deteccion, idempotencia y proteccion del inventario fisico.
+
+Hallazgo pendiente: despues de la secuencia de editar, eliminar y restaurar facturas, SIIGO reporto 10 unidades mientras WMS permanecio en 9. No se aplico un ajuste artificial. La diferencia queda abierta para determinar si es comportamiento del sandbox compartido o una regla del manejo de inventario al editar facturas.
+
 ## Criterio final
 
 - PT-01 a PT-09 aprobadas.
 - PT-11 aprobada para importacion dirigida y confirmacion exacta.
 - PT-12 aprobada para polling, cambios previos, diferencias fisicas y eliminacion pendiente.
 - PT-13 aprobada para factura de venta primero, reserva y despacho fisico.
+- PT-14 aprobada en WMS; SIIGO permite sobreventa y queda pendiente explicar una diferencia contable de 1 unidad tras editar/eliminar facturas.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.

@@ -129,7 +129,15 @@ async function handleGet(req, res) {
 
   const itemProduct = hasDirectItems ? 'COALESCE(di.producto_id, d.producto_id)' : 'di.producto_id';
   const itemLot = hasDirectItems ? 'COALESCE(di.lote, d.lote)' : 'di.lote';
-  const itemQty = hasDirectItems ? 'COALESCE(di.cantidad_des, d.cantidad)' : 'di.cantidad_des';
+  const itemQty = hasDirectItems
+    ? `CASE WHEN d.estado = 'despachado'
+         THEN COALESCE(di.cantidad_des, d.cantidad)
+         ELSE COALESCE(di.cantidad_sol, d.cantidad)
+       END`
+    : `CASE WHEN d.estado = 'despachado'
+         THEN di.cantidad_des
+         ELSE di.cantidad_sol
+       END`;
 
   const rows = await query(
     `SELECT
@@ -148,7 +156,9 @@ async function handleGet(req, res) {
        p.siigo_code AS sku,
        p.nombre AS producto_nombre,
        ${itemLot} AS lote,
-       ${itemQty} AS cantidad
+       ${itemQty} AS cantidad,
+       di.cantidad_sol AS cantidad_solicitada,
+       di.cantidad_des AS cantidad_despachada
      FROM despachos d
      LEFT JOIN despacho_items di ON di.despacho_id = d.id
      LEFT JOIN productos p ON p.id = ${itemProduct}
