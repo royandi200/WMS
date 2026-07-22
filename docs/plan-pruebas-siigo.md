@@ -434,12 +434,45 @@ Resultado: **APROBADO**.
 
 Resultado: **APROBADO**.
 
+### Conversion exacta de cotizacion a factura
+
+- Cotizacion: `C-1-12345902`, ID `0b9de167-67fa-4022-a0da-d0eb909d5e68`, por 1 unidad.
+- Reserva provisional: despacho 40, `RES-COT-C-1-12345902`.
+- Factura: `FV-1-10000003588`, ID `9cd0d8d1-3311-4845-b3ec-5e7ca80cf601`, por 1 unidad.
+- El documento de factura 2372 rechazo `additional_fields.purchase_order` porque esa opcion no esta habilitada en su configuracion.
+- La prueba uso la referencia visible `[WMS-COT:C-1-12345902]` en observaciones.
+- El importador reutilizo el despacho 40 y lo cambio a `DSP-SIIGO-FV-1-10000003588`.
+- La reserva permanecio en 1; no se creo otro despacho ni se reservo otra unidad.
+- Repetir la importacion devolvio `duplicate` y mantuvo el saldo.
+
+Resultado: **APROBADO**.
+
+### Factura diferente a la cotizacion
+
+- Cotizacion: `C-1-12345903`, reservada por 1 unidad.
+- Factura: `FV-1-10000003589`, referenciada correctamente pero creada por 2 unidades.
+- El WMS bloqueo la conversion por diferencia en productos, cantidades, precios o bodega.
+- La reserva original de 1 unidad permanecio intacta y no se creo un despacho adicional.
+
+Resultado: **APROBADO**.
+
+### Factura sin referencia
+
+- Cotizacion: `C-1-12345904`, reservada por 1 unidad.
+- Factura: `FV-1-10000003590`, con la misma firma comercial pero sin `WMSCOT` ni marcador en observaciones.
+- El WMS detecto la reserva coincidente y bloqueo la factura por referencia omitida.
+- El saldo permanecio en 9 fisicas, 1 reservada y 8 disponibles; no duplico la reserva.
+
+Resultado: **APROBADO**.
+
+Todos los documentos de estas tres pruebas se eliminaron del sandbox. Las conciliaciones anularon los despachos pendientes y el saldo final regreso a 9 fisicas, 0 reservadas y 9 disponibles.
+
 Pendientes antes de usar cotizaciones en el flujo comercial:
 
-- Enlazar explicitamente cotizacion y factura para convertir la reserva existente en despacho facturado sin reservar de nuevo.
 - Liberar automaticamente reservas vencidas; la vigencia registrada actualmente es de 120 minutos.
 - Agregar sincronizacion manual y estado de reserva al dashboard y a WhatsApp.
 - Definir si una modificacion de cotizacion conserva la reserva anterior hasta que la nueva cantidad pueda validarse.
+- Habilitar orden de compra en el tipo de factura productivo y usar prefijo `WMSCOT`, o formalizar el marcador `[WMS-COT:<numero>]` en observaciones.
 - Reducir la interferencia del rate limit usando credenciales propias; la cuenta sandbox compartida produjo multiples respuestas 429 durante la prueba.
 
 ## Criterio final
@@ -449,7 +482,7 @@ Pendientes antes de usar cotizaciones en el flujo comercial:
 - PT-12 aprobada para polling, cambios previos, diferencias fisicas y eliminacion pendiente.
 - PT-13 aprobada para factura de venta primero, reserva y despacho fisico.
 - PT-14 aprobada en WMS; SIIGO permite sobreventa y queda pendiente explicar una diferencia contable de 1 unidad tras editar/eliminar facturas.
-- PT-15 aprobada para prevalidacion, reserva FEFO, idempotencia y liberacion por eliminacion. La conversion cotizacion a factura sigue pendiente.
+- PT-15 aprobada para prevalidacion, reserva FEFO, conversion a factura sin doble reserva, diferencias, referencia omitida, idempotencia y liberacion.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.
