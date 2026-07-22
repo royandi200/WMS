@@ -399,6 +399,49 @@ Resultado: **APROBADO EN WMS** para deteccion, idempotencia y proteccion del inv
 
 Hallazgo pendiente: despues de la secuencia de editar, eliminar y restaurar facturas, SIIGO reporto 10 unidades mientras WMS permanecio en 9. No se aplico un ajuste artificial. La diferencia queda abierta para determinar si es comportamiento del sandbox compartido o una regla del manejo de inventario al editar facturas.
 
+## PT-15 - Prevalidacion de venta mediante cotizacion SIIGO
+
+Prueba ejecutada el 22 de julio de 2026 con cotizaciones exclusivas `WMSQA` y el producto `WMSQA260721P01`.
+
+Saldo inicial WMS: 9 unidades fisicas, 0 reservadas y 9 disponibles.
+
+### Cotizacion superior al stock
+
+- Cotizacion SIIGO: `C-1-12345900`, ID `828f294e-6d9b-40ba-bb3d-03f0494cae9d`.
+- Cantidad cotizada: 10.
+- SIIGO creo la cotizacion y no modifico inventario, como corresponde a un documento comercial no contable.
+- El WMS rechazo la reserva con HTTP 409: solicitado 10, disponible trazable 9.
+- El saldo WMS permanecio en 9 fisicas, 0 reservadas y 9 disponibles.
+
+Resultado: **APROBADO**. La garantia de stock la aplico el WMS antes de facturar.
+
+### Cotizacion con stock e idempotencia
+
+- Cotizacion SIIGO: `C-1-12345901`, ID `bc083c62-0056-4f89-85fa-087cfa42d2f0`.
+- Cantidad cotizada: 2.
+- El WMS creo la reserva `RES-COT-C-1-12345901`, despacho 39 en `picking`.
+- FEFO asigno 1 unidad de `WMSQA260721LOT01` y 1 de `WMSQA260722LOT01`.
+- El saldo quedo en 9 fisicas, 2 reservadas y 7 disponibles.
+- Repetir la validacion devolvio `duplicate`; la reserva no aumento.
+
+Resultado: **APROBADO**.
+
+### Eliminacion y liberacion
+
+- Las dos cotizaciones de prueba se eliminaron del sandbox compartido.
+- Reconciliar la cotizacion valida marco la reserva como cancelada, anulo el despacho pendiente y libero 2 unidades.
+- Saldo final WMS: 9 fisicas, 0 reservadas y 9 disponibles.
+
+Resultado: **APROBADO**.
+
+Pendientes antes de usar cotizaciones en el flujo comercial:
+
+- Enlazar explicitamente cotizacion y factura para convertir la reserva existente en despacho facturado sin reservar de nuevo.
+- Liberar automaticamente reservas vencidas; la vigencia registrada actualmente es de 120 minutos.
+- Agregar sincronizacion manual y estado de reserva al dashboard y a WhatsApp.
+- Definir si una modificacion de cotizacion conserva la reserva anterior hasta que la nueva cantidad pueda validarse.
+- Reducir la interferencia del rate limit usando credenciales propias; la cuenta sandbox compartida produjo multiples respuestas 429 durante la prueba.
+
 ## Criterio final
 
 - PT-01 a PT-09 aprobadas.
@@ -406,6 +449,7 @@ Hallazgo pendiente: despues de la secuencia de editar, eliminar y restaurar fact
 - PT-12 aprobada para polling, cambios previos, diferencias fisicas y eliminacion pendiente.
 - PT-13 aprobada para factura de venta primero, reserva y despacho fisico.
 - PT-14 aprobada en WMS; SIIGO permite sobreventa y queda pendiente explicar una diferencia contable de 1 unidad tras editar/eliminar facturas.
+- PT-15 aprobada para prevalidacion, reserva FEFO, idempotencia y liberacion por eliminacion. La conversion cotizacion a factura sigue pendiente.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.
