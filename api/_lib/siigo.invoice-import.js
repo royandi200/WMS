@@ -35,9 +35,10 @@ async function resolveWarehouse(conn, remoteWarehouseId) {
     const [active] = await conn.execute(
       `SELECT id, siigo_id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 2`
     );
-    if (active.length === 1 && active[0].siigo_id == null) {
+    const sharedSandbox = String(process.env.SIIGO_USERNAME || '').toLowerCase() === 'sandbox@siigoapi.com';
+    if (active.length === 1 && (active[0].siigo_id == null || sharedSandbox)) {
       await conn.execute(
-        `UPDATE bodegas SET siigo_id = ? WHERE id = ? AND siigo_id IS NULL`,
+        `UPDATE bodegas SET siigo_id = ? WHERE id = ?`,
         [Number(remoteWarehouseId), active[0].id]
       );
       return active[0].id;
