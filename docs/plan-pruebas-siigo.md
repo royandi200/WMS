@@ -475,6 +475,31 @@ Pendientes antes de usar cotizaciones en el flujo comercial:
 - Habilitar orden de compra en el tipo de factura productivo y usar prefijo `WMSCOT`, o formalizar el marcador `[WMS-COT:<numero>]` en observaciones.
 - Reducir la interferencia del rate limit usando credenciales propias; la cuenta sandbox compartida produjo multiples respuestas 429 durante la prueba.
 
+## PT-16 - Ordenes de compra de proveedores
+
+Validacion ejecutada el 22 de julio de 2026 contra la documentacion publica, la coleccion oficial de Postman y el sandbox compartido.
+
+Hallazgos:
+
+- Siigo Nube permite crear ordenes de compra desde su interfaz y convertir una orden aprobada en factura de compra mediante la accion `Comprar`.
+- La orden de compra es un documento administrativo/extracontable previo a la factura y no debe representarse con `/v1/purchases`.
+- La documentacion publica de Siigo API no incluye un recurso para crear, consultar, editar o eliminar ordenes de compra.
+- La coleccion oficial de Postman solo contiene `/v1/purchases` para facturas de compra; no contiene `purchase-orders`, `orders` ni un recurso equivalente.
+
+Pruebas de sandbox:
+
+- `GET /v1/document-types?type=OC` respondio HTTP 400, `Invalid value for parameter: type`.
+- `GET /v1/purchase-orders?page=1&page_size=1` respondio HTTP 404, `Resource not found`.
+- No se crearon documentos ni se modifico inventario durante estas pruebas.
+
+Resultado: **NO SOPORTADO POR LA API PUBLICA**. Siigo Nube soporta el proceso manual, pero el WMS no puede crear ni importar ordenes de compra nativas mediante los endpoints disponibles.
+
+Alternativas:
+
+- Crear y aprobar la orden de compra en el WMS; cuando el proveedor facture, vincularla con la factura de compra que el polling ya importa desde Siigo.
+- Crear la orden manualmente en Siigo Nube y registrar su numero en el WMS mediante una accion manual. El WMS solo podra detectarla automaticamente cuando se convierta en factura de compra.
+- Solicitar a Siigo confirmacion sobre un endpoint privado, beta, suscripcion o ampliacion futura para ordenes de compra.
+
 ## Criterio final
 
 - PT-01 a PT-09 aprobadas.
@@ -483,6 +508,7 @@ Pendientes antes de usar cotizaciones en el flujo comercial:
 - PT-13 aprobada para factura de venta primero, reserva y despacho fisico.
 - PT-14 aprobada en WMS; SIIGO permite sobreventa y queda pendiente explicar una diferencia contable de 1 unidad tras editar/eliminar facturas.
 - PT-15 aprobada para prevalidacion, reserva FEFO, conversion a factura sin doble reserva, diferencias, referencia omitida, idempotencia y liberacion.
+- PT-16 confirma que las ordenes de compra existen en Siigo Nube, pero no estan disponibles en la API publica ni en la coleccion oficial.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.
