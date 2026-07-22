@@ -217,10 +217,99 @@ Pendiente antes de automatizar en produccion:
 - Definir el tratamiento contable de faltantes o unidades danadas, porque la factura ya incremento SIIGO antes de la inspeccion fisica.
 - Incorporar en el dashboard la accion para confirmar recepciones en estado `borrador`.
 
+## PT-12 - Polling, cambios y diferencias fisicas
+
+Pruebas ejecutadas el 22 de julio de 2026 con Vercel Pro y frecuencia de dos minutos.
+
+### Hallazgo de la API
+
+`GET /v1/purchases` ignoro en el sandbox los filtros `created_start`, `updated_start` y `date_start`; en los tres casos reporto 7.769 resultados. El polling implementado consulta las paginas mas recientes, compara `metadata.created` con un cursor local solapado cinco minutos y se detiene al alcanzar el cursor. En el sandbox filtra `WQA` antes de importar y no persiste el contenido del listado compartido en logs.
+
+### Polling automatico
+
+- Compra: `FC-1-8690`, ID `4cd370ae-be61-458d-9c0d-360b1d0f860a`.
+- Creada en SIIGO: 09:25:01.
+- Recepcion creada por cron: 09:26:18.
+- Latencia observada: aproximadamente 77 segundos.
+- Resultado: una sola recepcion `REC-SIIGO-FC-1-8690`, esperado 2, recibido 0.
+
+Resultado: **APROBADO**.
+
+### Actualizacion antes de recibir
+
+`FC-1-8690` se actualizo en SIIGO de 2 a 3 unidades. El siguiente ciclo actualizo la misma recepcion WMS a esperado 3, sin duplicarla y sin mover stock.
+
+Nota de compatibilidad: para editar la compra, SIIGO exigio conservar `supplier_by_item=false`; enviar `number` fue rechazado por la configuracion de numeracion automatica.
+
+Resultado: **APROBADO**.
+
+### Faltante
+
+- Esperado: 3.
+- Recibido y aceptado: 2.
+- Stock WMS agregado: 2.
+- Novedad: `FALTANTE`, cantidad 1, estado `ABIERTA`.
+- La factura se corrigio posteriormente a 2 unidades y el saldo volvio a conciliar.
+
+Resultado: **APROBADO**.
+
+### Danado en recepcion
+
+- Compra: `FC-1-8691`.
+- Esperado y recibido fisicamente: 3.
+- Danado: 1.
+- Aceptado y agregado a stock: 2.
+- Novedad: `DANADO`, cantidad 1, estado `ABIERTA`.
+- La unidad danada no entro al stock disponible.
+
+Resultado: **APROBADO**.
+
+### Sobrante
+
+- Compra: `FC-1-8692`.
+- Esperado: 2.
+- Recibido fisicamente: 3.
+- Aceptado y agregado a stock: 2.
+- Novedad: `SOBRANTE`, cantidad 1, estado `ABIERTA`.
+- La unidad adicional no entro al stock disponible.
+
+Resultado: **APROBADO**.
+
+### Eliminacion antes de recibir
+
+- Compra: `FC-1-8693`.
+- La factura se elimino en SIIGO mientras la recepcion estaba en borrador.
+- El siguiente ciclo cambio `REC-SIIGO-FC-1-8693` a `anulada`.
+- Cantidad recibida y stock agregado: 0.
+
+Resultado: **APROBADO**.
+
+### Cambio despues de recibir
+
+La conciliacion de recepciones completadas detecto las correcciones posteriores de `FC-1-8690` y `FC-1-8691`. Creo una novedad `FACTURA_MODIFICADA` por recepcion, no modifico lotes ni stock y la segunda ejecucion devolvio `alert_exists` sin duplicar alertas.
+
+La conciliacion se ejecuta diariamente y tambien puede forzarse con `reconcile_completed=true`.
+
+Resultado: **APROBADO** para cambios. La eliminacion destructiva de una factura ya recibida no se ejecuto para evitar dejar inventario de prueba desbalanceado; el manejo implementado crea `FACTURA_ELIMINADA` sin modificar stock.
+
+### Conciliacion final
+
+- WMS: 11 unidades disponibles.
+- SIIGO: 11 unidades en bodega 81.
+- Recepciones duplicadas: 0.
+- Alertas duplicadas: 0.
+
+Pendientes de interfaz:
+
+- Confirmar recepciones `borrador` desde el dashboard.
+- Consultar y resolver `recepcion_novedades`.
+- Registrar la decision final sobre faltantes, danados, sobrantes y cambios contables.
+
 ## Criterio final
 
 - PT-01 a PT-09 aprobadas.
 - PT-11 aprobada para importacion dirigida y confirmacion exacta.
+- PT-12 aprobada para polling, cambios previos, diferencias fisicas y eliminacion pendiente.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.
