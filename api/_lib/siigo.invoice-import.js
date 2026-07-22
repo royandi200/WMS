@@ -106,6 +106,49 @@ async function allocateProduct(conn, { productId, bodegaId, quantity, invoiceNam
   return allocations;
 }
 
+function invoiceSignature(items) {
+  const totals = new Map();
+  for (const item of items) {
+    const code = String(item.code || item.siigo_code || '').trim();
+    const price = Number(item.price ?? item.precio_unitario ?? 0);
+    const discount = Number(item.discount?.percentage ?? item.discount ?? item.descuento ?? 0);
+    const warehouse = Number(item.warehouse?.id ?? item.warehouse ?? item.bodega_siigo_id ?? 0);
+    const quantity = Number(item.quantity ?? item.cantidad_sol ?? 0);
+    const key = `${code}|${price}|${discount}|${warehouse}`;
+    totals.set(key, Number(((totals.get(key) || 0) + quantity).toFixed(4)));
+  }
+  return [...totals.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+async function releaseReservations(conn, dispatchId, bodegaId) {
+  const [items] = await conn.execute(
+    `SELECT producto_id, ubicacion_id, lote, cantidad_sol
+     FROM despacho_items
+     WHERE despacho_id = ?
+     ORDER BY id ASC
+     FOR UPDATE`,
+    [dispatchId]
+  );
+  const released = [];
+  for (const item of items) {
+    const quantity = Number(item.cantidad_sol || 0);
+    if (!item.lote || quantity <= 0) continue;
+    const [updated] = await conn.execute(
+      `UPDATE stock
+       SET reservada = COALESCE(reservada, 0) - ?, actualizado_en = NOW()
+       WHERE producto_id = ? AND bodega_id = ? AND lote = ?
+         AND (ubicacion_id <=> ?) AND COALESCE(reservada, 0) >= ?
+       LIMIT 1`,
+      [quantity, item.producto_id, bodegaId, item.lote, item.ubicacion_id, quantity]
+    );
+    if (updated.affectedRows !== 1) {
+      throw httpError(409, `No se pudo liberar la reserva del lote ${item.lote}`);
+    }
+    released.push({ lote: item.lote, cantidad: quantity });
+  }
+  return released;
+}
+
 async function importInvoice(invoice, userId) {
   const data = normalizeInvoice(invoice);
   if (!data.id || !data.name) throw httpError(400, 'Factura SIIGO sin id o nombre');
@@ -117,11 +160,12 @@ async function importInvoice(invoice, userId) {
     await conn.beginTransaction();
 
     const [existing] = await conn.execute(
-      `SELECT id, numero, estado, siigo_invoice_id, siigo_invoice_name
+      `SELECT id, numero, estado, bodega_id, tercero_id, total_factura,
+              siigo_invoice_id, siigo_invoice_name
        FROM despachos WHERE siigo_invoice_id = ? LIMIT 1 FOR UPDATE`,
       [data.id]
     );
-    if (existing.length) {
+    if (existing.length && existing[0].estado !== 'picking') {
       await conn.commit();
       return { status: 'duplicate', ...existing[0] };
     }
@@ -179,17 +223,54 @@ async function importInvoice(invoice, userId) {
     const numero = `DSP-SIIGO-${safeName}`.slice(0, 30);
     const customer = customerRows[0];
     const customerName = data.customerName || customer.nombre_comercial || customer.nombre || 'CLIENTE SIIGO';
-    const [inserted] = await conn.execute(
-      `INSERT INTO despachos
-         (numero, tercero_id, cliente_nombre, bodega_id, estado, usuario_id,
-          observaciones, siigo_invoice_id, siigo_invoice_name, cufe,
-          stamp_status, total_factura, siigo_synced_at, creado_en)
-       VALUES (?, ?, ?, ?, 'picking', ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [numero, customer.id, customerName, bodegaId, userId,
-       data.observations || `Importado desde SIIGO ${data.name}`,
-       data.id, data.name, data.cufe || null, data.stampStatus || null, data.total || null]
-    );
-    const dispatchId = inserted.insertId;
+    let dispatchId;
+    let status;
+    if (existing.length) {
+      const [currentItems] = await conn.execute(
+        `SELECT p.siigo_code, di.cantidad_sol, di.precio_unitario,
+                di.descuento, di.bodega_siigo_id
+         FROM despacho_items di
+         JOIN productos p ON p.id = di.producto_id
+         WHERE di.despacho_id = ?`,
+        [existing[0].id]
+      );
+      const sameHeader = Number(existing[0].tercero_id) === Number(customer.id)
+        && Number(existing[0].total_factura || 0) === Number(data.total || 0)
+        && Number(existing[0].bodega_id) === Number(bodegaId);
+      if (sameHeader
+          && JSON.stringify(invoiceSignature(currentItems)) === JSON.stringify(invoiceSignature(data.items))) {
+        await conn.commit();
+        return { status: 'duplicate', ...existing[0] };
+      }
+
+      dispatchId = existing[0].id;
+      status = 'updated';
+      await releaseReservations(conn, dispatchId, existing[0].bodega_id);
+      await conn.execute(`DELETE FROM despacho_items WHERE despacho_id = ?`, [dispatchId]);
+      await conn.execute(
+        `UPDATE despachos
+         SET tercero_id = ?, cliente_nombre = ?, bodega_id = ?, usuario_id = ?,
+             observaciones = ?, siigo_invoice_name = ?, cufe = ?, stamp_status = ?,
+             total_factura = ?, siigo_synced_at = NOW()
+         WHERE id = ? AND estado = 'picking'`,
+        [customer.id, customerName, bodegaId, userId,
+         data.observations || `Actualizado desde SIIGO ${data.name}`,
+         data.name, data.cufe || null, data.stampStatus || null, data.total || null, dispatchId]
+      );
+    } else {
+      const [inserted] = await conn.execute(
+        `INSERT INTO despachos
+           (numero, tercero_id, cliente_nombre, bodega_id, estado, usuario_id,
+            observaciones, siigo_invoice_id, siigo_invoice_name, cufe,
+            stamp_status, total_factura, siigo_synced_at, creado_en)
+         VALUES (?, ?, ?, ?, 'picking', ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [numero, customer.id, customerName, bodegaId, userId,
+         data.observations || `Importado desde SIIGO ${data.name}`,
+         data.id, data.name, data.cufe || null, data.stampStatus || null, data.total || null]
+      );
+      dispatchId = inserted.insertId;
+      status = 'created';
+    }
     const reserved = [];
 
     for (const item of preparedItems) {
@@ -223,9 +304,9 @@ async function importInvoice(invoice, userId) {
 
     await conn.commit();
     return {
-      status: 'created',
+      status,
       id: dispatchId,
-      numero,
+      numero: existing[0]?.numero || numero,
       estado: 'picking',
       siigo_invoice_id: data.id,
       siigo_invoice_name: data.name,
@@ -246,4 +327,45 @@ async function importInvoice(invoice, userId) {
   }
 }
 
-module.exports = { importInvoice };
+async function cancelImportedInvoice(siigoInvoiceId, reason) {
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute(
+      `SELECT id, numero, estado, bodega_id, siigo_invoice_id, siigo_invoice_name
+       FROM despachos WHERE siigo_invoice_id = ? LIMIT 1 FOR UPDATE`,
+      [siigoInvoiceId]
+    );
+    if (!rows.length) {
+      await conn.commit();
+      return { status: 'not_found', siigo_invoice_id: siigoInvoiceId };
+    }
+    const dispatch = rows[0];
+    if (dispatch.estado === 'anulado') {
+      await conn.commit();
+      return { status: 'cancelled_duplicate', ...dispatch };
+    }
+    if (dispatch.estado !== 'picking') {
+      await conn.commit();
+      return { status: 'completed_change', ...dispatch };
+    }
+
+    const released = await releaseReservations(conn, dispatch.id, dispatch.bodega_id);
+    await conn.execute(
+      `UPDATE despachos
+       SET estado = 'anulado',
+           observaciones = CONCAT(COALESCE(observaciones, ''), '\n', ?)
+       WHERE id = ? AND estado = 'picking'`,
+      [reason || 'Factura anulada o eliminada en SIIGO; reserva liberada', dispatch.id]
+    );
+    await conn.commit();
+    return { status: 'cancelled', ...dispatch, released };
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+module.exports = { importInvoice, cancelImportedInvoice };

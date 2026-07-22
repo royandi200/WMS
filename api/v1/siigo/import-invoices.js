@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { cors, requireRole } = require('../../_lib/auth');
 const { query } = require('../../_lib/db');
 const { siigoGet } = require('../../_lib/siigo.service');
-const { importInvoice } = require('../../_lib/siigo.invoice-import');
+const { importInvoice, cancelImportedInvoice } = require('../../_lib/siigo.invoice-import');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -150,6 +150,50 @@ async function cronUser(req) {
   return users[0];
 }
 
+async function reconcilePending(user) {
+  const pending = await query(
+    `SELECT id, siigo_invoice_id, siigo_invoice_name
+     FROM despachos
+     WHERE estado = 'picking' AND siigo_invoice_id IS NOT NULL
+     ORDER BY creado_en ASC
+     LIMIT 20`
+  );
+  const results = [];
+  for (const dispatch of pending) {
+    try {
+      const invoice = await siigoGet(`/v1/invoices/${encodeURIComponent(dispatch.siigo_invoice_id)}`, {
+        entidad: 'factura_reconciliada',
+        entidad_id: dispatch.id,
+      });
+      validateSandboxInvoice(invoice);
+      if (invoice.annulled === true) {
+        results.push(await cancelImportedInvoice(
+          dispatch.siigo_invoice_id,
+          `Factura ${dispatch.siigo_invoice_name} anulada en SIIGO; reserva liberada`
+        ));
+      } else {
+        results.push(await importInvoice(invoice, user.id));
+      }
+    } catch (err) {
+      const status = err.response?.status || err.status;
+      if (status === 404) {
+        results.push(await cancelImportedInvoice(
+          dispatch.siigo_invoice_id,
+          `Factura ${dispatch.siigo_invoice_name} eliminada en SIIGO; reserva liberada`
+        ));
+      } else {
+        results.push({
+          status: 'error',
+          id: dispatch.id,
+          siigo_invoice_id: dispatch.siigo_invoice_id,
+          error: err.message,
+        });
+      }
+    }
+  }
+  return results;
+}
+
 module.exports = async (req, res) => {
   cors(res, 'GET,POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -181,6 +225,8 @@ module.exports = async (req, res) => {
       }
     }
 
+    results.push(...await reconcilePending(user));
+
     if (!ids.length && !results.some(result => result.status === 'error')) {
       await setCursor(startedAt.toISOString());
     }
@@ -192,7 +238,9 @@ module.exports = async (req, res) => {
         since: ids.length ? null : since,
         fetched: invoices.length,
         created: results.filter(result => result.status === 'created').length,
+        updated: results.filter(result => result.status === 'updated').length,
         duplicates: results.filter(result => result.status === 'duplicate').length,
+        cancelled: results.filter(result => result.status === 'cancelled').length,
         errors,
         results,
       },
