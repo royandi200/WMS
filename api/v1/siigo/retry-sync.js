@@ -1,4 +1,4 @@
-// POST /api/v1/siigo/retry-sync
+// GET/POST /api/v1/siigo/retry-sync
 // Fase 5 — Cola de reintentos: reenvía movimientos con siigo_sync = 0.
 //
 // Busca en `movimientos` los registros pendientes de sincronizar con SIIGO
@@ -14,27 +14,46 @@ const { pushFacturaToSiigo }       = require('../../_lib/siigo.invoices');
 
 const BATCH_LIMIT = 5;
 
+async function getPending() {
+  return query(
+    `SELECT DISTINCT referencia_id, referencia_tipo, tipo
+     FROM movimientos
+     WHERE siigo_sync = 0
+       AND referencia_id IS NOT NULL
+       AND referencia_tipo IN ('recepcion_siigo', 'despacho_siigo')
+     ORDER BY id ASC
+     LIMIT ?`,
+    [BATCH_LIMIT]
+  );
+}
+
+function formatExternalError(err) {
+  return {
+    message: err.message,
+    status: err.response?.status || null,
+    response: err.response?.data || null,
+  };
+}
+
 module.exports = async (req, res) => {
-  cors(res, 'POST');
+  cors(res, 'GET,POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     await requireRole(req, ['Admin', 'Supervisor']);
-    if (req.method !== 'POST') {
+    if (!['GET', 'POST'].includes(req.method)) {
       return res.status(405).json({ ok: false, error: 'Method not allowed' });
     }
 
     // Pendientes: siigo_sync=0, agrupados por referencia para no duplicar
-    const pending = await query(
-      `SELECT DISTINCT referencia_id, referencia_tipo, tipo
-       FROM movimientos
-       WHERE siigo_sync = 0
-         AND referencia_id IS NOT NULL
-         AND referencia_tipo IN ('recepcion_siigo', 'despacho_siigo')
-       ORDER BY id ASC
-       LIMIT ?`,
-      [BATCH_LIMIT]
-    );
+    const pending = await getPending();
+
+    if (req.method === 'GET') {
+      return res.status(200).json({
+        ok: true,
+        data: { pendientes: pending.length, detalle: pending },
+      });
+    }
 
     if (!pending.length) {
       return res.status(200).json({ ok: true, data: { pendientes: 0, procesados: 0, errores: 0 } });
@@ -57,13 +76,13 @@ module.exports = async (req, res) => {
         detalle.push({ ...mov, resultado: result });
       } catch (err) {
         errores++;
-        detalle.push({ ...mov, error: err.message });
+        detalle.push({ ...mov, error: formatExternalError(err) });
         console.error('[retry-sync] error', mov.referencia_tipo, mov.referencia_id, err.message);
       }
     }
 
     return res.status(200).json({
-      ok:   true,
+      ok:   errores === 0,
       data: { pendientes: pending.length, procesados, errores, detalle },
     });
   } catch (err) {
