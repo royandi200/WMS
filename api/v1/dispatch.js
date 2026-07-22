@@ -137,6 +137,9 @@ async function handleGet(req, res) {
        d.numero,
        d.cliente_nombre,
        d.estado,
+       d.siigo_invoice_id,
+       d.siigo_invoice_name,
+       d.total_factura,
        d.creado_en,
        d.despachado_en,
        d.usuario_id,
@@ -286,13 +289,148 @@ async function handlePost(req, res) {
   }
 }
 
+async function handlePut(req, res) {
+  const user = await requireRole(req, ['Admin', 'Supervisor', 'Operario']);
+  const body = req.body || {};
+  const dispatchId = Number(body.despacho_id || body.dispatch_id || body.id || 0) || null;
+  const invoiceId = String(body.siigo_invoice_id || '').trim();
+  if (!dispatchId && !invoiceId) {
+    throw httpError(400, 'despacho_id o siigo_invoice_id es obligatorio');
+  }
+
+  let conn;
+  try {
+    conn = await createConnection();
+    await conn.beginTransaction();
+
+    const [dispatchRows] = await conn.execute(
+      `SELECT id, numero, estado, bodega_id, siigo_invoice_id, siigo_invoice_name
+       FROM despachos
+       WHERE ${dispatchId ? 'id = ?' : 'siigo_invoice_id = ?'}
+       LIMIT 1 FOR UPDATE`,
+      [dispatchId || invoiceId]
+    );
+    if (!dispatchRows.length) throw httpError(404, 'Despacho no encontrado');
+    const dispatch = dispatchRows[0];
+    if (dispatch.estado === 'despachado') {
+      await conn.commit();
+      return res.status(200).json({
+        ok: true,
+        data: {
+          already_completed: true,
+          despacho_id: dispatch.id,
+          numero: dispatch.numero,
+          siigo_invoice_id: dispatch.siigo_invoice_id,
+        },
+      });
+    }
+    if (dispatch.estado !== 'picking') {
+      throw httpError(409, `El despacho esta en estado ${dispatch.estado} y debe estar en picking`);
+    }
+
+    const [items] = await conn.execute(
+      `SELECT di.id, di.producto_id, di.ubicacion_id, di.lote,
+              di.cantidad_sol, p.siigo_code
+       FROM despacho_items di
+       JOIN productos p ON p.id = di.producto_id
+       WHERE di.despacho_id = ?
+       ORDER BY di.id ASC
+       FOR UPDATE`,
+      [dispatch.id]
+    );
+    if (!items.length) throw httpError(409, 'Despacho sin reservas de inventario');
+
+    const dispatched = [];
+    for (const item of items) {
+      const quantity = Number(item.cantidad_sol || 0);
+      if (!item.lote || quantity <= 0) throw httpError(409, 'Reserva de despacho invalida');
+      const [stockUpdate] = await conn.execute(
+        `UPDATE stock
+         SET cantidad = cantidad - ?,
+             reservada = COALESCE(reservada, 0) - ?,
+             actualizado_en = NOW()
+         WHERE producto_id = ? AND bodega_id = ? AND lote = ?
+           AND (ubicacion_id <=> ?)
+           AND cantidad >= ? AND COALESCE(reservada, 0) >= ?
+         LIMIT 1`,
+        [quantity, quantity, item.producto_id, dispatch.bodega_id, item.lote,
+         item.ubicacion_id, quantity, quantity]
+      );
+      if (stockUpdate.affectedRows !== 1) {
+        throw httpError(409, `La reserva del lote ${item.lote} ya no esta disponible`);
+      }
+
+      const [lotUpdate] = await conn.execute(
+        `UPDATE lots SET qty_current = qty_current - ? WHERE lpn = ? AND qty_current >= ?`,
+        [quantity, item.lote, quantity]
+      );
+      if (lotUpdate.affectedRows !== 1) {
+        throw httpError(409, `Saldo insuficiente en lote ${item.lote}`);
+      }
+      await conn.execute(
+        `UPDATE lots SET status = IF(qty_current <= 0, 'DESPACHADO', 'DISPONIBLE') WHERE lpn = ?`,
+        [item.lote]
+      );
+      await conn.execute(`UPDATE despacho_items SET cantidad_des = ? WHERE id = ?`, [quantity, item.id]);
+      await conn.execute(
+        `INSERT INTO movimientos
+           (tipo, producto_id, bodega_orig, ubicacion_orig, lote, cantidad,
+            referencia_id, referencia_tipo, usuario_id, siigo_sync, siigo_voucher_id)
+         VALUES ('salida', ?, ?, ?, ?, ?, ?, 'factura_siigo', ?, 1, ?)`,
+        [item.producto_id, dispatch.bodega_id, item.ubicacion_id, item.lote,
+         quantity, dispatch.id, user.id, dispatch.siigo_invoice_id]
+      );
+
+      const [lotRows] = await conn.execute(
+        `SELECT id, qty_current FROM lots WHERE lpn = ? LIMIT 1`,
+        [item.lote]
+      );
+      const balance = Number(lotRows[0]?.qty_current || 0);
+      await logKardex(conn, {
+        productId: item.producto_id,
+        userId: user.id,
+        qty: -quantity,
+        lotId: lotRows[0]?.id || null,
+        balanceAfter: balance,
+        reference: `factura-siigo:${dispatch.siigo_invoice_name || dispatch.siigo_invoice_id}`,
+        notes: `Despacho ${dispatch.numero}`,
+      });
+      dispatched.push({ sku: item.siigo_code, lote: item.lote, cantidad: quantity, saldo_lote: balance });
+    }
+
+    await conn.execute(
+      `UPDATE despachos SET estado = 'despachado', despachado_en = NOW() WHERE id = ?`,
+      [dispatch.id]
+    );
+    await conn.commit();
+    return res.status(200).json({
+      ok: true,
+      data: {
+        already_completed: false,
+        despacho_id: dispatch.id,
+        numero: dispatch.numero,
+        siigo_invoice_id: dispatch.siigo_invoice_id,
+        siigo_invoice_name: dispatch.siigo_invoice_name,
+        lotes: dispatched,
+        mensaje: `Despacho ${dispatch.numero} confirmado para factura ${dispatch.siigo_invoice_name}`,
+      },
+    });
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    if (conn) await conn.end().catch(() => {});
+  }
+}
+
 module.exports = async (req, res) => {
-  cors(res, 'GET,POST');
+  cors(res, 'GET,POST,PUT');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     if (req.method === 'GET') return await handleGet(req, res);
     if (req.method === 'POST') return await handlePost(req, res);
+    if (req.method === 'PUT') return await handlePut(req, res);
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ ok: false, error: err.message });

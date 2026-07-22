@@ -7,6 +7,10 @@
     {
       "path": "/api/v1/siigo/import-purchases",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/v1/siigo/import-invoices",
+      "schedule": "1-59/2 * * * *"
     }
   ],
   "rewrites": [
