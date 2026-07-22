@@ -305,11 +305,51 @@ Pendientes de interfaz:
 - Consultar y resolver `recepcion_novedades`.
 - Registrar la decision final sobre faltantes, danados, sobrantes y cambios contables.
 
+## PT-13 - Factura de venta primero en SIIGO
+
+Prueba ejecutada el 22 de julio de 2026 con datos exclusivos `WMSQA`.
+
+Datos:
+
+- Factura SIIGO: `FV-1-10000003576`, ID `2cc451da-784b-4383-929e-07129dda48d5`.
+- Producto: `WMSQA260721P01`.
+- Cantidad facturada: 2.
+- Bodega SIIGO: 81.
+- Despacho WMS: `DSP-SIIGO-FV-1-10000003576`, ID 35.
+- Lote asignado por FEFO: `WMSQA260721LOT01`.
+- Factura sin envio DIAN ni correo y marcada sin validez comercial.
+
+Secuencia y resultados:
+
+1. Antes de facturar, WMS tenia 11 fisicas, 0 reservadas y 11 disponibles.
+2. La factura se creo directamente en SIIGO. SIIGO paso a 9 unidades.
+3. La importacion creo un despacho en `picking`, sin reducir stock fisico.
+4. WMS quedo en 11 fisicas, 2 reservadas y 9 disponibles, conciliado conceptualmente con SIIGO.
+5. Repetir la importacion devolvio `duplicate`; la reserva permanecio en 2.
+6. La confirmacion del despacho redujo `stock.cantidad` y `lots.qty_current` en la misma transaccion.
+7. WMS quedo en 9 fisicas, 0 reservadas y 9 disponibles. El lote quedo con saldo 1.
+8. Repetir la confirmacion devolvio `already_completed`; no hubo un segundo descuento.
+9. La consulta final de SIIGO reporto 9 unidades totales y 9 en la bodega 81.
+10. El endpoint de cron incremental respondio sin errores y tenia cursor actualizado.
+
+Durante la prueba se detecto que el WMS modela `BG-CUAR`, `BG-DEVOL` y `BG-PROD` como bodegas virtuales activas. La bodega contable de SIIGO se mapea exclusivamente a `BG-PPAL`; en sandbox se permite corregir el ID heredado de fixtures. En produccion una discrepancia permanece bloqueada.
+
+Resultado: **APROBADO** para factura primero en SIIGO, importacion manual/automatica, reserva FEFO, confirmacion fisica e idempotencia.
+
+Pendientes antes de produccion:
+
+- Registrar y mostrar facturas bloqueadas por stock insuficiente, SKU, cliente o bodega sin mapear.
+- Reconciliar anulaciones y modificaciones de facturas con despachos pendientes o completados.
+- Agregar al dashboard la sincronizacion manual, los despachos `picking` y la confirmacion fisica.
+- Agregar handlers de WhatsApp para consultar/sincronizar facturas; las excepciones requieren Admin o Supervisor.
+- Configurar explicitamente `SIIGO_WMS_WAREHOUSE_CODE=BG-PPAL` y verificar el ID de bodega de la cuenta productiva.
+
 ## Criterio final
 
 - PT-01 a PT-09 aprobadas.
 - PT-11 aprobada para importacion dirigida y confirmacion exacta.
 - PT-12 aprobada para polling, cambios previos, diferencias fisicas y eliminacion pendiente.
+- PT-13 aprobada para factura de venta primero, reserva y despacho fisico.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.
