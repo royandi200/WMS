@@ -35,6 +35,15 @@ function parseSiigoTimestamp(value) {
   return Date.parse(raw);
 }
 
+function siigoLocalTimestamp(epochMs) {
+  const offset = String(process.env.SIIGO_TIMEZONE_OFFSET || '-05:00');
+  const match = offset.match(/^([+-])(\d{2}):(\d{2})$/);
+  if (!match) return new Date(epochMs).toISOString();
+  const direction = match[1] === '-' ? -1 : 1;
+  const offsetMs = direction * (Number(match[2]) * 60 + Number(match[3])) * 60 * 1000;
+  return new Date(epochMs + offsetMs).toISOString().slice(0, 19);
+}
+
 function validateSandboxInvoice(invoice) {
   if (!isSharedSandbox()) return;
   const prefix = testPrefix();
@@ -65,7 +74,10 @@ async function fetchIncremental(since) {
 
   while (page <= MAX_INCREMENTAL_PAGES) {
     const response = await siigoGet('/v1/invoices', {
-      params: { page, page_size: PAGE_SIZE, updated_start: new Date(cutoffMs).toISOString() },
+      // SIIGO returns and filters invoice metadata using a naive company-local
+      // timestamp in this account. Keep the local cursor in UTC, but serialize
+      // the remote filter with the configured company offset.
+      params: { page, page_size: PAGE_SIZE, updated_start: siigoLocalTimestamp(cutoffMs) },
       entidad: 'factura_importada',
       logResponse: false,
     });
