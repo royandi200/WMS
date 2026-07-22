@@ -35,15 +35,6 @@ function parseSiigoTimestamp(value) {
   return Date.parse(raw);
 }
 
-function siigoLocalTimestamp(epochMs) {
-  const offset = String(process.env.SIIGO_TIMEZONE_OFFSET || '-05:00');
-  const match = offset.match(/^([+-])(\d{2}):(\d{2})$/);
-  if (!match) return new Date(epochMs).toISOString();
-  const direction = match[1] === '-' ? -1 : 1;
-  const offsetMs = direction * (Number(match[2]) * 60 + Number(match[3])) * 60 * 1000;
-  return new Date(epochMs + offsetMs).toISOString().slice(0, 19);
-}
-
 function validateSandboxInvoice(invoice) {
   if (!isSharedSandbox()) return;
   const prefix = testPrefix();
@@ -74,21 +65,29 @@ async function fetchIncremental(since) {
 
   while (page <= MAX_INCREMENTAL_PAGES) {
     const response = await siigoGet('/v1/invoices', {
-      // SIIGO returns and filters invoice metadata using a naive company-local
-      // timestamp in this account. Keep the local cursor in UTC, but serialize
-      // the remote filter with the configured company offset.
-      params: { page, page_size: PAGE_SIZE, updated_start: siigoLocalTimestamp(cutoffMs) },
+      // The shared sandbox returns zero rows for valid updated_start values.
+      // Read newest pages there and enforce the cursor locally. Production
+      // keeps the documented UTC filter to reduce API traffic.
+      params: {
+        page,
+        page_size: PAGE_SIZE,
+        ...(!isSharedSandbox() ? { updated_start: new Date(cutoffMs).toISOString() } : {}),
+      },
       entidad: 'factura_importada',
       logResponse: false,
     });
     const results = response?.results ?? (Array.isArray(response) ? response : []);
     if (!results.length) break;
 
+    let reachedCursor = false;
     for (const summary of results) {
       const changedMs = parseSiigoTimestamp(
         summary?.metadata?.last_updated || summary?.metadata?.created || summary?.date || ''
       );
-      if (Number.isFinite(changedMs) && changedMs < cutoffMs) continue;
+      if (Number.isFinite(changedMs) && changedMs < cutoffMs) {
+        reachedCursor = true;
+        continue;
+      }
       if (summary?.annulled === true || !summary?.id) continue;
       if (isSharedSandbox()) {
         const codes = (summary.items || []).map(item => String(item.code || '').toUpperCase());
@@ -99,6 +98,7 @@ async function fetchIncremental(since) {
       }));
     }
 
+    if (reachedCursor) break;
     const totalPages = Number(response?.pagination?.total_pages || 0);
     if (results.length < PAGE_SIZE || (totalPages && page >= totalPages)) break;
     page++;
