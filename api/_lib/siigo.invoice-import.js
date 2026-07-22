@@ -368,4 +368,4 @@ async function cancelImportedInvoice(siigoInvoiceId, reason) {
   }
 }
 
-module.exports = { importInvoice, cancelImportedInvoice };
+module.exports = { importInvoice, cancelImportedInvoice, invoiceSignature };

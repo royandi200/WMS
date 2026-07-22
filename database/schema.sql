@@ -290,6 +290,22 @@ CREATE TABLE despacho_items (
   FOREIGN KEY (ubicacion_id) REFERENCES ubicaciones(id)
 );
 
+CREATE TABLE despacho_novedades (
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  despacho_id  INT UNSIGNED NOT NULL,
+  tipo         VARCHAR(30) NOT NULL,
+  cantidad     DECIMAL(15,4) NOT NULL DEFAULT 0,
+  motivo       TEXT,
+  estado       VARCHAR(20) NOT NULL DEFAULT 'ABIERTA',
+  usuario_id   INT UNSIGNED NULL,
+  creado_en    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resuelto_en  DATETIME NULL,
+  INDEX idx_despacho_novedades_despacho (despacho_id),
+  INDEX idx_despacho_novedades_estado (estado),
+  FOREIGN KEY (despacho_id) REFERENCES despachos(id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
 -- ══════════════════════════════════════════════════════════════
 --  9. MOVIMIENTOS — Bitácora general de stock
 -- ══════════════════════════════════════════════════════════════
