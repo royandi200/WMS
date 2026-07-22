@@ -30,10 +30,22 @@ async function resolveWarehouse(conn, remoteWarehouseId) {
       `SELECT id FROM bodegas WHERE activa = 1 AND siigo_id = ? LIMIT 1`,
       [Number(remoteWarehouseId)]
     );
-    if (!mapped.length) {
-      throw httpError(409, `Bodega SIIGO ${remoteWarehouseId} no esta mapeada en WMS`);
+    if (mapped.length) return mapped[0].id;
+
+    const [active] = await conn.execute(
+      `SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 2`
+    );
+    const [configured] = await conn.execute(
+      `SELECT valor FROM siigo_config WHERE clave = 'default_warehouse_id' LIMIT 1`
+    );
+    if (active.length === 1 && Number(configured[0]?.valor) === Number(remoteWarehouseId)) {
+      await conn.execute(
+        `UPDATE bodegas SET siigo_id = ? WHERE id = ? AND siigo_id IS NULL`,
+        [Number(remoteWarehouseId), active[0].id]
+      );
+      return active[0].id;
     }
-    return mapped[0].id;
+    throw httpError(409, `Bodega SIIGO ${remoteWarehouseId} no esta mapeada en WMS`);
   }
 
   const [rows] = await conn.execute(
