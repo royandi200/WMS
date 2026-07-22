@@ -309,6 +309,22 @@ CREATE TABLE despacho_novedades (
 -- ══════════════════════════════════════════════════════════════
 --  9. MOVIMIENTOS — Bitácora general de stock
 -- ══════════════════════════════════════════════════════════════
+CREATE TABLE siigo_cotizacion_reservas (
+  id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  siigo_quotation_id      VARCHAR(60) NOT NULL UNIQUE,
+  siigo_quotation_name    VARCHAR(50),
+  despacho_id             INT UNSIGNED NULL UNIQUE,
+  estado                  VARCHAR(20) NOT NULL,
+  motivo                  TEXT,
+  usuario_id              INT UNSIGNED NULL,
+  expira_en               DATETIME NULL,
+  creado_en               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_cotizacion_reservas_estado (estado),
+  FOREIGN KEY (despacho_id) REFERENCES despachos(id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
 CREATE TABLE movimientos (
   id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   tipo             ENUM('entrada','salida','traslado','ajuste') NOT NULL,
