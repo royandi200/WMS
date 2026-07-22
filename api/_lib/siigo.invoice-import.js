@@ -33,12 +33,9 @@ async function resolveWarehouse(conn, remoteWarehouseId) {
     if (mapped.length) return mapped[0].id;
 
     const [active] = await conn.execute(
-      `SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 2`
+      `SELECT id, siigo_id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 2`
     );
-    const [configured] = await conn.execute(
-      `SELECT valor FROM siigo_config WHERE clave = 'default_warehouse_id' LIMIT 1`
-    );
-    if (active.length === 1 && Number(configured[0]?.valor) === Number(remoteWarehouseId)) {
+    if (active.length === 1 && active[0].siigo_id == null) {
       await conn.execute(
         `UPDATE bodegas SET siigo_id = ? WHERE id = ? AND siigo_id IS NULL`,
         [Number(remoteWarehouseId), active[0].id]
