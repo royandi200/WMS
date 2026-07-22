@@ -72,6 +72,12 @@ async function nextReceptionNumber(conn) {
 async function handleGet(req, res) {
   await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
   const limit = Math.min(Number(req.query?.limit || 100), 200);
+  const conn = await createConnection();
+  try {
+    await ensureReceptionIssuesTable(conn);
+  } finally {
+    await conn.end().catch(() => {});
+  }
   const rows = await query(
     `SELECT
        r.id,
@@ -83,6 +89,9 @@ async function handleGet(req, res) {
        r.observaciones,
        r.creado_en,
        r.completado_en,
+       (SELECT COUNT(*)
+          FROM recepcion_novedades rn
+         WHERE rn.recepcion_id = r.id AND rn.estado = 'ABIERTA') AS novedades_abiertas,
        u.nombre AS usuario_nombre,
        ri.producto_id,
        p.siigo_code AS sku,
@@ -110,6 +119,25 @@ function receivedItemInput(body, item, totalItems) {
   return totalItems === 1 ? body : null;
 }
 
+async function ensureReceptionIssuesTable(conn) {
+  await conn.execute(
+    `CREATE TABLE IF NOT EXISTS recepcion_novedades (
+       id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+       recepcion_id INT UNSIGNED NOT NULL,
+       recepcion_item_id INT UNSIGNED NOT NULL,
+       tipo VARCHAR(30) NOT NULL,
+       cantidad DECIMAL(15,4) NOT NULL,
+       motivo TEXT NULL,
+       estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA',
+       usuario_id INT UNSIGNED NULL,
+       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       resuelto_en DATETIME NULL,
+       INDEX idx_recepcion_novedades_recepcion (recepcion_id),
+       INDEX idx_recepcion_novedades_estado (estado)
+     )`
+  );
+}
+
 async function handlePut(req, res) {
   const user = await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
   const body = req.body || {};
@@ -121,6 +149,7 @@ async function handlePut(req, res) {
   let conn;
   try {
     conn = await createConnection();
+    await ensureReceptionIssuesTable(conn);
     await conn.beginTransaction();
 
     const [receptions] = await conn.execute(
@@ -173,11 +202,22 @@ async function handlePut(req, res) {
         throw httpError(400, `Cantidad danada invalida para ${item.siigo_code}`);
       }
 
-      const accepted = received - damaged;
+      const expected = Number(item.cantidad_esp);
+      const good = received - damaged;
+      const requestedAccepted = input.qty_accepted ?? input.cantidad_aceptada;
+      const accepted = requestedAccepted == null
+        ? Math.min(good, expected)
+        : Number(requestedAccepted);
+      if (!Number.isFinite(accepted) || accepted < 0 || accepted > good) {
+        throw httpError(400, `Cantidad aceptada invalida para ${item.siigo_code}`);
+      }
+      const shortage = Math.max(expected - received, 0);
+      const overage = Math.max(good - accepted, 0);
       if (accepted > 0 && !lot) throw httpError(400, `Lote requerido para ${item.siigo_code}`);
       hasDifference = hasDifference
-        || received !== Number(item.cantidad_esp)
-        || damaged > 0;
+        || shortage > 0
+        || damaged > 0
+        || overage > 0;
 
       await conn.execute(
         `UPDATE recepcion_items
@@ -221,19 +261,38 @@ async function handlePut(req, res) {
         );
       }
 
+      const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
+      const issues = [
+        { type: 'FALTANTE', quantity: shortage },
+        { type: 'DANADO', quantity: damaged },
+        { type: 'SOBRANTE', quantity: overage },
+      ].filter(issue => issue.quantity > 0);
+      for (const issue of issues) {
+        await conn.execute(
+          `INSERT INTO recepcion_novedades
+             (recepcion_id, recepcion_item_id, tipo, cantidad, motivo, estado, usuario_id, creado_en)
+           VALUES (?, ?, ?, ?, ?, 'ABIERTA', ?, NOW())`,
+          [receptionId, item.id, issue.type, issue.quantity,
+           reason || `${issue.type} detectado durante la recepcion fisica`, user.id]
+        );
+      }
+
       results.push({
         item_id: item.id,
         sku: item.siigo_code,
-        esperado: Number(item.cantidad_esp),
+        esperado: expected,
         recibido: received,
         danado: damaged,
         aceptado: accepted,
+        faltante: shortage,
+        sobrante: overage,
         lote: lot || null,
+        novedades: issues.map(issue => ({ tipo: issue.type, cantidad: issue.quantity })),
       });
     }
 
     const discrepancy = hasDifference
-      ? `Diferencia fisica confirmada ${new Date().toISOString()}`
+      ? `Diferencia fisica registrada en recepcion_novedades ${new Date().toISOString()}`
       : null;
     await conn.execute(
       `UPDATE recepciones

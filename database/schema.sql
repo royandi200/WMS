@@ -223,6 +223,24 @@ CREATE TABLE recepcion_items (
   FOREIGN KEY (ubicacion_id) REFERENCES ubicaciones(id)
 );
 
+CREATE TABLE recepcion_novedades (
+  id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  recepcion_id      INT UNSIGNED NOT NULL,
+  recepcion_item_id INT UNSIGNED NOT NULL,
+  tipo              VARCHAR(30) NOT NULL,
+  cantidad          DECIMAL(15,4) NOT NULL,
+  motivo            TEXT,
+  estado            VARCHAR(20) NOT NULL DEFAULT 'ABIERTA',
+  usuario_id        INT UNSIGNED NULL,
+  creado_en         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resuelto_en       DATETIME NULL,
+  INDEX idx_recepcion_novedades_recepcion (recepcion_id),
+  INDEX idx_recepcion_novedades_estado (estado),
+  FOREIGN KEY (recepcion_id) REFERENCES recepciones(id),
+  FOREIGN KEY (recepcion_item_id) REFERENCES recepcion_items(id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
 -- ══════════════════════════════════════════════════════════════
 --  8. DESPACHOS (genera Factura de Venta en SIIGO /v1/invoices)
 -- ══════════════════════════════════════════════════════════════

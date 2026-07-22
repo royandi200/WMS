@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { cors, requireRole } = require('../../_lib/auth');
 const { query } = require('../../_lib/db');
 const { siigoGet } = require('../../_lib/siigo.service');
@@ -6,6 +7,8 @@ const { importPurchase } = require('../../_lib/siigo.purchase-import');
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
 const PAGE_SIZE = 50;
+const MAX_INCREMENTAL_PAGES = 10;
+const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
 
 function isSharedSandbox() {
   return String(process.env.SIIGO_USERNAME || '').toLowerCase() === SHARED_SANDBOX_USERNAME;
@@ -20,6 +23,17 @@ function requestedIds(req) {
     ? req.body.purchase_ids
     : (req.body?.purchase_id ? [req.body.purchase_id] : []);
   return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
+}
+
+function parseSiigoTimestamp(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return NaN;
+  if (/Z$|[+-]\d{2}:?\d{2}$/i.test(raw)) return Date.parse(raw);
+  if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+    const offset = String(process.env.SIIGO_TIMEZONE_OFFSET || '-05:00');
+    return Date.parse(`${raw}${offset}`);
+  }
+  return Date.parse(raw);
 }
 
 function validateSandboxPurchase(purchase) {
@@ -43,26 +57,37 @@ async function fetchByIds(ids) {
 }
 
 async function fetchIncremental(since) {
-  const summaries = [];
+  const sinceMs = Date.parse(since);
+  if (!Number.isFinite(sinceMs)) {
+    throw Object.assign(new Error('Cursor de compras invalido'), { status: 400 });
+  }
+  const cutoffMs = sinceMs - CURSOR_OVERLAP_MS;
+  const purchases = [];
   let page = 1;
-  while (true) {
+  while (page <= MAX_INCREMENTAL_PAGES) {
     const response = await siigoGet('/v1/purchases', {
-      params: { updated_start: since, page, page_size: PAGE_SIZE },
+      // SIIGO currently ignores date filters for purchases. Read newest pages
+      // and stop as soon as the local cursor (with overlap) is reached.
+      params: { page, page_size: PAGE_SIZE },
       entidad: 'compra_importada',
+      logResponse: false,
     });
     const results = response?.results ?? (Array.isArray(response) ? response : []);
-    summaries.push(...results);
-    const total = Number(response?.pagination?.total_results ?? results.length);
-    if (!results.length || summaries.length >= total) break;
-    page++;
-  }
+    if (!results.length) break;
 
-  const purchases = [];
-  for (const summary of summaries) {
-    if (!summary?.id) continue;
-    purchases.push(await siigoGet(`/v1/purchases/${encodeURIComponent(summary.id)}`, {
-      entidad: 'compra_importada',
-    }));
+    let reachedCursor = false;
+    for (const purchase of results) {
+      const createdMs = parseSiigoTimestamp(purchase?.metadata?.created || purchase?.date || '');
+      if (Number.isFinite(createdMs) && createdMs < cutoffMs) {
+        reachedCursor = true;
+        continue;
+      }
+      if (!isSharedSandbox() || String(purchase?.provider_invoice?.prefix || '').toUpperCase() === 'WQA') {
+        purchases.push(purchase);
+      }
+    }
+    if (reachedCursor) break;
+    page++;
   }
   return purchases;
 }
@@ -82,23 +107,92 @@ async function setCursor(value) {
   );
 }
 
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+async function cronUser(req) {
+  const expected = process.env.CRON_SECRET;
+  const auth = String(req.headers?.authorization || '');
+  const received = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!expected) throw Object.assign(new Error('CRON_SECRET no configurado'), { status: 500 });
+  if (!safeEqual(received, expected)) {
+    throw Object.assign(new Error('Cron no autorizado'), { status: 401 });
+  }
+  const users = await query(
+    `SELECT u.id, u.nombre, u.email, r.nombre AS rol
+     FROM usuarios u
+     JOIN roles r ON r.id = u.rol_id
+     WHERE u.activo = 1 AND LOWER(r.nombre) IN ('admin', 'supervisor')
+     ORDER BY LOWER(r.nombre) = 'admin' DESC, u.id ASC
+     LIMIT 1`
+  );
+  if (!users.length) throw Object.assign(new Error('No hay usuario de sistema para importar compras'), { status: 500 });
+  return users[0];
+}
+
+async function reconcilePending(user) {
+  const pending = await query(
+    `SELECT id, siigo_purchase_id, siigo_purchase_name
+     FROM recepciones
+     WHERE estado = 'borrador' AND siigo_purchase_id IS NOT NULL
+     ORDER BY creado_en ASC
+     LIMIT 20`
+  );
+  const results = [];
+  for (const reception of pending) {
+    try {
+      const purchase = await siigoGet(`/v1/purchases/${encodeURIComponent(reception.siigo_purchase_id)}`, {
+        entidad: 'compra_reconciliada',
+        entidad_id: reception.id,
+      });
+      validateSandboxPurchase(purchase);
+      results.push(await importPurchase(purchase, user.id));
+    } catch (err) {
+      const status = err.response?.status || err.status;
+      if (status === 404) {
+        await query(
+          `UPDATE recepciones
+           SET estado = 'anulada',
+               observaciones = CONCAT(COALESCE(observaciones, ''), '\nFactura eliminada en SIIGO; borrador anulado por conciliacion')
+           WHERE id = ? AND estado = 'borrador'`,
+          [reception.id]
+        );
+        results.push({
+          status: 'cancelled',
+          id: reception.id,
+          siigo_purchase_id: reception.siigo_purchase_id,
+        });
+      } else {
+        results.push({
+          status: 'error',
+          id: reception.id,
+          siigo_purchase_id: reception.siigo_purchase_id,
+          error: err.message,
+        });
+      }
+    }
+  }
+  return results;
+}
+
 module.exports = async (req, res) => {
-  cors(res, 'POST');
+  cors(res, 'GET,POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  if (!['GET', 'POST'].includes(req.method)) {
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  }
 
   try {
-    const user = await requireRole(req, ['Admin', 'Supervisor']);
+    const user = req.method === 'GET'
+      ? await cronUser(req)
+      : await requireRole(req, ['Admin', 'Supervisor']);
     const ids = requestedIds(req);
-    if (isSharedSandbox() && !ids.length) {
-      return res.status(400).json({
-        ok: false,
-        error: 'En el sandbox compartido purchase_ids es obligatorio para no consultar compras ajenas',
-      });
-    }
 
     const startedAt = new Date();
-    const since = String(req.body?.updated_start || await getCursor());
+    const since = String(req.body?.updated_start || req.query?.updated_start || await getCursor());
     const purchases = ids.length ? await fetchByIds(ids) : await fetchIncremental(since);
     const results = [];
 
@@ -116,6 +210,9 @@ module.exports = async (req, res) => {
       }
     }
 
+    const reconciliation = await reconcilePending(user);
+    results.push(...reconciliation);
+
     if (!ids.length && !results.some(result => result.status === 'error')) {
       await setCursor(startedAt.toISOString());
     }
@@ -128,7 +225,9 @@ module.exports = async (req, res) => {
         since: ids.length ? null : since,
         fetched: purchases.length,
         created: results.filter(result => result.status === 'created').length,
+        updated: results.filter(result => result.status === 'updated').length,
         duplicates: results.filter(result => result.status === 'duplicate').length,
+        cancelled: results.filter(result => result.status === 'cancelled').length,
         errors,
         results,
       },

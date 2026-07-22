@@ -197,6 +197,7 @@ async function siigoRequest(
     entidad_id = null,
     authRetry = true,
     rateLimitRetries = MAX_RATE_LIMIT_RETRIES,
+    logResponse = true,
   } = {}
 ) {
   const startedAt   = Date.now();
@@ -231,6 +232,7 @@ async function siigoRequest(
         entidad_id,
         authRetry: false,
         rateLimitRetries,
+        logResponse,
       });
     }
 
@@ -245,6 +247,7 @@ async function siigoRequest(
         entidad_id,
         authRetry,
         rateLimitRetries: rateLimitRetries - 1,
+        logResponse,
       });
     }
     throw err;
@@ -255,7 +258,7 @@ async function siigoRequest(
       endpoint:     path,
       metodo_http:  method.toUpperCase(),
       request_body: data,
-      response_body: responseData,
+      response_body: logResponse ? responseData : null,
       status_code:  statusCode,
       error_msg:    errorMsg,
       duracion_ms:  Date.now() - startedAt,
