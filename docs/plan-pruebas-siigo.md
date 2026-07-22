@@ -184,9 +184,43 @@ La prueba extremo a extremo queda para credenciales sandbox propias o produccion
 
 Resultado actual: **PARCIALMENTE APROBADO**. Receptor y seguridad aprobados; suscripcion externa bloqueada deliberadamente en sandbox compartido.
 
+## PT-11 - Factura de compra primero en SIIGO
+
+Objetivo: comprobar que una factura creada primero en SIIGO genere una recepcion pendiente en WMS sin incorporar stock hasta la llegada fisica.
+
+Datos ejecutados el 22 de julio de 2026:
+
+- Factura SIIGO: `FC-1-8689`, ID `efc3003f-84c9-40b6-914a-f1eea50d6c75`.
+- Factura del proveedor: `WQA-2607220001`.
+- Producto: `WMSQA260721P01`.
+- Cantidad esperada: 2.
+- Recepcion WMS: `REC-SIIGO-FC-1-8689`, ID 35.
+- Lote fisico: `WMSQA260722LOT01`.
+
+Secuencia y resultados:
+
+1. Se creo la factura directamente mediante `POST /v1/purchases`: SIIGO paso de 3 a 5 unidades.
+2. Antes de importar, WMS permanecio en 3 unidades y no tenia una recepcion asociada.
+3. `POST /api/v1/siigo/import-purchases` con `purchase_ids` creo un unico borrador con esperado 2 y recibido 0.
+4. Repetir la importacion devolvio `duplicate`; no creo otra recepcion.
+5. El borrador no incremento stock WMS.
+6. `PUT /api/v1/reception` confirmo 2 recibidas, 0 danadas y creo el lote fisico.
+7. Repetir la confirmacion devolvio `already_completed`; no duplico lote ni stock.
+8. Saldo final conciliado: WMS 5, SIIGO 5.
+
+Resultado actual: **APROBADO** para importacion dirigida, idempotencia y confirmacion fisica sin diferencias.
+
+Pendiente antes de automatizar en produccion:
+
+- Configurar la ejecucion periodica del polling incremental.
+- Probar el cursor incremental con una cuenta sandbox exclusiva; en la compartida se exige `purchase_ids` para no consultar documentos ajenos.
+- Definir el tratamiento contable de faltantes o unidades danadas, porque la factura ya incremento SIIGO antes de la inspeccion fisica.
+- Incorporar en el dashboard la accion para confirmar recepciones en estado `borrador`.
+
 ## Criterio final
 
 - PT-01 a PT-09 aprobadas.
+- PT-11 aprobada para importacion dirigida y confirmacion exacta.
 - PT-10 completada con una cuenta no compartida.
 - Cola SIIGO en cero.
 - Inventario WMS conciliado con sus movimientos.
