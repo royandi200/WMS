@@ -256,6 +256,46 @@ async function convertQuotationReservation(conn, {
   };
 }
 
+async function rejectMissingQuotationReference(conn, { data, customer, bodegaId }) {
+  if (data.quotationReference) return;
+
+  const [candidates] = await conn.execute(
+    `SELECT r.siigo_quotation_name, r.despacho_id
+     FROM siigo_cotizacion_reservas r
+     JOIN despachos d ON d.id = r.despacho_id
+     WHERE r.estado = 'RESERVADA'
+       AND (r.expira_en IS NULL OR r.expira_en >= NOW())
+       AND d.estado = 'picking' AND d.tercero_id = ? AND d.bodega_id = ?
+     ORDER BY r.creado_en ASC
+     LIMIT 20 FOR UPDATE`,
+    [customer.id, bodegaId]
+  );
+  if (!candidates.length) return;
+
+  const remoteSignature = JSON.stringify(invoiceSignature(data.items));
+  const matches = [];
+  for (const candidate of candidates) {
+    const [items] = await conn.execute(
+      `SELECT p.siigo_code, di.cantidad_sol, di.precio_unitario,
+              di.descuento, di.bodega_siigo_id
+       FROM despacho_items di
+       JOIN productos p ON p.id = di.producto_id
+       WHERE di.despacho_id = ?`,
+      [candidate.despacho_id]
+    );
+    if (JSON.stringify(invoiceSignature(items)) === remoteSignature) {
+      matches.push(candidate.siigo_quotation_name);
+    }
+  }
+  if (!matches.length) return;
+
+  const reference = matches.length === 1 ? matches[0] : matches.join(', ');
+  throw httpError(
+    409,
+    `La factura ${data.name} coincide con una reserva de cotizacion (${reference}) pero no incluye la referencia WMSCOT`
+  );
+}
+
 async function importInvoice(invoice, userId) {
   const data = normalizeInvoice(invoice);
   if (!data.id || !data.name) throw httpError(400, 'Factura SIIGO sin id o nombre');
@@ -330,6 +370,9 @@ async function importInvoice(invoice, userId) {
     const numero = `DSP-SIIGO-${safeName}`.slice(0, 30);
     const customer = customerRows[0];
     const customerName = data.customerName || customer.nombre_comercial || customer.nombre || 'CLIENTE SIIGO';
+    if (!existing.length) {
+      await rejectMissingQuotationReference(conn, { data, customer, bodegaId });
+    }
     if (!existing.length && data.quotationReference) {
       const converted = await convertQuotationReservation(conn, {
         data,
