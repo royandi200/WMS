@@ -8,6 +8,7 @@ const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
 const PAGE_SIZE = 50;
 const MAX_INCREMENTAL_PAGES = 10;
+const MAX_SANDBOX_PAGES = 3;
 const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
 
 function isSharedSandbox() {
@@ -63,7 +64,8 @@ async function fetchIncremental(since) {
   const invoices = [];
   let page = 1;
 
-  while (page <= MAX_INCREMENTAL_PAGES) {
+  const maxPages = isSharedSandbox() ? MAX_SANDBOX_PAGES : MAX_INCREMENTAL_PAGES;
+  while (page <= maxPages) {
     const response = await siigoGet('/v1/invoices', {
       // The shared sandbox returns zero rows for valid updated_start values.
       // Read newest pages there and enforce the cursor locally. Production
@@ -84,7 +86,7 @@ async function fetchIncremental(since) {
       const changedMs = parseSiigoTimestamp(
         summary?.metadata?.last_updated || summary?.metadata?.created || summary?.date || ''
       );
-      if (Number.isFinite(changedMs) && changedMs < cutoffMs) {
+      if (!isSharedSandbox() && Number.isFinite(changedMs) && changedMs < cutoffMs) {
         reachedCursor = true;
         continue;
       }
@@ -92,6 +94,10 @@ async function fetchIncremental(since) {
       if (isSharedSandbox()) {
         const codes = (summary.items || []).map(item => String(item.code || '').toUpperCase());
         if (!codes.some(code => code.startsWith(testPrefix()))) continue;
+        if (summary.items?.length && summary.customer) {
+          invoices.push(summary);
+          continue;
+        }
       }
       invoices.push(await siigoGet(`/v1/invoices/${encodeURIComponent(summary.id)}`, {
         entidad: 'factura_importada',
