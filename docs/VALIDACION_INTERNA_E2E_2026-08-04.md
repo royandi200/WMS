@@ -74,4 +74,4 @@ La garantia interna cubre reglas de dominio, persistencia, autorizacion, idempot
 - URL: `https://wms-seven-ebon.vercel.app`.
 - Dashboard API: 20 de 20 rutas aprobadas despues del deployment.
 - Webhook API: 5 de 5 controles aprobados contra Vercel.
-- Pendiente antes de la prueba conversacional de capacidad: sincronizar `docs/Prompt WMS.txt` con Entrada y Voz en BBC usando la credencial Manager.
+- Prompt BBC sincronizado por MCP en Entrada y Voz; ambos hashes coinciden exactamente con `docs/Prompt WMS.txt` (`f6368136...f4cb9c2c`).

@@ -143,7 +143,7 @@ Los roles heredados `supervisor`, `operario` y `validador` siguen disponibles po
 - Entrada de voz: clasificador creado el 2026-08-04 con el mismo prompt.
 - Ambos flujos entregan JSON con `kw=g0m@s` al flujo `Salida`.
 - Salida llama `POST /api/v1/webhook/builderbot` y mapea `{mensaje}`.
-- SHA-256 del prompt sincronizado el 2026-08-04: `e932a761c09248bfaa8a496da1e7db292bc7c5e3fcc706088fd59bf9669b9ad4`.
+- SHA-256 del prompt sincronizado el 2026-08-04: `f63681366699d8aefe3c4cfa1476d48e8432453758960247e3488425f4cb9c2c`.
 
 El validador BBC marca `Entrada` como dead end por una limitación legacy de conteo. La API Manager confirma que la respuesta existe y está activa.
 
