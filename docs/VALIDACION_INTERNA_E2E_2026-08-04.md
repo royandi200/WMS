@@ -18,7 +18,8 @@ La validacion se ejecuto contra la base QA conectada al WMS. Las operaciones usa
 | Merma de lote | Aprobado | Descuento 0.25 en stock y lote; exceso rechazado con 409 |
 | RBAC | Aprobado | 12 controles con rotacion de roles y restauracion automatica |
 | Webhook local | Aprobado | Saludo, stock, trazabilidad, capacidad y rechazo sin credencial |
-| APIs dashboard desplegadas | 19/20 antes de correccion | Notificaciones era la unica ruta con 500 |
+| APIs dashboard desplegadas | Aprobado, 20/20 | Notificaciones corregida y revalidada en Vercel |
+| Webhook desplegado | Aprobado | Saludo, stock, trazabilidad, capacidad maxima y rechazo sin credencial |
 | Dependencias backend | Aprobado | 0 vulnerabilidades npm de produccion |
 
 ## Operaciones QA verificadas
@@ -65,3 +66,12 @@ La validacion se ejecuto contra la base QA conectada al WMS. Las operaciones usa
 - Confirmacion humana de textos, cantidades, ubicaciones y excepciones operativas.
 
 La garantia interna cubre reglas de dominio, persistencia, autorizacion, idempotencia y contratos API probados. No sustituye las pruebas manuales de interfaz, LLM, red de WhatsApp ni comportamiento del sandbox de terceros.
+
+## Despliegue validado
+
+- Commit: `8042f45`.
+- Rama: `main`.
+- URL: `https://wms-seven-ebon.vercel.app`.
+- Dashboard API: 20 de 20 rutas aprobadas despues del deployment.
+- Webhook API: 5 de 5 controles aprobados contra Vercel.
+- Pendiente antes de la prueba conversacional de capacidad: sincronizar `docs/Prompt WMS.txt` con Entrada y Voz en BBC usando la credencial Manager.

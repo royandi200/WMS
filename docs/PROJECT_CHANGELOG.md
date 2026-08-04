@@ -22,7 +22,7 @@ No reemplaza:
 - Se confirmo que las dos lineas humanas estan activas y que la linea del agente no pertenece a un usuario operativo.
 - Se corrigio el endpoint directo de despacho para respetar `ALLOW_DIRECT_DISPATCH_REQUEST=false` y exigir una tarea originada en factura Siigo.
 - Validacion local: 13 pruebas aprobadas, build Vite aprobado y preflight MySQL sin bloqueos.
-- Pendiente: desplegar esta proteccion y ejecutar la bateria por fases con evidencia por `RUN_ID`.
+- Desplegado en `8042f45`: 20/20 rutas del dashboard y webhook operativo revalidados en Vercel.
 
 | Área | Estado | Fuente de verdad |
 | --- | --- | --- |
