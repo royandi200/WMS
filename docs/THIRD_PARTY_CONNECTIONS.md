@@ -156,9 +156,12 @@ Variables necesarias:
 ```text
 BUILDERBOT_BOT_ID
 BUILDERBOT_API_TOKEN
-ENABLE_WORKFLOW_NOTIFICATIONS
 DISABLE_OUTBOUND_NOTIFICATIONS
 ```
+
+Las notificaciones salientes estan habilitadas por defecto. Definir
+`DISABLE_OUTBOUND_NOTIFICATIONS=true` funciona como corte de emergencia y
+detiene tanto envios nuevos como reintentos manuales.
 
 ## MySQL
 

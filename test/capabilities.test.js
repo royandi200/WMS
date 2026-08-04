@@ -11,7 +11,7 @@ const { envFlag, workflowFlags } = require('../api/_lib/feature-flags');
 const { normalizePurchaseOrderInput } = require('../api/_lib/purchase-orders');
 const { normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
-const { notifyRoles, normalizePhone, maskPhone } = require('../api/_lib/builderbot-notifications');
+const { notificationsEnabled, normalizePhone, maskPhone } = require('../api/_lib/builderbot-notifications');
 
 test('admin has every capability', () => {
   assert.equal(hasCapability('admin', CAPABILITIES.USERS_MANAGE), true);
@@ -148,13 +148,14 @@ test('BuilderBot phone normalization is deterministic and masked in results', ()
   assert.equal(maskPhone('573174442659'), '5731******59');
 });
 
-test('workflow notifications are opt-in', async () => {
-  const previous = process.env.ENABLE_WORKFLOW_NOTIFICATIONS;
-  delete process.env.ENABLE_WORKFLOW_NOTIFICATIONS;
-  const result = await notifyRoles({ event: 'test', roles: ['admin'], text: 'test' });
-  assert.deepEqual(result, [{ status: 'disabled' }]);
-  if (previous == null) delete process.env.ENABLE_WORKFLOW_NOTIFICATIONS;
-  else process.env.ENABLE_WORKFLOW_NOTIFICATIONS = previous;
+test('workflow notifications default to enabled with an emergency off switch', () => {
+  const previous = process.env.DISABLE_OUTBOUND_NOTIFICATIONS;
+  delete process.env.DISABLE_OUTBOUND_NOTIFICATIONS;
+  assert.equal(notificationsEnabled(), true);
+  process.env.DISABLE_OUTBOUND_NOTIFICATIONS = 'true';
+  assert.equal(notificationsEnabled(), false);
+  if (previous == null) delete process.env.DISABLE_OUTBOUND_NOTIFICATIONS;
+  else process.env.DISABLE_OUTBOUND_NOTIFICATIONS = previous;
 });
 
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {

@@ -15,6 +15,13 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Notificaciones salientes habilitadas por defecto
+
+- Se restauro el comportamiento historico de mensajeria proactiva sin exigir `ENABLE_WORKFLOW_NOTIFICATIONS`.
+- `DISABLE_OUTBOUND_NOTIFICATIONS=true` se conserva como corte de emergencia para envios y reintentos.
+- Se mantuvieron la seleccion de destinatarios por rol, la deduplicacion por evento y destinatario, y la bitacora en `notificaciones_salida`.
+- Validacion local: 15 pruebas aprobadas y build Vite aprobado.
+
 ### 2026-08-04 - Preparacion de pruebas E2E por rol
 
 - Se creo `docs/plan-pruebas-e2e-wms.md` con el recorrido completo WhatsApp, API, MySQL, dashboard y Siigo sandbox.

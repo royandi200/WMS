@@ -44,7 +44,7 @@ El plan prioriza una demostracion funcional temprana y deja las decisiones pendi
 - `RESERVE_AVAILABLE_ON_SHORTAGE=true`: si una factura no tiene stock completo, reserva lo disponible y deja el faltante como backorder, sin habilitar despacho.
 - `ALLOW_DIRECT_DISPATCH_REQUEST=false`: evita crear despachos sin factura Siigo.
 - `ALLOW_MANUAL_RECEPTION=false`: evita entradas que omitan OC y factura Siigo.
-- `ENABLE_WORKFLOW_NOTIFICATIONS=false`: evita enviar mensajes hasta corregir asignaciones de roles y destinatarios.
+- `DISABLE_OUTBOUND_NOTIFICATIONS=true`: corte de emergencia reversible para detener mensajes salientes.
 - No se cancela ni modifica automaticamente ningun documento contable de Siigo.
 - Una factura con cliente ausente queda en `PENDIENTE_DATOS_CLIENTE` y no genera tarea de despacho.
 

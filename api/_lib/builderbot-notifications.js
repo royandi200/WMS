@@ -12,9 +12,8 @@ function maskPhone(phone) {
 }
 
 function notificationsEnabled() {
-  const enabled = ['1', 'true', 'yes', 'on'].includes(String(process.env.ENABLE_WORKFLOW_NOTIFICATIONS || '').trim().toLowerCase());
   const disabled = ['1', 'true', 'yes', 'on'].includes(String(process.env.DISABLE_OUTBOUND_NOTIFICATIONS || '').trim().toLowerCase());
-  return enabled && !disabled;
+  return !disabled;
 }
 
 function sendMessage(phone, text) {
@@ -186,4 +185,4 @@ async function retryNotification(id) {
   }
 }
 
-module.exports = { notifyRoles, retryNotification, normalizePhone, maskPhone };
+module.exports = { notifyRoles, retryNotification, normalizePhone, maskPhone, notificationsEnabled };
