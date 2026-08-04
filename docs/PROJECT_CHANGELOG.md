@@ -20,6 +20,7 @@ No reemplaza:
 - El parser separa motivo de merma, ubicacion y fecha de vencimiento en una sola frase.
 - El cierre acepta alias del LLM para vencimiento, valida la fecha y la guarda en lote y stock.
 - Las respuestas de cierre y ajustes de materiales muestran el codigo visible de ubicacion, no el ID interno.
+- El reintento de un cierre informa responsable y fecha/hora sin repetir movimientos.
 - Se corrigieron de forma auditada los metadatos QA de `OP-20260804-000060` sin modificar cantidades.
 - Prompt sincronizado por MCP en Entrada y Voz; hash verificado `f3888f9f...f501f90`.
 - Validacion local: 17 pruebas aprobadas.

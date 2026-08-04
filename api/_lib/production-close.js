@@ -20,7 +20,10 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1 FOR UPDATE`,
+      `SELECT op.*, u.nombre AS cerrado_por_nombre
+       FROM ordenes_produccion op
+       LEFT JOIN usuarios u ON u.id = op.aprobado_por
+       WHERE op.id = ? OR op.codigo_orden = ? LIMIT 1 FOR UPDATE`,
       [orderId, orderId]
     );
     if (!orders.length) throw httpError(404, 'Orden no encontrada');
@@ -35,7 +38,15 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         [order.id, order.producto_id]
       );
       await conn.commit();
-      return { already_closed: true, order_code: order.codigo_orden, qty_real: Number(order.cantidad_real), lpn_terminado: existingLots[0]?.lpn || null, ubicacion: existingLots[0]?.ubicacion || null };
+      return {
+        already_closed: true,
+        order_code: order.codigo_orden,
+        qty_real: Number(order.cantidad_real),
+        lpn_terminado: existingLots[0]?.lpn || null,
+        ubicacion: existingLots[0]?.ubicacion || null,
+        closed_by: order.cerrado_por_nombre || null,
+        closed_at: order.cerrado_en || null,
+      };
     }
     if (order.estado !== 'EN_PROCESO') throw httpError(409, `La orden esta ${order.estado} y debe estar EN_PROCESO`);
     if (!Number.isFinite(conforming) || conforming < 0 || !Number.isFinite(waste) || waste < 0) {

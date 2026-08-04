@@ -2149,8 +2149,11 @@ module.exports = async (req, res) => {
           expiryDate: params.fecha_venc,
           userId: user.id,
         });
+        const closedWhen = closure.closed_at
+          ? new Date(closure.closed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })
+          : null;
         mensaje = closure.already_closed
-          ? `La orden ${closure.order_code} ya estaba cerrada. No se modifico inventario.`
+          ? `La orden ${closure.order_code} ya estaba cerrada${closure.closed_by ? ` por ${closure.closed_by}` : ''}${closedWhen ? ` el ${closedWhen}` : ''}. No se modifico inventario.`
           : [
               `Orden ${closure.order_code} cerrada.`,
               `Producto conforme: ${closure.qty_real}`,

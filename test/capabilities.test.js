@@ -195,6 +195,13 @@ test('production close normalizes LLM aliases', () => {
   assert.equal(normalizeProductionCloseParams({ fecha_vencimiento: '2027-02-29' }).fecha_venc, '2027-02-29');
 });
 
+test('production close idempotency response includes actor and timestamp', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
+  assert.match(source, /closure\.closed_by/u);
+  assert.match(source, /closure\.closed_at/u);
+  assert.match(source, /No se modifico inventario/u);
+});
+
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '..', 'docs', 'Prompt WMS.txt'), 'utf8');
   assert.doesNotMatch(prompt, /Ã|Â|â†|�/u);
