@@ -124,7 +124,7 @@ En Windows/Node, si aparece `unable to verify the first certificate`, ejecutar e
 El SHA comprobado el 2026-08-04 es:
 
 ```text
-f63681366699d8aefe3c4cfa1476d48e8432453758960247e3488425f4cb9c2c
+f3888f9fbf065b789395d4b5233970b1efb15ad0334c4654c364d85fef501f90
 ```
 
 El validador puede marcar falsamente Entrada como dead end por el formato legacy de la answer. Contrastar siempre con la lectura Manager antes de modificar la estructura.
