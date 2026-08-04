@@ -12,6 +12,11 @@ const { normalizePurchaseOrderInput } = require('../api/_lib/purchase-orders');
 const { normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
 const { notificationsEnabled, normalizePhone, maskPhone } = require('../api/_lib/builderbot-notifications');
+const {
+  normalizeExpiryDate,
+  normalizeProductionCloseParams,
+  parseProductionCloseFromText,
+} = require('../api/_lib/production-close-input');
 
 test('admin has every capability', () => {
   assert.equal(hasCapability('admin', CAPABILITIES.USERS_MANAGE), true);
@@ -156,6 +161,38 @@ test('workflow notifications default to enabled with an emergency off switch', (
   assert.equal(notificationsEnabled(), false);
   if (previous == null) delete process.env.DISABLE_OUTBOUND_NOTIFICATIONS;
   else process.env.DISABLE_OUTBOUND_NOTIFICATIONS = previous;
+});
+
+test('production close text keeps reason, location and expiry separate', () => {
+  const parsed = parseProductionCloseFromText(
+    'cerramos producción OP-20260804-000060 con 2 conformes y 1 merma por daño de empaque, dejar el producto terminado en PPAL-A-1-01, vence el 31 de diciembre de 2027'
+  );
+  assert.deepEqual(parsed.params, {
+    id_orden: 'OP-20260804-000060',
+    cantidad_real: 2,
+    merma: 1,
+    motivo_merma: 'daño de empaque',
+    ubicacion: 'PPAL-A-1-01',
+    fecha_venc: '2027-12-31',
+  });
+  assert.equal(normalizeExpiryDate('2027-02-29'), null);
+  assert.equal(normalizeExpiryDate('29 de febrero de 2028'), '2028-02-29');
+});
+
+test('production close normalizes LLM aliases', () => {
+  const normalized = normalizeProductionCloseParams({
+    conformes: 2,
+    cantidad_merma: 1,
+    motivo: 'daño de empaque',
+    ubicacion_codigo: 'PPAL-A-1-01',
+    fecha_vencimiento: '31 de diciembre de 2027',
+  });
+  assert.equal(normalized.cantidad_real, 2);
+  assert.equal(normalized.merma, 1);
+  assert.equal(normalized.motivo_merma, 'daño de empaque');
+  assert.equal(normalized.ubicacion, 'PPAL-A-1-01');
+  assert.equal(normalized.fecha_venc, '2027-12-31');
+  assert.equal(normalizeProductionCloseParams({ fecha_vencimiento: '2027-02-29' }).fecha_venc, '2027-02-29');
 });
 
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {

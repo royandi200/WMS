@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
+const { normalizeExpiryDate } = require('./production-close-input');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -10,8 +11,10 @@ function httpError(status, message) {
 async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, expiryDate, userId }) {
   const conforming = Number(qtyReal);
   const waste = Number(qtyWaste);
+  const normalizedExpiry = expiryDate ? normalizeExpiryDate(expiryDate) : null;
   const locationReference = locationId || locationCode || null;
   if (!orderId) throw httpError(400, 'La orden es obligatoria');
+  if (expiryDate && !normalizedExpiry) throw httpError(400, 'La fecha de vencimiento no es valida');
 
   const conn = await createConnection();
   try {
@@ -25,11 +28,14 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     const lpn = `LPN-${order.codigo_orden}`;
     if (order.estado === 'CERRADA') {
       const [existingLots] = await conn.execute(
-        `SELECT lpn FROM lots WHERE production_order_id = ? AND product_id = ? ORDER BY created_at LIMIT 1`,
+        `SELECT l.lpn, u.codigo AS ubicacion FROM lots l
+         LEFT JOIN stock s ON s.lote = l.lpn
+         LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id
+         WHERE l.production_order_id = ? AND l.product_id = ? ORDER BY l.created_at LIMIT 1`,
         [order.id, order.producto_id]
       );
       await conn.commit();
-      return { already_closed: true, order_code: order.codigo_orden, qty_real: Number(order.cantidad_real), lpn_terminado: existingLots[0]?.lpn || null };
+      return { already_closed: true, order_code: order.codigo_orden, qty_real: Number(order.cantidad_real), lpn_terminado: existingLots[0]?.lpn || null, ubicacion: existingLots[0]?.ubicacion || null };
     }
     if (order.estado !== 'EN_PROCESO') throw httpError(409, `La orden esta ${order.estado} y debe estar EN_PROCESO`);
     if (!Number.isFinite(conforming) || conforming < 0 || !Number.isFinite(waste) || waste < 0) {
@@ -49,6 +55,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     if (!materials.length) throw httpError(409, 'La orden no tiene conciliacion de materiales');
     let warehouseId = null;
     let location = null;
+    let resolvedLocationCode = null;
     if (locationReference) {
       const [locations] = await conn.execute(
         `SELECT u.id, u.codigo, u.bodega_id
@@ -59,6 +66,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       );
       if (!locations.length) throw httpError(400, 'La ubicacion no existe o no esta activa');
       location = locations[0].id;
+      resolvedLocationCode = locations[0].codigo;
       warehouseId = locations[0].bodega_id;
     }
 
@@ -73,13 +81,13 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         [lotId, lpn, order.producto_id, warehouseId, conforming, conforming,
          order.id, userId,
          `Orden ${order.codigo_orden} | Merma cierre: ${waste} | ${wasteReason || 'Sin merma'}`,
-         expiryDate || null]
+         normalizedExpiry]
       );
       await conn.execute(
         `INSERT INTO stock
            (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
          VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
-        [order.producto_id, warehouseId, location, lpn, expiryDate || null, conforming]
+        [order.producto_id, warehouseId, location, lpn, normalizedExpiry, conforming]
       );
       await conn.execute(
         `INSERT INTO movimientos
@@ -142,6 +150,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       waste_number: wasteNumber,
       lpn_terminado: conforming > 0 ? lpn : null,
       ubicacion_id: location,
+      ubicacion: resolvedLocationCode,
       material_reconciliation: reconciliation,
     };
   } catch (error) {

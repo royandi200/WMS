@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Cierre de produccion con metadatos completos
+
+- El parser separa motivo de merma, ubicacion y fecha de vencimiento en una sola frase.
+- El cierre acepta alias del LLM para vencimiento, valida la fecha y la guarda en lote y stock.
+- Las respuestas de cierre y ajustes de materiales muestran el codigo visible de ubicacion, no el ID interno.
+- Se corrigieron de forma auditada los metadatos QA de `OP-20260804-000060` sin modificar cantidades.
+- Validacion local: 17 pruebas aprobadas.
+
 ### 2026-08-04 - Notificaciones salientes habilitadas por defecto
 
 - Se restauro el comportamiento historico de mensajeria proactiva sin exigir `ENABLE_WORKFLOW_NOTIFICATIONS`.

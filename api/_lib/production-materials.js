@@ -41,7 +41,7 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
     if (!materials.length) throw httpError(409, 'El producto no pertenece al BOM de la orden');
     const material = materials[0];
     const [stocks] = await conn.execute(
-      `SELECT s.id, s.bodega_id, s.cantidad, s.reservada, s.ubicacion_id
+      `SELECT s.id, s.bodega_id, s.cantidad, s.reservada, s.ubicacion_id, u.codigo AS ubicacion_codigo
        FROM stock s
        JOIN ubicaciones u ON u.id = s.ubicacion_id
        WHERE s.producto_id = ? AND s.lote = ?
@@ -123,7 +123,7 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
        reason || adjustmentType, userId]
     );
     await conn.commit();
-    return { order_code: order.codigo_orden, tipo: adjustmentType, sku: product.siigo_code, lote: lpn, ubicacion_id: location, cantidad: qty };
+    return { order_code: order.codigo_orden, tipo: adjustmentType, sku: product.siigo_code, lote: lpn, ubicacion_id: location, ubicacion: stock.ubicacion_codigo, cantidad: qty };
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;

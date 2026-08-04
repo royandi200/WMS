@@ -87,6 +87,10 @@ const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const { adjustProductionMaterials } = require('../../_lib/production-materials');
 const { closeProductionOrder } = require('../../_lib/production-close');
+const {
+  normalizeProductionCloseParams,
+  parseProductionCloseFromText: parseProductionCloseInput,
+} = require('../../_lib/production-close-input');
 const { workflowFlags } = require('../../_lib/feature-flags');
 
 const DB = () => mysql.createConnection({
@@ -297,36 +301,6 @@ async function triggerInvoiceImport() {
   return payload;
 }
 
-function hasProductionCloseIntent(text) {
-  return /\b(cerr|cierre|cerramos|finaliz|termin)\w*\b/i.test(String(text || '')) &&
-    /\b(op|orden|producci[oó]n|produccion)\b/i.test(String(text || ''));
-}
-
-function parseProductionCloseFromText(text) {
-  const raw = String(text || '');
-  if (!hasProductionCloseIntent(raw)) return null;
-
-  const orderMatch = raw.match(/\b(?:OP|ORD|P)-[A-Z0-9-]+\b/i);
-  if (!orderMatch) return null;
-
-  const normalized = raw.toLowerCase().replace(/,/g, '.');
-  const conformes =
-    normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)?\s*(?:conforme(?:s)?|resultante(?:s)?|buen(?:a|as|o|os)|producid(?:a|as|o|os))/i) ||
-    normalized.match(/(?:conforme(?:s)?|resultante(?:s)?|salieron|producid(?:a|as|o|os))\s*(?:con|:)?\s*(\d+(?:\.\d+)?)/i) ||
-    normalized.match(/\bcon\s+(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)\b/i);
-  const merma =
-    normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)?\s*(?:de\s+)?(?:merma|mermas|no conforme(?:s)?|rechazo(?:s)?|desperdicio(?:s)?)/i) ||
-    normalized.match(/(?:merma|mermas|no conforme(?:s)?|rechazo(?:s)?|desperdicio(?:s)?)\s*(?:de|:)?\s*(\d+(?:\.\d+)?)/i);
-
-  const params = { id_orden: orderMatch[0].toUpperCase() };
-  if (conformes) params.cantidad_real = Number(conformes[1]);
-  if (merma) params.merma = Number(merma[1]);
-
-  const reasonMatch = raw.match(/(?:por|porque|motivo|causa)\s+(.+)$/i);
-  if (reasonMatch && params.merma > 0) params.motivo_merma = reasonMatch[1].trim();
-  return { action: 'CERRAR_ORDEN_PRODUCCION', params };
-}
-
 function inferProductionCloseReasonFromText(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
@@ -380,7 +354,7 @@ async function findRecentProductionCloseReason(db, from, orderId) {
 
     if (params.motivo_merma || params.motivo) return params.motivo_merma || params.motivo;
 
-    const parsedClose = parseProductionCloseFromText(rawText);
+    const parsedClose = parseProductionCloseInput(rawText);
     if (parsedClose?.params?.motivo_merma) {
       if (!orderId || parsedClose.params.id_orden === String(orderId).toUpperCase()) {
         return parsedClose.params.motivo_merma;
@@ -403,27 +377,7 @@ function firstDefined(...values) {
 function normalizeOperationalParams(action, params) {
   const next = { ...(params || {}) };
   if (action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION') {
-    next.cantidad_real = firstDefined(
-      next.cantidad_real,
-      next.qty_real,
-      next.cantidad_conforme,
-      next.cantidad_conformes,
-      next.conformes,
-      next.unidades_conformes,
-      next.unidades_resultantes,
-      next.resultantes,
-      next.producidas
-    );
-    next.merma = firstDefined(
-      next.merma,
-      next.qty_waste,
-      next.cantidad_merma,
-      next.cantidad_no_conforme,
-      next.no_conformes,
-      next.merma_declarada,
-      next.unidades_merma
-    );
-    next.motivo_merma = firstDefined(next.motivo_merma, next.motivo, next.razon_merma, next.causa_merma);
+    return normalizeProductionCloseParams(next);
   }
   if (action === 'SOLICITAR_DESPACHO') {
     next.id_lote = firstDefined(next.id_lote, next.lote, next.lpn);
@@ -1259,7 +1213,7 @@ module.exports = async (req, res) => {
 
     params = normalizeOperationalParams(action, params);
 
-    const cierreDetectado = parseProductionCloseFromText(rawText);
+    const cierreDetectado = parseProductionCloseInput(rawText);
     if (cierreDetectado && (action === 'UNKNOWN' || action === 'MODO_CHARLA' || action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION')) {
       action = 'CERRAR_ORDEN_PRODUCCION';
       params = normalizeOperationalParams(action, {
@@ -1268,7 +1222,9 @@ module.exports = async (req, res) => {
         id_orden: firstDefined(cierreDetectado.params.id_orden, params.id_orden),
         cantidad_real: firstDefined(cierreDetectado.params.cantidad_real, params.cantidad_real),
         merma: firstDefined(cierreDetectado.params.merma, params.merma),
-        motivo_merma: firstDefined(cierreDetectado.params.motivo_merma, params.motivo_merma),
+        motivo_merma: firstDefined(params.motivo_merma, cierreDetectado.params.motivo_merma),
+        ubicacion: firstDefined(params.ubicacion, cierreDetectado.params.ubicacion),
+        fecha_venc: firstDefined(params.fecha_venc, cierreDetectado.params.fecha_venc),
       });
     }
 
@@ -2200,7 +2156,7 @@ module.exports = async (req, res) => {
               `Producto conforme: ${closure.qty_real}`,
               `Merma: ${closure.qty_waste}`,
               `Lote PT: ${closure.lpn_terminado}`,
-              `Ubicacion: ${closure.ubicacion_id}`,
+              `Ubicacion: ${closure.ubicacion || closure.ubicacion_id}`,
             ].join('\n');
         responseContext.production_close = closure;
         break;
@@ -2238,7 +2194,7 @@ module.exports = async (req, res) => {
           reason: params.motivo,
           userId: user.id,
         });
-        mensaje = `${adjustment.tipo} registrada en ${adjustment.order_code}: ${adjustment.cantidad} de ${adjustment.sku}, lote ${adjustment.lote}, ubicacion ${adjustment.ubicacion_id}.`;
+        mensaje = `${adjustment.tipo} registrada en ${adjustment.order_code}: ${adjustment.cantidad} de ${adjustment.sku}, lote ${adjustment.lote}, ubicacion ${adjustment.ubicacion || adjustment.ubicacion_id}.`;
         responseContext.production_material = adjustment;
         break;
       }
