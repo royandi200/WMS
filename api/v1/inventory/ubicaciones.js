@@ -2,14 +2,26 @@
 // PUT    /api/v1/inventory/ubicaciones        → actualizar posición/zona (drag)
 // DELETE /api/v1/inventory/ubicaciones?id=X  → eliminar (solo si sin stock)
 const { query } = require('../../_lib/db')
-const { cors, requireRole } = require('../../_lib/auth')
+const { cors, requireCapability } = require('../../_lib/auth')
+const { CAPABILITIES } = require('../../_lib/capabilities')
 
 module.exports = async (req, res) => {
   cors(res, 'GET, POST, PUT, DELETE')
   if (req.method === 'OPTIONS') return res.status(200).end()
-  try { await requireRole(req, ['Admin', 'Supervisor']) } catch(e) { return res.status(e.status || 401).json({ ok:false, error:e.message }) }
+  try {
+    await requireCapability(req, req.method === 'GET' ? CAPABILITIES.INVENTORY_READ : CAPABILITIES.INVENTORY_ADJUST)
+  } catch(e) { return res.status(e.status || 401).json({ ok:false, error:e.message }) }
 
   try {
+    if (req.method === 'GET') {
+      const rows = await query(
+        `SELECT u.id, u.bodega_id, u.codigo, u.zona, u.pasillo, u.nivel, u.posicion,
+                b.codigo AS bodega_codigo, b.nombre AS bodega_nombre
+         FROM ubicaciones u JOIN bodegas b ON b.id = u.bodega_id
+         WHERE u.activa = 1 AND b.activa = 1 ORDER BY b.codigo, u.codigo`
+      )
+      return res.json({ ok: true, data: { rows } })
+    }
     // ── POST: crear ──────────────────────────────────────────────
     if (req.method === 'POST') {
       const { bodega_id=1, codigo, zona, pasillo, nivel='1', posicion='a',

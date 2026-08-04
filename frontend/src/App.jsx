@@ -19,6 +19,8 @@ const MermasPage       = lazy(() => import('./pages/MermasPage'))
 const KardexPage       = lazy(() => import('./pages/KardexPage'))
 const AprobacionesPage = lazy(() => import('./pages/AprobacionesPage'))
 const WebhookLogsPage  = lazy(() => import('./pages/WebhookLogsPage'))
+const UsuariosPage     = lazy(() => import('./pages/UsuariosPage'))
+const NotificacionesPage = lazy(() => import('./pages/NotificacionesPage'))
 
 function PageLoader() {
   return (
@@ -26,6 +28,14 @@ function PageLoader() {
       <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
     </div>
   )
+}
+
+function CapabilityRoute({ capability, children }) {
+  const user = useAuthStore((state) => state.user)
+  const capabilities = user?.capabilities || []
+  const legacyAdmin = ['admin', 'supervisor'].includes(String(user?.rol || '').toLowerCase())
+  const allowed = legacyAdmin || capabilities.includes('*') || capabilities.includes(capability)
+  return allowed ? children : <Navigate to="/" replace />
 }
 
 // ErrorBoundary global: captura errores de render y muestra mensaje en lugar de pantalla en blanco
@@ -76,16 +86,18 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
             <Route index element={<DashboardPage />} />
-            <Route path="recepciones"  element={<ErrorBoundary><Suspense fallback={<PageLoader />}><RecepcionPage /></Suspense></ErrorBoundary>} />
-            <Route path="despachos"    element={<ErrorBoundary><Suspense fallback={<PageLoader />}><DespachoPage /></Suspense></ErrorBoundary>} />
-            <Route path="devoluciones" element={<ErrorBoundary><Suspense fallback={<PageLoader />}><DevolucionesPage /></Suspense></ErrorBoundary>} />
-            <Route path="inventario"   element={<ErrorBoundary><Suspense fallback={<PageLoader />}><InventarioPage /></Suspense></ErrorBoundary>} />
-            <Route path="produccion"   element={<ErrorBoundary><Suspense fallback={<PageLoader />}><ProduccionPage /></Suspense></ErrorBoundary>} />
-            <Route path="mermas"       element={<ErrorBoundary><Suspense fallback={<PageLoader />}><MermasPage /></Suspense></ErrorBoundary>} />
-            <Route path="kardex"       element={<ErrorBoundary><Suspense fallback={<PageLoader />}><KardexPage /></Suspense></ErrorBoundary>} />
-            <Route path="aprobaciones" element={<ErrorBoundary><Suspense fallback={<PageLoader />}><AprobacionesPage /></Suspense></ErrorBoundary>} />
-            <Route path="productos"    element={<ErrorBoundary><ProductosPage /></ErrorBoundary>} />
-            <Route path="webhook-logs" element={<ErrorBoundary><Suspense fallback={<PageLoader />}><WebhookLogsPage /></Suspense></ErrorBoundary>} />
+            <Route path="recepciones"  element={<CapabilityRoute capability="reception.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><RecepcionPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="despachos"    element={<CapabilityRoute capability="dispatch.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><DespachoPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="devoluciones" element={<CapabilityRoute capability="returns.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><DevolucionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="inventario"   element={<CapabilityRoute capability="inventory.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><InventarioPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="produccion"   element={<CapabilityRoute capability="production.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><ProduccionPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="mermas"       element={<CapabilityRoute capability="waste.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><MermasPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="kardex"       element={<CapabilityRoute capability="inventory.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><KardexPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="aprobaciones" element={<CapabilityRoute capability="approvals.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><AprobacionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="productos"    element={<CapabilityRoute capability="catalog.read"><ErrorBoundary><ProductosPage /></ErrorBoundary></CapabilityRoute>} />
+            <Route path="webhook-logs" element={<CapabilityRoute capability="webhook.logs.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><WebhookLogsPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="usuarios" element={<CapabilityRoute capability="users.manage"><ErrorBoundary><Suspense fallback={<PageLoader />}><UsuariosPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="notificaciones" element={<CapabilityRoute capability="webhook.logs.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><NotificacionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
           </Route>
         </Route>
 

@@ -1,0 +1,155 @@
+const crypto = require('crypto');
+const { createConnection } = require('./db');
+
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, expiryDate, userId }) {
+  const conforming = Number(qtyReal);
+  const waste = Number(qtyWaste);
+  const locationReference = locationId || locationCode || null;
+  if (!orderId) throw httpError(400, 'La orden es obligatoria');
+
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const [orders] = await conn.execute(
+      `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1 FOR UPDATE`,
+      [orderId, orderId]
+    );
+    if (!orders.length) throw httpError(404, 'Orden no encontrada');
+    const order = orders[0];
+    const lpn = `LPN-${order.codigo_orden}`;
+    if (order.estado === 'CERRADA') {
+      const [existingLots] = await conn.execute(
+        `SELECT lpn FROM lots WHERE production_order_id = ? AND product_id = ? ORDER BY created_at LIMIT 1`,
+        [order.id, order.producto_id]
+      );
+      await conn.commit();
+      return { already_closed: true, order_code: order.codigo_orden, qty_real: Number(order.cantidad_real), lpn_terminado: existingLots[0]?.lpn || null };
+    }
+    if (order.estado !== 'EN_PROCESO') throw httpError(409, `La orden esta ${order.estado} y debe estar EN_PROCESO`);
+    if (!Number.isFinite(conforming) || conforming < 0 || !Number.isFinite(waste) || waste < 0) {
+      throw httpError(400, 'Cantidad conforme y merma son obligatorias');
+    }
+    if (conforming === 0 && waste === 0) throw httpError(400, 'Debes confirmar unidades conformes o merma');
+    if (waste > 0 && !String(wasteReason || '').trim()) throw httpError(400, 'El motivo de merma es obligatorio');
+    if (conforming > 0 && !locationReference) throw httpError(400, 'La ubicacion del producto terminado es obligatoria');
+    const [materials] = await conn.execute(
+      `SELECT pm.producto_id, p.siigo_code AS sku, p.nombre,
+              pm.cantidad_teorica, pm.cantidad_consumida,
+              pm.cantidad_devuelta, pm.cantidad_adicional
+       FROM produccion_materiales pm JOIN productos p ON p.id = pm.producto_id
+       WHERE pm.orden_produccion_id = ? ORDER BY pm.id`,
+      [order.id]
+    );
+    if (!materials.length) throw httpError(409, 'La orden no tiene conciliacion de materiales');
+    let warehouseId = null;
+    let location = null;
+    if (locationReference) {
+      const [locations] = await conn.execute(
+        `SELECT u.id, u.codigo, u.bodega_id
+         FROM ubicaciones u JOIN bodegas b ON b.id = u.bodega_id
+         WHERE (u.id = ? OR UPPER(u.codigo) = UPPER(?)) AND u.activa = 1 AND b.activa = 1
+         LIMIT 1`,
+        [Number(locationReference) || 0, String(locationReference).trim()]
+      );
+      if (!locations.length) throw httpError(400, 'La ubicacion no existe o no esta activa');
+      location = locations[0].id;
+      warehouseId = locations[0].bodega_id;
+    }
+
+    let lotId = null;
+    if (conforming > 0) {
+      lotId = crypto.randomUUID();
+      await conn.execute(
+        `INSERT INTO lots
+           (id, lpn, product_id, bodega_id, qty_initial, qty_current, origin, status,
+            production_order_id, received_by, notes, expiry_date, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'PRODUCCION', 'DISPONIBLE', ?, ?, ?, ?, NOW())`,
+        [lotId, lpn, order.producto_id, warehouseId, conforming, conforming,
+         order.id, userId,
+         `Orden ${order.codigo_orden} | Merma cierre: ${waste} | ${wasteReason || 'Sin merma'}`,
+         expiryDate || null]
+      );
+      await conn.execute(
+        `INSERT INTO stock
+           (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
+        [order.producto_id, warehouseId, location, lpn, expiryDate || null, conforming]
+      );
+      await conn.execute(
+        `INSERT INTO movimientos
+           (tipo, producto_id, bodega_dest, ubicacion_dest, lote, cantidad,
+            referencia_id, referencia_tipo, usuario_id, siigo_sync)
+         VALUES ('entrada', ?, ?, ?, ?, ?, ?, 'orden_produccion', ?, 0)`,
+        [order.producto_id, warehouseId, location, lpn, conforming, order.id, userId]
+      );
+      await conn.execute(
+        `INSERT INTO kardex
+           (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
+            reference, notes, approved_by, created_at)
+         VALUES (?, ?, ?, ?, ?, 'CIERRE_PRODUCCION', ?, ?, ?, ?, ?, NOW())`,
+        [crypto.randomUUID(), crypto.randomUUID(), lotId, order.producto_id, userId,
+         conforming, conforming, `produccion:${order.codigo_orden}`,
+         `Ubicacion ${location}`, userId]
+      );
+    }
+    await conn.execute(
+      `UPDATE ordenes_produccion
+       SET cantidad_real = ?, fase = 'F5', estado = 'CERRADA', cerrado_en = NOW(), aprobado_por = ?
+       WHERE id = ? AND estado = 'EN_PROCESO'`,
+      [conforming, userId, order.id]
+    );
+    let wasteNumber = null;
+    if (waste > 0) {
+      wasteNumber = `MER-${Date.now()}`;
+      await conn.execute(
+        `INSERT INTO mermas
+           (numero, tipo, producto_id, lote, orden_produccion_id, cantidad, motivo,
+            usuario_id, aprobado_por, estado, creado_en)
+         VALUES (?, 'PROCESO', ?, NULL, ?, ?, ?, ?, ?, 'APROBADO', NOW())`,
+        [wasteNumber, order.producto_id, order.id, waste, wasteReason, userId, userId]
+      );
+    }
+    const reconciliation = materials.map(material => {
+      const theoretical = Number(material.cantidad_teorica || 0);
+      const consumed = Number(material.cantidad_consumida || 0);
+      const returned = Number(material.cantidad_devuelta || 0);
+      const net = consumed - returned;
+      return {
+        product_id: material.producto_id,
+        sku: material.sku,
+        producto: material.nombre,
+        teorico: theoretical,
+        consumido: consumed,
+        devuelto: returned,
+        adicional: Number(material.cantidad_adicional || 0),
+        consumo_neto: net,
+        variacion: Number((net - theoretical).toFixed(4)),
+      };
+    });
+    await conn.commit();
+    return {
+      already_closed: false,
+      order_code: order.codigo_orden,
+      qty_planned: Number(order.cantidad_planeada),
+      qty_real: conforming,
+      qty_waste: waste,
+      waste_number: wasteNumber,
+      lpn_terminado: conforming > 0 ? lpn : null,
+      ubicacion_id: location,
+      material_reconciliation: reconciliation,
+    };
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+module.exports = { closeProductionOrder };

@@ -1,4 +1,7 @@
 const { createConnection } = require('./db');
+const { workflowFlags } = require('./feature-flags');
+const { notifyRoles } = require('./builderbot-notifications');
+const { resolvePrimaryWarehouse } = require('./warehouses');
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -61,11 +64,7 @@ async function resolveWarehouse(conn, remoteWarehouseId) {
     );
   }
 
-  const [rows] = await conn.execute(
-    `SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 1`
-  );
-  if (!rows.length) throw httpError(500, 'No hay bodega WMS activa');
-  return rows[0].id;
+  return resolvePrimaryWarehouse(conn);
 }
 
 async function allocateProduct(conn, { productId, bodegaId, quantity, invoiceName }) {
@@ -108,12 +107,30 @@ async function allocateProduct(conn, { productId, bodegaId, quantity, invoiceNam
 
   if (remaining > 0) {
     const available = Number(quantity) - remaining;
-    throw httpError(
-      409,
-      `Stock WMS insuficiente para ${invoiceName}. Solicitado: ${quantity}; disponible trazable: ${available}`
-    );
+    if (!workflowFlags().reserveAvailableOnShortage) {
+      throw httpError(
+        409,
+        `Stock WMS insuficiente para ${invoiceName}. Solicitado: ${quantity}; disponible trazable: ${available}`
+      );
+    }
   }
+  allocations.shortage = remaining;
   return allocations;
+}
+
+async function upsertDemand(conn, { dispatchId, productId, invoiced, reserved, status }) {
+  await conn.execute(
+    `INSERT INTO despacho_demanda_items
+       (despacho_id, producto_id, cantidad_facturada, cantidad_reservada,
+        cantidad_despachada, estado, creado_en, actualizado_en)
+     VALUES (?, ?, ?, ?, 0, ?, NOW(), NOW())
+     ON DUPLICATE KEY UPDATE
+       cantidad_facturada = cantidad_facturada + VALUES(cantidad_facturada),
+       cantidad_reservada = cantidad_reservada + VALUES(cantidad_reservada),
+       estado = IF(estado = 'PENDIENTE_DATOS_CLIENTE', estado, VALUES(estado)),
+       actualizado_en = NOW()`,
+    [dispatchId, productId, invoiced, reserved, status]
+  );
 }
 
 function invoiceSignature(items) {
@@ -312,7 +329,7 @@ async function importInvoice(invoice, userId) {
        FROM despachos WHERE siigo_invoice_id = ? LIMIT 1 FOR UPDATE`,
       [data.id]
     );
-    if (existing.length && existing[0].estado !== 'picking') {
+    if (existing.length && !['picking', 'borrador'].includes(existing[0].estado)) {
       await conn.commit();
       return { status: 'duplicate', ...existing[0] };
     }
@@ -325,10 +342,6 @@ async function importInvoice(invoice, userId) {
        LIMIT 1`,
       [data.customerId, data.customerIdentification, data.customerId]
     );
-    if (!customerRows.length) {
-      throw httpError(409, `Cliente ${data.customerIdentification || data.customerId} no sincronizado`);
-    }
-
     const productCodes = [...new Set(data.items.map(item => String(item.code || '').trim()).filter(Boolean))];
     if (!productCodes.length) throw httpError(400, `Factura ${data.name} sin codigos de producto`);
     const placeholders = productCodes.map(() => '?').join(',');
@@ -368,8 +381,60 @@ async function importInvoice(invoice, userId) {
     const bodegaId = [...warehouseIds][0];
     const safeName = data.name.replace(/[^A-Za-z0-9-]/g, '').slice(0, 18) || data.id.slice(0, 8);
     const numero = `DSP-SIIGO-${safeName}`.slice(0, 30);
-    const customer = customerRows[0];
-    const customerName = data.customerName || customer.nombre_comercial || customer.nombre || 'CLIENTE SIIGO';
+    const customer = customerRows[0] || null;
+    const customerName = data.customerName || customer?.nombre_comercial || customer?.nombre || null;
+    if (!customer) {
+      let pendingDispatchId = existing[0]?.id || null;
+      if (pendingDispatchId) {
+        await releaseReservations(conn, pendingDispatchId, existing[0].bodega_id);
+        await conn.execute(`DELETE FROM despacho_items WHERE despacho_id = ?`, [pendingDispatchId]);
+        await conn.execute(`DELETE FROM despacho_demanda_items WHERE despacho_id = ?`, [pendingDispatchId]);
+        await conn.execute(
+          `UPDATE despachos
+           SET tercero_id = NULL, cliente_nombre = ?, bodega_id = ?, estado = 'borrador',
+               observaciones = ?, siigo_invoice_name = ?, total_factura = ?, siigo_synced_at = NOW()
+           WHERE id = ?`,
+          [customerName || 'PENDIENTE DATOS CLIENTE', bodegaId,
+           `Factura ${data.name} pendiente de sincronizar cliente`, data.name, data.total || null, pendingDispatchId]
+        );
+      } else {
+        const [inserted] = await conn.execute(
+          `INSERT INTO despachos
+             (numero, tercero_id, cliente_nombre, bodega_id, estado, usuario_id,
+              observaciones, siigo_invoice_id, siigo_invoice_name, total_factura,
+              siigo_synced_at, creado_en)
+           VALUES (?, NULL, ?, ?, 'borrador', ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [numero, customerName || 'PENDIENTE DATOS CLIENTE', bodegaId, userId,
+           `Factura ${data.name} pendiente de sincronizar cliente`, data.id, data.name, data.total || null]
+        );
+        pendingDispatchId = inserted.insertId;
+      }
+      for (const item of preparedItems) {
+        await upsertDemand(conn, {
+          dispatchId: pendingDispatchId,
+          productId: item.productId,
+          invoiced: item.quantity,
+          reserved: 0,
+          status: 'PENDIENTE_DATOS_CLIENTE',
+        });
+      }
+      await conn.commit();
+      const notification = await notifyRoles({
+        event: `dispatch_pending_customer:${pendingDispatchId}`,
+        roles: ['admin'],
+        text: `Factura ${data.name} pendiente: el cliente ${data.customerIdentification || data.customerId} no esta sincronizado en el WMS.`,
+        fallbackRoles: [],
+      }).catch(error => [{ status: 'error', error: error.message }]);
+      return {
+        status: 'pending_customer',
+        id: pendingDispatchId,
+        numero: existing[0]?.numero || numero,
+        estado: 'PENDIENTE_DATOS_CLIENTE',
+        siigo_invoice_id: data.id,
+        siigo_invoice_name: data.name,
+        notification,
+      };
+    }
     if (!existing.length) {
       await rejectMissingQuotationReference(conn, { data, customer, bodegaId });
     }
@@ -409,12 +474,13 @@ async function importInvoice(invoice, userId) {
       status = 'updated';
       await releaseReservations(conn, dispatchId, existing[0].bodega_id);
       await conn.execute(`DELETE FROM despacho_items WHERE despacho_id = ?`, [dispatchId]);
+      await conn.execute(`DELETE FROM despacho_demanda_items WHERE despacho_id = ?`, [dispatchId]);
       await conn.execute(
         `UPDATE despachos
          SET tercero_id = ?, cliente_nombre = ?, bodega_id = ?, usuario_id = ?,
              observaciones = ?, siigo_invoice_name = ?, cufe = ?, stamp_status = ?,
-             total_factura = ?, siigo_synced_at = NOW()
-         WHERE id = ? AND estado = 'picking'`,
+             total_factura = ?, estado = 'picking', siigo_synced_at = NOW()
+         WHERE id = ? AND estado IN ('picking','borrador')`,
         [customer.id, customerName, bodegaId, userId,
          data.observations || `Actualizado desde SIIGO ${data.name}`,
          data.name, data.cufe || null, data.stampStatus || null, data.total || null, dispatchId]
@@ -434,6 +500,7 @@ async function importInvoice(invoice, userId) {
       status = 'created';
     }
     const reserved = [];
+    const shortages = [];
 
     for (const item of preparedItems) {
       const allocations = await allocateProduct(conn, {
@@ -462,9 +529,33 @@ async function importInvoice(invoice, userId) {
         );
         reserved.push({ sku: item.code, lote: allocation.lpn, cantidad: allocation.quantity });
       }
+      const reservedQuantity = Number((item.quantity - Number(allocations.shortage || 0)).toFixed(4));
+      const demandStatus = Number(allocations.shortage || 0) > 0 ? 'PENDIENTE_STOCK' : 'RESERVADO';
+      await upsertDemand(conn, {
+        dispatchId,
+        productId: item.productId,
+        invoiced: item.quantity,
+        reserved: reservedQuantity,
+        status: demandStatus,
+      });
+      if (Number(allocations.shortage || 0) > 0) {
+        shortages.push({ sku: item.code, cantidad: Number(allocations.shortage) });
+      }
     }
 
     await conn.commit();
+    const notificationState = shortages.length ? 'shortage' : 'ready';
+    const notification = await notifyRoles({
+      event: `dispatch_${notificationState}:${dispatchId}`,
+      roles: ['despacho'],
+      text: [
+        shortages.length ? `Factura ${data.name} pendiente de stock` : `Despacho listo para factura ${data.name}`,
+        `Cliente: ${customerName}`,
+        ...reserved.map(item => `${item.sku}: ${item.cantidad} und | lote ${item.lote}`),
+        ...shortages.map(item => `${item.sku}: faltan ${item.cantidad} und`),
+        shortages.length ? 'No confirmes el despacho hasta completar la reserva.' : `Confirma el despacho ${existing[0]?.numero || numero} cuando salga fisicamente.`,
+      ].join('\n'),
+    }).catch(error => [{ status: 'error', error: error.message }]);
     return {
       status,
       id: dispatchId,
@@ -473,6 +564,9 @@ async function importInvoice(invoice, userId) {
       siigo_invoice_id: data.id,
       siigo_invoice_name: data.name,
       reserved,
+      shortages,
+      ready_to_dispatch: shortages.length === 0,
+      notification,
     };
   } catch (err) {
     await conn.rollback().catch(() => {});

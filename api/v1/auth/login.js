@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
 const { query } = require('../../_lib/db');
 const { cors } = require('../../_lib/auth');
+const { capabilitiesForRole } = require('../../_lib/capabilities');
 
 module.exports = async (req, res) => {
   cors(res, 'POST');
@@ -62,6 +63,7 @@ module.exports = async (req, res) => {
         nombre: user.nombre,
         email:  user.email,
         rol:    user.rol_nombre,
+        capabilities: capabilitiesForRole(user.rol_nombre),
       },
     });
   } catch (err) {

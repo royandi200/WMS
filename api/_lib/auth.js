@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query } = require('./db');
+const { capabilitiesForRole, hasCapability } = require('./capabilities');
 
 function getAllowedOrigin() {
   const configured = process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -53,6 +54,14 @@ async function requireRole(req, allowedRoles = []) {
   return user;
 }
 
+async function requireCapability(req, capability) {
+  const user = await requireAuth(req);
+  if (!hasCapability(user.rol, capability)) {
+    throw Object.assign(new Error('No tienes permiso para esta accion'), { status: 403 });
+  }
+  return { ...user, capabilities: capabilitiesForRole(user.rol) };
+}
+
 function safeEqual(a, b) {
   const left = Buffer.from(String(a || ''));
   const right = Buffer.from(String(b || ''));
@@ -77,4 +86,11 @@ function requireWebhookSecret(req) {
   }
 }
 
-module.exports = { cors, verifyToken, requireAuth, requireRole, requireWebhookSecret };
+module.exports = {
+  cors,
+  verifyToken,
+  requireAuth,
+  requireRole,
+  requireCapability,
+  requireWebhookSecret,
+};

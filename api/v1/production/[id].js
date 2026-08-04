@@ -1,12 +1,13 @@
 // GET /api/v1/production/:id
 const { query } = require('../../_lib/db');
-const { cors, requireAuth } = require('../../_lib/auth');
+const { cors, requireCapability } = require('../../_lib/auth');
+const { CAPABILITIES } = require('../../_lib/capabilities');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  try { await requireAuth(req); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
+  try { await requireCapability(req, CAPABILITIES.PRODUCTION_READ); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
 
   const { id } = req.query;
   try {

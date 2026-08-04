@@ -80,8 +80,14 @@
 // =============================================================
 const mysql  = require('mysql2/promise');
 const https  = require('https');
-const { randomUUID } = require('crypto');
+const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
+const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
+const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
+const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
+const { adjustProductionMaterials } = require('../../_lib/production-materials');
+const { closeProductionOrder } = require('../../_lib/production-close');
+const { workflowFlags } = require('../../_lib/feature-flags');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -186,34 +192,14 @@ function requireBuilderBotAccess(req, info, rawBody) {
 }
 
 function safeKwEqual(a, b) {
-  return String(a || '') === String(b || '');
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 // ─────────────────────────────────────────────────────────────
 // RBAC
 // ─────────────────────────────────────────────────────────────
-const RBAC = {
-  INGRESO_RECEPCION:               ['Operario','Supervisor','Admin'],
-  SOLICITAR_INICIO_PRODUCCION:     ['Operario','Supervisor','Admin'],
-  AVANCE_FASES:                    ['Operario','Supervisor','Admin'],
-  REPORTE_MERMA:                   ['Operario','Supervisor','Admin'],
-  CONFIRMAR_MATERIALES_PRODUCCION: ['Operario','Supervisor','Admin'],
-  EXCEPCION_PICKING:               ['Operario','Supervisor','Admin'],
-  GESTION_DEVOLUCION:              ['Operario','Supervisor','Admin'],
-  CONSULTAR_STOCK_MATERIA_PRIMA:   ['Operario','Supervisor','Admin'],
-  CONSULTAR_STOCK_PRODUCTO_TERMINADO: ['Operario','Supervisor','Admin'],
-  CONSULTAR_ESTADO_PRODUCCION:     ['Operario','Supervisor','Admin'],
-  CONSULTAR_TRAZABILIDAD_LOTE:     ['Operario','Supervisor','Admin'],
-  CONSULTAR_CAPACIDAD_FABRICACION: ['Operario','Supervisor','Admin'],
-  MODO_CHARLA:                     ['Operario','Supervisor','Admin'],
-  SOLICITAR_CIERRE_PRODUCCION:     ['Operario','Supervisor','Admin'],
-  SOLICITAR_DESPACHO:              ['Operario','Supervisor','Admin'],
-  APROBAR_SOLICITUD:               ['Supervisor','Admin'],
-  RECHAZAR_SOLICITUD:              ['Supervisor','Admin'],
-  AJUSTE_INVENTARIO:               ['Supervisor','Admin'],
-  CONSULTAR_SOLICITUDES_PENDIENTES:['Supervisor','Admin'],
-};
-
 // ─────────────────────────────────────────────────────────────
 // [FIX 17] parsearAprobacionNatural
 // Detecta en texto libre si el supervisor está aprobando o
@@ -295,6 +281,22 @@ function hasDispatchIntent(text) {
   return /\b(despach|envi|mandar|sacar|salida)\w*\b/i.test(String(text || ''));
 }
 
+async function triggerInvoiceImport() {
+  const baseUrl = String(process.env.WMS_PUBLIC_URL || '').trim();
+  const secret = String(process.env.CRON_SECRET || '').trim();
+  if (!baseUrl || !secret) throw new Error('WMS_PUBLIC_URL o CRON_SECRET no configurado');
+  const url = new URL('/api/v1/siigo/import-invoices', baseUrl);
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json' },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok && response.status !== 207) {
+    throw new Error(payload.error || `Error HTTP ${response.status} al consultar Siigo`);
+  }
+  return payload;
+}
+
 function hasProductionCloseIntent(text) {
   return /\b(cerr|cierre|cerramos|finaliz|termin)\w*\b/i.test(String(text || '')) &&
     /\b(op|orden|producci[oó]n|produccion)\b/i.test(String(text || ''));
@@ -322,7 +324,7 @@ function parseProductionCloseFromText(text) {
 
   const reasonMatch = raw.match(/(?:por|porque|motivo|causa)\s+(.+)$/i);
   if (reasonMatch && params.merma > 0) params.motivo_merma = reasonMatch[1].trim();
-  return { action: 'SOLICITAR_CIERRE_PRODUCCION', params };
+  return { action: 'CERRAR_ORDEN_PRODUCCION', params };
 }
 
 function inferProductionCloseReasonFromText(text) {
@@ -386,7 +388,7 @@ async function findRecentProductionCloseReason(db, from, orderId) {
     }
 
     const inferred = inferProductionCloseReasonFromText(rawText);
-    if (inferred && (action === 'SOLICITAR_CIERRE_PRODUCCION' || action === 'MODO_CHARLA' || action === 'UNKNOWN' || !action)) {
+    if (inferred && (action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION' || action === 'MODO_CHARLA' || action === 'UNKNOWN' || !action)) {
       return inferred;
     }
   }
@@ -400,7 +402,7 @@ function firstDefined(...values) {
 
 function normalizeOperationalParams(action, params) {
   const next = { ...(params || {}) };
-  if (action === 'SOLICITAR_CIERRE_PRODUCCION') {
+  if (action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION') {
     next.cantidad_real = firstDefined(
       next.cantidad_real,
       next.qty_real,
@@ -1252,8 +1254,8 @@ module.exports = async (req, res) => {
     params = normalizeOperationalParams(action, params);
 
     const cierreDetectado = parseProductionCloseFromText(rawText);
-    if (cierreDetectado && (action === 'UNKNOWN' || action === 'MODO_CHARLA' || action === 'SOLICITAR_CIERRE_PRODUCCION')) {
-      action = 'SOLICITAR_CIERRE_PRODUCCION';
+    if (cierreDetectado && (action === 'UNKNOWN' || action === 'MODO_CHARLA' || action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION')) {
+      action = 'CERRAR_ORDEN_PRODUCCION';
       params = normalizeOperationalParams(action, {
         ...cierreDetectado.params,
         ...params,
@@ -1265,43 +1267,15 @@ module.exports = async (req, res) => {
     }
 
     if (action === 'CONSULTAR_TRAZABILIDAD_LOTE' && hasDispatchIntent(rawText)) {
-      const lpn = params.id_lote || params.lote || params.lpn;
-      const qtyFromText = rawText?.match(/\b(\d+(?:[.,]\d+)?)\b/);
-      const cantidad = firstDefined(params.cantidad, params.qty, qtyFromText ? qtyFromText[1].replace(',', '.') : null);
-      const [lotRows] = lpn
-        ? await db.execute(
-          `SELECT l.lpn, p.siigo_code
-           FROM lots l
-           JOIN productos p ON p.id = l.product_id
-           WHERE l.lpn = ?
-           LIMIT 1`,
-          [lpn]
-        ).catch(() => [[]])
-        : [[]];
-      const skuFromLot = lotRows[0]?.siigo_code || null;
-      const cliente = firstDefined(params.cliente_destino, params.cliente, params.customer);
-
-      if (!cliente) {
-        action = 'MODO_CHARLA';
-        params = {
-          texto: `Entendido. Ya tengo lote ${lpn || 'pendiente'}, producto ${skuFromLot || 'pendiente'} y cantidad ${cantidad || 'pendiente'}. ¿Para qué cliente es el despacho?`,
-        };
-      } else {
-        action = 'SOLICITAR_DESPACHO';
-        params = normalizeOperationalParams(action, {
-          ...params,
-          id_lote: lpn,
-          id_item: firstDefined(params.id_item, skuFromLot),
-          cantidad,
-          cliente_destino: cliente,
-        });
-      }
+      action = 'MODO_CHARLA';
+      params = {
+        texto: 'El despacho debe originarse en una factura de venta de Siigo. Puedo consultar nuevas facturas o confirmar una tarea de despacho existente.',
+      };
     }
 
-    const rolRaw  = user.rol_nombre || '';
-    const rolNorm = rolRaw.charAt(0).toUpperCase() + rolRaw.slice(1).toLowerCase();
-    const rolesPermitidos = RBAC[action];
-    if (rolesPermitidos && !rolesPermitidos.includes(rolNorm)) {
+    const rolRaw = user.rol_nombre || '';
+    const requiredCapability = capabilityForAction(action);
+    if (requiredCapability && !hasCapability(rolRaw, requiredCapability)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'DENIED' });
       return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
@@ -1760,6 +1734,9 @@ module.exports = async (req, res) => {
 
       // ── 6. SOLICITAR_DESPACHO → encolar (FIFO auto si no viene id_lote) ────
       case 'SOLICITAR_DESPACHO': {
+        if (!workflowFlags().allowDirectDispatchRequest) {
+          throw { status: 409, message: 'El despacho debe originarse en una factura de venta de Siigo. Consulta Siigo o confirma una tarea existente.' };
+        }
         if (!params.id_item && params.id_lote) {
           const [lotProductRows] = await db.execute(
             `SELECT p.siigo_code
@@ -2159,6 +2136,107 @@ module.exports = async (req, res) => {
         break;
       }
 
+      case 'SINCRONIZAR_FACTURAS_SIIGO': {
+        const syncResult = await triggerInvoiceImport();
+        const rows = Array.isArray(syncResult.results) ? syncResult.results : [];
+        const created = rows.filter(row => ['created', 'updated', 'converted'].includes(row.status));
+        const pending = rows.filter(row => ['pending_customer'].includes(row.status) || (row.shortages || []).length > 0);
+        const errors = rows.filter(row => row.status === 'error');
+        mensaje = [
+          'Consulta de facturas Siigo completada.',
+          `Tareas creadas o actualizadas: ${created.length}`,
+          `Pendientes de datos o stock: ${pending.length}`,
+          `Errores: ${errors.length}`,
+        ].join('\n');
+        responseContext.siigo = { created: created.length, pending: pending.length, errors: errors.length };
+        break;
+      }
+
+      case 'LIBERAR_ORDEN_PRODUCCION': {
+        const productionResult = await releaseProductionOrder({
+          product: params.id_producto_final || params.id_item || params.sku,
+          quantity: params.cantidad_planificada || params.cantidad,
+          originType: params.origen_tipo,
+          customerReference: params.referencia_cliente || params.oc_cliente,
+          finalCustomer: params.cliente_final,
+          notes: params.notas || params.observaciones,
+          userId: user.id,
+        });
+        const picking = productionResult.picking.map(item =>
+          `- ${item.sku}: ${item.cantidad} ${item.unidad || ''} | lote ${item.lote} | ubicacion ${item.ubicacion || item.ubicacion_id}`
+        );
+        mensaje = [
+          `Orden ${productionResult.order_code} liberada.`,
+          `Destino: ${productionResult.origin_type === 'OC_CLIENTE' ? `OC ${productionResult.customer_reference} - ${productionResult.final_customer}` : 'stock de seguridad'}`,
+          'Alistamiento FEFO:',
+          ...picking,
+          `Cuando esten listos, confirma materiales de ${productionResult.order_code}.`,
+        ].join('\n');
+        responseContext.production = productionResult;
+        break;
+      }
+
+      case 'CERRAR_ORDEN_PRODUCCION': {
+        const closure = await closeProductionOrder({
+          orderId: params.id_orden,
+          qtyReal: params.cantidad_real,
+          qtyWaste: params.merma,
+          wasteReason: params.motivo_merma,
+          locationId: params.ubicacion_id,
+          locationCode: params.ubicacion,
+          expiryDate: params.fecha_venc,
+          userId: user.id,
+        });
+        mensaje = closure.already_closed
+          ? `La orden ${closure.order_code} ya estaba cerrada. No se modifico inventario.`
+          : [
+              `Orden ${closure.order_code} cerrada.`,
+              `Producto conforme: ${closure.qty_real}`,
+              `Merma: ${closure.qty_waste}`,
+              `Lote PT: ${closure.lpn_terminado}`,
+              `Ubicacion: ${closure.ubicacion_id}`,
+            ].join('\n');
+        responseContext.production_close = closure;
+        break;
+      }
+
+      case 'CONFIRMAR_DESPACHO_SIIGO': {
+        const dispatchResult = await confirmImportedDispatch({
+          dispatchId: params.despacho_id || params.id_despacho,
+          invoiceId: params.siigo_invoice_id || params.id_factura,
+          userId: user.id,
+        });
+        const lots = (dispatchResult.lotes || []).map(item =>
+          `- ${item.sku}: ${item.cantidad} und del lote ${item.lote}`
+        );
+        mensaje = dispatchResult.already_completed
+          ? `El despacho ${dispatchResult.numero} ya habia sido confirmado. No se modifico inventario.`
+          : [
+              `Despacho ${dispatchResult.numero} confirmado.`,
+              `Factura: ${dispatchResult.siigo_invoice_name || dispatchResult.siigo_invoice_id}`,
+              ...lots,
+            ].join('\n');
+        responseContext.dispatch = dispatchResult;
+        break;
+      }
+
+      case 'AJUSTAR_MATERIALES_PRODUCCION': {
+        const adjustment = await adjustProductionMaterials({
+          orderId: params.id_orden,
+          productTerm: params.id_item || params.sku,
+          lot: params.id_lote || params.lote,
+          locationId: params.ubicacion_id,
+          locationCode: params.ubicacion,
+          type: params.tipo,
+          quantity: params.cantidad,
+          reason: params.motivo,
+          userId: user.id,
+        });
+        mensaje = `${adjustment.tipo} registrada en ${adjustment.order_code}: ${adjustment.cantidad} de ${adjustment.sku}, lote ${adjustment.lote}, ubicacion ${adjustment.ubicacion_id}.`;
+        responseContext.production_material = adjustment;
+        break;
+      }
+
       // ── Consultas de stock ────────────────────────────────────
       case 'CONSULTAR_STOCK_MATERIA_PRIMA':
       case 'CONSULTAR_STOCK_PRODUCTO_TERMINADO': {
@@ -2312,7 +2390,7 @@ module.exports = async (req, res) => {
       : '  (Sin movimientos en kardex)';
 
     const [dispatchRows] = await db.execute(
-      `SELECT d.numero, d.cliente_nombre, d.despachado_en, di.cantidad_des AS cantidad
+      `SELECT d.numero, d.cliente_nombre, d.siigo_invoice_name, d.despachado_en, di.cantidad_des AS cantidad
        FROM despacho_items di
        JOIN despachos d ON d.id = di.despacho_id
        WHERE di.lote = ?
@@ -2321,7 +2399,7 @@ module.exports = async (req, res) => {
       [params.id_lote]
     ).catch(() => [[]]);
     const dispatchHistory = dispatchRows.length
-      ? dispatchRows.map(d => `  - ${d.numero}: ${d.cantidad} und -> ${d.cliente_nombre || 'Cliente N/A'} (${d.despachado_en ? new Date(d.despachado_en).toLocaleString('es-CO') : 'sin fecha'})`).join('\n')
+      ? dispatchRows.map(d => `  - ${d.numero} / ${d.siigo_invoice_name || 'sin factura'}: ${d.cantidad} und -> ${d.cliente_nombre || 'Cliente N/A'} (${d.despachado_en ? new Date(d.despachado_en).toLocaleString('es-CO') : 'sin fecha'})`).join('\n')
       : '  (Sin despachos registrados)';
 
     const [returnRows] = await db.execute(
@@ -2340,7 +2418,7 @@ module.exports = async (req, res) => {
       `SELECT i.siigo_code, i.nombre, b.cantidad_por_unidad, b.unidad
        FROM bom b
        JOIN productos i ON i.id = b.insumo_id
-       WHERE b.producto_final_id = ? AND b.activo = 1
+       WHERE b.producto_final_id = ?
        ORDER BY i.siigo_code ASC
        LIMIT 12`,
       [l.product_id]
@@ -2348,6 +2426,54 @@ module.exports = async (req, res) => {
     const bomHistory = bomRows.length
       ? bomRows.map(b => `  - ${b.siigo_code}: ${b.cantidad_por_unidad} ${b.unidad}/und`).join('\n')
       : '  (Sin BOM registrado para este producto)';
+
+    const [receptionRows] = await db.execute(
+      `SELECT r.numero, r.siigo_purchase_name, r.proveedor_nombre,
+              oc.numero AS orden_compra, rd.condicion, rd.cantidad,
+              u.codigo AS ubicacion
+       FROM recepcion_distribuciones rd
+       JOIN recepciones r ON r.id = rd.recepcion_id
+       LEFT JOIN ordenes_compra_proveedor oc ON oc.id = r.orden_compra_id
+       LEFT JOIN ubicaciones u ON u.id = rd.ubicacion_id
+       WHERE rd.lote = ? ORDER BY rd.creado_en ASC`,
+      [params.id_lote]
+    ).catch(() => [[]]);
+    const receptionHistory = receptionRows.length
+      ? receptionRows.map(r => `  - ${r.numero} | OC ${r.orden_compra || 'N/A'} | Siigo ${r.siigo_purchase_name || 'N/A'} | ${r.proveedor_nombre || 'Proveedor N/A'} | ${r.condicion} ${r.cantidad} | ${r.ubicacion || 'sin ubicacion'}`).join('\n')
+      : '  (Sin recepcion vinculada)';
+
+    const [materialRows] = l.production_order_id ? await db.execute(
+      `SELECT p.siigo_code, p.nombre, pml.lote, u.codigo AS ubicacion,
+              pml.cantidad_consumida, pml.cantidad_devuelta,
+              ol.supplier, rr.siigo_purchase_name, oc.numero AS orden_compra
+       FROM produccion_materiales pm
+       JOIN produccion_material_lotes pml ON pml.produccion_material_id = pm.id
+       JOIN productos p ON p.id = pm.producto_id
+       LEFT JOIN ubicaciones u ON u.id = pml.ubicacion_id
+       LEFT JOIN lots ol ON ol.lpn = pml.lote
+       LEFT JOIN recepcion_distribuciones rd ON rd.lote = pml.lote
+       LEFT JOIN recepciones rr ON rr.id = rd.recepcion_id
+       LEFT JOIN ordenes_compra_proveedor oc ON oc.id = rr.orden_compra_id
+       WHERE pm.orden_produccion_id = ? ORDER BY pm.id, pml.id`,
+      [l.production_order_id]
+    ).catch(() => [[]]) : [[]];
+    const materialHistory = materialRows.length
+      ? materialRows.map(m => `  - ${m.siigo_code}: lote ${m.lote}, ubicacion ${m.ubicacion || 'N/A'}, consumo neto ${Number(m.cantidad_consumida || 0) - Number(m.cantidad_devuelta || 0)} | OC ${m.orden_compra || 'N/A'} | Siigo ${m.siigo_purchase_name || 'N/A'} | ${m.supplier || 'proveedor N/A'}`).join('\n')
+      : '  (Sin consumo real de materiales registrado)';
+
+    const [productionUseRows] = await db.execute(
+      `SELECT op.codigo_orden, pt.siigo_code AS producto_final,
+              pml.cantidad_consumida, pml.cantidad_devuelta
+       FROM produccion_material_lotes pml
+       JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
+       JOIN ordenes_produccion op ON op.id = pm.orden_produccion_id
+       JOIN productos pt ON pt.id = op.producto_id
+       WHERE pml.lote = ? ORDER BY op.creado_en ASC`,
+      [params.id_lote]
+    ).catch(() => [[]]);
+    const productionUses = productionUseRows.length
+      ? productionUseRows.map(p => `  - ${p.codigo_orden} -> ${p.producto_final}: consumo neto ${Number(p.cantidad_consumida || 0) - Number(p.cantidad_devuelta || 0)}`).join('\n')
+      : '  (No consumido en produccion)';
 
     mensaje = [
       `🔎 *Lote: ${params.id_lote}*`,
@@ -2367,6 +2493,15 @@ module.exports = async (req, res) => {
       ``,
       `*Devoluciones:*`,
       returnHistory,
+      ``,
+      `*Recepcion / origen contable:*`,
+      receptionHistory,
+      ``,
+      `*Consumo real de materias primas:*`,
+      materialHistory,
+      ``,
+      `*Ordenes que consumieron este lote:*`,
+      productionUses,
       ``,
       `*Materias primas esperadas segun BOM:*`,
       bomHistory
@@ -2429,77 +2564,15 @@ module.exports = async (req, res) => {
 
       // ── CONFIRMAR_MATERIALES_PRODUCCION ──────────────────────
       case 'CONFIRMAR_MATERIALES_PRODUCCION': {
-        const [ordenRows] = await db.execute(
-          `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1`,
-          [params.id_orden, params.id_orden]
-        );
-        if (!ordenRows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
-        const orden = ordenRows[0];
-
-        if (!['APROBADA','PLANEADA'].includes(orden.estado)) {
-          throw { status: 409, message: `La orden ${params.id_orden} está en estado ${orden.estado} y no puede confirmarse` };
-        }
-
-        const [bom] = await db.execute(
-          `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
-                  pr.siigo_code, pr.nombre
-           FROM bom b
-           JOIN productos pr ON pr.id = b.insumo_id
-           WHERE b.producto_final_id = ?`, [orden.producto_id]
-        ).catch(() => [[]]);
-
-        for (const item of bom) {
-          const cantInsumo = roundQty(parseFloat(item.cantidad_por_unidad) * parseFloat(orden.cantidad_planeada));
-          if (cantInsumo <= 0) continue;
-
-          const [stockUpdate] = await db.execute(
-            `UPDATE stock
-             SET cantidad  = cantidad - ?,
-                 reservada = CASE WHEN reservada >= ? THEN reservada - ? ELSE 0 END
-             WHERE producto_id = ? AND bodega_id = ? AND cantidad >= ?
-             ORDER BY id ASC LIMIT 1`,
-            [cantInsumo, cantInsumo, cantInsumo, item.insumo_id, bodegaId, cantInsumo]
-          );
-          if (stockUpdate.affectedRows !== 1) {
-            throw { status: 409, message: `Stock insuficiente para confirmar ${item.siigo_code}` };
-          }
-
-          await db.execute(
-            `INSERT INTO movimientos
-               (tipo, producto_id, bodega_orig, cantidad, referencia_id, referencia_tipo, usuario_id)
-             VALUES ('salida', ?, ?, ?, ?, 'orden_produccion', ?)`,
-            [item.insumo_id, bodegaId, cantInsumo, orden.id, user.id]
-          ).catch(() => {});
-
-          const balInsumo = await getStockBalance(db, item.insumo_id, bodegaId);
-          await logKardex(db, {
-            product_id:    item.insumo_id,
-            user_id:       user.id,
-            action:        'CONSUMO_MATERIAL',
-            qty:           -cantInsumo,
-            balance_after: balInsumo,
-            reference:     `orden_produccion:${orden.codigo_orden}`,
-            notes:         `Orden ${orden.codigo_orden} — ${orden.cantidad_planeada} uds confirmadas`,
-          });
-        }
-
-        await db.execute(
-          `UPDATE ordenes_produccion
-           SET estado = 'EN_PROCESO', materiales_conf_en = NOW()
-           WHERE id = ?`,
-          [orden.id]
-        );
-
-        await logSystemEvent(db, { modulo: 'produccion', nivel: 'INFO',
-          mensaje: `Materiales confirmados — orden ${orden.codigo_orden} EN_PROCESO`,
-          usuario_id: user.id, payload: { orden: orden.codigo_orden } });
-
-        mensaje = [
-          `✅ *Materiales confirmados*`,
-          `Orden: ${orden.codigo_orden} → EN_PROCESO`,
-          `Insumos descontados del stock.`,
-          params.lote_usado ? `Lote utilizado: ${params.lote_usado}` : ''
-        ].filter(Boolean).join('\n');
+        const confirmation = await confirmProductionMaterials({ orderId: params.id_orden, userId: user.id });
+        mensaje = confirmation.already_confirmed
+          ? `Los materiales de ${confirmation.order_code} ya estaban confirmados. No se modifico inventario.`
+          : [
+              `Materiales confirmados para ${confirmation.order_code}.`,
+              'Orden en proceso.',
+              ...confirmation.consumed.map(item => `- Lote ${item.lpn}: ${item.qty_taken}`),
+            ].join('\n');
+        responseContext.production_confirmation = confirmation;
         break;
       }
 

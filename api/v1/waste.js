@@ -1,6 +1,7 @@
 // GET/POST /api/v1/waste
 const { createConnection, query } = require('../_lib/db');
-const { cors, requireRole } = require('../_lib/auth');
+const { cors, requireCapability } = require('../_lib/auth');
+const { CAPABILITIES } = require('../_lib/capabilities');
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -53,7 +54,7 @@ async function ensureWasteTable(conn) {
 }
 
 async function handleGet(req, res) {
-  await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  await requireCapability(req, CAPABILITIES.WASTE_READ);
   const limit = Math.min(Number(req.query?.limit || 100), 200);
   const conn = await createConnection();
   try {
@@ -89,7 +90,7 @@ async function handleGet(req, res) {
 }
 
 async function handlePost(req, res) {
-  const user = await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  const user = await requireCapability(req, CAPABILITIES.WASTE_REPORT);
   const body = req.body || {};
   const qty = Math.abs(Number(body.qty || body.cantidad));
   if (!Number.isFinite(qty) || qty <= 0) throw httpError(400, 'Cantidad de merma invalida');

@@ -6,6 +6,7 @@ import {
   closeProduction,
   listProductions,
   getProduction,
+  adjustMaterials,
 } from '../api/production.api'
 
 // client.js devuelve el objeto Axios completo; production.api.js extrae .data manualmente.
@@ -87,6 +88,19 @@ export const useProductionStore = create((set) => ({
       return { ok: true, data: payload?.data ?? payload }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al confirmar materiales'
+      set({ error: msg, loading: false })
+      return { ok: false, message: msg }
+    }
+  },
+
+  adjustMaterials: async (body) => {
+    set({ loading: true, error: null })
+    try {
+      const payload = await adjustMaterials(body)
+      set({ loading: false })
+      return { ok: true, data: payload?.data ?? payload }
+    } catch (e) {
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al ajustar materiales'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }

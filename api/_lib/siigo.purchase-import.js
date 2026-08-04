@@ -1,4 +1,6 @@
 const { createConnection } = require('./db');
+const { notifyRoles } = require('./builderbot-notifications');
+const { resolvePrimaryWarehouse } = require('./warehouses');
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -82,10 +84,7 @@ async function importPurchase(purchase, userId) {
       throw httpError(409, `Productos no sincronizados: ${missing.join(', ')}`);
     }
 
-    const [warehouseRows] = await conn.execute(
-      `SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 1`
-    );
-    if (!warehouseRows.length) throw httpError(500, 'No hay bodega WMS activa');
+    const warehouseId = await resolvePrimaryWarehouse(conn);
 
     if (existing.length) {
       const [currentItems] = await conn.execute(
@@ -136,7 +135,7 @@ async function importPurchase(purchase, userId) {
             costo_total, creado_en)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'borrador', ?, ?, ?, ?, ?, NOW())`,
         [numero, supplier.id, supplierName, data.invoicePrefix || null,
-         data.invoiceNumber || null, data.date, warehouseRows[0].id, userId,
+         data.invoiceNumber || null, data.date, warehouseId, userId,
          data.observations || `Importada desde SIIGO ${data.name}`,
          data.id, data.name, data.total || null]
       );
@@ -162,6 +161,16 @@ async function importPurchase(purchase, userId) {
     }
 
     await conn.commit();
+    const notification = await notifyRoles({
+      event: `reception_pending:${receptionId}`,
+      roles: ['recepcion_cierre'],
+      text: [
+        `Recepcion pendiente por compra ${data.name}`,
+        `Proveedor: ${supplierName}`,
+        `Items esperados: ${data.items.length}`,
+        'Vincula la orden de compra, compara factura y confirma cantidades, lotes, condicion y ubicacion.',
+      ].join('\n'),
+    }).catch(error => [{ status: 'error', error: error.message }]);
     return {
       status,
       id: receptionId,
@@ -170,6 +179,7 @@ async function importPurchase(purchase, userId) {
       siigo_purchase_id: data.id,
       siigo_purchase_name: data.name,
       items: data.items.length,
+      notification,
     };
   } catch (err) {
     await conn.rollback().catch(() => {});

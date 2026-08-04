@@ -2,7 +2,8 @@
 // Body: { order_id, phase }  — acepta también nueva_fase por compatibilidad
 // order_id puede ser id numérico o codigo_orden
 const { query } = require('../../_lib/db');
-const { cors, requireRole } = require('../../_lib/auth');
+const { cors, requireCapability } = require('../../_lib/auth');
+const { CAPABILITIES } = require('../../_lib/capabilities');
 
 const PHASES = ['F0','F1','F2','F3','F4','F5'];
 
@@ -10,7 +11,7 @@ module.exports = async (req, res) => {
   cors(res, 'POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  try { await requireRole(req, ['Admin', 'Supervisor', 'Operario']); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
+  try { await requireCapability(req, CAPABILITIES.PRODUCTION_ADVANCE); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
 
   try {
     const { order_id, phase, nueva_fase } = req.body || {};

@@ -1,7 +1,8 @@
 // GET /api/v1/approvals/pending
 // Muestra movimientos de ajuste pendientes de revisión (sin voucher SIIGO)
 const { query } = require('../../_lib/db');
-const { cors, requireRole } = require('../../_lib/auth');
+const { cors, requireCapability } = require('../../_lib/auth');
+const { CAPABILITIES } = require('../../_lib/capabilities');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -9,7 +10,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
-    await requireRole(req, ['Admin', 'Validador', 'Supervisor']);
+    await requireCapability(req, CAPABILITIES.APPROVALS_READ);
 
     const rows = await query(
       `SELECT m.id, m.tipo, m.cantidad, m.lote, m.creado_en,

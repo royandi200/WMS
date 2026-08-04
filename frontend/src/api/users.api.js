@@ -13,8 +13,8 @@ export const createUser = (body) =>
   client.post('/users', body).then((r) => r.data)
 
 // PUT /users/:id
-export const updateUser = (id, body) =>
-  client.put(`/users/${id}`, body).then((r) => r.data)
+export const updateUserRole = (id, role) =>
+  client.put('/users', { user_id: id, role }).then((r) => r.data)
 
 // DELETE /users/:id
 export const deleteUser = (id) =>

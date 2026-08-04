@@ -1,192 +1,170 @@
-# Mapa funcional del agente BuilderBot WMS
+# Mapa operativo del agente WMS
 
-Este documento resume como funciona el agente WhatsApp/BuilderBot del WMS y como se conecta el prompt `Prompt WMS.txt` con el codigo activo del repositorio.
+## Proposito
 
-El objetivo es que una persona o IA pueda entender rapidamente que acciones reconoce el LLM, que handler ejecuta cada accion, que datos espera y donde hay diferencias importantes entre prompt y codigo.
+Este documento describe el contrato vigente entre WhatsApp, BuilderBot Cloud, la API en Vercel, el dashboard y MySQL. Es la referencia para modificar handlers sin romper inventario, trazabilidad o autorizaciones.
 
-## Flujo general
+El flujo historico basado en solicitudes `REQ-...` sigue presente para compatibilidad con registros anteriores, pero ya no es el flujo principal de recepcion, produccion ni despacho.
+
+## Arquitectura activa
 
 1. El usuario envia texto o audio por WhatsApp.
-2. BuilderBot usa el prompt LLM1 para clasificar el mensaje.
-3. LLM1 debe responder solo JSON con una accion (`@ction` o `action`), prioridad, `kw` y `params`.
-4. BuilderBot envia ese JSON al endpoint `POST /api/v1/webhook/builderbot`.
-5. El endpoint activo es `api/v1/webhook/builderbot.js` en Vercel Serverless.
-6. El endpoint valida secreto de webhook, identifica al usuario por telefono, valida rol, ejecuta el handler y responde `message`/`mensaje`.
-7. Algunas acciones no se ejecutan de inmediato: crean una solicitud `REQ-...` en `aprobaciones` y notifican a supervisores/admin por WhatsApp.
+2. BuilderBot entrega el mensaje y el historial corto al LLM clasificador.
+3. El LLM responde JSON estricto con `kw`, `@ction`, `priority`, `body`, `text`, `query` y `params`.
+4. `kw` debe ser exactamente `g0m@s` para que BuilderBot cambie al flujo HTTP.
+5. BuilderBot hace `POST /api/v1/webhook/builderbot`.
+6. La API identifica al usuario por telefono, consulta su rol actual en MySQL, valida la capacidad requerida y ejecuta el mismo servicio de dominio usado por el dashboard.
+7. La API responde siempre `message` y `mensaje`. BuilderBot envia uno de esos campos a WhatsApp.
 
-El stack Express de webhook en `backend/src/modules/webhook/builderbot.service.js` esta marcado como deprecado. No debe usarse como referencia principal.
+La implementacion activa es la API serverless bajo `api/v1`. El backend Express historico no es la referencia de produccion.
 
-## Contrato de entrada
+## Contrato BuilderBot
 
-BuilderBot envia normalmente:
+Ejemplo de entrada:
 
 ```json
 {
-  "from": "573001112233",
-  "info": "{\"@ction\":\"CONSULTAR_STOCK_MATERIA_PRIMA\",\"priority\":\"baja\",\"kw\":\"g0m@s\",\"params\":{\"id_item\":\"00051-MPASH\"}}"
+  "kw": "g0m@s",
+  "@ction": "CONFIRMAR_MATERIALES_PRODUCCION",
+  "priority": "alta",
+  "body": "confirmo materiales de OP-20260804-0001",
+  "text": "confirmo materiales de OP-20260804-0001",
+  "query": "confirmo materiales de OP-20260804-0001",
+  "params": {
+    "id_orden": "OP-20260804-0001"
+  }
 }
 ```
 
-El webhook acepta `info` como objeto o como string JSON. Lee la accion desde `info["@ction"]` o `info.action`.
+Reglas invariables:
 
-Campos relevantes:
+- `body`, `text` y `query` contienen el mensaje real, sin resumir ni corregir.
+- Los codigos de producto, lote, OP, factura y despacho se conservan completos.
+- Una operacion no se autoriza por lo que diga el JSON: el rol se consulta nuevamente en la base de datos.
+- Las respuestas funcionales usan HTTP 200 cuando BuilderBot necesita mostrar el mensaje, incluso si `ok` es `false`.
+- No se deben registrar tokens, secretos ni telefonos completos en logs de aplicacion.
 
-- `from`: telefono del usuario. Debe existir en `usuarios.telefono`, estar activo y no ser usuario bot.
-- `@ction`/`action`: nombre exacto del handler.
-- `priority`: prioridad informativa usada en logs.
-- `kw`: en el prompt se usa como marcador de flujo (`g0m@s`). En el endpoint activo no funciona como secreto de seguridad.
-- `params`: datos operativos de la accion.
+## Roles y capacidades
 
-La seguridad real del webhook depende de `requireWebhookSecret(req)`, que valida el secreto configurado en headers/autorizacion. `kw` no debe tratarse como autenticacion.
+Las capacidades se versionan en `api/_lib/capabilities.js`. El dashboard permite asignar roles, pero no editar permisos arbitrarios.
 
-## Referencias de producto
+| Rol | Responsabilidad principal |
+| --- | --- |
+| `admin` | Sofi: administracion, coordinacion, liberacion de OP y excepciones. |
+| `recepcion_cierre` | Nelly: confirmar recepciones y cerrar produccion. Puede aprobar su propia recepcion. |
+| `alistador` | Confirmar materiales, inicio y movimientos adicionales/devoluciones de MP. |
+| `despacho` | Anderson: consultar facturas Siigo y confirmar salida fisica. |
+| `consulta` | Lectura sin operaciones destructivas. |
 
-Las referencias del prompt son ejemplos de Gummybox y seran reemplazadas por referencias reales del cliente.
+Los roles heredados `supervisor`, `operario` y `validador` conservan compatibilidad temporal. No deben asignarse a usuarios nuevos.
 
-El codigo no deberia depender de esas referencias de ejemplo. El handler busca productos por:
+## Recepcion
 
-- `skus.sku`
-- `productos.siigo_code`
+Flujo principal:
 
-Cuando se actualicen referencias reales del cliente hay que alinear:
+1. Se registra una orden de compra de proveedor en el dashboard.
+2. El importador de Siigo crea una recepcion pendiente a partir de la factura de compra.
+3. Nelly vincula OC y factura, cuenta fisicamente y distribuye cada SKU por lote, ubicacion y condicion.
+4. Las condiciones admitidas son `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` y `PENDIENTE_DISPOSICION`.
+5. Solo `DISPONIBLE` crea stock utilizable y movimiento de entrada.
+6. Cuarentena y rechazo permanecen trazables, pero no suman inventario disponible.
+7. Se persisten diferencias OC-factura y factura-fisico.
 
-- Catalogo y sinonimos del prompt `Prompt WMS.txt`.
-- Tabla `productos`, especialmente `siigo_code`, `tipo_producto` y `activo`.
-- Tabla `skus` para alias o codigos alternos.
-- BOM de produccion (`bom.producto_final_id`, `bom.insumo_id`, `cantidad_por_unidad`).
-- Stock/lotes iniciales si aplica.
+La recepcion manual historica no sustituye este flujo y debe reservarse para contingencias controladas.
 
-No se deben cambiar nombres de handlers sin cambiar tambien el switch, RBAC y pruebas de webhook.
+## Produccion
 
-## Roles y acceso
+### Liberacion
 
-El webhook aplica RBAC por accion.
+`LIBERAR_ORDEN_PRODUCCION` es ejecutada por `admin`.
 
-- Operario, Supervisor y Admin pueden ejecutar operaciones normales, consultas, recepcion, produccion, merma, despacho solicitado, devolucion, confirmacion de materiales y excepcion de picking.
-- Solo Supervisor y Admin pueden aprobar/rechazar solicitudes, hacer ajuste manual de inventario y consultar solicitudes pendientes.
-- Telefonos no registrados reciben rechazo funcional y no se crea usuario fantasma.
+Parametros:
 
-## Ciclo de aprobaciones
+- `id_producto_final`
+- `cantidad_planificada`
+- `origen_tipo`: `OC_CLIENTE` o `STOCK_SEGURIDAD`
+- `referencia_cliente` y `cliente_final` cuando el origen es `OC_CLIENTE`
 
-Estas acciones crean una solicitud en `aprobaciones` y avisan a supervisores/admin:
+El servicio valida BOM, reserva MP por FEFO y ubicacion, crea la OP en `APROBADA` y genera el picking para el Alistador.
 
-- `SOLICITAR_INICIO_PRODUCCION`
-- `SOLICITAR_CIERRE_PRODUCCION`
-- `SOLICITAR_DESPACHO`
+### Confirmacion de materiales
 
-El supervisor responde con lenguaje natural como `apruebo REQ-000001` o `rechazo REQ-000001`. Si BuilderBot devuelve `UNKNOWN` o `MODO_CHARLA`, el webhook intenta detectar aprobacion/rechazo en texto libre antes del switch.
+`CONFIRMAR_MATERIALES_PRODUCCION` consume las reservas exactas por lote y ubicacion, registra movimientos y kardex, y cambia la OP a `EN_PROCESO`/`F1`. La operacion es idempotente.
 
-Al aprobar, `APROBAR_SOLICITUD` bloquea la solicitud pendiente, ejecuta el payload segun su accion original, marca `APROBADO` y notifica al operario cuando hay telefono en payload.
+### Ajustes durante proceso
 
-Al rechazar, `RECHAZAR_SOLICITUD` marca `RECHAZADO`, guarda motivo opcional y notifica al operario si aplica.
+`AJUSTAR_MATERIALES_PRODUCCION` registra `ENTREGA_ADICIONAL` o `DEVOLUCION`. Requiere OP, SKU, lote, codigo visible de ubicacion y cantidad. Una devolucion no puede superar lo consumido desde ese lote y ubicacion.
 
-## Diccionario de parametros
+### Cierre
 
-| Parametro prompt | Uso en codigo | Notas |
-| --- | --- | --- |
-| `id_item` | SKU o `siigo_code` de producto/insumo | Se resuelve con `findProductBySku`. |
-| `id_producto_final` | SKU o `siigo_code` de producto terminado | Se usa en produccion y capacidad. |
-| `cantidad` | Cantidad operativa | En despacho se guarda internamente como `qty` dentro del payload de aprobacion. |
-| `cantidad_planificada` | Cantidad planeada de orden | Crea orden `PLANEADA`. |
-| `cantidad_real` | Cantidad final producida | Se ejecuta solo tras aprobacion de cierre. |
-| `id_orden` | ID numerico o `codigo_orden` | Varias consultas aceptan ambos. |
-| `id_lote` | LPN/lote fisico | En aprobacion de despacho se transforma a `lpn`. |
-| `cliente_destino` | Cliente de despacho | Se guarda como `customer` en payload aprobado. |
-| `cliente_origen` | Cliente de devolucion | Se guarda en recepcion/devolucion. |
-| `estado` | Estado de devolucion | Normalizado a enum esperado. |
-| `motivo` | Motivo de merma, rechazo o ajuste | Opcional en algunos handlers. |
-| `fase_destino` | Nueva fase de produccion | Solo con orden `EN_PROCESO`. |
-| `lote_sugerido` / `lote_usado` | Excepcion de picking | Se registra en `system_logs`. |
+`CERRAR_ORDEN_PRODUCCION` es ejecutada por `recepcion_cierre`.
 
-## Matriz de handlers
+Requiere:
 
-| Accion | Parametros principales del prompt | Implementacion actual | Resultado principal |
-| --- | --- | --- | --- |
-| `INGRESO_RECEPCION` | `id_item`, `cantidad`, opcional `cantidad_mala`, `proveedor` | Implementado directo | Crea recepcion, lote bueno, stock, movimientos y kardex. Si hay cantidad mala crea lote de novedad y kardex. |
-| `SOLICITAR_INICIO_PRODUCCION` | `id_producto_final`, `cantidad_planificada` | Implementado con aprobacion | Valida BOM/stock, crea orden `PLANEADA`, crea `REQ-...` y notifica supervisores. Al aprobar reserva materiales y deja orden `APROBADA`. |
-| `CONFIRMAR_MATERIALES_PRODUCCION` | `id_orden`, opcional `lote_usado` | Implementado directo | Descuenta insumos segun BOM, baja reserva, registra movimientos/kardex y pasa orden a `EN_PROCESO`. |
-| `AVANCE_FASES` | `id_orden`, `fase_destino` | Implementado directo | Solo acepta orden `EN_PROCESO`; actualiza `fase` y agrega nota. |
-| `REPORTE_MERMA` | `id_item`, `cantidad`, `motivo`, y `id_orden` o `id_lote` | Implementado directo | Crea registro de merma, movimiento de ajuste y kardex. Si hay lote, descuenta stock/lote. |
-| `SOLICITAR_CIERRE_PRODUCCION` | `id_orden`, `cantidad_real` | Implementado con aprobacion | Encola cierre. Al aprobar exige orden `EN_PROCESO`, cierra orden, crea lote de PT `L-{SKU}-{ORDEN}-{timestamp}`, suma stock, movimiento y kardex. |
-| `SOLICITAR_DESPACHO` | `id_item`, `cantidad`, `cliente_destino`, opcional `id_lote` | Implementado con aprobacion | Si no hay lote, selecciona FIFO automaticamente. Encola solicitud. Al aprobar descuenta stock/lote, registra salida/kardex y notifica. |
-| `GESTION_DEVOLUCION` | `id_item`, `cantidad`, `cliente_origen`, `estado` | Implementado directo | Crea recepcion/devolucion y lote `L-DEV-...`. Si estado es cuarentena no suma stock disponible. |
-| `CONSULTAR_STOCK_MATERIA_PRIMA` | opcional `id_item` | Implementado directo | Consulta vista `v_stock_disponible` filtrando tipo `MP`; lista top 10 o desglose FIFO por lote. |
-| `CONSULTAR_STOCK_PRODUCTO_TERMINADO` | opcional `id_item` | Implementado directo | Consulta vista `v_stock_disponible` filtrando tipo `PT`; lista top 10 o desglose FIFO por lote. |
-| `CONSULTAR_ESTADO_PRODUCCION` | `id_orden` | Implementado directo | Devuelve producto, estado, fase, cantidad planeada/real y fecha de cierre. |
-| `CONSULTAR_TRAZABILIDAD_LOTE` | `id_lote` | Implementado directo | Busca en `lots` y kardex; si no existe, fallback a `stock`. |
-| `CONSULTAR_CAPACIDAD_FABRICACION` | `id_producto_final`, `cantidad_deseada` | Implementado directo | Calcula demanda de insumos segun BOM y stock disponible. |
-| `APROBAR_SOLICITUD` | `id_solicitud` | Implementado directo, solo Supervisor/Admin | Ejecuta payload pendiente para inicio, cierre o despacho. |
-| `RECHAZAR_SOLICITUD` | `id_solicitud`, opcional `motivo` | Implementado directo, solo Supervisor/Admin | Marca solicitud pendiente como rechazada y notifica al operario si aplica. |
-| `EXCEPCION_PICKING` | `lote_sugerido`, `lote_usado`, opcional `id_orden`, `id_item` | Implementado directo | Registra excepcion en `system_logs`; no ajusta stock por si solo. |
-| `MODO_CHARLA` | `texto` | Implementado directo | Responde texto aclaratorio o mensaje generico. |
+- OP en `EN_PROCESO`
+- unidades conformes
+- merma declarada, incluso si es cero
+- motivo cuando la merma es mayor a cero
+- ubicacion de producto terminado cuando hay unidades conformes
 
-## Handlers adicionales en codigo
+El servicio crea el lote PT, actualiza stock, registra merma aprobada y devuelve la conciliacion entre consumo teorico, consumo real, devoluciones y entregas adicionales. Repetir el cierre no ejecuta movimientos nuevamente.
 
-Estos handlers existen en `api/v1/webhook/builderbot.js`, pero no estan en el catalogo principal del prompt revisado:
+## Despacho
 
-| Accion | Uso | Recomendacion |
-| --- | --- | --- |
-| `AJUSTE_INVENTARIO` | Ajuste manual positivo o negativo por producto/lote. Solo Supervisor/Admin. | Agregar al prompt solo si se quiere operar desde WhatsApp; si no, mantenerlo fuera por riesgo operativo. |
-| `CONSULTAR_SOLICITUDES_PENDIENTES` | Lista hasta 10 solicitudes pendientes. Solo Supervisor/Admin. | Conviene agregarlo al prompt para supervisores. |
+La factura de venta de Siigo es el unico origen del despacho normal.
 
-## Gaps y diferencias prompt vs codigo
+1. `SINCRONIZAR_FACTURAS_SIIGO` ejecuta una consulta manual ademas del polling automatico.
+2. La importacion valida cliente, productos, bodega y stock trazable.
+3. El WMS reserva por FEFO y crea una tarea `picking` con cliente final, factura, lotes, ubicaciones y cantidades.
+4. Si falta cliente o stock, la tarea queda bloqueada y no se puede confirmar.
+5. `CONFIRMAR_DESPACHO_SIIGO` descuenta stock solo cuando Anderson confirma la salida fisica.
+6. La confirmacion es idempotente y registra movimiento y kardex por lote.
 
-1. `kw` no se valida en el endpoint activo. El prompt lo exige como `g0m@s`, pero el codigo usa secreto de webhook. Esto esta bien desde seguridad, pero hay que documentarlo en BuilderBot como marcador de flujo, no como secreto.
+`SOLICITAR_DESPACHO` es un handler heredado y esta bloqueado por defecto con `ALLOW_DIRECT_DISPATCH_REQUEST=false`.
 
-2. El prompt ya fue actualizado para usar codigos Infinity reales y no debe generar `FG-`. Si vuelve a aparecer `FG-` en ejemplos o pruebas, debe tratarse como regresion del prompt.
+Los despachos parciales tienen estructura de datos y bandera, pero permanecen desactivados. No se debe habilitar `ALLOW_PARTIAL_DISPATCH` hasta completar y probar el ciclo de reservas posteriores contra la misma factura.
 
-3. `SOLICITAR_DESPACHO` tiene una tension interna en el prompt: una seccion exige extraer `id_lote` cuando aparece, otra recomienda omitir lote para FIFO automatico salvo mencion explicita. El codigo soporta ambos casos: si `id_lote` llega, usa ese lote; si no llega, selecciona FIFO.
+## Trazabilidad
 
-4. El prompt lista referencias de productos de ejemplo. El sistema real resuelve por base de datos (`skus` y `productos.siigo_code`), por lo que las referencias definitivas deben cargarse en datos y replicarse en el prompt.
+`CONSULTAR_TRAZABILIDAD_LOTE` debe poder recorrer:
 
-5. El prompt no incluye `CONSULTAR_SOLICITUDES_PENDIENTES`, aunque el codigo lo tiene. Es util para supervisores y deberia incorporarse.
+- OC de proveedor, factura de compra Siigo y recepcion fisica;
+- condicion, lote y ubicacion de entrada;
+- consumo real por OP y lote de MP;
+- lote de producto terminado y conciliacion de produccion;
+- factura de venta Siigo, despacho, cantidades y cliente final.
 
-6. El prompt no incluye `AJUSTE_INVENTARIO`. Por seguridad, es razonable mantenerlo fuera del prompt operativo general o exigir una politica explicita de aprobacion/roles.
+Los movimientos de stock y kardex son evidencia operativa. Los mensajes de WhatsApp no son la fuente de verdad.
 
-7. `REPORTE_MERMA` en el prompt pide exactamente uno de `id_orden` o `id_lote`. El codigo acepta merma con orden o lote, y si no llega lote no descuenta stock especifico. Conviene mantener la restriccion estricta en prompt para evitar mermas ambiguas.
+## Notificaciones
 
-8. `CONFIRMAR_MATERIALES_PRODUCCION` recibe `lote_usado`, pero el codigo descuenta insumos por producto/bodega sin aplicar lote especifico por cada insumo. Si se requiere trazabilidad fina de insumos consumidos por lote, falta ampliar contrato y handler.
+Las notificaciones nuevas usan `notificaciones_salida` con clave idempotente por evento, canal y destinatario. Los fallos quedan en estado `ERROR` para reintento.
 
-9. `EXCEPCION_PICKING` solo registra el evento. No corrige reservas, stock ni trazabilidad. Es adecuado como bitacora, pero no reemplaza un flujo de ajuste o consumo alterno.
+`ENABLE_WORKFLOW_NOTIFICATIONS=false` es el valor seguro inicial. Solo debe cambiarse a `true` despues de asignar correctamente un Admin, un responsable de recepcion/cierre, un Alistador y un responsable de despacho. `DISABLE_OUTBOUND_NOTIFICATIONS=true` anula envios durante pruebas automatizadas.
 
-10. Los mensajes y comentarios del archivo contienen algunos problemas de encoding visual. No afecta el comportamiento, pero dificulta lectura y mantenimiento.
+## Feature flags
 
-## Funcionamiento por proceso
+Valores seguros por defecto:
 
-### Recepcion
+```text
+ALLOW_PARTIAL_DISPATCH=false
+ENABLE_BACKORDER_ALERTS=false
+AUTO_RELEASE_STALE_RESERVATIONS=false
+RESERVE_AVAILABLE_ON_SHORTAGE=true
+REQUIRE_PURCHASE_ORDER_FOR_SIIGO_RECEIPT=true
+ALLOW_SPLIT_PRODUCTION_LINE=false
+ALLOW_DIRECT_DISPATCH_REQUEST=false
+ENABLE_WORKFLOW_NOTIFICATIONS=false
+```
 
-`INGRESO_RECEPCION` registra entrada de producto o insumo. El producto se busca por SKU/`siigo_code`; se crea una recepcion completada, lote fisico, stock, movimiento y kardex. Si se informa `cantidad_mala`, se crea un lote de novedad separado.
+## Compatibilidad heredada
 
-### Produccion
+Siguen existiendo acciones `SOLICITAR_INICIO_PRODUCCION`, `SOLICITAR_CIERRE_PRODUCCION`, `SOLICITAR_DESPACHO`, `APROBAR_SOLICITUD` y `RECHAZAR_SOLICITUD` para consultar o completar solicitudes antiguas. No deben aparecer como flujo recomendado en prompts nuevos.
 
-El inicio se solicita con `SOLICITAR_INICIO_PRODUCCION`. Antes de crear la solicitud, el sistema calcula materiales segun BOM y stock disponible. Si hay faltantes, no crea orden. Si hay disponibilidad, crea orden `PLANEADA` y solicitud pendiente.
+## Pendientes de negocio
 
-Al aprobar, la orden pasa a `APROBADA` y se reservan materiales. Luego el operario confirma con `CONFIRMAR_MATERIALES_PRODUCCION`, lo que descuenta insumos y pasa la orden a `EN_PROCESO`.
-
-Durante produccion se puede usar `AVANCE_FASES` para registrar cambios de fase. El cierre se pide con `SOLICITAR_CIERRE_PRODUCCION`; al aprobar, se crea lote de producto terminado y entrada a inventario.
-
-### Mermas
-
-`REPORTE_MERMA` puede asociarse a proceso (`id_orden`) o bodega/lote (`id_lote`). Con lote, descuenta stock y actualiza estado si queda agotado. Con orden, valida que la orden este `EN_PROCESO`.
-
-### Despacho
-
-`SOLICITAR_DESPACHO` siempre debe tener producto y cantidad. Si el LLM no envia lote, el sistema elige FIFO por vista `v_stock_disponible`. Si envia lote, intenta usar ese lote. La salida real ocurre al aprobar la solicitud.
-
-### Devoluciones
-
-`GESTION_DEVOLUCION` crea recepcion, lote de devolucion y registro de devolucion. Si el estado normalizado es `CUARENTENA`, el lote queda bloqueado y no suma stock disponible.
-
-### Consultas
-
-Las consultas de stock usan `v_stock_disponible` y separan lotes disponibles, cuarentena y vencidos. Las consultas de produccion/lote/capacidad leen ordenes, lotes, kardex, BOM y stock.
-
-## Recomendaciones para evolucionar el agente
-
-1. Mantener una tabla de contrato LLM -> webhook con nombres exactos de handlers y parametros.
-2. Cuando cambien referencias del cliente, actualizar primero datos maestros y luego prompt.
-3. Agregar `CONSULTAR_SOLICITUDES_PENDIENTES` al prompt para supervisores.
-4. Corregir la regla de prefijos y el ejemplo `FG-...` del prompt.
-5. Decidir si `AJUSTE_INVENTARIO` debe existir por WhatsApp. Si se habilita, exigir rol supervisor/admin y probablemente aprobacion adicional.
-6. Si el cliente exige trazabilidad completa por lote de insumo, ampliar `CONFIRMAR_MATERIALES_PRODUCCION` para recibir y consumir lotes especificos por insumo.
-7. Crear pruebas de contrato con payloads JSON de ejemplo para cada accion antes de modificar prompt o handlers.
+- Definir si una OC de proveedor admite varias facturas y recepciones parciales.
+- Definir tratamiento final y autorizacion de material en cuarentena.
+- Definir tolerancias de diferencias por SKU y umbrales que requieren segunda aprobacion.
+- Completar la ejecucion de despachos parciales antes de habilitarla.
+- Asignar usuarios reales a los roles y habilitar notificaciones solo despues de una prueba controlada.

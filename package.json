@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "cd frontend && npm install && npm run build"
+    "build": "cd frontend && npm install && npm run build",
+    "test": "node --test test/*.test.js",
+    "test:workflow:live": "node scripts/qa/client-production-smoke.js",
+    "test:reception:live": "node scripts/qa/client-reception-smoke.js",
+    "test:dispatch:live": "node scripts/qa/client-dispatch-smoke.js"
   },
   "dependencies": {
     "mysql2": "^3.9.7",

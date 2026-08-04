@@ -1,12 +1,13 @@
 // GET /api/v1/production  — listar órdenes de producción
 const { query } = require('../../_lib/db');
-const { cors, requireAuth } = require('../../_lib/auth');
+const { cors, requireCapability } = require('../../_lib/auth');
+const { CAPABILITIES } = require('../../_lib/capabilities');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  try { await requireAuth(req); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
+  try { await requireCapability(req, CAPABILITIES.PRODUCTION_READ); } catch (e) { return res.status(e.status || 401).json({ ok: false, error: e.message }); }
 
   try {
     const { estado, page = 1, limit = 50 } = req.query;
@@ -16,6 +17,9 @@ module.exports = async (req, res) => {
         op.id,
         op.codigo_orden,
         op.producto_id,
+        op.origen_tipo,
+        op.referencia_cliente,
+        op.cliente_final,
         op.cantidad_planeada,
         op.cantidad_real,
         op.fase,
@@ -24,6 +28,7 @@ module.exports = async (req, res) => {
         op.creado_por,
         op.aprobado_por,
         op.materiales_conf_en,
+        op.liberado_en,
         op.cerrado_en,
         op.creado_en,
         p.siigo_code AS sku,

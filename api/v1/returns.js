@@ -1,7 +1,8 @@
 // GET/POST /api/v1/returns
 const crypto = require('crypto');
 const { createConnection, query } = require('../_lib/db');
-const { cors, requireRole } = require('../_lib/auth');
+const { cors, requireCapability } = require('../_lib/auth');
+const { CAPABILITIES } = require('../_lib/capabilities');
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -88,7 +89,7 @@ async function logKardex(conn, { productId, userId, lotId, qty, reference, notes
 }
 
 async function handleGet(req, res) {
-  await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  await requireCapability(req, CAPABILITIES.RETURNS_READ);
   const limit = Math.min(Number(req.query?.limit || 100), 200);
   const rows = await query(
     `SELECT
@@ -115,7 +116,7 @@ async function handleGet(req, res) {
 }
 
 async function handlePost(req, res) {
-  const user = await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  const user = await requireCapability(req, CAPABILITIES.RETURNS_MANAGE);
   const body = req.body || {};
   const qty = Number(body.cantidad || body.qty);
   const estado = normalizeReturnStatus(body.estado || body.status);

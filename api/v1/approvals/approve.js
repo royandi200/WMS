@@ -2,7 +2,8 @@
 const crypto = require('crypto');
 const https = require('https');
 const { createConnection, query } = require('../../_lib/db');
-const { cors, requireRole } = require('../../_lib/auth');
+const { cors, requireCapability } = require('../../_lib/auth');
+const { CAPABILITIES } = require('../../_lib/capabilities');
 
 const BB_TOKEN = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
@@ -551,7 +552,7 @@ module.exports = async (req, res) => {
 
   let user;
   try {
-    user = await requireRole(req, ['Admin', 'Validador']);
+    user = await requireCapability(req, CAPABILITIES.APPROVALS_DECIDE);
   } catch (e) {
     return res.status(e.status || 401).json({ ok: false, error: e.message });
   }

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { cors, requireRole } = require('../../_lib/auth');
+const { cors, requireRole, requireCapability } = require('../../_lib/auth');
+const { CAPABILITIES } = require('../../_lib/capabilities');
 const { query } = require('../../_lib/db');
 const { siigoGet } = require('../../_lib/siigo.service');
 const {
@@ -343,7 +344,7 @@ module.exports = async (req, res) => {
   try {
     const user = req.method === 'GET'
       ? await cronUser(req)
-      : await requireRole(req, ['Admin', 'Supervisor', 'Operario']);
+      : await requireCapability(req, CAPABILITIES.SIIGO_POLL);
     const ids = requestedIds(req);
     const startedAt = new Date();
     const since = String(req.body?.updated_start || req.query?.updated_start || await getCursor());

@@ -1,8 +1,12 @@
 // GET/POST /api/v1/reception
 const crypto = require('crypto');
 const { createConnection, query } = require('../_lib/db');
-const { cors, requireRole } = require('../_lib/auth');
+const { cors, requireCapability } = require('../_lib/auth');
+const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { pushCompraToSiigo } = require('../_lib/siigo.purchases');
+const { normalizeReceptionDistributions } = require('../_lib/reception-distributions');
+const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
+const { workflowFlags } = require('../_lib/feature-flags');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -14,9 +18,7 @@ function httpError(status, message) {
 }
 
 async function getDefaultBodega(conn) {
-  const [rows] = await conn.execute(`SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
-  if (!rows.length) throw httpError(500, 'No hay bodega activa configurada');
-  return rows[0].id;
+  return resolvePrimaryWarehouse(conn);
 }
 
 async function findProduct(conn, value) {
@@ -33,7 +35,7 @@ async function findProduct(conn, value) {
 }
 
 function canSyncSiigo(user) {
-  return ['admin', 'supervisor'].includes(String(user.rol || '').toLowerCase());
+  return hasCapability(user.rol, CAPABILITIES.SIIGO_SYNC);
 }
 
 async function validateSiigoReception(conn, { terceroId, product, price, invoiceNumber }) {
@@ -70,18 +72,14 @@ async function nextReceptionNumber(conn) {
 }
 
 async function handleGet(req, res) {
-  await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  await requireCapability(req, CAPABILITIES.RECEPTION_READ);
   const limit = Math.min(Number(req.query?.limit || 100), 200);
-  const conn = await createConnection();
-  try {
-    await ensureReceptionIssuesTable(conn);
-  } finally {
-    await conn.end().catch(() => {});
-  }
   const rows = await query(
     `SELECT
        r.id,
        r.numero,
+       r.orden_compra_id,
+       oc.numero AS orden_compra_numero,
        r.proveedor_nombre,
        r.estado,
        r.siigo_purchase_id,
@@ -93,6 +91,7 @@ async function handleGet(req, res) {
           FROM recepcion_novedades rn
          WHERE rn.recepcion_id = r.id AND rn.estado = 'ABIERTA') AS novedades_abiertas,
        u.nombre AS usuario_nombre,
+       ri.id AS recepcion_item_id,
        ri.producto_id,
        p.siigo_code AS sku,
        p.nombre AS producto_nombre,
@@ -100,10 +99,18 @@ async function handleGet(req, res) {
        ri.fecha_venc,
        ri.cantidad_esp,
        ri.cantidad_rec
+       ,rci.cantidad_oc
+       ,rci.cantidad_factura
+       ,rci.cantidad_fisica
+       ,rci.diferencia_oc_factura
+       ,rci.diferencia_factura_fisica
      FROM recepciones r
      LEFT JOIN recepcion_items ri ON ri.recepcion_id = r.id
      LEFT JOIN productos p ON p.id = ri.producto_id
      LEFT JOIN usuarios u ON u.id = r.usuario_id
+     LEFT JOIN ordenes_compra_proveedor oc ON oc.id = r.orden_compra_id
+     LEFT JOIN recepcion_conciliacion_items rci
+       ON rci.recepcion_id = r.id AND rci.producto_id = ri.producto_id
      ORDER BY COALESCE(r.completado_en, r.creado_en) DESC
      LIMIT ?`,
     [limit]
@@ -119,27 +126,111 @@ function receivedItemInput(body, item, totalItems) {
   return totalItems === 1 ? body : null;
 }
 
-async function ensureReceptionIssuesTable(conn) {
+async function processDistributedItem(conn, { item, input, reception, user, receptionId, body }) {
+  const normalized = normalizeReceptionDistributions(input);
+  if (!normalized) return null;
+  const { distributions, totals } = normalized;
+  const expected = Number(item.cantidad_esp);
+  const shortage = Math.max(expected - totals.received, 0);
+  const overage = Math.max(totals.received - expected, 0);
+  const locationIds = [...new Set(distributions.map(entry => entry.locationId).filter(Boolean))];
+  if (locationIds.length) {
+    const placeholders = locationIds.map(() => '?').join(',');
+    const [locations] = await conn.execute(
+      `SELECT id FROM ubicaciones WHERE bodega_id = ? AND activa = 1 AND id IN (${placeholders})`,
+      [reception.bodega_id, ...locationIds]
+    );
+    if (locations.length !== locationIds.length) throw httpError(400, 'Una ubicacion no pertenece a la bodega de recepcion');
+  }
+
+  const groupedLots = new Map();
+  for (const entry of distributions) {
+    const current = groupedLots.get(entry.lot) || { ...entry, quantity: 0 };
+    current.quantity += entry.quantity;
+    groupedLots.set(entry.lot, current);
+  }
+  for (const lot of groupedLots.values()) {
+    const [existing] = await conn.execute(`SELECT id FROM lots WHERE lpn = ? LIMIT 1`, [lot.lot]);
+    if (existing.length) throw httpError(409, `El lote ${lot.lot} ya existe`);
+    await conn.execute(
+      `INSERT INTO lots
+         (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier,
+          origin, status, received_by, notes, expiry_date, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', ?, ?, ?, ?, NOW())`,
+      [crypto.randomUUID(), lot.lot, item.producto_id, reception.bodega_id,
+       lot.quantity, lot.quantity, reception.proveedor_nombre || null, lot.condition,
+       user.id, body.notes || `Recepcion ${reception.numero}`, lot.expiryDate]
+    );
+  }
+
+  for (const entry of distributions) {
+    await conn.execute(
+      `INSERT INTO recepcion_distribuciones
+         (recepcion_id, recepcion_item_id, ubicacion_id, lote, fecha_venc,
+          condicion, cantidad, motivo, usuario_id, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [receptionId, item.id, entry.locationId, entry.lot, entry.expiryDate,
+       entry.condition, entry.quantity, entry.reason, user.id]
+    );
+    if (entry.condition === 'DISPONIBLE') {
+      await conn.execute(
+        `INSERT INTO stock
+           (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
+        [item.producto_id, reception.bodega_id, entry.locationId, entry.lot,
+         entry.expiryDate, entry.quantity]
+      );
+      await conn.execute(
+        `INSERT INTO movimientos
+           (tipo, producto_id, bodega_dest, ubicacion_dest, lote, cantidad,
+            referencia_id, referencia_tipo, usuario_id, siigo_sync)
+         VALUES ('entrada', ?, ?, ?, ?, ?, ?, 'recepcion_siigo_import', ?, 1)`,
+        [item.producto_id, reception.bodega_id, entry.locationId, entry.lot,
+         entry.quantity, receptionId, user.id]
+      );
+    }
+  }
+
+  const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
+  const issues = [
+    { type: 'FALTANTE', quantity: shortage },
+    { type: 'SOBRANTE', quantity: overage },
+    { type: 'CUARENTENA', quantity: totals.CUARENTENA },
+    { type: 'RECHAZADO', quantity: totals.RECHAZADO + totals.PENDIENTE_DISPOSICION },
+  ].filter(issue => issue.quantity > 0);
+  for (const issue of issues) {
+    await conn.execute(
+      `INSERT INTO recepcion_novedades
+         (recepcion_id, recepcion_item_id, tipo, cantidad, motivo, estado, usuario_id, creado_en)
+       VALUES (?, ?, ?, ?, ?, 'ABIERTA', ?, NOW())`,
+      [receptionId, item.id, issue.type, issue.quantity,
+       reason || `${issue.type} detectado durante la recepcion fisica`, user.id]
+    );
+  }
+  const first = distributions[0];
   await conn.execute(
-    `CREATE TABLE IF NOT EXISTS recepcion_novedades (
-       id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-       recepcion_id INT UNSIGNED NOT NULL,
-       recepcion_item_id INT UNSIGNED NOT NULL,
-       tipo VARCHAR(30) NOT NULL,
-       cantidad DECIMAL(15,4) NOT NULL,
-       motivo TEXT NULL,
-       estado VARCHAR(20) NOT NULL DEFAULT 'ABIERTA',
-       usuario_id INT UNSIGNED NULL,
-       creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-       resuelto_en DATETIME NULL,
-       INDEX idx_recepcion_novedades_recepcion (recepcion_id),
-       INDEX idx_recepcion_novedades_estado (estado)
-     )`
+    `UPDATE recepcion_items SET lote = ?, fecha_venc = ?, cantidad_rec = ? WHERE id = ?`,
+    [groupedLots.size === 1 ? first.lot : null, groupedLots.size === 1 ? first.expiryDate : null,
+     totals.received, item.id]
   );
+  return {
+    item_id: item.id,
+    sku: item.siigo_code,
+    esperado: expected,
+    recibido: totals.received,
+    disponible: totals.DISPONIBLE,
+    cuarentena: totals.CUARENTENA,
+    rechazado: totals.RECHAZADO + totals.PENDIENTE_DISPOSICION,
+    faltante: shortage,
+    sobrante: overage,
+    distribuciones: distributions,
+    novedades: issues.map(issue => ({ tipo: issue.type, cantidad: issue.quantity })),
+    hasDifference: issues.length > 0,
+  };
 }
 
 async function handlePut(req, res) {
-  const user = await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  const user = await requireCapability(req, CAPABILITIES.RECEPTION_CONFIRM);
   const body = req.body || {};
   const receptionId = Number(body.reception_id || body.recepcion_id || 0);
   if (!Number.isInteger(receptionId) || receptionId <= 0) {
@@ -149,7 +240,6 @@ async function handlePut(req, res) {
   let conn;
   try {
     conn = await createConnection();
-    await ensureReceptionIssuesTable(conn);
     await conn.beginTransaction();
 
     const [receptions] = await conn.execute(
@@ -174,6 +264,28 @@ async function handlePut(req, res) {
       throw httpError(409, `La recepcion esta ${reception.estado} y no puede completarse`);
     }
 
+    const purchaseOrderId = Number(body.orden_compra_id || body.purchase_order_id || reception.orden_compra_id || 0) || null;
+    if (reception.siigo_purchase_id && workflowFlags().requirePurchaseOrderForSiigoReceipt && !purchaseOrderId) {
+      throw httpError(400, 'Debes vincular una orden de compra antes de confirmar esta recepcion Siigo');
+    }
+    let purchaseOrder = null;
+    if (purchaseOrderId) {
+      const [purchaseOrders] = await conn.execute(
+        `SELECT * FROM ordenes_compra_proveedor WHERE id = ? LIMIT 1 FOR UPDATE`,
+        [purchaseOrderId]
+      );
+      if (!purchaseOrders.length) throw httpError(404, 'Orden de compra no encontrada');
+      purchaseOrder = purchaseOrders[0];
+      if (['CANCELADA', 'CERRADA'].includes(purchaseOrder.estado)) {
+        throw httpError(409, `La orden de compra esta ${purchaseOrder.estado}`);
+      }
+      if (purchaseOrder.tercero_id && reception.tercero_id
+          && Number(purchaseOrder.tercero_id) !== Number(reception.tercero_id)) {
+        throw httpError(409, 'El proveedor de la OC no coincide con la factura Siigo');
+      }
+      await conn.execute(`UPDATE recepciones SET orden_compra_id = ? WHERE id = ?`, [purchaseOrderId, receptionId]);
+    }
+
     const [items] = await conn.execute(
       `SELECT ri.*, p.siigo_code
        FROM recepcion_items ri
@@ -190,6 +302,14 @@ async function handlePut(req, res) {
     for (const item of items) {
       const input = receivedItemInput(body, item, items.length);
       if (!input) throw httpError(400, `Falta confirmar el item ${item.siigo_code}`);
+
+      const distributed = await processDistributedItem(conn, { item, input, reception, user, receptionId, body });
+      if (distributed) {
+        hasDifference = hasDifference || distributed.hasDifference;
+        delete distributed.hasDifference;
+        results.push(distributed);
+        continue;
+      }
 
       const received = Number(input.qty_received ?? input.cantidad_recibida ?? input.qty_total);
       const damaged = Number(input.qty_damaged ?? input.cantidad_danada ?? 0);
@@ -291,19 +411,62 @@ async function handlePut(req, res) {
       });
     }
 
+    const reconciliation = [];
+    if (purchaseOrder) {
+      const [orderedItems] = await conn.execute(
+        `SELECT producto_id, SUM(cantidad_ordenada) AS cantidad
+         FROM orden_compra_proveedor_items WHERE orden_compra_id = ? GROUP BY producto_id`,
+        [purchaseOrder.id]
+      );
+      const ordered = new Map(orderedItems.map(item => [Number(item.producto_id), Number(item.cantidad)]));
+      const invoiced = new Map(items.map(item => [Number(item.producto_id), Number(item.cantidad_esp)]));
+      const physical = new Map(items.map((item, index) => [Number(item.producto_id), Number(results[index]?.recibido || 0)]));
+      const productIds = [...new Set([...ordered.keys(), ...invoiced.keys(), ...physical.keys()])];
+      for (const productId of productIds) {
+        const qtyOrdered = ordered.get(productId) || 0;
+        const qtyInvoiced = invoiced.get(productId) || 0;
+        const qtyPhysical = physical.get(productId) || 0;
+        const orderInvoiceDiff = Number((qtyInvoiced - qtyOrdered).toFixed(4));
+        const invoicePhysicalDiff = Number((qtyPhysical - qtyInvoiced).toFixed(4));
+        if (Math.abs(orderInvoiceDiff) > 0.0001) hasDifference = true;
+        await conn.execute(
+          `INSERT INTO recepcion_conciliacion_items
+             (recepcion_id, orden_compra_id, producto_id, cantidad_oc,
+              cantidad_factura, cantidad_fisica, diferencia_oc_factura,
+              diferencia_factura_fisica, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [receptionId, purchaseOrder.id, productId, qtyOrdered, qtyInvoiced,
+           qtyPhysical, orderInvoiceDiff, invoicePhysicalDiff]
+        );
+        reconciliation.push({
+          producto_id: productId,
+          cantidad_oc: qtyOrdered,
+          cantidad_factura: qtyInvoiced,
+          cantidad_fisica: qtyPhysical,
+          diferencia_oc_factura: orderInvoiceDiff,
+          diferencia_factura_fisica: invoicePhysicalDiff,
+        });
+      }
+      await conn.execute(
+        `UPDATE ordenes_compra_proveedor SET estado = ?, actualizado_en = NOW() WHERE id = ?`,
+        [hasDifference ? 'RECIBIDA' : 'CERRADA', purchaseOrder.id]
+      );
+    }
+
     const discrepancy = hasDifference
       ? `Diferencia fisica registrada en recepcion_novedades ${new Date().toISOString()}`
       : null;
     await conn.execute(
       `UPDATE recepciones
        SET estado = 'completada', completado_en = NOW(), usuario_id = ?,
+           aprobado_por = ?, aprobado_en = NOW(),
            observaciones = CASE
              WHEN ? IS NULL THEN observaciones
              WHEN observaciones IS NULL OR observaciones = '' THEN ?
              ELSE CONCAT(observaciones, '\n', ?)
            END
        WHERE id = ?`,
-      [user.id, discrepancy, discrepancy, discrepancy, receptionId]
+      [user.id, user.id, discrepancy, discrepancy, discrepancy, receptionId]
     );
 
     await conn.commit();
@@ -316,6 +479,7 @@ async function handlePut(req, res) {
         siigo_purchase_id: reception.siigo_purchase_id,
         diferencia: hasDifference,
         items: results,
+        conciliacion: reconciliation,
       },
     });
   } catch (err) {
@@ -327,7 +491,10 @@ async function handlePut(req, res) {
 }
 
 async function handlePost(req, res) {
-  const user = await requireRole(req, ['Admin', 'Supervisor', 'Validador', 'Operario']);
+  const user = await requireCapability(req, CAPABILITIES.RECEPTION_CONFIRM);
+  if (!workflowFlags().allowManualReception) {
+    throw httpError(409, 'La recepcion manual esta desactivada. Vincula una OC con la factura de compra de Siigo.');
+  }
   const body = req.body || {};
   const qtyTotal = Number(body.qty_total || body.cantidad || body.qty);
   const qtyDamaged = Number(body.qty_damaged || 0);
