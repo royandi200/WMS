@@ -17,9 +17,11 @@ El plan prioriza una demostracion funcional temprana y deja las decisiones pendi
 - Completado: notificaciones salientes idempotentes, historial y reintento de errores.
 - Completado: contrato nuevo de BuilderBot y bloqueo por defecto de recepcion/despacho libres heredados.
 - Validado: pruebas unitarias, build, invariantes de MySQL y smoke completo con `00102-PTASH60`.
-- Pendiente antes de demo: asignar usuarios reales a `admin`, `recepcion_cierre`, `alistador` y `despacho`.
-- Pendiente antes de demo: actualizar el prompt activo de BuilderBot con `docs/Prompt WMS.txt`.
-- Pendiente antes de demo: desplegar y ejecutar smokes HTTP/WhatsApp sobre Vercel.
+- Completado: prompt de Entrada sincronizado en BuilderBot con `docs/Prompt WMS.txt`.
+- Completado: clasificador de Voz creado con el mismo prompt y redireccion al flujo Salida.
+- Comprobado: despliegue Vercel y `GET /api/v1/health` en estado `ok`, con MySQL conectado.
+- Pendiente antes de demo: asignar usuarios reales o temporales a `admin`, `recepcion_cierre`, `alistador` y `despacho`.
+- Pendiente antes de demo: ejecutar la matriz HTTP/WhatsApp por rol y validar destinatarios antes de habilitar notificaciones.
 - Pendiente de producto: recepciones parciales de una misma OC y ejecucion completa de despachos parciales.
 
 ## Decisiones confirmadas

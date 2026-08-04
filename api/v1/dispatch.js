@@ -5,6 +5,7 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { confirmImportedDispatch } = require('../_lib/dispatch-workflow');
 const { pushFacturaToSiigo } = require('../_lib/siigo.invoices');
+const { workflowFlags } = require('../_lib/feature-flags');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -179,6 +180,9 @@ async function handleGet(req, res) {
 
 async function handlePost(req, res) {
   const user = await requireCapability(req, CAPABILITIES.DISPATCH_CONFIRM);
+  if (!workflowFlags().allowDirectDispatchRequest) {
+    throw httpError(409, 'El despacho directo esta desactivado. Confirma una tarea importada desde una factura de venta de Siigo.');
+  }
   const body = req.body || {};
   const lpn = String(body.lot_id || body.lpn || body.lote || '').trim();
   const qty = Number(body.qty || body.cantidad);

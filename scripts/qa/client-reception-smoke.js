@@ -122,4 +122,9 @@ async function main() {
   }
 }
 
-main().catch((error) => { console.error(`${error.code || 'ERROR'}: ${error.message}`); process.exitCode = 1; });
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(`${error.code || 'ERROR'}: ${error.message}`);
+    process.exit(1);
+  });

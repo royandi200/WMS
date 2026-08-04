@@ -777,6 +777,12 @@ async function getSupervisorPhones(db) {
   return phones;
 }
 
+function estadoLoteDevolucion(estado) {
+  if (estado === 'RECUPERABLE') return 'DISPONIBLE';
+  if (estado === 'CUARENTENA') return 'CUARENTENA';
+  return 'PENDIENTE_DISPOSICION';
+}
+
 function pushWasAccepted(result) {
   return result && Number(result.status) >= 200 && Number(result.status) < 300;
 }
@@ -1857,7 +1863,7 @@ module.exports = async (req, res) => {
       `UPDATE lots
        SET status = ?
        WHERE id = ?`,
-      [estadoNorm, lotIdDev]
+      [estadoLoteDevolucion(estadoNorm), lotIdDev]
     ).catch(() => {});
   } else {
     await upsertStock(db, {
@@ -2535,30 +2541,58 @@ module.exports = async (req, res) => {
 
       // ── Capacidad de fabricación ──────────────────────────────
       case 'CONSULTAR_CAPACIDAD_FABRICACION': {
-        const p = await findProductBySku(db, params.id_producto_final);
+        const productReference = params.id_producto_final || params.id_item;
+        if (!productReference) {
+          throw { status: 400, message: 'CONSULTAR_CAPACIDAD_FABRICACION requiere id_producto_final' };
+        }
+        const desiredRaw = params.cantidad_deseada;
+        const desired = desiredRaw == null || desiredRaw === '' ? null : Number(desiredRaw);
+        if (desired != null && (!Number.isFinite(desired) || desired <= 0)) {
+          throw { status: 400, message: 'cantidad_deseada debe ser positiva' };
+        }
+        const p = await findProductBySku(db, productReference);
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.id AS insumo_id FROM bom b
            JOIN productos pr ON pr.id = b.insumo_id
            WHERE b.producto_final_id = ?`, [p.id]
         ).catch(() => [[]]);
+        if (!bom.length) {
+          throw { status: 409, message: `${productReference} no tiene BOM configurado` };
+        }
         let puedeProd = true;
+        let capacidadMaxima = Infinity;
         const checks  = [];
         for (const item of bom) {
-          const needed = roundQty(parseFloat(item.cantidad_por_unidad) * params.cantidad_deseada);
+          const perUnit = Number(item.cantidad_por_unidad);
+          if (!Number.isFinite(perUnit) || perUnit <= 0) {
+            throw { status: 409, message: `El BOM de ${item.siigo_code} tiene una cantidad por unidad invalida` };
+          }
           const [st]   = await db.execute(
             `SELECT COALESCE(SUM(cantidad - reservada), 0) AS disponible
              FROM stock WHERE producto_id=? AND bodega_id=?`,
             [item.insumo_id, bodegaId]
           );
           const disp = parseFloat(st[0].disponible || 0);
-          const ok   = disp >= needed;
-          if (!ok) puedeProd = false;
-          checks.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code}: necesita ${needed}, disponible ${disp}`);
+          const componentCapacity = Math.max(Math.floor(disp / perUnit), 0);
+          capacidadMaxima = Math.min(capacidadMaxima, componentCapacity);
+          if (desired == null) {
+            checks.push(`  ${item.siigo_code}: disponible ${disp}, consumo ${perUnit}/ud, capacidad ${componentCapacity} uds`);
+          } else {
+            const needed = roundQty(perUnit * desired);
+            const ok = disp >= needed;
+            if (!ok) puedeProd = false;
+            checks.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code}: necesita ${needed}, disponible ${disp}`);
+          }
         }
-        mensaje = [
-          `${puedeProd ? '✅' : '❌'} *Capacidad para ${params.cantidad_deseada} uds de ${params.id_producto_final}:*`,
-          ...checks
-        ].join('\n');
+        mensaje = desired == null
+          ? [
+              `*Capacidad actual de ${productReference}: ${Number.isFinite(capacidadMaxima) ? capacidadMaxima : 0} uds*`,
+              ...checks,
+            ].join('\n')
+          : [
+              `${puedeProd ? '✅' : '❌'} *Capacidad para ${desired} uds de ${productReference}:*`,
+              ...checks,
+            ].join('\n');
         break;
       }
 

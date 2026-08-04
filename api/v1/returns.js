@@ -23,6 +23,12 @@ function normalizeReturnStatus(value) {
   return map[raw] || 'CUARENTENA';
 }
 
+function returnLotStatus(returnStatus) {
+  if (returnStatus === 'RECUPERABLE') return 'DISPONIBLE';
+  if (returnStatus === 'CUARENTENA') return 'CUARENTENA';
+  return 'PENDIENTE_DISPOSICION';
+}
+
 async function getDefaultBodega(conn) {
   const [rows] = await conn.execute(`SELECT id FROM bodegas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
   if (!rows.length) throw httpError(500, 'No hay bodega activa configurada');
@@ -161,7 +167,7 @@ async function handlePost(req, res) {
       `INSERT INTO lots
          (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier, origin, status, received_by, notes, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'DEVOLUCION', ?, ?, ?, NOW())`,
-      [lotId, lpn, product.id, bodegaId, qty, qty, cliente, estado === 'RECUPERABLE' ? 'DISPONIBLE' : estado, user.id, notes]
+      [lotId, lpn, product.id, bodegaId, qty, qty, cliente, returnLotStatus(estado), user.id, notes]
     );
 
     if (estado === 'RECUPERABLE') {

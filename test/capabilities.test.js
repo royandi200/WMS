@@ -70,6 +70,26 @@ test('risky workflow features are disabled by default', () => {
   }
 });
 
+test('dashboard dispatch route enforces the direct-dispatch feature flag', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'dispatch.js'), 'utf8');
+  assert.match(source, /workflowFlags\(\)\.allowDirectDispatchRequest/u);
+  assert.match(source, /despacho directo esta desactivado/u);
+});
+
+test('notifications route uses a validated literal LIMIT for MySQL compatibility', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'notifications.js'), 'utf8');
+  assert.match(source, /Math\.min\(Math\.max\(Number\(req\.query\?\.limit/u);
+  assert.match(source, /LIMIT \$\{limit\}/u);
+  assert.doesNotMatch(source, /notificaciones_salida ORDER BY creado_en DESC LIMIT \?/u);
+});
+
+test('destroyed returns use a supported non-available lot status', () => {
+  const dashboard = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'returns.js'), 'utf8');
+  const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
+  assert.match(dashboard, /return 'PENDIENTE_DISPOSICION'/u);
+  assert.match(webhook, /return 'PENDIENTE_DISPOSICION'/u);
+});
+
 test('environment flag parsing is explicit', () => {
   process.env.TEST_WMS_FLAG = 'yes';
   assert.equal(envFlag('TEST_WMS_FLAG'), true);
@@ -153,4 +173,5 @@ test('BuilderBot prompt keeps the API contract and valid encoding', () => {
     assert.notEqual(capabilityForAction(action), null, `${action} debe existir en el contrato del API`);
     assert.match(prompt, new RegExp(`\\b${action}\\b`, 'u'));
   }
+  assert.match(prompt, /Sin cantidad, el WMS calcula el maximo fabricable/u);
 });

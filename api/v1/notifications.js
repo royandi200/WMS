@@ -19,8 +19,7 @@ module.exports = async (req, res) => {
       const [rows] = await conn.execute(
         `SELECT id, evento, canal, destinatario, mensaje, estado, intentos,
                 ultimo_error, creado_en, enviado_en
-         FROM notificaciones_salida ORDER BY creado_en DESC LIMIT ?`,
-        [limit]
+         FROM notificaciones_salida ORDER BY creado_en DESC LIMIT ${limit}`
       );
       return res.status(200).json({
         ok: true,

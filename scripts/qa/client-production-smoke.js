@@ -73,12 +73,14 @@ async function main() {
     const fixtures = await ensureFixtureStock(conn);
     const released = await releaseProductionOrder({
       product: FINAL_SKU,
-      quantity: 1,
+      quantity: 3,
       originType: 'STOCK_SEGURIDAD',
       notes: 'WMSFLOW-QA smoke de produccion con SKU cliente',
       userId: USER_ID,
     });
     const started = await confirmProductionMaterials({ orderId: released.order_code, userId: USER_ID });
+    const startRetry = await confirmProductionMaterials({ orderId: released.order_code, userId: USER_ID });
+    if (!startRetry.already_confirmed) throw new Error('La segunda confirmacion de materiales no fue idempotente');
     const material = released.picking.find((item) => item.sku === '00051-MPASH');
     if (!material) throw new Error('La reserva no incluyo 00051-MPASH');
     const additional = await adjustProductionMaterials({
@@ -103,22 +105,25 @@ async function main() {
     });
     const closed = await closeProductionOrder({
       orderId: released.order_code,
-      qtyReal: 1,
-      qtyWaste: 0,
+      qtyReal: 2,
+      qtyWaste: 1,
+      wasteReason: 'WMSFLOW-QA merma controlada de cierre',
       locationCode: OUTPUT_LOCATION,
       expiryDate: '2027-12-31',
       userId: USER_ID,
     });
     const retry = await closeProductionOrder({ orderId: released.order_code, userId: USER_ID });
     if (!retry.already_closed) throw new Error('El segundo cierre no fue idempotente');
-    console.log(JSON.stringify({ fixtures, released, started, additional, returned, closed, retry }, null, 2));
+    console.log(JSON.stringify({ fixtures, released, started, startRetry, additional, returned, closed, retry }, null, 2));
   } finally {
     await conn.end().catch(() => {});
   }
 }
 
-main().catch((error) => {
-  console.error(`${error.code || error.status || 'ERROR'}: ${error.message}`);
-  if (error.data) console.error(JSON.stringify(error.data));
-  process.exitCode = 1;
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(`${error.code || error.status || 'ERROR'}: ${error.message}`);
+    if (error.data) console.error(JSON.stringify(error.data));
+    process.exit(1);
+  });

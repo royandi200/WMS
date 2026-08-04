@@ -201,7 +201,7 @@ Obligatorios: `id_item`, `cantidad`, `cliente_origen`, `estado`.
 - `CONSULTAR_STOCK_PRODUCTO_TERMINADO`: `id_item` opcional.
 - `CONSULTAR_ESTADO_PRODUCCION`: `id_orden` obligatorio.
 - `CONSULTAR_TRAZABILIDAD_LOTE`: `id_lote` obligatorio.
-- `CONSULTAR_CAPACIDAD_FABRICACION`: `id_producto_final` y `cantidad_deseada` obligatorios.
+- `CONSULTAR_CAPACIDAD_FABRICACION`: `id_producto_final` obligatorio; `cantidad_deseada` es opcional. Sin cantidad, el WMS calcula el maximo fabricable segun BOM y stock disponible.
 - `CONSULTAR_SOLICITUDES_PENDIENTES`: sin código obligatorio.
 
 ### 11. EXCEPCION_PICKING | media
