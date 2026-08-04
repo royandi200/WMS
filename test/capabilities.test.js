@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   CAPABILITIES,
   capabilityForAction,
@@ -133,4 +135,22 @@ test('workflow notifications are opt-in', async () => {
   assert.deepEqual(result, [{ status: 'disabled' }]);
   if (previous == null) delete process.env.ENABLE_WORKFLOW_NOTIFICATIONS;
   else process.env.ENABLE_WORKFLOW_NOTIFICATIONS = previous;
+});
+
+test('BuilderBot prompt keeps the API contract and valid encoding', () => {
+  const prompt = fs.readFileSync(path.join(__dirname, '..', 'docs', 'Prompt WMS.txt'), 'utf8');
+  assert.doesNotMatch(prompt, /Ã|Â|â†|�/u);
+  assert.match(prompt, /`kw` debe ser exactamente `g0m@s`/u);
+  assert.match(prompt, /`body`, `text` y `query` son obligatorios/u);
+  for (const action of [
+    'LIBERAR_ORDEN_PRODUCCION',
+    'CONFIRMAR_MATERIALES_PRODUCCION',
+    'AJUSTAR_MATERIALES_PRODUCCION',
+    'CERRAR_ORDEN_PRODUCCION',
+    'SINCRONIZAR_FACTURAS_SIIGO',
+    'CONFIRMAR_DESPACHO_SIIGO',
+  ]) {
+    assert.notEqual(capabilityForAction(action), null, `${action} debe existir en el contrato del API`);
+    assert.match(prompt, new RegExp(`\\b${action}\\b`, 'u'));
+  }
 });
