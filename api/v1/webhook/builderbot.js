@@ -95,7 +95,7 @@ const {
 } = require('../../_lib/production-close-input');
 const { workflowFlags } = require('../../_lib/feature-flags');
 const { formatPendingApprovals } = require('../../_lib/pending-approvals');
-const { getEligibleStock } = require('../../_lib/manufacturing-capacity');
+const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufacturing-capacity');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -2429,9 +2429,9 @@ module.exports = async (req, res) => {
             checks.push(`  ${item.siigo_code}: disponible ${disp}, consumo ${perUnit}/ud, capacidad ${componentCapacity} uds`);
           } else {
             const needed = roundQty(perUnit * desired);
-            const ok = disp >= needed;
-            if (!ok) puedeProd = false;
-            checks.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code}: necesita ${needed}, disponible ${disp}`);
+            const check = formatCapacityCheck(item.siigo_code, needed, disp);
+            if (!check.ok) puedeProd = false;
+            checks.push(check.line);
           }
         }
         mensaje = desired == null

@@ -19,4 +19,13 @@ async function getEligibleStock(conn, productId, warehouseId) {
   return roundQty(rows[0]?.disponible || 0);
 }
 
-module.exports = { getEligibleStock };
+function formatCapacityCheck(sku, needed, available) {
+  const ok = available >= needed;
+  const shortage = ok ? '' : `, faltan ${roundQty(needed - available)}`;
+  return {
+    ok,
+    line: `  ${ok ? '✅' : '❌'} ${sku}: necesita ${needed}, disponible ${available}${shortage}`,
+  };
+}
+
+module.exports = { formatCapacityCheck, getEligibleStock };
