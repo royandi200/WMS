@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-05 - Limpieza conservadora previa a demostracion
+
+- Se agrego un procedimiento transaccional con modo simulacion para expirar solicitudes QA heredadas.
+- Solo se elimina una merma QA anomala si no tiene movimiento ni kardex asociado.
+- Productos, BOM, fixtures de inventario y operaciones QA trazables se preservan.
+- Se expiraron diez solicitudes heredadas, se elimino la merma fallida de 99 unidades y se revirtio el despacho QA accidental `DSP-1785941723310`.
+- El lote `TEST_AGENT-PTASH-DISP` se restauro a 87.75 unidades en stock y maestro de lote.
+
 ### 2026-08-05 - Detalle operativo en aprobaciones heredadas
 
 - Las solicitudes antiguas con `qty`, `lpn`, `customer` y `product_id` se normalizan al contrato visual vigente.

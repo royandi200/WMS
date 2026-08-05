@@ -14,7 +14,8 @@
     "test:returns:live": "node scripts/qa/client-returns-smoke.js",
     "test:waste:live": "node scripts/qa/client-waste-smoke.js",
     "test:rbac:live": "node scripts/qa/client-rbac-smoke.js",
-    "test:webhook:live": "node --use-system-ca scripts/qa/builderbot-webhook-smoke.js"
+    "test:webhook:live": "node --use-system-ca scripts/qa/builderbot-webhook-smoke.js",
+    "cleanup:qa": "node scripts/qa/cleanup-demo-data.js"
   },
   "dependencies": {
     "mysql2": "^3.9.7",
