@@ -148,7 +148,7 @@ async function cronUser(req) {
   return users[0];
 }
 
-async function reconcilePending(user) {
+async function reconcilePending(user, excludedPurchaseIds = new Set()) {
   const pending = await query(
     `SELECT id, siigo_purchase_id, siigo_purchase_name
      FROM recepciones
@@ -158,6 +158,7 @@ async function reconcilePending(user) {
   );
   const results = [];
   for (const reception of pending) {
+    if (excludedPurchaseIds.has(String(reception.siigo_purchase_id))) continue;
     try {
       const purchase = await siigoGet(`/v1/purchases/${encodeURIComponent(reception.siigo_purchase_id)}`, {
         entidad: 'compra_reconciliada',
@@ -339,7 +340,8 @@ module.exports = async (req, res) => {
       }
     }
 
-    const reconciliation = await reconcilePending(user);
+    const fetchedPurchaseIds = new Set(purchases.map(purchase => String(purchase?.id || '')).filter(Boolean));
+    const reconciliation = await reconcilePending(user, fetchedPurchaseIds);
     results.push(...reconciliation);
 
     const forceCompleted = req.body?.reconcile_completed === true || req.query?.reconcile_completed === 'true';

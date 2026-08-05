@@ -15,6 +15,11 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Resultado limpio en importacion dirigida de compras
+
+- Una factura creada e importada en la misma ejecucion ya no reaparece como `duplicate` durante la reconciliacion de pendientes.
+- La idempotencia de base de datos se conserva y los contadores reflejan una sola operacion logica.
+
 ### 2026-08-04 - Zona horaria consistente entre MySQL y Vercel
 
 - La conexion MySQL interpreta `DATETIME` con `DB_TIMEZONE=-05:00` por defecto.

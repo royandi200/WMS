@@ -223,6 +223,12 @@ test('production close idempotency response includes actor and timestamp', () =>
   assert.match(source, /No se modifico inventario/u);
 });
 
+test('purchase import does not reconcile the same document twice in one run', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../api/v1/siigo/import-purchases.js'), 'utf8');
+  assert.match(source, /excludedPurchaseIds\.has\(String\(reception\.siigo_purchase_id\)\)/u);
+  assert.match(source, /reconcilePending\(user, fetchedPurchaseIds\)/u);
+});
+
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '..', 'docs', 'Prompt WMS.txt'), 'utf8');
   assert.doesNotMatch(prompt, /Ã|Â|â†|�/u);
