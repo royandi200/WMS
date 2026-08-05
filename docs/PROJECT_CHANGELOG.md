@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-05 - Trazabilidad de produccion con mermas diferenciadas
+
+- La consulta del lote PT muestra la OP, plan, conformes, responsable y fecha de cierre.
+- Las mermas de materia prima durante proceso se separan de la merma de producto terminado al cierre.
+- El consumo de materiales muestra neto entregado, merma de proceso y uso productivo estimado.
+- El auditor E2E ya no suma cantidades de SKU y unidades de medida diferentes como una sola merma.
+- Validacion: 44 pruebas unitarias y auditoria integral de MySQL sin fallos.
+
 ### 2026-08-04 - Mermas transaccionales e idempotentes
 
 - Dashboard y WhatsApp usan un unico servicio de mermas con el mismo contrato y las mismas validaciones.

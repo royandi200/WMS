@@ -89,8 +89,18 @@ async function main() {
       `SELECT op.id, op.codigo_orden, op.estado, op.fase, op.cantidad_planeada,
               op.cantidad_real,
               (SELECT l.lpn FROM lots l WHERE l.production_order_id = op.id ORDER BY l.created_at LIMIT 1) AS lpn_terminado,
-              (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m WHERE m.orden_produccion_id = op.id) AS merma,
-              (SELECT COUNT(*) FROM mermas m WHERE m.orden_produccion_id = op.id) AS mermas_registradas
+              (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
+               WHERE m.orden_produccion_id = op.id AND m.producto_id = op.producto_id
+                 AND m.referencia_externa IS NULL) AS merma_cierre,
+              (SELECT COUNT(*) FROM mermas m
+               WHERE m.orden_produccion_id = op.id AND m.producto_id = op.producto_id
+                 AND m.referencia_externa IS NULL) AS mermas_cierre,
+              (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
+               WHERE m.orden_produccion_id = op.id
+                 AND (m.producto_id <> op.producto_id OR m.referencia_externa IS NOT NULL)) AS merma_proceso,
+              (SELECT COUNT(*) FROM mermas m
+               WHERE m.orden_produccion_id = op.id
+                 AND (m.producto_id <> op.producto_id OR m.referencia_externa IS NOT NULL)) AS eventos_merma_proceso
        FROM ordenes_produccion op
        WHERE op.codigo_orden LIKE 'OP-%'
          AND EXISTS (SELECT 1 FROM lots l WHERE l.production_order_id = op.id AND l.lpn LIKE 'LPN-OP-%')
@@ -100,8 +110,8 @@ async function main() {
     add('qa-production-closed', latestProduction?.estado === 'CERRADA'
       && Number(latestProduction?.cantidad_planeada) === 3
       && Number(latestProduction?.cantidad_real) === 2
-      && Number(latestProduction?.merma) === 1
-      && Number(latestProduction?.mermas_registradas) === 1, latestProduction || null);
+      && Number(latestProduction?.merma_cierre) === 1
+      && Number(latestProduction?.mermas_cierre) === 1, latestProduction || null);
 
     const productionLots = latestProduction ? await rows(
       `SELECT l.lpn, l.qty_current, l.status, s.cantidad, s.reservada

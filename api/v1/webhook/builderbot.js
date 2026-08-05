@@ -2269,6 +2269,9 @@ module.exports = async (req, res) => {
     const [materialRows] = l.production_order_id ? await db.execute(
       `SELECT p.siigo_code, p.nombre, pml.lote, u.codigo AS ubicacion,
               pml.cantidad_consumida, pml.cantidad_devuelta,
+              (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
+               WHERE m.orden_produccion_id = pm.orden_produccion_id
+                 AND m.producto_id = pm.producto_id) AS merma_proceso,
               ol.supplier, rr.siigo_purchase_name, oc.numero AS orden_compra
        FROM produccion_materiales pm
        JOIN produccion_material_lotes pml ON pml.produccion_material_id = pm.id
@@ -2282,12 +2285,42 @@ module.exports = async (req, res) => {
       [l.production_order_id]
     ).catch(() => [[]]) : [[]];
     const materialHistory = materialRows.length
-      ? materialRows.map(m => `  - ${m.siigo_code}: lote ${m.lote}, ubicacion ${m.ubicacion || 'N/A'}, consumo neto ${Number(m.cantidad_consumida || 0) - Number(m.cantidad_devuelta || 0)} | OC ${m.orden_compra || 'N/A'} | Siigo ${m.siigo_purchase_name || 'N/A'} | ${m.supplier || 'proveedor N/A'}`).join('\n')
+      ? materialRows.map(m => {
+          const net = Number(m.cantidad_consumida || 0) - Number(m.cantidad_devuelta || 0);
+          const processWaste = Number(m.merma_proceso || 0);
+          return `  - ${m.siigo_code}: lote ${m.lote}, ubicacion ${m.ubicacion || 'N/A'}, neto entregado ${net}, merma proceso ${processWaste}, uso productivo estimado ${Number((net - processWaste).toFixed(4))} | OC ${m.orden_compra || 'N/A'} | Siigo ${m.siigo_purchase_name || 'N/A'} | ${m.supplier || 'proveedor N/A'}`;
+        }).join('\n')
       : '  (Sin consumo real de materiales registrado)';
+
+    const [productionRows] = l.production_order_id ? await db.execute(
+      `SELECT op.codigo_orden, op.estado, op.cantidad_planeada, op.cantidad_real,
+              op.cerrado_en, u.nombre AS cerrado_por
+       FROM ordenes_produccion op
+       LEFT JOIN usuarios u ON u.id = op.aprobado_por
+       WHERE op.id = ? LIMIT 1`,
+      [l.production_order_id]
+    ).catch(() => [[]]) : [[]];
+    const productionHistory = productionRows.length
+      ? productionRows.map(op => `  - ${op.codigo_orden} | ${op.estado} | plan ${op.cantidad_planeada} | conformes ${op.cantidad_real} | cerro ${op.cerrado_por || 'N/A'} | ${op.cerrado_en ? new Date(op.cerrado_en).toLocaleString('es-CO') : 'sin cierre'}`).join('\n')
+      : '  (Sin orden de produccion vinculada)';
+
+    const [wasteRows] = l.production_order_id ? await db.execute(
+      `SELECT m.numero, p.siigo_code, m.cantidad, m.motivo,
+              m.referencia_externa, m.creado_en
+       FROM mermas m JOIN productos p ON p.id = m.producto_id
+       WHERE m.orden_produccion_id = ? ORDER BY m.creado_en, m.id`,
+      [l.production_order_id]
+    ).catch(() => [[]]) : [[]];
+    const wasteHistory = wasteRows.length
+      ? wasteRows.map(m => `  - ${m.numero}: ${m.siigo_code} | ${m.cantidad} und | ${m.motivo || 'sin motivo'} | ${m.referencia_externa ? `proceso ${m.referencia_externa}` : 'cierre de produccion'}`).join('\n')
+      : '  (Sin mermas asociadas)';
 
     const [productionUseRows] = await db.execute(
       `SELECT op.codigo_orden, pt.siigo_code AS producto_final,
-              pml.cantidad_consumida, pml.cantidad_devuelta
+              pml.cantidad_consumida, pml.cantidad_devuelta,
+              (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
+               WHERE m.orden_produccion_id = op.id
+                 AND m.producto_id = pm.producto_id) AS merma_proceso
        FROM produccion_material_lotes pml
        JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
        JOIN ordenes_produccion op ON op.id = pm.orden_produccion_id
@@ -2296,7 +2329,11 @@ module.exports = async (req, res) => {
       [params.id_lote]
     ).catch(() => [[]]);
     const productionUses = productionUseRows.length
-      ? productionUseRows.map(p => `  - ${p.codigo_orden} -> ${p.producto_final}: consumo neto ${Number(p.cantidad_consumida || 0) - Number(p.cantidad_devuelta || 0)}`).join('\n')
+      ? productionUseRows.map(p => {
+          const net = Number(p.cantidad_consumida || 0) - Number(p.cantidad_devuelta || 0);
+          const processWaste = Number(p.merma_proceso || 0);
+          return `  - ${p.codigo_orden} -> ${p.producto_final}: neto entregado ${net}, merma proceso ${processWaste}, uso productivo estimado ${Number((net - processWaste).toFixed(4))}`;
+        }).join('\n')
       : '  (No consumido en produccion)';
 
     mensaje = [
@@ -2323,6 +2360,12 @@ module.exports = async (req, res) => {
       ``,
       `*Consumo real de materias primas:*`,
       materialHistory,
+      ``,
+      `*Produccion / resultado:*`,
+      productionHistory,
+      ``,
+      `*Mermas asociadas:*`,
+      wasteHistory,
       ``,
       `*Ordenes que consumieron este lote:*`,
       productionUses,
