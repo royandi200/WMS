@@ -13,7 +13,8 @@ function normalizeWasteInput(input = {}) {
   const lot = String(input.id_lote ?? input.lot_id ?? input.lote ?? '').trim();
   const data = {
     externalReference: String(
-      input.referencia_merma ?? input.referencia_externa ?? input.reference ?? input.referencia ?? ''
+      input.external_reference ?? input.referencia_merma ?? input.referencia_externa
+        ?? input.reference ?? input.referencia ?? ''
     ).trim(),
     sku: String(input.id_item ?? input.sku ?? input.product_id ?? '').trim(),
     quantity,

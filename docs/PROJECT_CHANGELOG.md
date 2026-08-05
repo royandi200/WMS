@@ -15,6 +15,11 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-05 - Contrato de referencia de mermas del dashboard
+
+- El servicio compartido acepta `external_reference`, que es el campo enviado por el formulario de mermas.
+- Se agrego una prueba de regresion con el payload exacto de una merma de bodega desde React.
+
 ### 2026-08-05 - Disponibilidad operativa consistente en el dashboard
 
 - Buscar producto separa inventario fisico, reservado, disponible operativo y bloqueado.

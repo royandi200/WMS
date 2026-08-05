@@ -17,6 +17,21 @@ test('normalizes a location-specific warehouse waste report', () => {
   assert.equal(result.location, 'PPAL-A-1-01');
 });
 
+test('accepts the exact dashboard waste payload contract', () => {
+  const result = normalizeWasteInput({
+    type: 'BODEGA',
+    external_reference: 'E2E-DASH-MER-20260805-001',
+    product_id: '00102-PTASH60',
+    qty: 0.25,
+    lot_id: 'TEST_AGENT-PTASH-DISP',
+    location: 'PPAL-A-1-01',
+    reason: 'prueba controlada desde dashboard',
+  });
+  assert.equal(result.externalReference, 'E2E-DASH-MER-20260805-001');
+  assert.equal(result.sku, '00102-PTASH60');
+  assert.equal(result.quantity, 0.25);
+});
+
 test('requires exactly one inventory context', () => {
   const base = {
     referencia_merma: 'MER-QA-002', id_item: 'SKU-1', cantidad: 1, motivo: 'QA',
