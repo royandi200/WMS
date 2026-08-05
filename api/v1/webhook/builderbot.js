@@ -2270,8 +2270,11 @@ module.exports = async (req, res) => {
          k.balance_after,
          k.reference,
          k.notes,
-         k.created_at
+         k.created_at,
+         dv.cantidad AS cantidad_fisica_devolucion,
+         dv.estado AS estado_devolucion
        FROM kardex k
+       LEFT JOIN devoluciones dv ON k.reference = CONCAT('devolucion:', dv.numero)
        WHERE k.lot_id = ?
        ORDER BY k.created_at ASC`,
       [l.id]
@@ -2280,6 +2283,11 @@ module.exports = async (req, res) => {
     const history = kRows.length
       ? kRows.map(k => {
           const fecha = new Date(k.created_at).toLocaleString('es-CO');
+          if (k.action === 'DEVOLUCION'
+              && Number(k.qty) === 0
+              && Number(k.cantidad_fisica_devolucion) > 0) {
+            return `  ${fecha} | DEVOLUCION_${k.estado_devolucion}: ${k.cantidad_fisica_devolucion} und fisicas (sin cambio en disponible; saldo: ${k.balance_after})${k.notes ? ` | ${k.notes}` : ''}`;
+          }
           let extra = '';
 
           if (k.notes) {
@@ -2301,7 +2309,9 @@ module.exports = async (req, res) => {
     ).catch(() => [[]]);
     const dispatchHistory = dispatchRows.length
       ? dispatchRows.map(d => `  - ${d.numero} / ${d.siigo_invoice_name || 'sin factura'}: ${d.cantidad} und -> ${d.cliente_nombre || 'Cliente N/A'} (${d.despachado_en ? new Date(d.despachado_en).toLocaleString('es-CO') : 'sin fecha'})`).join('\n')
-      : '  (Sin despachos registrados)';
+      : l.origin === 'DEVOLUCION'
+        ? '  (Este lote devuelto no registra despachos posteriores)'
+        : '  (Sin despachos registrados)';
 
     const [returnRows] = await db.execute(
       `SELECT dv.numero, dv.referencia_externa, dv.cliente_origen, dv.cantidad,
