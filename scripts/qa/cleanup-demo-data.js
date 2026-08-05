@@ -38,7 +38,10 @@ async function main() {
         WHERE codigo_solicitud IN (${placeholders}) FOR UPDATE`,
       STALE_REQUESTS
     );
-    const pending = requests.filter((request) => request.estado === 'PENDIENTE');
+    const [pending] = await conn.execute(
+      `SELECT codigo_solicitud, accion, estado FROM aprobaciones
+        WHERE estado = 'PENDIENTE' AND creado_en < '2026-08-01' FOR UPDATE`
+    );
 
     const [anomalousWaste] = await conn.execute(
       `SELECT m.id, m.numero, m.cantidad, m.motivo
@@ -86,8 +89,7 @@ async function main() {
                   motivo_rechazo = 'Limpieza QA previa a demostracion',
                   procesado_por = 5,
                   procesado_en = NOW()
-            WHERE codigo_solicitud IN (${placeholders}) AND estado = 'PENDIENTE'`,
-          STALE_REQUESTS
+            WHERE estado = 'PENDIENTE' AND creado_en < '2026-08-01'`
         );
       }
       if (anomalousWaste.length) {
@@ -144,6 +146,11 @@ async function main() {
          LEFT JOIN lots l ON l.lpn = s.lote AND l.product_id = s.producto_id
         WHERE p.siigo_code = '00102-PTASH60' AND s.lote = 'TEST_AGENT-PTASH-DISP'`
     );
+    const [remainingPending] = await conn.execute(
+      `SELECT codigo_solicitud, accion, creado_en
+         FROM aprobaciones WHERE estado = 'PENDIENTE'
+         ORDER BY creado_en DESC`
+    );
 
     console.log(JSON.stringify({
       mode: apply ? 'applied' : 'dry-run',
@@ -160,6 +167,7 @@ async function main() {
         linkedReturns: dispatchReturns,
       })),
       inventoryState: inventoryState[0] || null,
+      remainingPending,
     }, null, 2));
   } catch (error) {
     await conn.rollback().catch(() => {});
