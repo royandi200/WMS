@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { createDispatch, listDispatches } from '../api/dispatch.api'
+import { groupDispatchRows } from '../utils/dispatchRows'
 
 export const useDispatchStore = create((set) => ({
   loading: false,
@@ -12,7 +13,7 @@ export const useDispatchStore = create((set) => ({
     try {
       const res = await listDispatches(params)
       const payload = res?.data?.data ?? res?.data ?? res
-      const rows = Array.isArray(payload?.rows) ? payload.rows : []
+      const rows = groupDispatchRows(Array.isArray(payload?.rows) ? payload.rows : [])
       set({ list: rows, loading: false })
       return { ok: true, data: rows }
     } catch (e) {

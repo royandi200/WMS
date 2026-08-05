@@ -79,6 +79,9 @@ test('dashboard dispatch route enforces the direct-dispatch feature flag', () =>
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'dispatch.js'), 'utf8');
   assert.match(source, /workflowFlags\(\)\.allowDirectDispatchRequest/u);
   assert.match(source, /despacho directo esta desactivado/u);
+  assert.match(source, /Math\.min\(Math\.max\(Math\.trunc\(requestedLimit\), 1\), 200\)/u);
+  assert.match(source, /SELECT \* FROM despachos[\s\S]*LIMIT \$\{limit\}/u);
+  assert.match(source, /new Set\(rows\.map\(\(row\) => row\.id\)\)\.size/u);
 });
 
 test('notifications route uses a validated literal LIMIT for MySQL compatibility', () => {

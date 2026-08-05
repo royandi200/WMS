@@ -88,13 +88,24 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
           {!loading && rows.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">{pending ? 'Sin despachos pendientes' : 'Sin despachos historicos'}</td></tr>}
           {!loading && rows.map((row, index) => {
             const ready = row.estado === 'picking' && Number(row.cantidad_pendiente || 0) <= 0 && row.siigo_invoice_id
+            const items = row.items?.length ? row.items : [row]
             return (
-              <tr key={`${row.id}-${row.lote || index}`} className="border-b border-border/50 hover:bg-white/[0.02]">
+              <tr key={row.id || index} className="border-b border-border/50 hover:bg-white/[0.02] align-top">
                 <td className="px-4 py-3 font-mono text-xs">{row.siigo_invoice_name || '-'}</td>
                 <td className="px-4 py-3 font-mono text-xs">{row.numero}</td>
                 <td className="px-4 py-3">{row.cliente_nombre || 'Pendiente'}</td>
-                <td className="px-4 py-3"><span className="font-mono text-xs">{row.sku || '-'}</span><span className="block text-xs text-muted">{row.producto_nombre || ''}</span></td>
-                <td className="px-4 py-3"><span className="font-mono text-xs">{row.lote || '-'}</span></td>
+                <td className="px-4 py-3 space-y-2">{items.map((item, itemIndex) => (
+                  <div key={`${item.sku || 'sku'}-${item.lote || 'lote'}-${itemIndex}`}>
+                    <span className="font-mono text-xs">{item.sku || '-'}</span>
+                    <span className="block text-xs text-muted">{item.producto_nombre || ''}</span>
+                  </div>
+                ))}</td>
+                <td className="px-4 py-3 space-y-2">{items.map((item, itemIndex) => (
+                  <div key={`${item.lote || 'lote'}-${itemIndex}`}>
+                    <span className="font-mono text-xs">{item.lote || '-'}</span>
+                    <span className="block text-xs text-muted">{item.ubicacion || 'Sin ubicacion'} | {item.cantidad} u.</span>
+                  </div>
+                ))}</td>
                 <td className="px-4 py-3 tabular-nums">{row.cantidad_facturada ?? '-'}</td>
                 <td className="px-4 py-3 tabular-nums">{row.cantidad_reservada ?? '-'}</td>
                 <td className={`px-4 py-3 tabular-nums ${Number(row.cantidad_pendiente) > 0 ? 'text-yellow-400' : 'text-green-400'}`}>{row.cantidad_pendiente ?? '-'}</td>

@@ -124,7 +124,10 @@ async function insertDispatch(conn, {
 
 async function handleGet(req, res) {
   await requireCapability(req, CAPABILITIES.DISPATCH_READ);
-  const limit = Math.min(Number(req.query?.limit || 100), 200);
+  const requestedLimit = Number(req.query?.limit || 100);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 200)
+    : 100;
   const columns = await query(`SHOW COLUMNS FROM despachos`).catch(() => []);
   const hasDirectItems = columns.some((c) => c.Field === 'producto_id')
     && columns.some((c) => c.Field === 'lote')
@@ -163,19 +166,24 @@ async function handleGet(req, res) {
        p.siigo_code AS sku,
        p.nombre AS producto_nombre,
        ${itemLot} AS lote,
+       ub.codigo AS ubicacion,
        ${itemQty} AS cantidad,
        di.cantidad_sol AS cantidad_solicitada,
        di.cantidad_des AS cantidad_despachada
-     FROM despachos d
+     FROM (
+       SELECT * FROM despachos
+       ORDER BY COALESCE(despachado_en, creado_en) DESC
+       LIMIT ${limit}
+     ) d
      LEFT JOIN despacho_items di ON di.despacho_id = d.id
      LEFT JOIN productos p ON p.id = ${itemProduct}
+     LEFT JOIN ubicaciones ub ON ub.id = di.ubicacion_id
      LEFT JOIN usuarios u ON u.id = d.usuario_id
-     ORDER BY COALESCE(d.despachado_en, d.creado_en) DESC
-     LIMIT ?`,
-    [limit]
+     ORDER BY COALESCE(d.despachado_en, d.creado_en) DESC, di.id ASC`
   );
 
-  return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
+  const total = new Set(rows.map((row) => row.id)).size;
+  return res.status(200).json({ ok: true, data: { rows, total } });
 }
 
 async function handlePost(req, res) {
