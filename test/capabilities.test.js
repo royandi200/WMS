@@ -11,7 +11,7 @@ const { envFlag, workflowFlags } = require('../api/_lib/feature-flags');
 const { normalizePurchaseOrderInput } = require('../api/_lib/purchase-orders');
 const { normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
-const { notificationsEnabled, normalizePhone, maskPhone } = require('../api/_lib/builderbot-notifications');
+const { notificationsEnabled, normalizePhone, maskPhone, recipientPhones } = require('../api/_lib/builderbot-notifications');
 const {
   normalizeExpiryDate,
   normalizeProductionCloseParams,
@@ -161,6 +161,27 @@ test('workflow notifications default to enabled with an emergency off switch', (
   assert.equal(notificationsEnabled(), false);
   if (previous == null) delete process.env.DISABLE_OUTBOUND_NOTIFICATIONS;
   else process.env.DISABLE_OUTBOUND_NOTIFICATIONS = previous;
+});
+
+test('proactive notifications exclude the actor and deduplicate phones', () => {
+  const rows = [
+    { id: 1, telefono: '3174442659' },
+    { id: 2, telefono: '3125031367' },
+    { id: 3, telefono: '+57 312 503 1367' },
+    { id: 4, telefono: 'invalido' },
+  ];
+  assert.deepEqual(recipientPhones(rows, [1]), ['573125031367']);
+});
+
+test('production start and close emit stable notification events', () => {
+  const startSource = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'production-workflow.js'), 'utf8');
+  const closeSource = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'production-close.js'), 'utf8');
+  assert.match(startSource, /production_started:\$\{order\.id\}/u);
+  assert.match(startSource, /roles: \['admin', 'recepcion_cierre'\]/u);
+  assert.match(startSource, /excludeUserIds: \[userId\]/u);
+  assert.match(closeSource, /production_closed:\$\{order\.id\}/u);
+  assert.match(closeSource, /roles: \['admin'\]/u);
+  assert.match(closeSource, /excludeUserIds: \[userId\]/u);
 });
 
 test('production close text keeps reason, location and expiry separate', () => {

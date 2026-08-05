@@ -189,7 +189,9 @@ async function confirmProductionMaterials({ orderId, userId }) {
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1 FOR UPDATE`,
+      `SELECT op.*, p.siigo_code AS producto_sku, p.nombre AS producto_nombre
+       FROM ordenes_produccion op JOIN productos p ON p.id = op.producto_id
+       WHERE op.id = ? OR op.codigo_orden = ? LIMIT 1 FOR UPDATE`,
       [orderId, orderId]
     );
     if (!orders.length) throw httpError(404, 'Orden no encontrada');
@@ -203,10 +205,13 @@ async function confirmProductionMaterials({ orderId, userId }) {
     }
     const [allocations] = await conn.execute(
       `SELECT pml.id, pml.stock_id, pml.lote, pml.ubicacion_id, pml.cantidad_reservada,
-              pm.id AS material_id, pm.producto_id, s.bodega_id
+              pm.id AS material_id, pm.producto_id, s.bodega_id,
+              p.siigo_code AS sku, p.nombre AS producto_nombre, u.codigo AS ubicacion
        FROM produccion_material_lotes pml
        JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
        JOIN stock s ON s.id = pml.stock_id
+       JOIN productos p ON p.id = pm.producto_id
+       LEFT JOIN ubicaciones u ON u.id = pml.ubicacion_id
        WHERE pm.orden_produccion_id = ?
        ORDER BY pm.id, pml.id FOR UPDATE`,
       [order.id]
@@ -260,7 +265,14 @@ async function confirmProductionMaterials({ orderId, userId }) {
          allocation.producto_id, userId, -qty, Number(lotRows[0]?.qty_current || 0),
          `produccion:${order.codigo_orden}`, `Lote ${allocation.lote}`, userId]
       );
-      consumed.push({ product_id: allocation.producto_id, lpn: allocation.lote, qty_taken: qty });
+      consumed.push({
+        product_id: allocation.producto_id,
+        sku: allocation.sku,
+        product: allocation.producto_nombre,
+        lpn: allocation.lote,
+        location: allocation.ubicacion,
+        qty_taken: qty,
+      });
     }
     await conn.execute(
       `UPDATE produccion_materiales pm
@@ -282,8 +294,28 @@ async function confirmProductionMaterials({ orderId, userId }) {
        WHERE id = ? AND estado = 'APROBADA' AND fase = 'F0'`,
       [order.id]
     );
+    const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
-    return { order_code: order.codigo_orden, phase: 'F1', already_confirmed: false, consumed };
+    const result = { order_code: order.codigo_orden, phase: 'F1', already_confirmed: false, consumed };
+    const startedAt = new Date().toLocaleString('es-CO', {
+      timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short',
+    });
+    result.notification = await notifyRoles({
+      event: `production_started:${order.id}`,
+      roles: ['admin', 'recepcion_cierre'],
+      fallbackRoles: ['admin'],
+      excludeUserIds: [userId],
+      text: [
+        `Produccion iniciada: ${order.codigo_orden}`,
+        `${order.producto_sku} - ${order.producto_nombre}: ${Number(order.cantidad_planeada)} und planeadas`,
+        `Origen: ${order.origen_tipo === 'OC_CLIENTE' ? `OC ${order.referencia_cliente} - ${order.cliente_final}` : 'stock de seguridad'}`,
+        `Confirmo: ${actors[0]?.nombre || 'Usuario WMS'} | ${startedAt}`,
+        'Materiales consumidos:',
+        ...consumed.map(item => `- ${item.sku}: ${item.qty_taken} | lote ${item.lpn} | ubicacion ${item.location || 'N/A'}`),
+        'Estado: EN_PROCESO',
+      ].join('\n'),
+    }).catch(error => [{ status: 'error', error: error.message }]);
+    return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;

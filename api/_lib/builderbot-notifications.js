@@ -16,6 +16,14 @@ function notificationsEnabled() {
   return !disabled;
 }
 
+function recipientPhones(rows, excludeUserIds = []) {
+  const excludedUsers = new Set(excludeUserIds.map(Number).filter(Number.isInteger));
+  return [...new Set(rows
+    .filter(row => !excludedUsers.has(Number(row.id)))
+    .map(row => normalizePhone(row.telefono))
+    .filter(Boolean))];
+}
+
 function sendMessage(phone, text) {
   const token = process.env.BUILDERBOT_API_TOKEN;
   const botId = process.env.BUILDERBOT_BOT_ID;
@@ -47,7 +55,7 @@ function sendMessage(phone, text) {
   });
 }
 
-async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'] }) {
+async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excludeUserIds = [] }) {
   if (!notificationsEnabled()) {
     return [{ status: 'disabled' }];
   }
@@ -59,15 +67,23 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'] }) {
       if (!roleNames.length) return [];
       const placeholders = roleNames.map(() => '?').join(',');
       const [rows] = await conn.execute(
-        `SELECT u.telefono FROM usuarios u JOIN roles r ON r.id = u.rol_id
+        `SELECT u.id, u.telefono FROM usuarios u JOIN roles r ON r.id = u.rol_id
          WHERE u.activo = 1 AND u.telefono IS NOT NULL AND u.email NOT LIKE '%@wa.bot'
            AND LOWER(r.nombre) IN (${placeholders}) ORDER BY u.id`,
         roleNames
       );
-      return [...new Set(rows.map(row => normalizePhone(row.telefono)).filter(Boolean))];
+      return recipientPhones(rows, excludeUserIds);
     };
     let phones = await find(normalizedRoles);
     if (!phones.length) phones = await find(fallback);
+    if (!phones.length) {
+      await conn.execute(
+        `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
+         VALUES ('whatsapp', 'WARN', 'Notificacion sin destinatarios', ?, ?, NOW())`,
+        [excludeUserIds[0] || null, JSON.stringify({ event, roles: normalizedRoles, fallback_roles: fallback })]
+      ).catch(() => {});
+      return [{ status: 'no_recipient' }];
+    }
     const results = [];
     for (const phone of phones) {
       let notificationId;
@@ -185,4 +201,4 @@ async function retryNotification(id) {
   }
 }
 
-module.exports = { notifyRoles, retryNotification, normalizePhone, maskPhone, notificationsEnabled };
+module.exports = { notifyRoles, retryNotification, normalizePhone, maskPhone, notificationsEnabled, recipientPhones };

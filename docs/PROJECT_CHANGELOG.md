@@ -15,6 +15,13 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Avisos de inicio y cierre de produccion
+
+- `production_started:{op_id}` notifica a `admin` y `recepcion_cierre` con materiales, lotes y ubicaciones.
+- `production_closed:{op_id}` notifica a `admin` con plan, resultado, merma, lote PT y conciliacion BOM.
+- El actor se excluye de su propio aviso proactivo y una falla de WhatsApp no revierte la operacion.
+- La ausencia de destinatarios queda registrada en `system_logs`.
+
 ### 2026-08-04 - Politica de notificaciones operativas
 
 - Se creo `docs/politica-notificaciones-operativas.md` como fuente de verdad para eventos, destinatarios, fallbacks, contenido, idempotencia y decisiones configurables.

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { normalizeExpiryDate } = require('./production-close-input');
+const { notifyRoles } = require('./builderbot-notifications');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -20,9 +21,11 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT op.*, u.nombre AS cerrado_por_nombre
+      `SELECT op.*, u.nombre AS cerrado_por_nombre,
+              p.siigo_code AS producto_sku, p.nombre AS producto_nombre
        FROM ordenes_produccion op
        LEFT JOIN usuarios u ON u.id = op.aprobado_por
+       JOIN productos p ON p.id = op.producto_id
        WHERE op.id = ? OR op.codigo_orden = ? LIMIT 1 FOR UPDATE`,
       [orderId, orderId]
     );
@@ -151,8 +154,9 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         variacion: Number((net - theoretical).toFixed(4)),
       };
     });
+    const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
-    return {
+    const result = {
       already_closed: false,
       order_code: order.codigo_orden,
       qty_planned: Number(order.cantidad_planeada),
@@ -164,6 +168,29 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       ubicacion: resolvedLocationCode,
       material_reconciliation: reconciliation,
     };
+    const closedAt = new Date().toLocaleString('es-CO', {
+      timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short',
+    });
+    const wastePercent = Number(order.cantidad_planeada) > 0
+      ? Number(((waste / Number(order.cantidad_planeada)) * 100).toFixed(2))
+      : 0;
+    result.notification = await notifyRoles({
+      event: `production_closed:${order.id}`,
+      roles: ['admin'],
+      fallbackRoles: [],
+      excludeUserIds: [userId],
+      text: [
+        `Produccion cerrada: ${order.codigo_orden}`,
+        `${order.producto_sku} - ${order.producto_nombre}`,
+        `Plan: ${Number(order.cantidad_planeada)} | Conformes: ${conforming} | Merma: ${waste} (${wastePercent}%)`,
+        `Motivo de merma: ${waste > 0 ? wasteReason : 'Sin merma'}`,
+        `Lote PT: ${conforming > 0 ? lpn : 'Sin lote conforme'} | ubicacion ${resolvedLocationCode || 'N/A'} | vence ${normalizedExpiry || 'N/A'}`,
+        `Cerro: ${actors[0]?.nombre || 'Usuario WMS'} | ${closedAt}`,
+        'Conciliacion de materiales:',
+        ...reconciliation.map(item => `- ${item.sku}: teorico ${item.teorico}, neto ${item.consumo_neto}, variacion ${item.variacion}`),
+      ].join('\n'),
+    }).catch(error => [{ status: 'error', error: error.message }]);
+    return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;

@@ -38,11 +38,11 @@ Estados: `ACTIVO` ya existe; `SIGUIENTE` esta aprobado para la proxima implement
 | Dominio | Momento de decision | Evento idempotente | Prioridad | Destinatarios | Fallback | Estado |
 | --- | --- | --- | --- | --- | --- | --- |
 | Produccion | OP liberada y materiales reservados | `production_released:{op_id}` | Alta | `alistador` | `admin` | ACTIVO |
-| Produccion | Materiales confirmados e inicio real | `production_started:{op_id}` | Alta | `admin`, `recepcion_cierre` | `admin` | SIGUIENTE |
+| Produccion | Materiales confirmados e inicio real | `production_started:{op_id}` | Alta | `admin`, `recepcion_cierre` | `admin` | ACTIVO |
 | Produccion | Entrega adicional de MP | `production_extra_material:{movement_id}` | Media | Dashboard; `admin` si supera umbral | Ninguno | CONDICIONAL |
 | Produccion | Devolucion de MP a bodega | `production_material_returned:{movement_id}` | Media | Dashboard; `admin` si supera umbral | Ninguno | CONDICIONAL |
 | Produccion | Merma durante proceso | `production_waste_reported:{waste_id}` | Alta | `admin`, `recepcion_cierre` | `admin` | SIGUIENTE |
-| Produccion | OP cerrada | `production_closed:{op_id}` | Alta | `admin` | Ninguno | SIGUIENTE |
+| Produccion | OP cerrada | `production_closed:{op_id}` | Alta | `admin` | Ninguno | ACTIVO |
 | Recepcion | Factura de compra importada y recepcion pendiente | `reception_pending:{reception_id}` | Alta | `recepcion_cierre` | `admin` | ACTIVO |
 | Recepcion | Recepcion exacta confirmada | `reception_completed:{reception_id}` | Baja | Dashboard | Ninguno | DASHBOARD |
 | Recepcion | Diferencia OC/factura/fisico, cuarentena o rechazo | `reception_exception:{reception_id}` | Alta | `admin` | Ninguno | SIGUIENTE |
