@@ -78,6 +78,19 @@ La segunda ejecucion confirmo que el lote vencido dejo de ser elegible.
 - API JavaScript: sintaxis validada con `node --check`.
 - `git diff --check`: sin errores en archivos del cambio; solo existe una linea final en blanco en `docs/agent-dashboard-qa-plan.md`, modificada por el usuario y excluida del alcance.
 
+## Addendum: merma de almacenamiento
+
+Se valido el servicio transaccional compartido por dashboard y WhatsApp con un lote QA temporal de una unidad, de la cual `0.5` estaba reservada:
+
+- Reporte valido de `0.25`: stock `1 -> 0.75` y lote `1 -> 0.75`.
+- Registros creados: una merma, un movimiento y un kardex.
+- Reintento con la misma referencia y los mismos datos: sin nuevo descuento.
+- Misma referencia con datos diferentes: rechazo `409`.
+- Ubicacion incorrecta: rechazo `409` sin escrituras.
+- Intento de consumir `0.75` cuando solo habia `0.5` disponible: rechazo `409`.
+- El fixture y sus registros se eliminaron al finalizar; no quedo inventario QA residual.
+- Migracion `15_waste_integrity.sql` aplicada en MySQL.
+
 ## Seguridad
 
 ### Corregido

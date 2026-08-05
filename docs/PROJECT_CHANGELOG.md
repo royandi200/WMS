@@ -15,6 +15,17 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Mermas transaccionales e idempotentes
+
+- Dashboard y WhatsApp usan un unico servicio de mermas con el mismo contrato y las mismas validaciones.
+- Toda merma exige una referencia externa unica, SKU, cantidad positiva y motivo.
+- La merma de bodega exige lote y ubicacion activa exactos; descuenta solo stock no reservado.
+- `mermas`, `stock`, `lots`, `movimientos` y `kardex` se actualizan en una sola transaccion.
+- Un reintento identico no repite el descuento y reutilizar la referencia con datos diferentes se rechaza.
+- La merma de una OP `EN_PROCESO` queda registrada para conciliacion sin volver a descontar stock disponible.
+- Migracion `15_waste_integrity.sql` aplicada en MySQL.
+- Validacion: 41 pruebas unitarias, build Vite y smoke vivo con ubicacion incorrecta, exceso, reserva e idempotencia aprobados.
+
 ### 2026-08-04 - Devoluciones vinculadas al despacho original
 
 - WhatsApp y dashboard usan un unico servicio transaccional de devoluciones.

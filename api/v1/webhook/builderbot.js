@@ -85,6 +85,7 @@ const { requireWebhookSecret } = require('../../_lib/auth');
 const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
+const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const { adjustProductionMaterials } = require('../../_lib/production-materials');
 const { closeProductionOrder } = require('../../_lib/production-close');
@@ -1474,135 +1475,25 @@ module.exports = async (req, res) => {
 
       // ── 4. REPORTE_MERMA ──────────────────────────────────────
       case 'REPORTE_MERMA': {
-  const p = await findProductBySku(db, params.id_item);
-  const cantMerma = Math.abs(Number(params.cantidad));
-  if (!Number.isFinite(cantMerma) || cantMerma <= 0) {
-    throw { status: 400, message: 'REPORTE_MERMA requiere cantidad positiva' };
-  }
-  const lotIdMerma = await lotIdByLpn(db, params.id_lote);
-
-  let ordenId = null;
-  let codigoOrden = null;
-  let tipoMerma = params.id_orden ? 'PROCESO' : 'BODEGA';
-
-  if (params.id_orden) {
-    const [opRows] = await db.execute(
-      `SELECT id, codigo_orden, estado
-       FROM ordenes_produccion
-       WHERE id = ? OR codigo_orden = ?
-       LIMIT 1`,
-      [params.id_orden, params.id_orden]
-    );
-
-    if (!opRows.length) {
-      throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
-    }
-
-    const op = opRows[0];
-    ordenId = op.id;
-    codigoOrden = op.codigo_orden;
-
-    if (op.estado !== 'EN_PROCESO') {
-      throw {
-        status: 409,
-        message: `La orden ${op.codigo_orden} está en estado "${op.estado}". Si ya fue cerrada, reporta la merma usando el lote correspondiente.`
-      };
-    }
-  }
-
-  if (params.id_lote) {
-    const [stockRows] = await db.execute(
-      `SELECT cantidad FROM stock WHERE producto_id = ? AND lote = ? LIMIT 1`,
-      [p.id, params.id_lote]
-    );
-    if (!stockRows.length || Number(stockRows[0].cantidad) < cantMerma) {
-      throw { status: 409, message: `Stock insuficiente para merma de lote ${params.id_lote}` };
-    }
-  }
-
-  const numeroMerma = `MER-${Date.now()}`;
-
-  await db.execute(
-    `INSERT INTO mermas
-       (numero, tipo, producto_id, lote, orden_produccion_id, cantidad, motivo, usuario_id, creado_en)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-    [
-      numeroMerma,
-      tipoMerma,
-      p.id,
-      params.id_lote || null,
-      ordenId,
-      cantMerma,
-      params.motivo || null,
-      user.id
-    ]
-  );
-
-  await db.execute(
-    `INSERT INTO movimientos (tipo, producto_id, bodega_orig, lote, cantidad, referencia_tipo, usuario_id)
-     VALUES ('ajuste',?,?,?,?,'merma_wa',?)`,
-    [p.id, bodegaId, params.id_lote || null, -cantMerma, user.id]
-  );
-
-  if (params.id_lote) {
-    const [stockUpdate] = await db.execute(
-      `UPDATE stock
-       SET cantidad = cantidad - ?
-       WHERE producto_id = ? AND lote = ? AND cantidad >= ?`,
-      [cantMerma, p.id, params.id_lote, cantMerma]
-    );
-    if (stockUpdate.affectedRows !== 1) {
-      throw { status: 409, message: `Stock insuficiente para merma de lote ${params.id_lote}` };
-    }
-
-    const [lotUpdate] = await db.execute(
-      `UPDATE lots
-       SET qty_current = qty_current - ?
-       WHERE lpn = ? AND qty_current >= ?`,
-      [cantMerma, params.id_lote, cantMerma]
-    );
-    if (lotUpdate.affectedRows !== 1) {
-      throw { status: 409, message: `Lote insuficiente para merma ${params.id_lote}` };
-    }
-    await db.execute(
-      `UPDATE lots SET status = IF(qty_current <= 0, 'AGOTADO', 'DISPONIBLE') WHERE lpn = ?`,
-      [params.id_lote]
-    );
-  }
-
-  const balance = await getStockBalance(db, p.id, bodegaId);
-
-  const mermaNoteParts = [];
-  if (params.motivo) mermaNoteParts.push(`Motivo: ${params.motivo}`);
-  if (codigoOrden) mermaNoteParts.push(`Orden: ${codigoOrden}`);
-  if (params.id_lote) mermaNoteParts.push(`Lote: ${params.id_lote}`);
-  if (numeroMerma) mermaNoteParts.push(`Merma: ${numeroMerma}`);
-  const mermaNote = mermaNoteParts.join(' | ') || null;
-
-  await logKardex(db, {
-    product_id: p.id,
-    user_id: user.id,
-    action: params.id_orden ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
-    qty: -cantMerma,
-    lot_id: lotIdMerma,
-    balance_after: balance,
-    reference: ordenId
-      ? `orden_produccion:${codigoOrden}`
-      : (params.id_lote ? `lote:${params.id_lote}` : null),
-    notes: mermaNote,
-  });
-
-  mensaje = [
-    `⚠️ *Merma registrada*`,
-    `Nro merma: ${numeroMerma}`,
-    `Producto: ${params.id_item}`,
-    `Cantidad: ${cantMerma}`,
-    `Motivo: ${params.motivo || 'No especificado'}`,
-    codigoOrden ? `Orden: ${codigoOrden}` : '',
-    params.id_lote ? `Lote: ${params.id_lote}` : ''
-  ].filter(Boolean).join('\n');
-  break;
-}
+        const inferred = parseWasteReferences(rawText);
+        const result = await reportWaste({ ...inferred, ...params }, user.id);
+        mensaje = result.already_completed
+          ? `La merma ${result.numero} ya estaba registrada. No se modifico inventario.`
+          : [
+              `Merma ${result.numero} registrada.`,
+              `Referencia: ${result.referencia_externa}`,
+              `Producto: ${result.sku}`,
+              `Cantidad: ${result.cantidad}`,
+              `Motivo: ${result.motivo}`,
+              result.codigo_orden ? `Orden: ${result.codigo_orden}` : '',
+              result.lote ? `Lote: ${result.lote}` : '',
+              result.ubicacion ? `Ubicacion: ${result.ubicacion}` : '',
+              result.balance_disponible != null
+                ? `Disponible en bodega despues de la merma: ${result.balance_disponible}`
+                : 'La merma de proceso quedo registrada para la conciliacion de la orden.',
+            ].filter(Boolean).join('\n');
+        break;
+      }
 
       // ── 5. SOLICITAR_CIERRE_PRODUCCION → encolar ─────────────
       case 'SOLICITAR_CIERRE_PRODUCCION': {

@@ -132,7 +132,30 @@ Obligatorios: `id_orden`, `fase_destino`.
 
 Merma durante proceso o almacenamiento.
 
-Obligatorios: `id_item`, `cantidad`, `motivo` y exactamente uno de `id_orden` o `id_lote`.
+Obligatorios en todos los casos: `referencia_merma`, `id_item`, `cantidad`, `motivo` y exactamente uno de `id_orden` o `id_lote`.
+
+Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicacion` con el código visible. No inventes la referencia, el lote, la ubicación ni el motivo. Si falta un dato, pregunta únicamente por ese dato y conserva los demás desde `{history}`.
+
+La `referencia_merma` identifica el evento físico y permite reintentos sin descontar inventario dos veces. Debe ser un código aportado por el usuario, por ejemplo `MER-BOD-20260804-001`.
+
+Ejemplo de almacenamiento:
+
+{
+  "kw": "g0m@s",
+  "@ction": "REPORTE_MERMA",
+  "priority": "alta",
+  "body": "reporta merma de 0.25 de WMSQA260721P01, lote L-DEV-WMSQA260721P01-65EA3EDF, ubicacion PPAL-A-1-01, por daño de empaque, referencia MER-BOD-20260804-001",
+  "text": "reporta merma de 0.25 de WMSQA260721P01, lote L-DEV-WMSQA260721P01-65EA3EDF, ubicacion PPAL-A-1-01, por daño de empaque, referencia MER-BOD-20260804-001",
+  "query": "reporta merma de 0.25 de WMSQA260721P01, lote L-DEV-WMSQA260721P01-65EA3EDF, ubicacion PPAL-A-1-01, por daño de empaque, referencia MER-BOD-20260804-001",
+  "params": {
+    "referencia_merma": "MER-BOD-20260804-001",
+    "id_item": "WMSQA260721P01",
+    "id_lote": "L-DEV-WMSQA260721P01-65EA3EDF",
+    "ubicacion": "PPAL-A-1-01",
+    "cantidad": 0.25,
+    "motivo": "daño de empaque"
+  }
+}
 
 ### 6. CERRAR_ORDEN_PRODUCCION | alta
 

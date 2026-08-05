@@ -1,0 +1,266 @@
+const crypto = require('crypto');
+const { createConnection } = require('./db');
+
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function normalizeWasteInput(input = {}) {
+  const quantity = Number(input.cantidad ?? input.qty);
+  const order = String(input.id_orden ?? input.production_order_id ?? '').trim();
+  const lot = String(input.id_lote ?? input.lot_id ?? input.lote ?? '').trim();
+  const data = {
+    externalReference: String(
+      input.referencia_merma ?? input.referencia_externa ?? input.reference ?? input.referencia ?? ''
+    ).trim(),
+    sku: String(input.id_item ?? input.sku ?? input.product_id ?? '').trim(),
+    quantity,
+    reason: String(input.motivo ?? input.reason ?? '').trim(),
+    order,
+    lot,
+    location: String(input.ubicacion ?? input.location ?? input.location_code ?? '').trim(),
+    requestedType: String(input.tipo ?? input.type ?? '').trim().toUpperCase(),
+  };
+
+  if (!data.externalReference) throw httpError(400, 'Referencia de merma es obligatoria');
+  if (!data.sku) throw httpError(400, 'Producto de la merma es obligatorio');
+  if (!Number.isFinite(quantity) || quantity <= 0) throw httpError(400, 'Cantidad de merma invalida');
+  if (quantity > 999999999) throw httpError(400, 'Cantidad de merma fuera de rango');
+  if (!data.reason) throw httpError(400, 'Motivo de la merma es obligatorio');
+  if (Boolean(order) === Boolean(lot)) {
+    throw httpError(400, 'Debes indicar exactamente uno: orden de produccion o lote');
+  }
+  if (lot && !data.location) throw httpError(400, 'Ubicacion del lote es obligatoria');
+
+  for (const [label, value, max] of [
+    ['Referencia de merma', data.externalReference, 80],
+    ['Producto', data.sku, 80],
+    ['Orden', data.order, 80],
+    ['Lote', data.lot, 80],
+    ['Ubicacion', data.location, 30],
+    ['Motivo', data.reason, 255],
+  ]) {
+    if (value.length > max) throw httpError(400, `${label} supera ${max} caracteres`);
+  }
+  return data;
+}
+
+function parseWasteReferences(text) {
+  const source = String(text || '');
+  const reference = source.match(/\breferencia(?:\s+de\s+merma)?\s+([A-Z0-9._-]+)/i)?.[1];
+  const order = source.match(/\b(OP-[A-Z0-9-]+)\b/i)?.[1];
+  const lot = source.match(/\blote\s+([A-Z0-9._-]+)/i)?.[1];
+  const location = source.match(/\b(?:ubicacion|ubicaci[oó]n)\s+([A-Z0-9._-]+)/i)?.[1];
+  return {
+    ...(reference ? { referencia_merma: reference } : {}),
+    ...(order ? { id_orden: order } : {}),
+    ...(lot ? { id_lote: lot } : {}),
+    ...(location ? { ubicacion: location } : {}),
+  };
+}
+
+async function findExisting(conn, externalReference) {
+  const [rows] = await conn.execute(
+    `SELECT m.id, m.numero, m.tipo, m.producto_id, m.orden_produccion_id,
+            m.cantidad, m.motivo, m.lote,
+            m.referencia_externa, p.siigo_code AS sku,
+            op.codigo_orden, u.codigo AS ubicacion
+     FROM mermas m
+     JOIN productos p ON p.id = m.producto_id
+     LEFT JOIN ordenes_produccion op ON op.id = m.orden_produccion_id
+     LEFT JOIN ubicaciones u ON u.id = m.ubicacion_id
+     WHERE m.referencia_externa = ? LIMIT 1 FOR UPDATE`,
+    [externalReference]
+  );
+  return rows[0] || null;
+}
+
+async function findProduct(conn, value) {
+  const numericId = /^\d+$/.test(value) ? Number(value) : 0;
+  const [rows] = await conn.execute(
+    `SELECT DISTINCT p.id, p.siigo_code, p.nombre
+     FROM productos p
+     LEFT JOIN skus s ON s.producto_id = p.id
+     WHERE p.activo = 1 AND (p.id = ? OR p.siigo_code = ? OR s.sku = ?)
+     LIMIT 2`,
+    [numericId, value, value]
+  );
+  if (!rows.length) throw httpError(404, `Producto ${value} no encontrado`);
+  if (rows.length > 1) throw httpError(409, 'La referencia identifica mas de un producto');
+  return rows[0];
+}
+
+async function reportWaste(input, userId) {
+  const data = normalizeWasteInput(input);
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const existing = await findExisting(conn, data.externalReference);
+    if (existing) {
+      const sameProduct = String(existing.sku) === data.sku
+        || String(existing.producto_id) === data.sku;
+      const sameContext = data.order
+        ? (String(existing.codigo_orden || '') === data.order
+          || String(existing.orden_produccion_id || '') === data.order) && !existing.lote
+        : String(existing.lote || '') === data.lot
+          && String(existing.ubicacion || '') === data.location
+          && !existing.codigo_orden;
+      const samePayload = sameProduct
+        && sameContext
+        && Math.abs(Number(existing.cantidad) - data.quantity) < 0.000001
+        && String(existing.motivo || '') === data.reason;
+      if (!samePayload) {
+        throw httpError(409, 'La referencia de merma ya fue utilizada con datos diferentes');
+      }
+      await conn.commit();
+      return { ...existing, already_completed: true };
+    }
+
+    const product = await findProduct(conn, data.sku);
+    let order = null;
+    let lotRow = null;
+    let stockRow = null;
+
+    if (data.order) {
+      const numericOrderId = /^\d+$/.test(data.order) ? Number(data.order) : 0;
+      const [rows] = await conn.execute(
+        `SELECT id, codigo_orden, estado, producto_id
+         FROM ordenes_produccion
+         WHERE id = ? OR codigo_orden = ? LIMIT 2 FOR UPDATE`,
+        [numericOrderId, data.order]
+      );
+      if (!rows.length) throw httpError(404, `Orden ${data.order} no encontrada`);
+      if (rows.length > 1) throw httpError(409, 'La referencia identifica mas de una orden');
+      order = rows[0];
+      if (order.estado !== 'EN_PROCESO') {
+        throw httpError(409, `La orden ${order.codigo_orden} esta en estado ${order.estado}; debe estar EN_PROCESO`);
+      }
+      if (Number(order.producto_id) !== Number(product.id)) {
+        throw httpError(409, 'El producto no corresponde al producto terminado de la orden');
+      }
+    } else {
+      const [lots] = await conn.execute(
+        `SELECT id, lpn, product_id, bodega_id, qty_current, status
+         FROM lots WHERE lpn = ? LIMIT 2 FOR UPDATE`,
+        [data.lot]
+      );
+      if (!lots.length) throw httpError(404, `Lote ${data.lot} no encontrado`);
+      if (lots.length > 1) throw httpError(409, 'El codigo identifica mas de un lote');
+      lotRow = lots[0];
+      if (Number(lotRow.product_id) !== Number(product.id)) {
+        throw httpError(409, 'El lote no pertenece al producto indicado');
+      }
+      if (lotRow.status !== 'DISPONIBLE') {
+        throw httpError(409, `El lote esta en estado ${lotRow.status} y no admite merma de stock disponible`);
+      }
+
+      const [stocks] = await conn.execute(
+        `SELECT s.id, s.bodega_id, s.ubicacion_id, s.cantidad, s.reservada, u.codigo
+         FROM stock s
+         JOIN ubicaciones u ON u.id = s.ubicacion_id
+         WHERE s.producto_id = ? AND s.lote = ? AND s.bodega_id = ?
+           AND u.codigo = ? AND u.activa = 1
+         LIMIT 2 FOR UPDATE`,
+        [product.id, data.lot, lotRow.bodega_id, data.location]
+      );
+      if (!stocks.length) throw httpError(409, 'Lote y ubicacion no coinciden en el inventario disponible');
+      if (stocks.length > 1) throw httpError(409, 'Hay mas de un saldo para el lote y ubicacion; requiere conciliacion');
+      stockRow = stocks[0];
+      const available = Number(stockRow.cantidad) - Number(stockRow.reservada);
+      if (data.quantity > available + 0.000001) {
+        throw httpError(409, `Stock disponible insuficiente: ${available}`);
+      }
+      if (data.quantity > Number(lotRow.qty_current) + 0.000001) {
+        throw httpError(409, `Saldo de lote insuficiente: ${lotRow.qty_current}`);
+      }
+    }
+
+    const number = `MER-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const type = order ? 'PROCESO' : 'BODEGA';
+    const [inserted] = await conn.execute(
+      `INSERT INTO mermas
+         (numero, tipo, producto_id, lote, orden_produccion_id, ubicacion_id,
+          referencia_externa, cantidad, motivo, usuario_id, aprobado_por, estado, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'APROBADO', NOW())`,
+      [number, type, product.id, data.lot || null, order?.id || null,
+       stockRow?.ubicacion_id || null, data.externalReference, data.quantity,
+       data.reason, userId, userId]
+    );
+
+    let balance = null;
+    if (stockRow) {
+      const [stockUpdate] = await conn.execute(
+        `UPDATE stock SET cantidad = cantidad - ?, actualizado_en = NOW()
+         WHERE id = ? AND cantidad - reservada >= ?`,
+        [data.quantity, stockRow.id, data.quantity]
+      );
+      if (stockUpdate.affectedRows !== 1) throw httpError(409, 'El saldo disponible cambio; vuelve a consultar');
+
+      const [lotUpdate] = await conn.execute(
+        `UPDATE lots
+         SET qty_current = qty_current - ?,
+             status = IF(qty_current - ? <= 0, 'AGOTADO', 'DISPONIBLE')
+         WHERE id = ? AND qty_current >= ?`,
+        [data.quantity, data.quantity, lotRow.id, data.quantity]
+      );
+      if (lotUpdate.affectedRows !== 1) throw httpError(409, 'El saldo del lote cambio; vuelve a consultar');
+
+      await conn.execute(
+        `INSERT INTO movimientos
+           (tipo, producto_id, bodega_orig, ubicacion_orig, lote, cantidad,
+            referencia_id, referencia_tipo, usuario_id, creado_en)
+         VALUES ('ajuste', ?, ?, ?, ?, ?, ?, 'merma_bodega', ?, NOW())`,
+        [product.id, stockRow.bodega_id, stockRow.ubicacion_id, data.lot,
+         -data.quantity, inserted.insertId, userId]
+      );
+      const [balances] = await conn.execute(
+        `SELECT COALESCE(SUM(cantidad - reservada), 0) AS balance
+         FROM stock WHERE producto_id = ? AND bodega_id = ?`,
+        [product.id, stockRow.bodega_id]
+      );
+      balance = Number(balances[0]?.balance || 0);
+    }
+
+    await conn.execute(
+      `INSERT INTO kardex
+         (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
+          reference, notes, approved_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [crypto.randomUUID(), crypto.randomUUID(), lotRow?.id || null, product.id,
+       userId, order ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
+       -data.quantity, balance,
+       `merma:${number}`,
+       `${data.reason}${order ? ` | Orden: ${order.codigo_orden}` : ` | Lote: ${data.lot} | Ubicacion: ${data.location}`}`,
+       userId]
+    );
+
+    await conn.commit();
+    return {
+      id: inserted.insertId,
+      numero: number,
+      referencia_externa: data.externalReference,
+      tipo: type,
+      sku: product.siigo_code,
+      producto: product.nombre,
+      cantidad: data.quantity,
+      motivo: data.reason,
+      lote: data.lot || null,
+      codigo_orden: order?.codigo_orden || null,
+      ubicacion: stockRow?.codigo || null,
+      balance_disponible: balance,
+      already_completed: false,
+    };
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    if (error.code === 'ER_DUP_ENTRY') {
+      throw httpError(409, 'La referencia de merma ya fue utilizada');
+    }
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+module.exports = { normalizeWasteInput, parseWasteReferences, reportWaste };
