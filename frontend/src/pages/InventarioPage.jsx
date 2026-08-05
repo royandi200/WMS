@@ -153,8 +153,8 @@ function ProductResult({ data }) {
   const product = data.product || {}
   const totals = data.totals || {}
   const rows = Array.isArray(data.rows) ? data.rows : []
-  const availableRows = rows.filter((r) => Number(r.disponible || 0) > 0)
-  const blockedRows = rows.filter((r) => ['CUARENTENA', 'VENCIDO', 'DESTRUCCION'].includes(String(r.estado_calculado || r.lot_status || '').toUpperCase()))
+  const blockedRows = rows.filter((r) => Number(r.bloqueada || 0) > 0)
+  const displayRows = [...rows].sort((a, b) => Number(b.disponible || 0) - Number(a.disponible || 0))
 
   return (
     <div className="space-y-4">
@@ -165,15 +165,16 @@ function ProductResult({ data }) {
             <h2 className="text-lg font-semibold text-foreground">{product.name || '-'}</h2>
             <p className="text-xs font-mono text-muted mt-1">{product.sku || product.id || '-'}</p>
           </div>
-          <div className="grid grid-cols-3 gap-3 min-w-[280px]">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 min-w-[280px]">
             <Metric label="Disponible" value={totals.disponible} tone="text-green-400" />
             <Metric label="Reservado" value={totals.reservada} tone="text-yellow-400" />
+            <Metric label="Bloqueado" value={totals.bloqueada} tone="text-red-400" />
             <Metric label="Total" value={totals.cantidad} tone="text-primary" />
           </div>
         </div>
         {blockedRows.length > 0 && (
           <div className="mt-4 px-3 py-2 rounded border border-danger/30 bg-danger/10 text-danger text-sm">
-            {blockedRows.length} lote(s) requieren revision: cuarentena, vencido o destruccion.
+            {blockedRows.length} lote(s) no estan disponibles: revisa estado, vencimiento y ubicacion.
           </div>
         )}
       </div>
@@ -188,7 +189,7 @@ function ProductResult({ data }) {
             </tr>
           </thead>
           <tbody>
-            {availableRows.concat(blockedRows.filter((r) => !availableRows.includes(r))).map((r) => (
+            {displayRows.map((r) => (
               <tr key={r.stock_id || r.lote || r.lpn} className="border-b border-border/50 hover:bg-white/[0.02]">
                 <td className="px-4 py-3 font-mono text-xs">{r.lote || r.lpn || '-'}</td>
                 <td className="px-4 py-3">{r.bodega_codigo || r.bodega_nombre || '-'}</td>

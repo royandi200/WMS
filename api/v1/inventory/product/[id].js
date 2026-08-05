@@ -1,5 +1,6 @@
 const { query } = require('../../../_lib/db');
 const { cors, requireAuth } = require('../../../_lib/auth');
+const { classifyInventoryRow } = require('../../../_lib/inventory-availability');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -36,9 +37,11 @@ module.exports = async (req, res) => {
          s.bodega_id,
          b.codigo AS bodega_codigo,
          b.nombre AS bodega_nombre,
+         b.activa AS bodega_activa,
          s.ubicacion_id,
          u.codigo AS ubicacion_codigo,
          u.zona AS ubicacion_zona,
+         u.activa AS ubicacion_activa,
          s.lote,
          s.fecha_venc,
          s.cantidad,
@@ -65,31 +68,15 @@ module.exports = async (req, res) => {
       [product.id]
     );
 
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-
-    const lotes = rows.map((row) => {
-      const expiry = row.expiry_date || row.fecha_venc;
-      const expiryDate = expiry ? new Date(expiry) : null;
-      return {
-        ...row,
-        cantidad: Number(row.cantidad || 0),
-        reservada: Number(row.reservada || 0),
-        disponible: Number(row.disponible || 0),
-        qty_initial: row.qty_initial == null ? null : Number(row.qty_initial),
-        qty_current: row.qty_current == null ? null : Number(row.qty_current),
-        estado_calculado: expiryDate && expiryDate < hoy
-          ? 'VENCIDO'
-          : (row.lot_status || 'DISPONIBLE').toUpperCase(),
-      };
-    });
+    const lotes = rows.map((row) => classifyInventoryRow(row));
 
     const totals = lotes.reduce((acc, row) => {
       acc.cantidad += row.cantidad;
       acc.reservada += row.reservada;
       acc.disponible += row.disponible;
+      acc.bloqueada += row.bloqueada;
       return acc;
-    }, { cantidad: 0, reservada: 0, disponible: 0 });
+    }, { cantidad: 0, reservada: 0, disponible: 0, bloqueada: 0 });
 
     return res.status(200).json({
       ok: true,

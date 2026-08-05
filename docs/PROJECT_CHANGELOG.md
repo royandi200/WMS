@@ -15,6 +15,13 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-05 - Disponibilidad operativa consistente en el dashboard
+
+- Buscar producto separa inventario fisico, reservado, disponible operativo y bloqueado.
+- Stock sin ubicacion activa, sin maestro de lote, vencido o con estado no disponible conserva trazabilidad, pero no suma como disponible.
+- Los lotes totalmente reservados permanecen visibles en el detalle.
+- Validacion: 51 pruebas unitarias, build Vite, 20 endpoints del dashboard y auditoria MySQL aprobados.
+
 ### 2026-08-05 - Capacidad de fabricacion basada en inventario elegible
 
 - La capacidad por BOM excluye lotes no disponibles o vencidos y stock en ubicaciones inactivas.
