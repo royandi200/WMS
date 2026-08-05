@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Politica de notificaciones operativas
+
+- Se creo `docs/politica-notificaciones-operativas.md` como fuente de verdad para eventos, destinatarios, fallbacks, contenido, idempotencia y decisiones configurables.
+- Se separaron explicitamente autorizacion, tarea en dashboard y aviso por WhatsApp.
+- La matriz distingue capacidades activas, siguientes, condicionales y eventos solo de dashboard.
+
 ### 2026-08-04 - Cierre de produccion con metadatos completos
 
 - El parser separa motivo de merma, ubicacion y fecha de vencimiento en una sola frase.

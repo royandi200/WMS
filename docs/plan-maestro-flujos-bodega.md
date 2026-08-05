@@ -217,6 +217,8 @@ No se puede superar lo facturado, repetir una salida ni despachar sin cliente fi
 
 ## Fase 5: experiencia, tareas y notificaciones
 
+La fuente de verdad para eventos, destinatarios, contenido, fallbacks e idempotencia es `docs/politica-notificaciones-operativas.md`.
+
 - Inicio por rol con tareas pendientes y excepciones relevantes.
 - Bandejas para Nelly, Alistador, Anderson y Sofi.
 - Acciones con datos precargados; evitar solicitar IDs internos al usuario.

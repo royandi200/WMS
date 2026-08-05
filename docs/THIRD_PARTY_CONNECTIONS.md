@@ -131,6 +131,8 @@ El validador puede marcar falsamente Entrada como dead end por el formato legacy
 
 ### Mensajería saliente
 
+La politica funcional de eventos y destinatarios se mantiene en `docs/politica-notificaciones-operativas.md`. Este runbook documenta solamente transporte y credenciales.
+
 Endpoint:
 
 ```text
