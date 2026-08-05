@@ -1,6 +1,6 @@
 # Estado y bitácora del proyecto WMS
 
-Última actualización: 2026-08-04
+Última actualización: 2026-08-05
 
 ## Propósito
 
@@ -14,6 +14,13 @@ No reemplaza:
 - `docs/validacion-flujos-bodega-2026-08-04.md`, que documenta los smokes integrados.
 
 ## Resumen actual
+
+### 2026-08-05 - Capacidad de fabricacion basada en inventario elegible
+
+- La capacidad por BOM excluye lotes no disponibles o vencidos y stock en ubicaciones inactivas.
+- El saldo usado coincide con las reglas FEFO de liberacion de produccion y descuenta reservas vigentes.
+- Se comprobo en MySQL que `00102-PTASH60` tiene una capacidad actual de 154 unidades, limitada por `00017-ETASH60`.
+- Validacion: 47 pruebas unitarias y build Vite aprobados.
 
 ### 2026-08-05 - Trazabilidad de produccion con mermas diferenciadas
 

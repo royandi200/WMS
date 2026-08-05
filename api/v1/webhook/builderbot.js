@@ -95,6 +95,7 @@ const {
 } = require('../../_lib/production-close-input');
 const { workflowFlags } = require('../../_lib/feature-flags');
 const { formatPendingApprovals } = require('../../_lib/pending-approvals');
+const { getEligibleStock } = require('../../_lib/manufacturing-capacity');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -2421,12 +2422,7 @@ module.exports = async (req, res) => {
           if (!Number.isFinite(perUnit) || perUnit <= 0) {
             throw { status: 409, message: `El BOM de ${item.siigo_code} tiene una cantidad por unidad invalida` };
           }
-          const [st]   = await db.execute(
-            `SELECT COALESCE(SUM(cantidad - reservada), 0) AS disponible
-             FROM stock WHERE producto_id=? AND bodega_id=?`,
-            [item.insumo_id, bodegaId]
-          );
-          const disp = parseFloat(st[0].disponible || 0);
+          const disp = await getEligibleStock(db, item.insumo_id, bodegaId);
           const componentCapacity = Math.max(Math.floor(disp / perUnit), 0);
           capacidadMaxima = Math.min(capacidadMaxima, componentCapacity);
           if (desired == null) {
