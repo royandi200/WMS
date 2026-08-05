@@ -94,6 +94,7 @@ const {
   parseProductionCloseFromText: parseProductionCloseInput,
 } = require('../../_lib/production-close-input');
 const { workflowFlags } = require('../../_lib/feature-flags');
+const { formatPendingApprovals } = require('../../_lib/pending-approvals');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -1905,23 +1906,7 @@ module.exports = async (req, res) => {
            WHERE a.estado = 'PENDIENTE'
            ORDER BY a.creado_en ASC LIMIT 10`
         );
-        const lines = rows.length
-          ? rows.map(r => {
-              const payload = typeof r.payload === 'string'
-                ? (() => { try { return JSON.parse(r.payload); } catch { return {}; } })()
-                : (r.payload || {});
-              return [
-                `  - ${r.codigo_solicitud}: ${r.accion.replace(/_/g,' ')}`,
-                payload.id_item || payload.sku ? `Producto: ${payload.id_item || payload.sku}` : null,
-                payload.qty || payload.cantidad || payload.cantidad_real ? `Cantidad: ${payload.qty || payload.cantidad || payload.cantidad_real}` : null,
-                payload.lpn || payload.id_lote || payload.lote ? `Lote: ${payload.lpn || payload.id_lote || payload.lote}` : null,
-                payload.customer || payload.cliente_destino ? `Cliente: ${payload.customer || payload.cliente_destino}` : null,
-                payload.codigo_orden || payload.id_orden ? `Orden: ${payload.codigo_orden || payload.id_orden}` : null,
-                r.operario ? `Solicita: ${r.operario}` : null,
-              ].filter(Boolean).join(' | ');
-            }).join('\n')
-          : '  (No hay solicitudes pendientes)';
-        mensaje = `📋 *Solicitudes pendientes:*\n${lines}`;
+        mensaje = formatPendingApprovals(rows);
         break;
       }
 
