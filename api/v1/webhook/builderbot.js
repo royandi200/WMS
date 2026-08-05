@@ -375,6 +375,13 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== '');
 }
 
+function formatDateOnly(value) {
+  if (!value) return 'N/A';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return date.toLocaleDateString('es-CO', { timeZone: 'UTC' });
+}
+
 function normalizeOperationalParams(action, params) {
   const next = { ...(params || {}) };
   if (action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION') {
@@ -2287,7 +2294,7 @@ module.exports = async (req, res) => {
       `SELECT d.numero, d.cliente_nombre, d.siigo_invoice_name, d.despachado_en, di.cantidad_des AS cantidad
        FROM despacho_items di
        JOIN despachos d ON d.id = di.despacho_id
-       WHERE di.lote = ?
+       WHERE di.lote = ? AND d.estado = 'despachado' AND di.cantidad_des > 0
        ORDER BY COALESCE(d.despachado_en, d.creado_en) ASC
        LIMIT 10`,
       [params.id_lote]
@@ -2386,7 +2393,7 @@ module.exports = async (req, res) => {
       `Actual: ${l.qty_current} und`,
       `Estado: ${l.status}  |  Origen: ${l.origin}`,
       `Creado: ${new Date(l.created_at).toLocaleString('es-CO')}`,
-      `Vence: ${l.expiry_date || 'N/A'}`,
+      `Vence: ${formatDateOnly(l.expiry_date)}`,
       ``,
       `📋 *Historial:*`,
       history,

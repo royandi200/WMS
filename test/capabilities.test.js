@@ -249,6 +249,8 @@ test('dispatch allocation requires and reports an active physical location', () 
 test('lot traceability follows returns from original lot to returned lot', () => {
   const source = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
   assert.match(source, /WHERE dv\.lote = \? OR dv\.lote_origen = \?/u);
+  assert.match(source, /d\.estado = 'despachado' AND di\.cantidad_des > 0/u);
+  assert.match(source, /Vence: \$\{formatDateOnly\(l\.expiry_date\)\}/u);
   assert.match(source, /d\.siigo_invoice_name/u);
   assert.match(source, /d\.despacho_numero/u);
   assert.match(source, /d\.referencia_externa/u);
