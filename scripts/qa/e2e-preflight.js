@@ -100,6 +100,15 @@ async function main() {
     add('qa-locations', ['PPAL-A-1-01', 'PPAL-A-1-02', 'CUAR-C-1-01', 'DEVOL-D-1-01']
       .every((code) => locationSet.has(code)), `Ubicaciones QA activas: ${[...locationSet].join(', ')}`);
 
+    const [receivingLocations] = await conn.execute(
+      `SELECT u.codigo, b.codigo AS bodega
+       FROM ubicaciones u JOIN bodegas b ON b.id = u.bodega_id
+       WHERE u.activa = 1 AND b.activa = 1
+         AND u.codigo IN ('PPAL-A-1-01', 'CUAR-C-1-01')`
+    );
+    add('reception-locations-primary-warehouse', receivingLocations.length === 2
+      && receivingLocations.every((row) => row.bodega === 'BG-PPAL'), receivingLocations);
+
     const [products] = await conn.execute(
       `SELECT p.id, p.siigo_code, p.activo,
               (SELECT COUNT(*) FROM bom b WHERE b.producto_final_id = p.id) AS bom_items

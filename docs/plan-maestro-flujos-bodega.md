@@ -116,6 +116,19 @@ Nelly podra dividir una linea recibida entre:
 
 Cada division tendra lote, cantidad, ubicacion, motivo y responsable. Una misma linea podra distribuirse en varias ubicaciones.
 
+### Captura asistida por el agente
+
+La automatizacion de recepcion se implementara en dos fases para separar rapidez de efecto contable:
+
+1. Nelly dicta o escribe cantidades, lotes, vencimientos, condiciones, ubicaciones y motivos.
+2. El agente genera un borrador estructurado asociado a una recepcion pendiente; esta accion no crea stock, lotes ni movimientos.
+3. La API valida suma fisica, OC, factura, SKU, lotes unicos, ubicaciones de la bodega, condiciones y diferencias.
+4. El agente devuelve un resumen de impacto: disponible, cuarentena, rechazado y diferencias contra OC/factura.
+5. Nelly corrige el borrador o confirma explicitamente la version exacta. Cualquier cambio invalida la confirmacion anterior.
+6. Al confirmar, la API bloquea la recepcion, repite las validaciones dentro de una transaccion y ejecuta una sola vez mediante clave idempotente.
+
+Para la primera version, WhatsApp prepara el borrador y el dashboard conserva el boton final `Aprobar recepcion fisica`. La confirmacion completa por WhatsApp se habilitara despues de probar expiracion del borrador, hash del contenido, reintentos y doble confirmacion cuando existan diferencias.
+
 ### Criterio de salida
 
 El sistema explica todas las diferencias entre OC, factura Siigo y recepcion fisica, y ninguna cantidad en cuarentena o disposicion aparece como disponible.

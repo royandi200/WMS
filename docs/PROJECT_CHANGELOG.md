@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Cuarentena como ubicacion de la bodega principal
+
+- `CUAR-C-1-01` se modela como ubicacion controlada dentro de `BG-PPAL` para nuevas recepciones.
+- La ubicacion historica en la bodega logica de cuarentena se desactiva sin reescribir stock ni movimientos anteriores.
+- El preflight bloquea nuevas pruebas si recepcion disponible y cuarentena no pertenecen a la bodega principal.
+
 ### 2026-08-04 - Resultado limpio en importacion dirigida de compras
 
 - Una factura creada e importada en la misma ejecucion ya no reaparece como `duplicate` durante la reconciliacion de pendientes.
