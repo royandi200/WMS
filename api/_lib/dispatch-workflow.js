@@ -8,20 +8,41 @@ function httpError(status, message) {
   return error;
 }
 
+function buildDispatchLookup({ dispatchId, invoiceId }) {
+  const dispatchRef = String(dispatchId || '').trim();
+  const invoiceRef = String(invoiceId || '').trim();
+
+  if (dispatchRef) {
+    const numericId = /^\d+$/.test(dispatchRef) ? Number(dispatchRef) : null;
+    if (numericId && Number.isSafeInteger(numericId)) {
+      return { clause: '(id = ? OR numero = ?)', params: [numericId, dispatchRef] };
+    }
+    return { clause: 'numero = ?', params: [dispatchRef] };
+  }
+
+  if (invoiceRef) {
+    return {
+      clause: '(siigo_invoice_id = ? OR siigo_invoice_name = ?)',
+      params: [invoiceRef, invoiceRef],
+    };
+  }
+
+  throw httpError(400, 'despacho_id o id_factura es obligatorio');
+}
+
 async function confirmImportedDispatch({ dispatchId, invoiceId, userId }) {
-  const localId = Number(dispatchId || 0) || null;
-  const remoteId = String(invoiceId || '').trim();
-  if (!localId && !remoteId) throw httpError(400, 'despacho_id o siigo_invoice_id es obligatorio');
+  const lookup = buildDispatchLookup({ dispatchId, invoiceId });
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
     const [rows] = await conn.execute(
       `SELECT id, numero, estado, bodega_id, siigo_invoice_id, siigo_invoice_name
-       FROM despachos WHERE ${localId ? 'id = ?' : 'siigo_invoice_id = ?'}
-       LIMIT 1 FOR UPDATE`,
-      [localId || remoteId]
+       FROM despachos WHERE ${lookup.clause}
+       LIMIT 2 FOR UPDATE`,
+      lookup.params
     );
     if (!rows.length) throw httpError(404, 'Despacho no encontrado');
+    if (rows.length > 1) throw httpError(409, 'La referencia identifica mas de un despacho');
     const dispatch = rows[0];
     if (dispatch.estado === 'despachado') {
       await conn.commit();
@@ -30,6 +51,7 @@ async function confirmImportedDispatch({ dispatchId, invoiceId, userId }) {
         despacho_id: dispatch.id,
         numero: dispatch.numero,
         siigo_invoice_id: dispatch.siigo_invoice_id,
+        siigo_invoice_name: dispatch.siigo_invoice_name,
         lotes: [],
       };
     }
@@ -128,4 +150,4 @@ async function confirmImportedDispatch({ dispatchId, invoiceId, userId }) {
   }
 }
 
-module.exports = { confirmImportedDispatch };
+module.exports = { buildDispatchLookup, confirmImportedDispatch };
