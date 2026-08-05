@@ -84,7 +84,7 @@ const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
 const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
-const { createCustomerReturn } = require('../../_lib/returns-workflow');
+const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const { adjustProductionMaterials } = require('../../_lib/production-materials');
 const { closeProductionOrder } = require('../../_lib/production-close');
@@ -1780,7 +1780,10 @@ module.exports = async (req, res) => {
 
       // ── 7. GESTION_DEVOLUCION ─────────────────────────────────
       case 'GESTION_DEVOLUCION': {
-        const returned = await createCustomerReturn(params, user.id);
+        const returned = await createCustomerReturn({
+          ...parseCustomerReturnReferences(rawText),
+          ...params,
+        }, user.id);
         mensaje = returned.already_completed
           ? `La devolucion ${returned.numero} ya estaba registrada. No se modifico inventario.`
           : [

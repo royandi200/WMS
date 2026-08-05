@@ -67,6 +67,19 @@ function lotStatusForReturn(status) {
   return 'PENDIENTE_DISPOSICION';
 }
 
+function parseCustomerReturnReferences(text) {
+  const source = String(text || '');
+  const invoice = source.match(/\b(FV-[A-Z0-9-]+)\b/i)?.[1];
+  const dispatch = source.match(/\b(DSP-[A-Z0-9-]+)\b/i)?.[1];
+  const sourceLot = source.match(/\blote(?:\s+original)?\s+([A-Z0-9._-]+)/i)?.[1];
+  const reference = source.match(/\breferencia(?:\s+de\s+devolucion)?\s+([A-Z0-9._-]+)/i)?.[1];
+  return {
+    ...(dispatch ? { id_despacho: dispatch } : invoice ? { id_factura: invoice } : {}),
+    ...(sourceLot ? { lote_origen: sourceLot } : {}),
+    ...(reference ? { referencia_devolucion: reference } : {}),
+  };
+}
+
 async function findLocation(conn, warehouseId, status, requestedCode) {
   const code = status === 'RECUPERABLE' ? requestedCode : 'CUAR-C-1-01';
   const [rows] = await conn.execute(
@@ -277,4 +290,5 @@ module.exports = {
   lotStatusForReturn,
   normalizeReturnInput,
   normalizeReturnStatus,
+  parseCustomerReturnReferences,
 };

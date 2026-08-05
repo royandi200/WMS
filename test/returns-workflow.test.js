@@ -5,6 +5,7 @@ const {
   lotStatusForReturn,
   normalizeReturnInput,
   normalizeReturnStatus,
+  parseCustomerReturnReferences,
 } = require('../api/_lib/returns-workflow');
 
 test('normalizes a traceable quarantined customer return', () => {
@@ -49,11 +50,24 @@ test('maps return disposition to a supported physical lot status', () => {
   assert.equal(lotStatusForReturn('DESTRUCCION'), 'PENDIENTE_DISPOSICION');
 });
 
+test('recovers trace references from the immutable user message', () => {
+  assert.deepEqual(
+    parseCustomerReturnReferences(
+      'registra devolucion del lote WMSQA260721LOT01 para la factura FV-1-10000004804 referencia E2E-RET-001'
+    ),
+    {
+      id_factura: 'FV-1-10000004804',
+      lote_origen: 'WMSQA260721LOT01',
+      referencia_devolucion: 'E2E-RET-001',
+    }
+  );
+});
+
 test('dashboard and BuilderBot use the shared return workflow', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const dashboard = fs.readFileSync(path.join(__dirname, '../api/v1/returns.js'), 'utf8');
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
   assert.match(dashboard, /createCustomerReturn\(req\.body \|\| \{\}, user\.id\)/u);
-  assert.match(webhook, /createCustomerReturn\(params, user\.id\)/u);
+  assert.match(webhook, /parseCustomerReturnReferences\(rawText\)/u);
 });
