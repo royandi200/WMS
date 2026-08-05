@@ -137,9 +137,6 @@ async function reportWaste(input, userId) {
       if (order.estado !== 'EN_PROCESO') {
         throw httpError(409, `La orden ${order.codigo_orden} esta en estado ${order.estado}; debe estar EN_PROCESO`);
       }
-      if (Number(order.producto_id) !== Number(product.id)) {
-        throw httpError(409, 'El producto no corresponde al producto terminado de la orden');
-      }
     } else {
       const [lots] = await conn.execute(
         `SELECT id, lpn, product_id, bodega_id, qty_current, status

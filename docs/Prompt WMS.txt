@@ -138,6 +138,8 @@ Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicaci
 
 La `referencia_merma` identifica el evento físico y permite reintentos sin descontar inventario dos veces. Debe ser un código aportado por el usuario, por ejemplo `MER-BOD-20260804-001`.
 
+En una merma de proceso, `id_item` puede ser una materia prima ya entregada a la OP o el producto en proceso. Este reporte documenta la pérdida para conciliación; si fue necesario retirar material adicional de bodega, usa además `AJUSTAR_MATERIALES_PRODUCCION` con `ENTREGA_ADICIONAL`.
+
 Ejemplo de almacenamiento:
 
 {
