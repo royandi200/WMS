@@ -236,6 +236,14 @@ test('purchase import does not reconcile the same document twice in one run', ()
   assert.match(source, /reconcilePending\(user, fetchedPurchaseIds\)/u);
 });
 
+test('dispatch allocation requires and reports an active physical location', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../api/_lib/siigo.invoice-import.js'), 'utf8');
+  assert.match(source, /JOIN ubicaciones u ON u\.id = s\.ubicacion_id/u);
+  assert.match(source, /u\.bodega_id = s\.bodega_id AND u\.activa = 1/u);
+  assert.match(source, /ubicacion: allocation\.ubicacion/u);
+  assert.match(source, /\| ubicacion \$\{item\.ubicacion\}/u);
+});
+
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '..', 'docs', 'Prompt WMS.txt'), 'utf8');
   assert.doesNotMatch(prompt, /Ã|Â|â†|�/u);

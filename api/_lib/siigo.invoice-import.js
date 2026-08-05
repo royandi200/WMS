@@ -69,11 +69,13 @@ async function resolveWarehouse(conn, remoteWarehouseId) {
 
 async function allocateProduct(conn, { productId, bodegaId, quantity, invoiceName }) {
   const [rows] = await conn.execute(
-    `SELECT s.id AS stock_id, s.ubicacion_id, s.lote,
+    `SELECT s.id AS stock_id, s.ubicacion_id, u.codigo AS ubicacion, s.lote,
             (s.cantidad - COALESCE(s.reservada, 0)) AS disponible,
             COALESCE(l.expiry_date, s.fecha_venc) AS vence
      FROM stock s
      LEFT JOIN lots l ON BINARY l.lpn = BINARY s.lote
+     JOIN ubicaciones u ON u.id = s.ubicacion_id
+       AND u.bodega_id = s.bodega_id AND u.activa = 1
      WHERE s.producto_id = ? AND s.bodega_id = ?
        AND s.lote IS NOT NULL
        AND (s.cantidad - COALESCE(s.reservada, 0)) > 0
@@ -97,6 +99,7 @@ async function allocateProduct(conn, { productId, bodegaId, quantity, invoiceNam
       allocations.push({
         stockId: row.stock_id,
         ubicacionId: row.ubicacion_id || null,
+        ubicacion: row.ubicacion,
         lpn: row.lote,
         quantity: allocated,
         expiry: row.vence || null,
@@ -527,7 +530,12 @@ async function importInvoice(invoice, userId) {
           [dispatchId, item.productId, allocation.ubicacionId, allocation.lpn,
            allocation.quantity, item.price || null, item.discount, item.remoteWarehouse]
         );
-        reserved.push({ sku: item.code, lote: allocation.lpn, cantidad: allocation.quantity });
+        reserved.push({
+          sku: item.code,
+          lote: allocation.lpn,
+          ubicacion: allocation.ubicacion,
+          cantidad: allocation.quantity,
+        });
       }
       const reservedQuantity = Number((item.quantity - Number(allocations.shortage || 0)).toFixed(4));
       const demandStatus = Number(allocations.shortage || 0) > 0 ? 'PENDIENTE_STOCK' : 'RESERVADO';
@@ -551,7 +559,7 @@ async function importInvoice(invoice, userId) {
       text: [
         shortages.length ? `Factura ${data.name} pendiente de stock` : `Despacho listo para factura ${data.name}`,
         `Cliente: ${customerName}`,
-        ...reserved.map(item => `${item.sku}: ${item.cantidad} und | lote ${item.lote}`),
+        ...reserved.map(item => `${item.sku}: ${item.cantidad} und | lote ${item.lote} | ubicacion ${item.ubicacion}`),
         ...shortages.map(item => `${item.sku}: faltan ${item.cantidad} und`),
         shortages.length ? 'No confirmes el despacho hasta completar la reserva.' : `Confirma el despacho ${existing[0]?.numero || numero} cuando salga fisicamente.`,
       ].join('\n'),

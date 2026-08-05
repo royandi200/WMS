@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Ubicacion obligatoria en alistamiento de despachos
+
+- FEFO solo reserva stock con ubicacion activa perteneciente a la misma bodega.
+- La notificacion de tarea de despacho incluye SKU, cantidad, lote y codigo de ubicacion.
+- Stock sin ubicacion permanece bloqueado hasta corregir el dato maestro.
+
 ### 2026-08-04 - Auditoria completa de entradas por recepcion
 
 - `movimientos.referencia_tipo` admite la referencia completa `recepcion_siigo_import` sin truncamiento.
