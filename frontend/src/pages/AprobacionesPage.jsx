@@ -33,6 +33,7 @@ const norm = (item) => ({
   estado: item.estado ?? 'PENDIENTE',
   cantidad: item.cantidad ?? item.qty ?? '',
   lote: item.lote ?? item.lot ?? '',
+  cliente: item.cliente ?? item.customer ?? '',
   fecha: item.creado_en ?? item.created_at ?? item.fecha ?? '',
   fechaProcesado: item.procesado_en ?? item.processed_at ?? '',
   producto: item.producto_nombre ?? item.producto ?? item.description ?? item.id_item ?? `#${String(item.id).slice(0,8)}`,
@@ -175,6 +176,7 @@ export default function AprobacionesPage() {
                     {item.sku && <span>SKU: <span className="font-mono text-primary">{item.sku}</span></span>}
                     {item.cantidad !== '' && item.cantidad != null && <span>Cant: <strong className="text-foreground">{item.cantidad}</strong></span>}
                     {item.lote && <span>Lote: <span className="font-mono">{item.lote}</span></span>}
+                    {item.cliente && <span>Cliente: <strong className="text-foreground">{item.cliente}</strong></span>}
                     {item.bodegaOrig && <span>← {item.bodegaOrig}</span>}
                     {item.bodegaDest && <span>→ {item.bodegaDest}</span>}
                     {item.usuario && <span>👤 {item.usuario}</span>}

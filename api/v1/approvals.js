@@ -1,6 +1,7 @@
 const { query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
+const { normalizeApprovalPayload } = require('../_lib/approval-view');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -34,26 +35,43 @@ module.exports = async (req, res) => {
       [...params, limit]
     );
 
-    const data = rows.map((row) => {
+    const parsedRows = rows.map((row) => {
       let payload = row.payload || {};
       if (typeof payload === 'string') {
         try { payload = JSON.parse(payload); } catch { payload = {}; }
       }
+      return { ...row, payload };
+    });
+    const productIds = [...new Set(parsedRows
+      .map((row) => Number(row.payload?.product_id))
+      .filter((id) => Number.isInteger(id) && id > 0))];
+    const products = productIds.length
+      ? await query(
+        `SELECT id, nombre, siigo_code FROM productos WHERE id IN (${productIds.map(() => '?').join(',')})`,
+        productIds
+      )
+      : [];
+    const productsById = new Map(products.map((product) => [Number(product.id), product]));
+
+    const data = parsedRows.map((row) => {
+      const payload = row.payload;
+      const view = normalizeApprovalPayload(payload, productsById.get(Number(payload.product_id)));
       return {
         id: row.id,
         codigo_solicitud: row.codigo_solicitud,
         tipo: row.accion,
         accion: row.accion,
         estado: row.estado,
-        cantidad: payload.cantidad ?? payload.cantidad_real ?? payload.cantidad_planificada ?? payload.cantidad_deseada ?? null,
-        lote: payload.id_lote ?? payload.lote ?? payload.lot ?? payload.lote_usado ?? payload.lote_sugerido ?? null,
+        cantidad: view.quantity,
+        lote: view.lot,
         creado_en: row.creado_en,
         procesado_en: row.procesado_en,
         motivo_rechazo: row.motivo_rechazo,
-        producto_nombre: payload.producto_nombre ?? payload.producto ?? payload.id_producto_final ?? payload.id_item ?? payload.sku ?? null,
-        siigo_code: payload.siigo_code ?? payload.sku ?? null,
-        id_item: payload.id_item ?? payload.id_producto_final ?? null,
-        id_orden: payload.id_orden ?? null,
+        producto_nombre: view.productName,
+        siigo_code: view.sku,
+        id_item: view.itemId,
+        id_orden: view.orderId,
+        cliente: view.customer,
         bodega_orig_nombre: payload.bodega_origen ?? payload.bodega_orig_nombre ?? null,
         bodega_dest_nombre: payload.bodega_destino ?? payload.bodega_dest_nombre ?? null,
         usuario_nombre: row.usuario_nombre ?? null,

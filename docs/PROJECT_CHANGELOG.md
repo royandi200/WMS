@@ -15,6 +15,11 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-05 - Detalle operativo en aprobaciones heredadas
+
+- Las solicitudes antiguas con `qty`, `lpn`, `customer` y `product_id` se normalizan al contrato visual vigente.
+- Las tarjetas muestran producto, SKU, cantidad, lote y cliente antes de gestionar una aprobacion.
+
 ### 2026-08-05 - Lote terminado visible en produccion
 
 - El listado de produccion expone y muestra el LPN de producto terminado generado al cierre.
