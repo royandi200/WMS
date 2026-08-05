@@ -22,6 +22,7 @@ module.exports = async (req, res) => {
         op.cliente_final,
         op.cantidad_planeada,
         op.cantidad_real,
+        op.lpn_terminado,
         op.fase,
         op.estado,
         op.notas,

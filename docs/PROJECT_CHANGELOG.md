@@ -15,6 +15,11 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-05 - Lote terminado visible en produccion
+
+- El listado de produccion expone y muestra el LPN de producto terminado generado al cierre.
+- Las ordenes abiertas conservan `-` hasta que exista un lote PT.
+
 ### 2026-08-05 - Contrato de referencia de mermas del dashboard
 
 - El servicio compartido acepta `external_reference`, que es el campo enviado por el formulario de mermas.

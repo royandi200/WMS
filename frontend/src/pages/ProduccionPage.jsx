@@ -69,10 +69,10 @@ export default function ProduccionPage() {
           {!loading && list.length === 0 && <EmptyState text="Sin ordenes de produccion" />}
           {list.length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-sm min-w-[760px]">
+              <table className="w-full text-sm min-w-[980px]">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['Codigo orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Fase', 'Estado', 'Fecha', 'Hora'].map((c) => (
+                    {['Codigo orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Lote PT', 'Fase', 'Estado', 'Fecha', 'Hora'].map((c) => (
                       <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
                     ))}
                   </tr>
@@ -88,6 +88,7 @@ export default function ProduccionPage() {
                         <td className="px-4 py-3 text-xs">{r.origen_tipo === 'OC_CLIENTE' ? `${r.referencia_cliente || 'OC'} / ${r.cliente_final || '-'}` : r.origen_tipo === 'STOCK_SEGURIDAD' ? 'Stock seguridad' : '-'}</td>
                         <td className="px-4 py-3 tabular-nums">{r.qty_planned ?? empty}</td>
                         <td className="px-4 py-3 tabular-nums">{r.qty_real ?? empty}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">{r.output_lot ?? empty}</td>
                         <td className="px-4 py-3">{r.current_phase ?? empty}</td>
                         <td className="px-4 py-3">
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${st.css}`}>{st.label}</span>

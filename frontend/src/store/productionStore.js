@@ -24,6 +24,7 @@ const normalizeOrden = (r) => ({
   sku:           r.producto?.siigo_code  ?? r.sku          ?? r.siigo_code,
   qty_planned:   r.cantidad_planeada     ?? r.qty_planned,
   qty_real:      r.cantidad_real         ?? r.qty_real,
+  output_lot:    r.lpn_terminado         ?? r.output_lot,
   current_phase: r.fase                  ?? r.current_phase,
   status:        r.estado                ?? r.status,
   created_at:    r.creado_en             ?? r.created_at,
