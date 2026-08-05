@@ -9,6 +9,32 @@ function httpError(status, message) {
   return error;
 }
 
+function buildMaterialReconciliation(materials, processWasteRows = []) {
+  const processWasteByProduct = new Map(
+    processWasteRows.map((row) => [Number(row.producto_id), Number(row.merma_proceso || 0)])
+  );
+  return materials.map((material) => {
+    const theoretical = Number(material.cantidad_teorica || 0);
+    const consumed = Number(material.cantidad_consumida || 0);
+    const returned = Number(material.cantidad_devuelta || 0);
+    const net = consumed - returned;
+    const processWaste = processWasteByProduct.get(Number(material.producto_id)) || 0;
+    return {
+      product_id: material.producto_id,
+      sku: material.sku,
+      producto: material.nombre,
+      teorico: theoretical,
+      consumido: consumed,
+      devuelto: returned,
+      adicional: Number(material.cantidad_adicional || 0),
+      consumo_neto: net,
+      merma_proceso: processWaste,
+      uso_productivo_estimado: Number((net - processWaste).toFixed(4)),
+      variacion: Number((net - theoretical).toFixed(4)),
+    };
+  });
+}
+
 async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, expiryDate, userId }) {
   const conforming = Number(qtyReal);
   const waste = Number(qtyWaste);
@@ -67,6 +93,13 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       [order.id]
     );
     if (!materials.length) throw httpError(409, 'La orden no tiene conciliacion de materiales');
+    const [processWasteRows] = await conn.execute(
+      `SELECT producto_id, COALESCE(SUM(cantidad), 0) AS merma_proceso
+       FROM mermas
+       WHERE orden_produccion_id = ? AND tipo = 'PROCESO'
+       GROUP BY producto_id`,
+      [order.id]
+    );
     let warehouseId = null;
     let location = null;
     let resolvedLocationCode = null;
@@ -137,23 +170,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         [wasteNumber, order.producto_id, order.id, waste, wasteReason, userId, userId]
       );
     }
-    const reconciliation = materials.map(material => {
-      const theoretical = Number(material.cantidad_teorica || 0);
-      const consumed = Number(material.cantidad_consumida || 0);
-      const returned = Number(material.cantidad_devuelta || 0);
-      const net = consumed - returned;
-      return {
-        product_id: material.producto_id,
-        sku: material.sku,
-        producto: material.nombre,
-        teorico: theoretical,
-        consumido: consumed,
-        devuelto: returned,
-        adicional: Number(material.cantidad_adicional || 0),
-        consumo_neto: net,
-        variacion: Number((net - theoretical).toFixed(4)),
-      };
-    });
+    const reconciliation = buildMaterialReconciliation(materials, processWasteRows);
     const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
     const result = {
@@ -187,7 +204,11 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         `Lote PT: ${conforming > 0 ? lpn : 'Sin lote conforme'} | ubicacion ${resolvedLocationCode || 'N/A'} | vence ${normalizedExpiry || 'N/A'}`,
         `Cerro: ${actors[0]?.nombre || 'Usuario WMS'} | ${closedAt}`,
         'Conciliacion de materiales:',
-        ...reconciliation.map(item => `- ${item.sku}: teorico ${item.teorico}, neto ${item.consumo_neto}, variacion ${item.variacion}`),
+        ...reconciliation.map(item => [
+          `- ${item.sku}: teorico ${item.teorico}, neto entregado ${item.consumo_neto}`,
+          `merma proceso ${item.merma_proceso}, uso productivo estimado ${item.uso_productivo_estimado}`,
+          `variacion de entrega ${item.variacion}`,
+        ].join(' | ')),
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;
@@ -199,4 +220,4 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
   }
 }
 
-module.exports = { closeProductionOrder };
+module.exports = { buildMaterialReconciliation, closeProductionOrder };

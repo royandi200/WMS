@@ -23,6 +23,7 @@ No reemplaza:
 - `mermas`, `stock`, `lots`, `movimientos` y `kardex` se actualizan en una sola transaccion.
 - Un reintento identico no repite el descuento y reutilizar la referencia con datos diferentes se rechaza.
 - La merma de una OP `EN_PROCESO` queda registrada para conciliacion sin volver a descontar stock disponible.
+- El cierre separa material neto entregado, merma de proceso y uso productivo estimado para no ocultar perdidas de WIP.
 - Migracion `15_waste_integrity.sql` aplicada en MySQL.
 - Validacion: 41 pruebas unitarias, build Vite y smoke vivo con ubicacion incorrecta, exceso, reserva e idempotencia aprobados.
 
