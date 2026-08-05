@@ -11,6 +11,9 @@ function connectionConfig() {
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     connectTimeout: 10000,
+    // MySQL DATETIME values are warehouse-local. Pin their interpretation so
+    // Vercel (UTC) and local development produce the same instant.
+    timezone: process.env.DB_TIMEZONE || '-05:00',
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
   };
 }
@@ -52,4 +55,4 @@ async function withTransaction(work) {
   }
 }
 
-module.exports = { query, withTransaction, createConnection };
+module.exports = { query, withTransaction, createConnection, connectionConfig };

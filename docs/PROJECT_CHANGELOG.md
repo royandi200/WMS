@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Zona horaria consistente entre MySQL y Vercel
+
+- La conexion MySQL interpreta `DATETIME` con `DB_TIMEZONE=-05:00` por defecto.
+- Se evita que Vercel reste cinco horas adicionales al mostrar cierres ya procesados.
+- El valor puede sobrescribirse por ambiente sin cambiar codigo.
+
 ### 2026-08-04 - Avisos de inicio y cierre de produccion
 
 - `production_started:{op_id}` notifica a `admin` y `recepcion_cierre` con materiales, lotes y ubicaciones.
