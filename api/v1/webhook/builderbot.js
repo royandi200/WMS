@@ -2297,15 +2297,24 @@ module.exports = async (req, res) => {
       : '  (Sin despachos registrados)';
 
     const [returnRows] = await db.execute(
-      `SELECT numero, cliente_origen, cantidad, estado, creado_en
-       FROM devoluciones
-       WHERE lote = ?
-       ORDER BY creado_en ASC
+      `SELECT dv.numero, dv.referencia_externa, dv.cliente_origen, dv.cantidad,
+              dv.estado, dv.lote, dv.lote_origen, dv.creado_en,
+              d.numero AS despacho_numero, d.siigo_invoice_name,
+              u.codigo AS ubicacion
+       FROM devoluciones dv
+       LEFT JOIN despachos d ON d.id = dv.despacho_id
+       LEFT JOIN ubicaciones u ON u.id = dv.ubicacion_id
+       WHERE dv.lote = ? OR dv.lote_origen = ?
+       ORDER BY dv.creado_en ASC
        LIMIT 10`,
-      [params.id_lote]
+      [params.id_lote, params.id_lote]
     ).catch(() => [[]]);
     const returnHistory = returnRows.length
-      ? returnRows.map(d => `  - ${d.numero}: ${d.cantidad} und desde ${d.cliente_origen || 'N/A'} | ${d.estado}`).join('\n')
+      ? returnRows.map(d => [
+          `  - ${d.numero} / ${d.referencia_externa || 'sin referencia'}: ${d.cantidad} und | ${d.estado}`,
+          `    ${d.lote_origen || 'lote origen N/A'} -> ${d.lote || 'lote devuelto N/A'} | ${d.ubicacion || 'sin ubicacion'}`,
+          `    ${d.despacho_numero || 'sin despacho'} / ${d.siigo_invoice_name || 'sin factura'} -> ${d.cliente_origen || 'Cliente N/A'}`,
+        ].join('\n')).join('\n')
       : '  (Sin devoluciones registradas)';
 
     const [bomRows] = await db.execute(
