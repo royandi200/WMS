@@ -150,7 +150,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
          VALUES (?, ?, ?, ?, ?, 'CIERRE_PRODUCCION', ?, ?, ?, ?, ?, NOW())`,
         [crypto.randomUUID(), crypto.randomUUID(), lotId, order.producto_id, userId,
          conforming, conforming, `produccion:${order.codigo_orden}`,
-         `Ubicacion ${location}`, userId]
+         `Ubicacion ${resolvedLocationCode}`, userId]
       );
     }
     await conn.execute(

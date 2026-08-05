@@ -2162,6 +2162,12 @@ module.exports = async (req, res) => {
          k.reference,
          k.notes,
          k.created_at,
+         (SELECT u.codigo
+          FROM lots kl
+          JOIN stock ks ON ks.lote = kl.lpn
+          JOIN ubicaciones u ON u.id = ks.ubicacion_id
+          WHERE kl.id = k.lot_id
+          ORDER BY ks.id LIMIT 1) AS ubicacion_codigo,
          dv.cantidad AS cantidad_fisica_devolucion,
          dv.estado AS estado_devolucion
        FROM kardex k
@@ -2181,7 +2187,9 @@ module.exports = async (req, res) => {
           }
           let extra = '';
 
-          if (k.notes) {
+          if (k.action === 'CIERRE_PRODUCCION' && k.ubicacion_codigo) {
+            extra = ` | Ubicacion ${k.ubicacion_codigo}`;
+          } else if (k.notes) {
             extra = ` | ${k.notes}`;
           }
 
