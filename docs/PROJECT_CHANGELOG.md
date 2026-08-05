@@ -18,6 +18,7 @@ No reemplaza:
 ### 2026-08-05 - Lote terminado visible en produccion
 
 - El listado de produccion expone y muestra el LPN de producto terminado generado al cierre.
+- El LPN se obtiene desde la relacion `lots.production_order_id`; no es una columna de `ordenes_produccion`.
 - Las ordenes abiertas conservan `-` hasta que exista un lote PT.
 
 ### 2026-08-05 - Contrato de referencia de mermas del dashboard

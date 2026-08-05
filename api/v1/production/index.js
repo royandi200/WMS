@@ -22,7 +22,9 @@ module.exports = async (req, res) => {
         op.cliente_final,
         op.cantidad_planeada,
         op.cantidad_real,
-        op.lpn_terminado,
+        (SELECT l.lpn FROM lots l
+          WHERE l.production_order_id = op.id
+          ORDER BY l.created_at ASC LIMIT 1) AS lpn_terminado,
         op.fase,
         op.estado,
         op.notas,
