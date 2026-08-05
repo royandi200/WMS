@@ -254,6 +254,8 @@ test('lot traceability follows returns from original lot to returned lot', () =>
   assert.match(source, /d\.siigo_invoice_name/u);
   assert.match(source, /d\.despacho_numero/u);
   assert.match(source, /d\.referencia_externa/u);
+  assert.match(source, /CONCAT\('DEVOLUCION_', dv\.estado\) AS condicion/u);
+  assert.match(source, /JOIN recepciones r ON r\.id = dv\.recepcion_id/u);
 });
 
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {

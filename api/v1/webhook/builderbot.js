@@ -2338,15 +2338,28 @@ module.exports = async (req, res) => {
       : '  (Sin BOM registrado para este producto)';
 
     const [receptionRows] = await db.execute(
-      `SELECT r.numero, r.siigo_purchase_name, r.proveedor_nombre,
-              oc.numero AS orden_compra, rd.condicion, rd.cantidad,
-              u.codigo AS ubicacion
-       FROM recepcion_distribuciones rd
-       JOIN recepciones r ON r.id = rd.recepcion_id
-       LEFT JOIN ordenes_compra_proveedor oc ON oc.id = r.orden_compra_id
-       LEFT JOIN ubicaciones u ON u.id = rd.ubicacion_id
-       WHERE rd.lote = ? ORDER BY rd.creado_en ASC`,
-      [params.id_lote]
+      `SELECT numero, siigo_purchase_name, proveedor_nombre, orden_compra,
+              condicion, cantidad, ubicacion
+       FROM (
+         SELECT r.numero, r.siigo_purchase_name, r.proveedor_nombre,
+                oc.numero AS orden_compra, rd.condicion, rd.cantidad,
+                u.codigo AS ubicacion, rd.creado_en AS evento
+         FROM recepcion_distribuciones rd
+         JOIN recepciones r ON r.id = rd.recepcion_id
+         LEFT JOIN ordenes_compra_proveedor oc ON oc.id = r.orden_compra_id
+         LEFT JOIN ubicaciones u ON u.id = rd.ubicacion_id
+         WHERE rd.lote = ?
+         UNION ALL
+         SELECT r.numero, r.siigo_purchase_name, r.proveedor_nombre,
+                NULL AS orden_compra, CONCAT('DEVOLUCION_', dv.estado) AS condicion,
+                dv.cantidad, u.codigo AS ubicacion, dv.creado_en AS evento
+         FROM devoluciones dv
+         JOIN recepciones r ON r.id = dv.recepcion_id
+         LEFT JOIN ubicaciones u ON u.id = dv.ubicacion_id
+         WHERE dv.lote = ?
+       ) origen
+       ORDER BY evento ASC`,
+      [params.id_lote, params.id_lote]
     ).catch(() => [[]]);
     const receptionHistory = receptionRows.length
       ? receptionRows.map(r => `  - ${r.numero} | OC ${r.orden_compra || 'N/A'} | Siigo ${r.siigo_purchase_name || 'N/A'} | ${r.proveedor_nombre || 'Proveedor N/A'} | ${r.condicion} ${r.cantidad} | ${r.ubicacion || 'sin ubicacion'}`).join('\n')
@@ -2404,7 +2417,7 @@ module.exports = async (req, res) => {
       `*Devoluciones:*`,
       returnHistory,
       ``,
-      `*Recepcion / origen contable:*`,
+      `*Recepcion / origen documental:*`,
       receptionHistory,
       ``,
       `*Consumo real de materias primas:*`,
