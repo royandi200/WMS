@@ -336,7 +336,7 @@ CREATE TABLE movimientos (
   lote             VARCHAR(50),
   cantidad         DECIMAL(15,4) NOT NULL,
   referencia_id    INT UNSIGNED  NULL,                         -- ID recepcion o despacho
-  referencia_tipo  VARCHAR(20)   NULL,                         -- 'recepcion' | 'despacho' | 'ajuste'
+  referencia_tipo  VARCHAR(40)   NULL,                         -- 'recepcion' | 'despacho' | 'ajuste'
   usuario_id       INT UNSIGNED  NOT NULL,
   -- Integración SIIGO
   siigo_sync       TINYINT(1)    DEFAULT 0,                    -- ¿ya enviado a SIIGO?

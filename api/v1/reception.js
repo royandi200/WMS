@@ -126,7 +126,7 @@ function receivedItemInput(body, item, totalItems) {
   return totalItems === 1 ? body : null;
 }
 
-async function processDistributedItem(conn, { item, input, reception, user, receptionId, body }) {
+async function processDistributedItem(conn, { item, input, reception, user, receptionId, body, txId }) {
   const normalized = normalizeReceptionDistributions(input);
   if (!normalized) return null;
   const { distributions, totals } = normalized;
@@ -152,17 +152,20 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
   for (const lot of groupedLots.values()) {
     const [existing] = await conn.execute(`SELECT id FROM lots WHERE lpn = ? LIMIT 1`, [lot.lot]);
     if (existing.length) throw httpError(409, `El lote ${lot.lot} ya existe`);
+    const lotId = crypto.randomUUID();
+    lot.id = lotId;
     await conn.execute(
       `INSERT INTO lots
          (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier,
           origin, status, received_by, notes, expiry_date, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', ?, ?, ?, ?, NOW())`,
-      [crypto.randomUUID(), lot.lot, item.producto_id, reception.bodega_id,
+      [lotId, lot.lot, item.producto_id, reception.bodega_id,
        lot.quantity, lot.quantity, reception.proveedor_nombre || null, lot.condition,
        user.id, body.notes || `Recepcion ${reception.numero}`, lot.expiryDate]
     );
   }
 
+  const availableBalances = new Map();
   for (const entry of distributions) {
     await conn.execute(
       `INSERT INTO recepcion_distribuciones
@@ -188,15 +191,29 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
         [item.producto_id, reception.bodega_id, entry.locationId, entry.lot,
          entry.quantity, receptionId, user.id]
       );
+      const balanceAfter = Number((Number(availableBalances.get(entry.lot) || 0) + entry.quantity).toFixed(4));
+      availableBalances.set(entry.lot, balanceAfter);
+      await conn.execute(
+        `INSERT INTO kardex
+           (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
+            reference, notes, approved_by, created_at)
+         VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION', ?, ?, ?, ?, ?, NOW())`,
+        [crypto.randomUUID(), txId, groupedLots.get(entry.lot).id, item.producto_id,
+         user.id, entry.quantity, balanceAfter, `recepcion:${reception.numero}`,
+         `Condicion ${entry.condition} | Ubicacion ${entry.locationId}`, user.id]
+      );
     }
   }
 
   const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
+  const reasonsFor = conditions => [...new Set(distributions
+    .filter(entry => conditions.includes(entry.condition) && entry.reason)
+    .map(entry => entry.reason))].join('; ');
   const issues = [
-    { type: 'FALTANTE', quantity: shortage },
-    { type: 'SOBRANTE', quantity: overage },
-    { type: 'CUARENTENA', quantity: totals.CUARENTENA },
-    { type: 'RECHAZADO', quantity: totals.RECHAZADO + totals.PENDIENTE_DISPOSICION },
+    { type: 'FALTANTE', quantity: shortage, reason },
+    { type: 'SOBRANTE', quantity: overage, reason },
+    { type: 'CUARENTENA', quantity: totals.CUARENTENA, reason: reasonsFor(['CUARENTENA']) },
+    { type: 'RECHAZADO', quantity: totals.RECHAZADO + totals.PENDIENTE_DISPOSICION, reason: reasonsFor(['RECHAZADO', 'PENDIENTE_DISPOSICION']) },
   ].filter(issue => issue.quantity > 0);
   for (const issue of issues) {
     await conn.execute(
@@ -204,7 +221,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
          (recepcion_id, recepcion_item_id, tipo, cantidad, motivo, estado, usuario_id, creado_en)
        VALUES (?, ?, ?, ?, ?, 'ABIERTA', ?, NOW())`,
       [receptionId, item.id, issue.type, issue.quantity,
-       reason || `${issue.type} detectado durante la recepcion fisica`, user.id]
+       issue.reason || reason || `${issue.type} detectado durante la recepcion fisica`, user.id]
     );
   }
   const first = distributions[0];
@@ -298,12 +315,15 @@ async function handlePut(req, res) {
     if (!items.length) throw httpError(409, 'La recepcion no tiene items importados');
 
     const results = [];
+    const receptionTxId = crypto.randomUUID();
     let hasDifference = false;
     for (const item of items) {
       const input = receivedItemInput(body, item, items.length);
       if (!input) throw httpError(400, `Falta confirmar el item ${item.siigo_code}`);
 
-      const distributed = await processDistributedItem(conn, { item, input, reception, user, receptionId, body });
+      const distributed = await processDistributedItem(conn, {
+        item, input, reception, user, receptionId, body, txId: receptionTxId,
+      });
       if (distributed) {
         hasDifference = hasDifference || distributed.hasDifference;
         delete distributed.hasDifference;
@@ -378,6 +398,15 @@ async function handlePut(req, res) {
               referencia_tipo, usuario_id, siigo_sync)
            VALUES ('entrada', ?, ?, ?, ?, ?, 'recepcion_siigo_import', ?, 1)`,
           [item.producto_id, reception.bodega_id, lot, accepted, receptionId, user.id]
+        );
+        await conn.execute(
+          `INSERT INTO kardex
+             (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
+              reference, notes, approved_by, created_at)
+           VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION', ?, ?, ?, ?, ?, NOW())`,
+          [crypto.randomUUID(), receptionTxId, lotId, item.producto_id, user.id,
+           accepted, accepted, `recepcion:${reception.numero}`,
+           `Recepcion simple | Lote ${lot}`, user.id]
         );
       }
 

@@ -141,6 +141,13 @@ test('reception distributions separate available and blocked inventory', () => {
   );
 });
 
+test('reception writes a complete movement reference and inventory kardex', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
+  assert.match(source, /'recepcion_siigo_import'/u);
+  assert.match(source, /'INGRESO_RECEPCION'/u);
+  assert.match(source, /reasonsFor\(\['CUARENTENA'\]\)/u);
+});
+
 test('production quantities are rounded consistently', () => {
   assert.equal(roundQty(0.1 + 0.2), 0.3);
   assert.equal(roundQty(3.141592), 3.1416);

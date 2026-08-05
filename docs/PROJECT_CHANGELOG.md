@@ -15,6 +15,13 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Auditoria completa de entradas por recepcion
+
+- `movimientos.referencia_tipo` admite la referencia completa `recepcion_siigo_import` sin truncamiento.
+- Recepciones distribuidas y simples crean kardex de ingreso dentro de la misma transaccion.
+- Las novedades de cuarentena y rechazo conservan el motivo especifico diligenciado.
+- La migracion reparadora agrega kardex faltante sin modificar stock ni cantidades de lotes.
+
 ### 2026-08-04 - Cuarentena como ubicacion de la bodega principal
 
 - `CUAR-C-1-01` se modela como ubicacion controlada dentro de `BG-PPAL` para nuevas recepciones.
