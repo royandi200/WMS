@@ -92,10 +92,9 @@ test('notifications route uses a validated literal LIMIT for MySQL compatibility
 });
 
 test('destroyed returns use a supported non-available lot status', () => {
-  const dashboard = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'returns.js'), 'utf8');
-  const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
-  assert.match(dashboard, /return 'PENDIENTE_DISPOSICION'/u);
-  assert.match(webhook, /return 'PENDIENTE_DISPOSICION'/u);
+  const workflow = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'returns-workflow.js'), 'utf8');
+  assert.match(workflow, /return 'PENDIENTE_DISPOSICION'/u);
+  assert.match(workflow, /createCustomerReturn/u);
 });
 
 test('environment flag parsing is explicit', () => {

@@ -124,6 +124,19 @@ La factura de venta de Siigo es el unico origen del despacho normal.
 
 Los despachos parciales tienen estructura de datos y bandera, pero permanecen desactivados. No se debe habilitar `ALLOW_PARTIAL_DISPATCH` hasta completar y probar el ciclo de reservas posteriores contra la misma factura.
 
+## Devoluciones de cliente
+
+`GESTION_DEVOLUCION` y el formulario del dashboard usan el mismo servicio transaccional. Toda devolucion nueva requiere:
+
+- factura o despacho ya confirmado;
+- referencia externa unica de la devolucion;
+- SKU, lote original despachado y cantidad;
+- disposicion `RECUPERABLE`, `CUARENTENA` o `DESTRUCCION`.
+
+El cliente se toma del despacho; si el agente lo envia, debe coincidir. La suma de devoluciones de una partida no puede superar su cantidad despachada. Repetir una referencia informa el registro existente y no crea inventario.
+
+`CUARENTENA` y `DESTRUCCION` se ubican en `CUAR-C-1-01` y no quedan disponibles. `RECUPERABLE` exige una ubicacion activa, crea stock disponible y hereda el vencimiento del lote original.
+
 ## Trazabilidad
 
 `CONSULTAR_TRAZABILIDAD_LOTE` debe poder recorrer:

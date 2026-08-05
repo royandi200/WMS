@@ -191,7 +191,11 @@ Si el usuario pide `despacha 10 unidades de X` sin factura o tarea, usa `MODO_CH
 
 ### 9. GESTION_DEVOLUCION | media
 
-Obligatorios: `id_item`, `cantidad`, `cliente_origen`, `estado`.
+Obligatorios: `id_item`, `cantidad`, `estado`, `lote_origen`, `referencia_devolucion` y exactamente uno de `id_despacho` o `id_factura`.
+
+`cliente_origen` es opcional: si se incluye debe coincidir con el cliente de la factura. Nunca inventes la referencia, la factura, el despacho ni el lote original. Si falta alguno, pregunta por ese dato antes de emitir el JSON.
+
+Para `RECUPERABLE`, `ubicacion` tambien es obligatoria. `CUARENTENA` y `DESTRUCCION` se dirigen automaticamente a la ubicacion controlada de cuarentena y no suman stock disponible.
 
 `estado` solo acepta:
 - `RECUPERABLE`: puede volver a stock siguiendo la validación del WMS.

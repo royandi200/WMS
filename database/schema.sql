@@ -290,6 +290,33 @@ CREATE TABLE despacho_items (
   FOREIGN KEY (ubicacion_id) REFERENCES ubicaciones(id)
 );
 
+CREATE TABLE devoluciones (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  numero              VARCHAR(30) NOT NULL UNIQUE,
+  despacho_id         INT UNSIGNED NULL,
+  despacho_item_id    INT UNSIGNED NULL,
+  producto_id         INT UNSIGNED NOT NULL,
+  lote                VARCHAR(80) NULL,
+  lote_origen         VARCHAR(80) NULL,
+  ubicacion_id        INT UNSIGNED NULL,
+  referencia_externa  VARCHAR(80) NULL UNIQUE,
+  cliente_origen      VARCHAR(200) NULL,
+  cantidad            DECIMAL(12,3) NOT NULL,
+  estado              ENUM('RECUPERABLE','DESTRUCCION','CUARENTENA') NOT NULL,
+  recepcion_id        INT UNSIGNED NULL,
+  usuario_id          INT UNSIGNED NOT NULL,
+  observaciones       TEXT,
+  creado_en           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_devolucion_despacho (despacho_id),
+  INDEX idx_devolucion_item (despacho_item_id),
+  FOREIGN KEY (despacho_id) REFERENCES despachos(id),
+  FOREIGN KEY (despacho_item_id) REFERENCES despacho_items(id),
+  FOREIGN KEY (producto_id) REFERENCES productos(id),
+  FOREIGN KEY (ubicacion_id) REFERENCES ubicaciones(id),
+  FOREIGN KEY (recepcion_id) REFERENCES recepciones(id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
 CREATE TABLE despacho_novedades (
   id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   despacho_id  INT UNSIGNED NOT NULL,

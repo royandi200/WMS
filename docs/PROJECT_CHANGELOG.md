@@ -15,6 +15,15 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-04 - Devoluciones vinculadas al despacho original
+
+- WhatsApp y dashboard usan un unico servicio transaccional de devoluciones.
+- Cada devolucion nueva exige factura o despacho, referencia externa unica, SKU y lote original.
+- El acumulado devuelto no puede superar lo despachado para la partida y el cliente debe coincidir.
+- Cuarentena y destruccion se ubican en `CUAR-C-1-01` sin aumentar disponible.
+- Solo `RECUPERABLE` crea stock en una ubicacion activa y conserva el vencimiento del lote original.
+- `devoluciones` migro de MyISAM a InnoDB y ahora conserva relaciones con despacho, partida y ubicacion.
+
 ### 2026-08-04 - Ubicacion obligatoria en alistamiento de despachos
 
 - FEFO solo reserva stock con ubicacion activa perteneciente a la misma bodega.

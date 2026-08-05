@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { createReturn, listReturns } from '../api/returns.api'
 
 const EMPTY = {
+  despacho_id: '',
+  referencia_devolucion: '',
   product_id: '',
   cantidad: '',
   cliente_origen: '',
   estado: 'CUARENTENA',
   lote_origen: '',
   observaciones: '',
+  ubicacion: '',
 }
 
 const ESTADOS = [
@@ -53,11 +56,14 @@ export default function DevolucionesPage() {
     setError(null)
     try {
       const payload = {
+        despacho_id: form.despacho_id.trim(),
+        referencia_devolucion: form.referencia_devolucion.trim(),
         product_id: form.product_id.trim(),
         cantidad: Number(form.cantidad),
         cliente_origen: form.cliente_origen.trim(),
         estado: form.estado,
-        lote_origen: form.lote_origen.trim() || undefined,
+        lote_origen: form.lote_origen.trim(),
+        ubicacion: form.ubicacion.trim() || undefined,
         observaciones: form.observaciones.trim() || undefined,
       }
       const res = await createReturn(payload)
@@ -119,6 +125,26 @@ export default function DevolucionesPage() {
       {tab === 'crear' && (
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,640px)_minmax(320px,1fr)] gap-5">
           <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-5 space-y-4">
+            <Field label="Factura o despacho origen *">
+              <input
+                value={form.despacho_id}
+                onChange={set('despacho_id')}
+                placeholder="Ej: FV-1-10000004804 o DSP-SIIGO-FV-1-10000004804"
+                className="input-field"
+                required
+              />
+            </Field>
+
+            <Field label="Referencia de devolucion *">
+              <input
+                value={form.referencia_devolucion}
+                onChange={set('referencia_devolucion')}
+                placeholder="Ej: RMA-CLIENTE-0001"
+                className="input-field"
+                required
+              />
+            </Field>
+
             <Field label="SKU o ID del producto *">
               <input
                 value={form.product_id}
@@ -149,24 +175,36 @@ export default function DevolucionesPage() {
               </Field>
             </div>
 
-            <Field label="Cliente origen *">
+            <Field label="Cliente origen">
               <input
                 value={form.cliente_origen}
                 onChange={set('cliente_origen')}
                 placeholder="Ej: Cliente QA"
                 className="input-field"
+              />
+            </Field>
+
+            <Field label="Lote original despachado *">
+              <input
+                value={form.lote_origen}
+                onChange={set('lote_origen')}
+                placeholder="Ej: WMSQA260721LOT01"
+                className="input-field"
                 required
               />
             </Field>
 
-            <Field label="Lote original despachado">
-              <input
-                value={form.lote_origen}
-                onChange={set('lote_origen')}
-                placeholder="Opcional, si se conoce"
-                className="input-field"
-              />
-            </Field>
+            {form.estado === 'RECUPERABLE' && (
+              <Field label="Ubicacion de reintegro *">
+                <input
+                  value={form.ubicacion}
+                  onChange={set('ubicacion')}
+                  placeholder="Ej: PPAL-A-1-01"
+                  className="input-field"
+                  required
+                />
+              </Field>
+            )}
 
             <Field label="Observaciones">
               <textarea
@@ -214,22 +252,24 @@ function ReturnsTable({ rows, loading }) {
       <table className="w-full text-sm min-w-[920px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Devolucion', 'Fecha', 'Cliente', 'SKU', 'Producto', 'Lote', 'Cantidad', 'Estado', 'Usuario'].map((c) => (
+            {['Devolucion', 'Origen', 'Fecha', 'Cliente', 'SKU', 'Producto', 'Lotes', 'Ubicacion', 'Cantidad', 'Estado', 'Usuario'].map((c) => (
               <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {loading && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">Cargando devoluciones...</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">Sin devoluciones registradas</td></tr>}
+          {loading && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Cargando devoluciones...</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Sin devoluciones registradas</td></tr>}
           {!loading && rows.map((r) => (
             <tr key={r.id} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs">{r.numero}</td>
+              <td className="px-4 py-3"><span className="block font-mono text-xs">{r.siigo_invoice_name || '-'}</span><span className="block text-xs text-muted">{r.referencia_externa || r.despacho_numero || ''}</span></td>
               <td className="px-4 py-3 text-muted text-xs">{formatDate(r.creado_en)}</td>
               <td className="px-4 py-3">{r.cliente_origen || '-'}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.sku || '-'}</td>
               <td className="px-4 py-3">{r.producto_nombre || '-'}</td>
-              <td className="px-4 py-3 font-mono text-xs">{r.lote || '-'}</td>
+              <td className="px-4 py-3"><span className="block font-mono text-xs">{r.lote || '-'}</span><span className="block text-xs text-muted">Origen: {r.lote_origen || '-'}</span></td>
+              <td className="px-4 py-3 font-mono text-xs">{r.ubicacion || '-'}</td>
               <td className="px-4 py-3 tabular-nums">{r.cantidad ?? '-'}</td>
               <td className="px-4 py-3"><StatusBadge value={r.estado} /></td>
               <td className="px-4 py-3">{r.usuario_nombre || '-'}</td>
