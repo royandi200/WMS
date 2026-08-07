@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "observed_at": "2026-08-06T21:30:00-05:00",
+  "test_state": {
+    "status": "passed",
+    "source": "npm_test_local",
+    "confidence": "verificado-repo",
+    "passed": 60
+  },
+  "master_data_blockers": [
+    "bom_pending_client_validation",
+    "units_pending_client_validation",
+    "locations_pending_production_validation",
+    "users_pending_role_assignment"
+  ],
+  "siigo_state": {
+    "status": "sandbox_flows_reported",
+    "confidence": "reportado"
+  },
+  "next_human_action": "validate_master_data_and_assign_roles",
+  "evidence_key": "wms-readiness-2026-08-06"
+}

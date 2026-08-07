@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nobs.local/contracts/lamano-event-1.0.schema.json",
+  "title": "La Mano coordination event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "event_id", "event_type", "occurred_at", "producer",
+    "scope", "summary", "status", "sensitivity", "evidence"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "event_type": {
+      "enum": [
+        "handoff.created", "handoff.updated", "alert.raised", "alert.resolved",
+        "decision.proposed", "decision.recorded", "agent.status"
+      ]
+    },
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "runtime"],
+      "properties": {
+        "agent_id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "runtime": {"type": "string", "minLength": 1, "maxLength": 100},
+        "task_id": {"type": "string", "maxLength": 128}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id"],
+      "properties": {
+        "project_id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "community_id": {"type": "string", "maxLength": 100}
+      }
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+    "status": {
+      "enum": ["pending", "in_progress", "blocked", "needs_decision", "completed", "cancelled"]
+    },
+    "sensitivity": {"enum": ["internal", "confidential", "restricted"]},
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri", "observed_at", "confidence"],
+        "properties": {
+          "uri": {"type": "string", "minLength": 1, "maxLength": 500},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "confidence": {
+            "enum": ["verificado-vivo", "verificado-repo", "reportado", "inferido", "pendiente"]
+          },
+          "note": {"type": "string", "maxLength": 500}
+        }
+      }
+    },
+    "payload": {"type": "object"},
+    "data_ref": {"type": "string", "minLength": 1, "maxLength": 500},
+    "correlation_id": {"type": "string", "maxLength": 128},
+    "causation_id": {"type": "string", "maxLength": 128},
+    "review_on": {"type": "string", "format": "date"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"sensitivity": {"enum": ["confidential", "restricted"]}}},
+      "then": {"required": ["data_ref"], "not": {"required": ["payload"]}}
+    }
+  ]
+}
