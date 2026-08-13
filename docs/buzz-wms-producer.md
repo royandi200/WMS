@@ -10,7 +10,11 @@ El productor solo lee:
 - el commit y la fecha de `HEAD` mediante Git;
 - el snapshot contractual `contracts/buzz-event-1.0.schema.json` durante las pruebas.
 
-El snapshot tiene SHA-256 `3e41e11097174b79126761019d92e9b706361830b9a2b90846aedb8bbd9d677f`, idéntico al contrato leído en solo lectura desde `NoBS/infra/buzz-lamano/contracts/event.schema.json` el 2026-08-06.
+El snapshot tiene SHA-256 `3e41e11097174b79126761019d92e9b706361830b9a2b90846aedb8bbd9d677f`, idéntico al contrato leído en solo lectura desde `NoBS/infra/buzz-lamano/contracts/event.schema.json`; la igualdad se reconfirmó el 2026-08-13.
+
+El manifest operativo se refrescó el 2026-08-13 después de aprobar 60/60 pruebas
+locales. BOM, unidades, ubicaciones, usuarios y SIIGO permanecen `reportado`: no se
+consultaron sistemas vivos ni se publicó el evento.
 
 ## Contenido y confianza
 
