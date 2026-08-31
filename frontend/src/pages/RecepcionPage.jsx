@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Download, FileText, Plus, Trash2 } from 'lucide-react'
 import { useReceptionStore } from '../store/receptionStore'
-import { createPurchaseOrder, listPurchaseOrders } from '../api/purchaseOrders.api'
+import { createPurchaseOrder, downloadPurchaseOrderDocument, listPurchaseOrders } from '../api/purchaseOrders.api'
+import { listOutsourcingOrders } from '../api/outsourcing.api'
+import { listSuppliers } from '../api/suppliers.api'
 import { confirmReception } from '../api/reception.api'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
@@ -18,6 +20,8 @@ export default function RecepcionPage() {
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [purchaseLoading, setPurchaseLoading] = useState(false)
   const [locations, setLocations] = useState([])
+  const [outsourcingOrders, setOutsourcingOrders] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const { loading, list, fetchList } = useReceptionStore()
   const user = useAuthStore((state) => state.user)
   const capabilities = user?.capabilities || []
@@ -36,9 +40,17 @@ export default function RecepcionPage() {
         .catch((error) => showToast(error.response?.data?.error || 'Error al cargar ordenes de compra', false))
         .finally(() => setPurchaseLoading(false))
     }
+    if (tab === 'orders') {
+      listSuppliers()
+        .then((payload) => setSuppliers(payload?.data?.rows || []))
+        .catch((error) => showToast(error.response?.data?.error || 'Error al cargar proveedores', false))
+    }
     if (tab === 'confirm') {
       fetchList({ limit: 200 })
       listUbicaciones().then((payload) => setLocations(payload?.data?.rows || [])).catch(() => setLocations([]))
+      listOutsourcingOrders({ limit: 200 })
+        .then((payload) => setOutsourcingOrders(payload?.data?.rows || []))
+        .catch(() => setOutsourcingOrders([]))
     }
     if (tab === 'history') fetchList({ limit: 100 })
   }, [tab])
@@ -70,6 +82,7 @@ export default function RecepcionPage() {
       {tab === 'orders' && (
         <PurchaseOrdersPanel
           rows={purchaseOrders}
+          suppliers={suppliers}
           loading={purchaseLoading}
           onCreate={async (body) => {
             setPurchaseLoading(true)
@@ -95,6 +108,7 @@ export default function RecepcionPage() {
           rows={list.filter((row) => ['borrador', 'en_proceso'].includes(row.estado))}
           purchaseOrders={purchaseOrders}
           locations={locations}
+          outsourcingOrders={outsourcingOrders}
           loading={loading || purchaseLoading}
           onConfirm={async (body) => {
             try {
@@ -116,7 +130,7 @@ export default function RecepcionPage() {
   )
 }
 
-function ConfirmReceptionPanel({ rows, purchaseOrders, locations, loading, onConfirm }) {
+function ConfirmReceptionPanel({ rows, purchaseOrders, locations, outsourcingOrders, loading, onConfirm }) {
   const grouped = Object.values(rows.reduce((result, row) => {
     if (!result[row.id]) result[row.id] = { ...row, items: [] }
     result[row.id].items.push(row)
@@ -135,7 +149,9 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, loading, onCon
       reception_item_id: item.recepcion_item_id,
       sku: item.sku,
       producto: item.producto_nombre,
+      modalidad: item.modalidad_operativa,
       expected: Number(item.cantidad_esp || 0),
+      orden_maquila_id: '',
       distributions: [{ condicion: 'DISPONIBLE', cantidad: item.cantidad_esp || '', lote: '', ubicacion_id: '', fecha_venc: item.fecha_venc?.slice?.(0, 10) || '', motivo: '' }],
     })))
   }
@@ -158,6 +174,7 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, loading, onCon
       orden_compra_id: Number(purchaseOrderId),
       items: items.map((item) => ({
         item_id: item.reception_item_id,
+        orden_maquila_id: item.orden_maquila_id ? Number(item.orden_maquila_id) : undefined,
         qty_received: item.distributions.reduce((sum, distribution) => sum + Number(distribution.cantidad || 0), 0),
         distributions: item.distributions.map((distribution) => ({
           ...distribution,
@@ -196,6 +213,26 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, loading, onCon
       {items.map((item, itemIndex) => (
         <section key={item.item_id} className="border-y border-border py-4 space-y-3">
           <div><p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p><p className="text-xs text-muted">Factura: {item.expected} unidades</p></div>
+          {item.modalidad === 'PT' && (
+            <Field label="Orden de maquila 3Q *">
+              <select
+                value={item.orden_maquila_id}
+                onChange={(event) => {
+                  const value = event.target.value
+                  const order = outsourcingOrders.find((entry) => String(entry.id) === String(value))
+                  setItems((current) => current.map((entry, index) => index === itemIndex ? { ...entry, orden_maquila_id: value } : entry))
+                  if (order?.orden_compra_id) setPurchaseOrderId(String(order.orden_compra_id))
+                }}
+                className="input-field max-w-xl"
+                required
+              >
+                <option value="">Selecciona la orden correspondiente</option>
+                {outsourcingOrders
+                  .filter((order) => order.sku === item.sku && ['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado))
+                  .map((order) => <option key={order.id} value={order.id}>{order.codigo} - pendiente {Math.max(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida), 0)}</option>)}
+              </select>
+            </Field>
+          )}
           {item.distributions.map((distribution, distributionIndex) => (
             <div key={distributionIndex} className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-[150px_110px_minmax(150px,1fr)_minmax(170px,1fr)_140px_36px] gap-2 items-end">
@@ -220,13 +257,13 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, loading, onCon
 
 const EMPTY_PO = {
   numero: '',
-  proveedor_nombre: '',
+  tercero_id: '',
   fecha_orden: '',
-  archivo_nombre: '',
+  documento_pdf: null,
   items: [{ sku: '', cantidad: '', unidad: 'und' }],
 }
 
-function PurchaseOrdersPanel({ rows, loading, onCreate }) {
+function PurchaseOrdersPanel({ rows, suppliers, loading, onCreate }) {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(EMPTY_PO)
   const setHeader = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
@@ -244,10 +281,18 @@ function PurchaseOrdersPanel({ rows, loading, onCreate }) {
   }))
   const submit = async (event) => {
     event.preventDefault()
+    if (!form.documento_pdf) return
+    const base64 = await readFileAsDataUrl(form.documento_pdf)
     const result = await onCreate({
       ...form,
+      tercero_id: Number(form.tercero_id),
       fecha_orden: form.fecha_orden || undefined,
-      archivo_nombre: form.archivo_nombre || undefined,
+      archivo_nombre: form.documento_pdf.name,
+      documento_pdf: {
+        nombre: form.documento_pdf.name,
+        mime_type: form.documento_pdf.type || 'application/pdf',
+        base64,
+      },
       items: form.items.map((item) => ({ ...item, cantidad: Number(item.cantidad) })),
     })
     if (result.ok) {
@@ -272,11 +317,41 @@ function PurchaseOrdersPanel({ rows, loading, onCreate }) {
         <form onSubmit={submit} className="border-y border-border py-5 space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <Field label="Numero de OC *"><input value={form.numero} onChange={setHeader('numero')} className="input-field" required /></Field>
-            <Field label="Proveedor *"><input value={form.proveedor_nombre} onChange={setHeader('proveedor_nombre')} className="input-field" required /></Field>
+            <Field label="Proveedor sincronizado *">
+              <select value={form.tercero_id} onChange={setHeader('tercero_id')} className="input-field" required>
+                <option value="">Seleccionar proveedor</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.nombre}{supplier.identification ? ` - ${supplier.identification}` : ''}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Fecha de orden"><input type="date" value={form.fecha_orden} onChange={setHeader('fecha_orden')} className="input-field" /></Field>
           </div>
-          <Field label="Nombre del archivo origen">
-            <input value={form.archivo_nombre} onChange={setHeader('archivo_nombre')} placeholder="OC-123.pdf o OC-123.xlsx" className="input-field" />
+          <Field label="Orden de compra en PDF *">
+            <label className="flex min-h-20 cursor-pointer items-center gap-3 border border-dashed border-border px-4 py-3 hover:border-primary/60">
+              <FileText size={20} className="text-primary" />
+              <span className="min-w-0 flex-1 text-sm text-foreground">
+                {form.documento_pdf ? form.documento_pdf.name : 'Seleccionar PDF'}
+                <span className="block text-xs text-muted">Maximo 2.5 MB. Los items se transcriben para permitir la conciliacion.</span>
+              </span>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                className="sr-only"
+                required
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null
+                  if (file && file.size > 2_500_000) {
+                    event.target.value = ''
+                    setForm((current) => ({ ...current, documento_pdf: null }))
+                    return
+                  }
+                  setForm((current) => ({ ...current, documento_pdf: file }))
+                }}
+              />
+            </label>
           </Field>
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted">Items</p>
@@ -311,16 +386,23 @@ function PurchaseOrderTable({ rows, loading }) {
     <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full text-sm min-w-[760px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Orden', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Unidades', 'Cargada por', 'Creada'].map((label) => (
+          {['Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Unidades', 'Cargada por', 'Creada'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
         <tbody>
-          {loading && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">Cargando ordenes...</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">Sin ordenes de compra cargadas</td></tr>}
+          {loading && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">Cargando ordenes...</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">Sin ordenes de compra cargadas</td></tr>}
           {!loading && rows.map((row) => (
             <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs text-foreground">{row.numero}</td>
+              <td className="px-4 py-3">
+                {row.documento_id ? (
+                  <button type="button" title="Descargar PDF" onClick={() => downloadPurchaseOrderDocument(row.documento_id, row.documento_nombre)} className="inline-flex h-8 w-8 items-center justify-center text-primary hover:bg-primary/10">
+                    <Download size={16} />
+                  </button>
+                ) : <span className="text-xs text-danger">Falta</span>}
+              </td>
               <td className="px-4 py-3">{row.proveedor_nombre || '-'}</td>
               <td className="px-4 py-3 text-muted">{formatDate(row.fecha_orden)}</td>
               <td className="px-4 py-3"><span className="text-xs font-semibold text-sky-400">{row.estado}</span></td>
@@ -343,7 +425,7 @@ function ReceptionTable({ rows, loading }) {
       <table className="w-full text-sm min-w-[860px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Recepcion', 'OC', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Factura / Fisico', 'Diferencias', 'Usuario'].map((c) => (
+            {['Recepcion', 'OC / Maquila', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Fact. acum. / Aceptado', 'Conciliacion', 'Usuario'].map((c) => (
               <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
             ))}
           </tr>
@@ -354,15 +436,15 @@ function ReceptionTable({ rows, loading }) {
           {!loading && rows.map((r) => (
             <tr key={`${r.id}-${r.lote || ''}`} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs">{r.numero}</td>
-              <td className="px-4 py-3 font-mono text-xs">{r.orden_compra_numero || '-'}</td>
+              <td className="px-4 py-3 font-mono text-xs">{r.orden_compra_numero || '-'}{r.ordenes_maquila && <span className="block text-primary">{r.ordenes_maquila}</span>}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.siigo_purchase_name || '-'}</td>
               <td className="px-4 py-3 text-muted text-xs">{formatDate(r.completado_en || r.creado_en)}</td>
               <td className="px-4 py-3">{r.proveedor_nombre || '-'}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.sku || '-'}</td>
               <td className="px-4 py-3">{r.producto_nombre || '-'}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.lote || '-'}</td>
-              <td className="px-4 py-3 tabular-nums text-xs">{r.cantidad_oc ?? '-'} / {r.cantidad_factura ?? r.cantidad_esp ?? '-'} / {r.cantidad_fisica ?? r.cantidad_rec ?? '-'}</td>
-              <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.diferencia_oc_factura) !== 0 ? 'text-yellow-400' : 'text-muted'}>OC-F: {r.diferencia_oc_factura ?? '-'}</span><span className={`block ${Number(r.diferencia_factura_fisica) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>F-Fis: {r.diferencia_factura_fisica ?? '-'}</span></td>
+              <td className="px-4 py-3 tabular-nums text-xs">{r.cantidad_oc ?? '-'} / {r.cantidad_factura_acumulada ?? r.cantidad_factura ?? r.cantidad_esp ?? '-'} / {r.cantidad_aceptada_acumulada ?? r.cantidad_fisica ?? r.cantidad_rec ?? '-'}</td>
+              <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.saldo_oc) > 0 ? 'text-yellow-400' : 'text-green-400'}>Saldo OC: {r.saldo_oc ?? '-'}</span><span className={`block ${Number(r.diferencia_factura_fisica) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>Factura-Fisico: {r.diferencia_factura_fisica ?? '-'}</span></td>
               <td className="px-4 py-3">{r.usuario_nombre || '-'}</td>
             </tr>
           ))}
@@ -381,6 +463,15 @@ function Field({ label, required, children }) {
       {children}
     </div>
   )
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('No fue posible leer el PDF'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function Spin() {

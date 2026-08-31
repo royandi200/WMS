@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { resolvePrimaryWarehouse } = require('./warehouses');
 const { notifyRoles } = require('./builderbot-notifications');
+const { assertInternalProductionProduct } = require('./product-modes');
 
 function httpError(status, message, data) {
   const error = new Error(message);
@@ -24,7 +25,7 @@ async function resolveProduct(conn, value) {
   const term = String(value || '').trim();
   const numericId = Number(term);
   const [rows] = await conn.execute(
-    `SELECT id, siigo_code, nombre FROM productos
+    `SELECT id, siigo_code, nombre, modalidad_operativa FROM productos
      WHERE id = ? OR siigo_code = ? LIMIT 1`,
     [Number.isFinite(numericId) ? numericId : 0, term]
   );
@@ -54,12 +55,13 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
   try {
     await conn.beginTransaction();
     const finalProduct = await resolveProduct(conn, product);
+    assertInternalProductionProduct(finalProduct);
     const warehouseId = await defaultWarehouse(conn);
     const [bom] = await conn.execute(
       `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
               p.siigo_code AS sku, p.nombre
        FROM bom b JOIN productos p ON p.id = b.insumo_id
-       WHERE b.producto_final_id = ? ORDER BY b.id`,
+       WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION' ORDER BY b.id`,
       [finalProduct.id]
     );
     if (!bom.length) throw httpError(422, `No existe BOM para ${finalProduct.siigo_code}`);

@@ -21,6 +21,7 @@ const AprobacionesPage = lazy(() => import('./pages/AprobacionesPage'))
 const WebhookLogsPage  = lazy(() => import('./pages/WebhookLogsPage'))
 const UsuariosPage     = lazy(() => import('./pages/UsuariosPage'))
 const NotificacionesPage = lazy(() => import('./pages/NotificacionesPage'))
+const OutsourcingPage = lazy(() => import('./pages/OutsourcingPage'))
 
 function PageLoader() {
   return (
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="devoluciones" element={<CapabilityRoute capability="returns.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><DevolucionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="inventario"   element={<CapabilityRoute capability="inventory.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><InventarioPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="produccion"   element={<CapabilityRoute capability="production.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><ProduccionPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
+            <Route path="maquila"      element={<CapabilityRoute capability="outsourcing.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><OutsourcingPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="mermas"       element={<CapabilityRoute capability="waste.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><MermasPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="kardex"       element={<CapabilityRoute capability="inventory.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><KardexPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="aprobaciones" element={<CapabilityRoute capability="approvals.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><AprobacionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />

@@ -108,13 +108,22 @@ test('environment flag parsing is explicit', () => {
 test('purchase order normalization is deterministic and validates quantities', () => {
   const input = {
     numero: 'OC-100',
+    tercero_id: 25,
     proveedor_nombre: 'Proveedor QA',
     items: [{ sku: 'SKU-1', cantidad: 12, unidad: 'und' }],
   };
   const first = normalizePurchaseOrderInput(input);
   const second = normalizePurchaseOrderInput(input);
   assert.equal(first.hash, second.hash);
+  assert.equal(
+    first.hash,
+    normalizePurchaseOrderInput({ ...input, proveedor_nombre: 'Nombre manipulado' }).hash
+  );
   assert.equal(first.items[0].quantity, 12);
+  assert.throws(
+    () => normalizePurchaseOrderInput({ ...input, tercero_id: null }),
+    /proveedor sincronizado/
+  );
   assert.throws(
     () => normalizePurchaseOrderInput({ ...input, items: [{ sku: 'SKU-1', cantidad: 0 }] }),
     /Cantidad invalida/

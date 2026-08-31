@@ -4,6 +4,7 @@ const https = require('https');
 const { createConnection, query } = require('../../_lib/db');
 const { cors, requireCapability } = require('../../_lib/auth');
 const { CAPABILITIES } = require('../../_lib/capabilities');
+const { assertInternalProductionProduct } = require('../../_lib/product-modes');
 
 const BB_TOKEN = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
@@ -309,9 +310,16 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
   const bodegaId = await getDefaultBodega(conn, payload);
 
   if (accion === 'SOLICITAR_INICIO_PRODUCCION') {
-    const [orders] = await conn.execute(`SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1 FOR UPDATE`, [payload.order_id]);
+    const [orders] = await conn.execute(
+      `SELECT op.*, p.siigo_code, p.modalidad_operativa
+       FROM ordenes_produccion op
+       JOIN productos p ON p.id = op.producto_id
+       WHERE op.id = ? LIMIT 1 FOR UPDATE`,
+      [payload.order_id]
+    );
     if (!orders.length) throw httpError(404, `Orden #${payload.order_id} no encontrada`);
     const order = orders[0];
+    assertInternalProductionProduct(order);
     if (!['PLANEADA', 'APROBADA'].includes(order.estado)) {
       throw httpError(409, `La orden ${order.codigo_orden} esta en estado ${order.estado}`);
     }
@@ -320,7 +328,7 @@ async function executeApprovedPayload(conn, { accion, payload, userId }) {
       `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad, p.siigo_code
        FROM bom b
        JOIN productos p ON p.id = b.insumo_id
-       WHERE b.producto_final_id = ?`,
+       WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION'`,
       [order.producto_id]
     );
 

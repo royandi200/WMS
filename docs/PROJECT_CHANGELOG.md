@@ -1,6 +1,6 @@
 # Estado y bitácora del proyecto WMS
 
-Última actualización: 2026-08-05
+Última actualización: 2026-08-30
 
 ## Propósito
 
@@ -14,6 +14,41 @@ No reemplaza:
 - `docs/validacion-flujos-bodega-2026-08-04.md`, que documenta los smokes integrados.
 
 ## Resumen actual
+
+### 2026-08-30 - OC en PDF y flujo de maquila 3Q
+
+- La orden de compra exige PDF validado por firma, tipo, tamano y SHA-256, ademas de items estructurados para conciliacion.
+- Las nuevas OC exigen seleccionar un proveedor activo sincronizado desde Siigo; se elimino el nombre libre para cerrar el cruce contable por identidad.
+- Los documentos se almacenan fuera de los listados y se descargan mediante una ruta autenticada con cabeceras de descarga segura.
+- Se creo el flujo de maquila `PT`: OC -> reserva FEFO -> remision en borrador -> confirmacion de salida -> custodia externa 3Q -> recepcion Siigo parcial -> conciliacion.
+- 3Q no se modela como bodega ni ubicacion. Se conserva lote y ubicacion interna de origen y un saldo de custodia por SKU y unidad.
+- Sofi administra ordenes, remisiones iniciales y material adicional. Nelly vincula cada linea `PT` recibida con su orden 3Q.
+- Remisiones confirmadas son idempotentes; remisiones en borrador pueden cancelarse y liberan reservas en una transaccion.
+- La OC acumula facturas y recepciones parciales. Solo la cantidad `DISPONIBLE` reduce el saldo pendiente; cuarentena y rechazo no cierran la orden.
+- El material adicional confirmado se separa para conciliacion como merma de maquila.
+- Validacion local: 78 pruebas aprobadas, build Vite de produccion aprobado y cero vulnerabilidades npm en dependencias de produccion.
+- Se actualizaron `react-router-dom`, `postcss` y `nanoid` a revisiones corregidas. Queda pendiente migrar Vite 5 a Vite 8 para retirar la alerta del servidor de desarrollo; el servidor actual conserva el enlace local por defecto y no afecta el bundle desplegado.
+- La migracion se aplico en QA: siete tablas 3Q creadas, cuatro columnas acumuladas agregadas y tres tablas heredadas convertidas de MyISAM a InnoDB, sin filas huerfanas.
+- Estado operativo: codigo local y esquema QA terminados; despliegue, inventario de prueba, prueba funcional y handlers de WhatsApp pendientes.
+- Contrato detallado: `docs/flujo-orden-compra-y-maquila-3q.md`.
+
+### 2026-08-26 - Datos maestros y BOM desde el acta 5.2
+
+- La sección 5.2 del acta de Infinity Brands se estableció como fuente canónica de productos terminados, modalidades y relaciones de materiales.
+- Se cargaron 30 productos terminados: 21 de producción interna (`PR`), 3 de maquila tercerizada (`PT`) y 6 in-and-out (`IO`).
+- La carga abarca 75 códigos entre productos terminados e insumos y 113 relaciones BOM: 101 de `PRODUCCION` y 12 de `ENVIO`.
+- Las seis filas autorreferenciadas `IO` se usan para clasificación y no se cargan como BOM.
+- Tres pares producto-insumo repetidos se normalizaron a una sola relación sin sumar cantidades; la evidencia conserva las filas de origen.
+- MySQL incorpora `productos.modalidad_operativa` y `bom.etapa`, con barreras que impiden crear producción interna para productos `PT`, `IO` o sin modalidad.
+- Se generaron respaldos `backup_productos_pre_acta_20260826`, `backup_skus_pre_acta_20260826` y `backup_bom_pre_acta_20260826` antes de reemplazar los datos maestros afectados.
+- Se eliminaron 43 alias SKU heredados en dos pasadas; el catálogo visible quedó en 79 filas activas: 75 referencias de la sección 5.2 y cuatro cajas vigentes ya existentes.
+- Los productos ajenos al conjunto vigente del acta quedaron inactivos para preservar sus relaciones históricas sin exponer referencias obsoletas; no quedó ningún SKU ligado a un producto inactivo.
+- El importador reserva además los cinco códigos de embalaje restantes del acta para que no sean desactivados cuando se creen con la funcionalidad de empaque.
+- Regla de maquila confirmada: 3Q recibe los materiales de envase del BOM, que pueden compartir SKU con producción interna, pero no recibe gomas. Las entregas adicionales se conciliarán como merma de la orden de maquila y queda pendiente vincular la identidad exacta de 3Q con Siigo.
+- Cajas master confirmadas, sin sustitución por tener diseños diferentes: Calm Vibes usa `00041-CMCV`; CreaGums de 120 y 140 usa `00042-CMCG`; Vinagre usa `00040-CMV`.
+- El importador es reproducible, usa bloqueo nominal, transacción, validación previa, verificación posterior y `dry-run` por defecto.
+- Validación: 68 pruebas aprobadas; 75/75 códigos fuente activos y con SKU principal; cero SKU de productos inactivos, BOM `IO`, duplicados o cruces incompatibles de modalidad/etapa.
+- Esta carga no sustituye el inventario inicial ni las ubicaciones definitivas. Los movimientos e inventario QA deberán depurarse antes del corte productivo.
 
 ### 2026-08-05 - Limpieza conservadora previa a demostracion
 
@@ -335,7 +370,7 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 5. Completar el ciclo de reservas para despachos parciales antes de habilitarlo.
 6. Instalar o verificar la CA de MySQL; la opción TLS actual puede usar `rejectUnauthorized=false`.
 7. Confirmar con el cliente el uso real de órdenes de compra en Siigo.
-8. Separar y depurar datos QA antes de producción; los SKU del cliente son reales, pero BOM y movimientos de prueba no lo son necesariamente.
+8. Cargar ubicaciones e inventario inicial definitivos y depurar movimientos, lotes y stock QA antes de producción; el BOM canónico ya proviene del acta 5.2.
 9. Actualizar o reemplazar `README.md`, `docs/architecture.md` y `docs/siigo-integration.md`, que describen componentes históricos.
 10. Reducir la respuesta pública de `/api/v1/health`: actualmente expone nombres, conteos de columnas e identificadores recientes que no son necesarios para monitoreo externo.
 

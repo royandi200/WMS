@@ -7,6 +7,8 @@ const { pushCompraToSiigo } = require('../_lib/siigo.purchases');
 const { normalizeReceptionDistributions } = require('../_lib/reception-distributions');
 const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
 const { workflowFlags } = require('../_lib/feature-flags');
+const { PRODUCT_MODES } = require('../_lib/product-modes');
+const { reconcileOutsourcingReception } = require('../_lib/outsourcing-workflow');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -80,6 +82,10 @@ async function handleGet(req, res) {
        r.numero,
        r.orden_compra_id,
        oc.numero AS orden_compra_numero,
+       (SELECT GROUP_CONCAT(DISTINCT om.codigo ORDER BY om.codigo SEPARATOR ', ')
+          FROM maquila_recepciones mr
+          JOIN ordenes_maquila om ON om.id = mr.orden_maquila_id
+         WHERE mr.recepcion_id = r.id) AS ordenes_maquila,
        r.proveedor_nombre,
        r.estado,
        r.siigo_purchase_id,
@@ -95,13 +101,18 @@ async function handleGet(req, res) {
        ri.producto_id,
        p.siigo_code AS sku,
        p.nombre AS producto_nombre,
+       p.modalidad_operativa,
        ri.lote,
        ri.fecha_venc,
        ri.cantidad_esp,
        ri.cantidad_rec
        ,rci.cantidad_oc
        ,rci.cantidad_factura
+       ,rci.cantidad_factura_acumulada
        ,rci.cantidad_fisica
+       ,rci.cantidad_fisica_acumulada
+       ,rci.cantidad_aceptada_acumulada
+       ,rci.saldo_oc
        ,rci.diferencia_oc_factura
        ,rci.diferencia_factura_fisica
      FROM recepciones r
@@ -304,7 +315,7 @@ async function handlePut(req, res) {
     }
 
     const [items] = await conn.execute(
-      `SELECT ri.*, p.siigo_code
+      `SELECT ri.*, p.siigo_code, p.modalidad_operativa
        FROM recepcion_items ri
        JOIN productos p ON p.id = ri.producto_id
        WHERE ri.recepcion_id = ?
@@ -314,12 +325,58 @@ async function handlePut(req, res) {
     );
     if (!items.length) throw httpError(409, 'La recepcion no tiene items importados');
 
+    const outsourcingOrderIds = new Set();
+    for (const item of items) {
+      const input = receivedItemInput(body, item, items.length) || {};
+      const outsourcingOrderId = Number(
+        input.orden_maquila_id || input.outsourcing_order_id
+        || body.orden_maquila_id || body.outsourcing_order_id || 0
+      ) || null;
+      if (item.modalidad_operativa === PRODUCT_MODES.OUTSOURCED) {
+        if (!hasCapability(user.rol, CAPABILITIES.OUTSOURCING_RECEIVE)) {
+          throw httpError(403, 'No tienes permiso para vincular recepciones de maquila');
+        }
+        if (!outsourcingOrderId) {
+          throw httpError(400, `Debes vincular una orden 3Q para ${item.siigo_code}`);
+        }
+        const [outsourcingOrders] = await conn.execute(
+          `SELECT id, codigo, orden_compra_id, producto_id, estado
+             FROM ordenes_maquila WHERE id = ? LIMIT 1 FOR UPDATE`,
+          [outsourcingOrderId]
+        );
+        if (!outsourcingOrders.length) throw httpError(404, `Orden 3Q no encontrada para ${item.siigo_code}`);
+        const outsourcingOrder = outsourcingOrders[0];
+        if (Number(outsourcingOrder.producto_id) !== Number(item.producto_id)) {
+          throw httpError(409, `La orden ${outsourcingOrder.codigo} no corresponde a ${item.siigo_code}`);
+        }
+        if (!['EN_3Q', 'RECIBIDA_PARCIAL'].includes(outsourcingOrder.estado)) {
+          throw httpError(409, `La orden ${outsourcingOrder.codigo} esta ${outsourcingOrder.estado}`);
+        }
+        if (!purchaseOrder || Number(outsourcingOrder.orden_compra_id) !== Number(purchaseOrder.id)) {
+          throw httpError(409, `La orden ${outsourcingOrder.codigo} no pertenece a la OC seleccionada`);
+        }
+        await conn.execute(
+          `INSERT INTO maquila_recepciones
+             (orden_maquila_id, recepcion_id, producto_id, vinculado_por, creado_en)
+           VALUES (?, ?, ?, ?, NOW())`,
+          [outsourcingOrder.id, receptionId, item.producto_id, user.id]
+        );
+        outsourcingOrderIds.add(outsourcingOrder.id);
+      } else if (outsourcingOrderId) {
+        throw httpError(409, `${item.siigo_code} no es un producto de maquila tercerizada`);
+      }
+    }
+
     const results = [];
     const receptionTxId = crypto.randomUUID();
     let hasDifference = false;
     for (const item of items) {
       const input = receivedItemInput(body, item, items.length);
       if (!input) throw httpError(400, `Falta confirmar el item ${item.siigo_code}`);
+      if (item.modalidad_operativa === PRODUCT_MODES.OUTSOURCED
+          && (!Array.isArray(input.distributions) || !input.distributions.length)) {
+        throw httpError(400, `La recepcion 3Q de ${item.siigo_code} requiere distribuciones por condicion`);
+      }
 
       const distributed = await processDistributedItem(conn, {
         item, input, reception, user, receptionId, body, txId: receptionTxId,
@@ -451,34 +508,70 @@ async function handlePut(req, res) {
       const invoiced = new Map(items.map(item => [Number(item.producto_id), Number(item.cantidad_esp)]));
       const physical = new Map(items.map((item, index) => [Number(item.producto_id), Number(results[index]?.recibido || 0)]));
       const productIds = [...new Set([...ordered.keys(), ...invoiced.keys(), ...physical.keys()])];
+      const cumulativeProgress = new Map();
       for (const productId of productIds) {
         const qtyOrdered = ordered.get(productId) || 0;
         const qtyInvoiced = invoiced.get(productId) || 0;
         const qtyPhysical = physical.get(productId) || 0;
+        const [cumulativeRows] = await conn.execute(
+          `SELECT COALESCE(SUM(ri.cantidad_esp), 0) AS facturada,
+                  COALESCE(SUM(ri.cantidad_rec), 0) AS fisica
+             FROM recepciones r
+             JOIN recepcion_items ri ON ri.recepcion_id = r.id
+            WHERE r.orden_compra_id = ? AND r.estado <> 'anulada' AND ri.producto_id = ?`,
+          [purchaseOrder.id, productId]
+        );
+        const [acceptedRows] = await conn.execute(
+          `SELECT COALESCE(SUM(rd.cantidad), 0) AS aceptada
+             FROM recepciones r
+             JOIN recepcion_items ri ON ri.recepcion_id = r.id
+             JOIN recepcion_distribuciones rd
+               ON rd.recepcion_id = r.id AND rd.recepcion_item_id = ri.id
+            WHERE r.orden_compra_id = ? AND r.estado <> 'anulada'
+              AND ri.producto_id = ? AND rd.condicion = 'DISPONIBLE'`,
+          [purchaseOrder.id, productId]
+        );
+        const cumulativeInvoiced = Number(cumulativeRows[0]?.facturada || 0);
+        const cumulativePhysical = Number(cumulativeRows[0]?.fisica || 0);
+        const cumulativeAccepted = Number(acceptedRows[0]?.aceptada || 0);
+        const pending = Number(Math.max(qtyOrdered - cumulativeAccepted, 0).toFixed(4));
+        cumulativeProgress.set(productId, { ordered: qtyOrdered, accepted: cumulativeAccepted });
         const orderInvoiceDiff = Number((qtyInvoiced - qtyOrdered).toFixed(4));
         const invoicePhysicalDiff = Number((qtyPhysical - qtyInvoiced).toFixed(4));
-        if (Math.abs(orderInvoiceDiff) > 0.0001) hasDifference = true;
+        if (qtyOrdered <= 0 || cumulativeInvoiced > qtyOrdered + 0.0001
+            || cumulativeAccepted > qtyOrdered + 0.0001) hasDifference = true;
         await conn.execute(
           `INSERT INTO recepcion_conciliacion_items
              (recepcion_id, orden_compra_id, producto_id, cantidad_oc,
-              cantidad_factura, cantidad_fisica, diferencia_oc_factura,
-              diferencia_factura_fisica, creado_en)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+              cantidad_factura, cantidad_factura_acumulada, cantidad_fisica,
+              cantidad_fisica_acumulada, cantidad_aceptada_acumulada,
+              diferencia_oc_factura, diferencia_factura_fisica, saldo_oc, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
           [receptionId, purchaseOrder.id, productId, qtyOrdered, qtyInvoiced,
-           qtyPhysical, orderInvoiceDiff, invoicePhysicalDiff]
+           cumulativeInvoiced, qtyPhysical, cumulativePhysical, cumulativeAccepted,
+           orderInvoiceDiff, invoicePhysicalDiff, pending]
         );
         reconciliation.push({
           producto_id: productId,
           cantidad_oc: qtyOrdered,
           cantidad_factura: qtyInvoiced,
+          cantidad_factura_acumulada: cumulativeInvoiced,
           cantidad_fisica: qtyPhysical,
+          cantidad_fisica_acumulada: cumulativePhysical,
+          cantidad_aceptada_acumulada: cumulativeAccepted,
+          saldo_oc: pending,
           diferencia_oc_factura: orderInvoiceDiff,
           diferencia_factura_fisica: invoicePhysicalDiff,
         });
       }
+      const allFulfilled = ordered.size > 0 && [...ordered.entries()].every(([productId, qty]) => {
+        const progress = cumulativeProgress.get(productId);
+        return progress && progress.accepted + 0.0001 >= qty;
+      });
+      const anyAccepted = [...cumulativeProgress.values()].some(progress => progress.accepted > 0.0001);
       await conn.execute(
         `UPDATE ordenes_compra_proveedor SET estado = ?, actualizado_en = NOW() WHERE id = ?`,
-        [hasDifference ? 'RECIBIDA' : 'CERRADA', purchaseOrder.id]
+        [allFulfilled ? 'CERRADA' : anyAccepted ? 'RECIBIDA' : 'FACTURA_VINCULADA', purchaseOrder.id]
       );
     }
 
@@ -498,6 +591,14 @@ async function handlePut(req, res) {
       [user.id, user.id, discrepancy, discrepancy, discrepancy, receptionId]
     );
 
+    const outsourcing = [];
+    for (const outsourcingOrderId of outsourcingOrderIds) {
+      outsourcing.push(await reconcileOutsourcingReception(conn, {
+        outsourcingOrderId,
+        userId: user.id,
+      }));
+    }
+
     await conn.commit();
     return res.status(200).json({
       ok: true,
@@ -509,6 +610,7 @@ async function handlePut(req, res) {
         diferencia: hasDifference,
         items: results,
         conciliacion: reconciliation,
+        maquila: outsourcing,
       },
     });
   } catch (err) {

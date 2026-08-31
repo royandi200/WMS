@@ -16,6 +16,10 @@
     "test:rbac:live": "node scripts/qa/client-rbac-smoke.js",
     "test:webhook:live": "node --use-system-ca scripts/qa/builderbot-webhook-smoke.js",
     "cleanup:qa": "node scripts/qa/cleanup-demo-data.js",
+    "data:acta:dry-run": "node scripts/import-acta-5-2.js",
+    "data:acta:apply": "node scripts/import-acta-5-2.js --apply --yes-i-understand-this-replaces-bom",
+    "data:outsourcing:dry-run": "node scripts/apply-outsourcing-migration.js",
+    "data:outsourcing:apply": "node scripts/apply-outsourcing-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {

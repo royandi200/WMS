@@ -96,6 +96,7 @@ const {
 const { workflowFlags } = require('../../_lib/feature-flags');
 const { formatPendingApprovals } = require('../../_lib/pending-approvals');
 const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufacturing-capacity');
+const { assertInternalProductionProduct } = require('../../_lib/product-modes');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -910,17 +911,21 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
 
     case 'SOLICITAR_INICIO_PRODUCCION': {
       const [ordenRows] = await db.execute(
-        `SELECT * FROM ordenes_produccion WHERE id = ? LIMIT 1`, [payload.order_id]
+        `SELECT op.*, p.siigo_code, p.modalidad_operativa
+         FROM ordenes_produccion op
+         JOIN productos p ON p.id = op.producto_id
+         WHERE op.id = ? LIMIT 1`, [payload.order_id]
       );
       if (!ordenRows.length) throw { status: 404, message: `Orden #${payload.order_id} no encontrada` };
       const orden = ordenRows[0];
+      assertInternalProductionProduct(orden);
 
       const [bom] = await db.execute(
         `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
                 pr.siigo_code, pr.nombre
          FROM bom b
          JOIN productos pr ON pr.id = b.insumo_id
-         WHERE b.producto_final_id = ?`, [orden.producto_id]
+         WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION'`, [orden.producto_id]
       ).catch(() => [[]]);
 
       const reservados = [];
@@ -1341,6 +1346,7 @@ module.exports = async (req, res) => {
       // ── 2. SOLICITAR_INICIO_PRODUCCION ───────────────────────
       case 'SOLICITAR_INICIO_PRODUCCION': {
         const p        = await findProductBySku(db, params.id_producto_final);
+        assertInternalProductionProduct(p);
         const cantPlan = Number(params.cantidad_planificada) || 0;
 
         const [bom] = await db.execute(
@@ -1348,7 +1354,7 @@ module.exports = async (req, res) => {
                   pr.siigo_code, pr.nombre
            FROM bom b
            JOIN productos pr ON pr.id = b.insumo_id
-           WHERE b.producto_final_id = ?`, [p.id]
+           WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION'`, [p.id]
         ).catch(() => [[]]);
 
         const faltantes = [];
@@ -2406,10 +2412,11 @@ module.exports = async (req, res) => {
           throw { status: 400, message: 'cantidad_deseada debe ser positiva' };
         }
         const p = await findProductBySku(db, productReference);
+        assertInternalProductionProduct(p);
         const [bom] = await db.execute(
           `SELECT b.*, pr.siigo_code, pr.id AS insumo_id FROM bom b
            JOIN productos pr ON pr.id = b.insumo_id
-           WHERE b.producto_final_id = ?`, [p.id]
+           WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION'`, [p.id]
         ).catch(() => [[]]);
         if (!bom.length) {
           throw { status: 409, message: `${productReference} no tiene BOM configurado` };

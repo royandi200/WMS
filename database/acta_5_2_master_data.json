@@ -1,0 +1,1250 @@
+{
+  "source": {
+    "document": "Acta de actualizacion de alcance y requisitos WMS - Infinity Brands",
+    "url": "https://docs.google.com/document/d/1-VYAI9UawsEd-BaHsdD0Uck3BQ_jS5L21GgGIiqn4Tg/edit?tab=t.0",
+    "section": "5.2",
+    "revision_id": "AIroW37ek207Sh8_Etu2obbO8tiUv2gfyKCRoxX_Ei9SKcevbWe1-0gHtjY6LVcgzGu8jGvPAS6Zb8UjApznMGJN7kmjsfld5eGtjqPudq0",
+    "extracted_on": "2026-08-26",
+    "convention": {
+      "PR": "produccion normal",
+      "PT": "producto terminado maquila tercerizada",
+      "IO": "in & out"
+    }
+  },
+  "normalization": {
+    "decimal_separator": "comma converted to dot",
+    "units": {
+      "und|unidad": "und",
+      "g|gramo|gramos": "g"
+    },
+    "stages": {
+      "Produccion|Prodccion|Porduccion": "PRODUCCION",
+      "Envio": "ENVIO",
+      "blank": null
+    },
+    "duplicate_policy": "same producto-insumo pair is loaded once without summing quantity",
+    "io_policy": "self-referential IO rows classify the product and are not loaded into bom"
+  },
+  "rows": [
+    {
+      "source_row": 2,
+      "producto": "00102-PTASH60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 3,
+      "producto": "00102-PTASH60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 4,
+      "producto": "00102-PTASH60",
+      "insumo": "00017-ETASH60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta de 60"
+    },
+    {
+      "source_row": 5,
+      "producto": "00102-PTASH60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 6,
+      "producto": "00102-PTASH60",
+      "insumo": "00051-MPASH",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 7,
+      "producto": "00200-PTASH120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 8,
+      "producto": "00200-PTASH120",
+      "insumo": "00002-TPGB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 9,
+      "producto": "00200-PTASH120",
+      "insumo": "00028-ETASH120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta de 120"
+    },
+    {
+      "source_row": 10,
+      "producto": "00200-PTASH120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 11,
+      "producto": "00200-PTASH120",
+      "insumo": "00051-MPASH",
+      "cantidad": 360,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia Prima"
+    },
+    {
+      "source_row": 12,
+      "producto": "00105-PTBOS60",
+      "insumo": "00018-ETBOS60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Etiqueta de 60"
+    },
+    {
+      "source_row": 13,
+      "producto": "00105-PTBOS60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 14,
+      "producto": "00105-PTBOS60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 15,
+      "producto": "00105-PTBOS60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 16,
+      "producto": "00105-PTBOS60",
+      "insumo": "00018-ETBOS60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Etiqueta booster 60"
+    },
+    {
+      "source_row": 17,
+      "producto": "00106-PTCLT60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 18,
+      "producto": "00106-PTCLT60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 19,
+      "producto": "00106-PTCLT60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 20,
+      "producto": "00106-PTCLT60",
+      "insumo": "00013-ETCT60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "etiqueta"
+    },
+    {
+      "source_row": 21,
+      "producto": "00106-PTCLT60",
+      "insumo": "00047-MPCBCT",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 22,
+      "producto": "00106-PTCV60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 23,
+      "producto": "00106-PTCV60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 24,
+      "producto": "00106-PTCV60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner de 60"
+    },
+    {
+      "source_row": 25,
+      "producto": "00106-PTCV60",
+      "insumo": "00010-ETCV60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta 60"
+    },
+    {
+      "source_row": 26,
+      "producto": "00106-PTCV60",
+      "insumo": "00047-MPCBCT",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 27,
+      "producto": "00109-PTCOL60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 28,
+      "producto": "00109-PTCOL60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 29,
+      "producto": "00109-PTCOL60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 30,
+      "producto": "00109-PTCOL60",
+      "insumo": "00011-ETCOL60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 31,
+      "producto": "00109-PTCOL60",
+      "insumo": "00044-MPCBR",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 32,
+      "producto": "00286-PTCOLV",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 33,
+      "producto": "00286-PTCOLV",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 34,
+      "producto": "00286-PTCOLV",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 35,
+      "producto": "00286-PTCOLV",
+      "insumo": "00020-ETCOLV",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 36,
+      "producto": "00286-PTCOLV",
+      "insumo": "00044-MPCBR",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 37,
+      "producto": "00287-PTVV",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 38,
+      "producto": "00287-PTVV",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 39,
+      "producto": "00287-PTVV",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 40,
+      "producto": "00287-PTVV",
+      "insumo": "00020-ETCOLV",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 41,
+      "producto": "00287-PTVV",
+      "insumo": "00049-MPVM",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 42,
+      "producto": "00110-PTCG120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 43,
+      "producto": "00110-PTCG120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 44,
+      "producto": "00110-PTCG120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 45,
+      "producto": "00110-PTCG120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa"
+    },
+    {
+      "source_row": 46,
+      "producto": "00110-PTCG120",
+      "insumo": "00052-MPCG",
+      "cantidad": 360,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 47,
+      "producto": "00114-PTGF60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 48,
+      "producto": "00114-PTGF60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 49,
+      "producto": "00114-PTGF60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 50,
+      "producto": "00114-PTGF60",
+      "insumo": "00012-ETGF60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 51,
+      "producto": "00114-PTGF60",
+      "insumo": "00048-MPGF",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia Prima"
+    },
+    {
+      "source_row": 52,
+      "producto": "00118-PTMTLS60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 53,
+      "producto": "00118-PTMTLS60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 54,
+      "producto": "00118-PTMTLS60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 55,
+      "producto": "00118-PTMTLS60",
+      "insumo": "00016-ETML60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 56,
+      "producto": "00118-PTMTLS60",
+      "insumo": "000-MPMENT",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 57,
+      "producto": "00120-PTPBT60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 58,
+      "producto": "00120-PTPBT60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 59,
+      "producto": "00120-PTPBT60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 60,
+      "producto": "00120-PTPBT60",
+      "insumo": "00014-ETPR60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 61,
+      "producto": "00120-PTPBT60",
+      "insumo": "00050-MPRO",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 62,
+      "producto": "00231-PTRES60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 63,
+      "producto": "00231-PTRES60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 64,
+      "producto": "00231-PTRES60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 65,
+      "producto": "00231-PTRES60",
+      "insumo": "00015-ETRESI60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 66,
+      "producto": "00125-PTVM60",
+      "insumo": "00006-TRP",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 60"
+    },
+    {
+      "source_row": 67,
+      "producto": "00125-PTVM60",
+      "insumo": "00001-TPBI",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 60"
+    },
+    {
+      "source_row": 68,
+      "producto": "00125-PTVM60",
+      "insumo": "00035-LNTP60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 60"
+    },
+    {
+      "source_row": 69,
+      "producto": "00125-PTVM60",
+      "insumo": "00049-MPVM",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 70,
+      "producto": "00125-PTVM60",
+      "insumo": "00009-ETVM60",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 71,
+      "producto": "00201-PTPBS120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 72,
+      "producto": "00201-PTPBS120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 73,
+      "producto": "00201-PTPBS120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 74,
+      "producto": "00201-PTPBS120",
+      "insumo": "00025-ETPR120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 75,
+      "producto": "00201-PTPBS120",
+      "insumo": "00050-MPRO",
+      "cantidad": 360,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 76,
+      "producto": "00202-PTRESV120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 77,
+      "producto": "00202-PTRESV120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 78,
+      "producto": "00202-PTRESV120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 79,
+      "producto": "00202-PTRESV120",
+      "insumo": "00026-ETRES120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "ENVIO",
+      "modalidad": "PT",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 80,
+      "producto": "00203-PTMTL120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 81,
+      "producto": "00203-PTMTL120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 82,
+      "producto": "00203-PTMTL120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 83,
+      "producto": "00203-PTMTL120",
+      "insumo": "00027-ETML120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 84,
+      "producto": "00203-PTMTL120",
+      "insumo": "000-MPMENT",
+      "cantidad": 360,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia Prima"
+    },
+    {
+      "source_row": 85,
+      "producto": "00204-PTVM120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 86,
+      "producto": "00204-PTVM120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 87,
+      "producto": "00204-PTVM120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 88,
+      "producto": "00204-PTVM120",
+      "insumo": "00023-ETVM120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 89,
+      "producto": "00204-PTVM120",
+      "insumo": "00049-MPVM",
+      "cantidad": 360,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 90,
+      "producto": "00205-PTCV120",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 91,
+      "producto": "00205-PTCV120",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 92,
+      "producto": "00205-PTCV120",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 93,
+      "producto": "00205-PTCV120",
+      "insumo": "00024-ETCV120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 94,
+      "producto": "00205-PTCV120",
+      "insumo": "00047-MPCBCT",
+      "cantidad": 360,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 95,
+      "producto": "00206-PTCG140",
+      "insumo": "00003-TPGG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa de 120"
+    },
+    {
+      "source_row": 96,
+      "producto": "00206-PTCG140",
+      "insumo": "00007-TRG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro de 120"
+    },
+    {
+      "source_row": 97,
+      "producto": "00206-PTCG140",
+      "insumo": "00036-LNTG120",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner 120"
+    },
+    {
+      "source_row": 98,
+      "producto": "00206-PTCG140",
+      "insumo": "00052-MPCG",
+      "cantidad": 438,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia Prima"
+    },
+    {
+      "source_row": 99,
+      "producto": "00206-PTCG140",
+      "insumo": "00030-ETCG140",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta"
+    },
+    {
+      "source_row": 100,
+      "producto": "00207-PTAHSLB",
+      "insumo": "00004-TPALB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa azul"
+    },
+    {
+      "source_row": 101,
+      "producto": "00207-PTAHSLB",
+      "insumo": "00008-TRLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro pastillero"
+    },
+    {
+      "source_row": 102,
+      "producto": "00207-PTAHSLB",
+      "insumo": "00037-LNTLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner"
+    },
+    {
+      "source_row": 103,
+      "producto": "00207-PTAHSLB",
+      "insumo": "000-34FLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Funda"
+    },
+    {
+      "source_row": 104,
+      "producto": "00207-PTAHSLB",
+      "insumo": "00031-ETLBASH",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta x 60"
+    },
+    {
+      "source_row": 105,
+      "producto": "00207-PTAHSLB",
+      "insumo": "00031-ETLBASH",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta x 80"
+    },
+    {
+      "source_row": 106,
+      "producto": "00207-PTAHSLB",
+      "insumo": "00045-MPASHLB",
+      "cantidad": 180,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 107,
+      "producto": "00208-PTRESVLB",
+      "insumo": "00005-TPMLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tapa morada"
+    },
+    {
+      "source_row": 108,
+      "producto": "00208-PTRESVLB",
+      "insumo": "00008-TRLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Tarro pastillero"
+    },
+    {
+      "source_row": 109,
+      "producto": "00208-PTRESVLB",
+      "insumo": "00037-LNTLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Liner"
+    },
+    {
+      "source_row": 110,
+      "producto": "00208-PTRESVLB",
+      "insumo": "000-34FLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Funda"
+    },
+    {
+      "source_row": 111,
+      "producto": "00208-PTRESVLB",
+      "insumo": "00032-ETRLB",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta x 60"
+    },
+    {
+      "source_row": 112,
+      "producto": "00208-PTRESVLB",
+      "insumo": "000293-ETLBRES",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Etiqueta x 80"
+    },
+    {
+      "source_row": 113,
+      "producto": "00208-PTRESVLB",
+      "insumo": "00046-MPRESLB",
+      "cantidad": 1,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    },
+    {
+      "source_row": 114,
+      "producto": "00276-PTZNASHWA",
+      "insumo": "00276-PTZNASHWA",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": null,
+      "modalidad": "IO",
+      "observacion": null
+    },
+    {
+      "source_row": 115,
+      "producto": "00277-PTZNREM",
+      "insumo": "00277-PTZNREM",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": null,
+      "modalidad": "IO",
+      "observacion": null
+    },
+    {
+      "source_row": 116,
+      "producto": "00278-PTZNCUR",
+      "insumo": "00278-PTZNCUR",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": null,
+      "modalidad": "IO",
+      "observacion": null
+    },
+    {
+      "source_row": 117,
+      "producto": "00279-PTZNINO",
+      "insumo": "00279-PTZNINO",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": null,
+      "modalidad": "IO",
+      "observacion": null
+    },
+    {
+      "source_row": 118,
+      "producto": "00280-PTZNQUE",
+      "insumo": "00280-PTZNQUE",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": null,
+      "modalidad": "IO",
+      "observacion": null
+    },
+    {
+      "source_row": 119,
+      "producto": "00281-PTZNMAG",
+      "insumo": "00281-PTZNMAG",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": null,
+      "modalidad": "IO",
+      "observacion": null
+    },
+    {
+      "source_row": 120,
+      "producto": "00286-SAMPV",
+      "insumo": "001-SAMPVIN",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Bolsas"
+    },
+    {
+      "source_row": 121,
+      "producto": "00286-SAMPV",
+      "insumo": "00049-MPVM",
+      "cantidad": 9,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia Prima"
+    },
+    {
+      "source_row": 122,
+      "producto": "00287-SAMPCV",
+      "insumo": "002-SAMCALV",
+      "cantidad": 1,
+      "unidad": "und",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Bolsas"
+    },
+    {
+      "source_row": 123,
+      "producto": "00287-SAMPCV",
+      "insumo": "00047-MPCBCT",
+      "cantidad": 9,
+      "unidad": "g",
+      "etapa": "PRODUCCION",
+      "modalidad": "PR",
+      "observacion": "Materia prima"
+    }
+  ]
+}

@@ -72,6 +72,22 @@ Flujo principal:
 
 La recepcion manual historica no sustituye este flujo y debe reservarse para contingencias controladas.
 
+## Maquila 3Q
+
+El flujo de maquila tercerizada esta implementado inicialmente en API y dashboard:
+
+1. La OC se carga con PDF e items estructurados.
+2. Sofi crea una orden `PT`; el WMS reserva el BOM `ENVIO` por FEFO.
+3. Una remision en borrador muestra lote y ubicacion interna de origen.
+4. Sofi confirma la salida; el material sale del stock local y queda en custodia externa 3Q, sin bodega o ubicacion ficticia.
+5. La factura de compra Siigo crea la recepcion pendiente.
+6. Nelly vincula cada producto `PT` a su orden 3Q y registra lote, vencimiento, ubicacion WMS y condicion.
+7. Las entregas parciales acumulan cantidad disponible hasta completar el objetivo.
+
+Los handlers de WhatsApp para crear, enviar o recibir maquila no estan habilitados. Deben agregarse despues de validar el dashboard y reutilizar `outsourcing-workflow.js`; no se autoriza una ruta de mutacion paralela.
+
+Contrato completo: `docs/flujo-orden-compra-y-maquila-3q.md`.
+
 ## Produccion
 
 ### Liberacion

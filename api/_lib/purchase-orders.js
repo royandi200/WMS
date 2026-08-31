@@ -2,14 +2,13 @@ const crypto = require('crypto');
 
 function normalizePurchaseOrderInput(body = {}) {
   const numero = String(body.numero || body.order_number || '').trim();
-  const proveedorNombre = String(body.proveedor_nombre || body.supplier_name || '').trim() || null;
   const terceroId = Number(body.tercero_id || body.supplier_id || 0) || null;
   const fechaOrden = body.fecha_orden || body.order_date || null;
   const archivoNombre = String(body.archivo_nombre || body.file_name || '').trim() || null;
   const rawItems = Array.isArray(body.items) ? body.items : [];
 
   if (!numero) throw inputError('numero es obligatorio');
-  if (!terceroId && !proveedorNombre) throw inputError('Debes indicar el proveedor');
+  if (!terceroId) throw inputError('Debes seleccionar un proveedor sincronizado');
   if (!rawItems.length) throw inputError('La orden debe tener al menos un item');
 
   const items = rawItems.map((item, index) => {
@@ -33,9 +32,10 @@ function normalizePurchaseOrderInput(body = {}) {
     };
   });
 
-  const canonical = { numero, terceroId, proveedorNombre, fechaOrden, items };
+  const canonical = { numero, terceroId, fechaOrden, items };
   return {
     ...canonical,
+    proveedorNombre: null,
     archivoNombre,
     sourceData: body.datos_origen || body.source_data || null,
     hash: crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex'),

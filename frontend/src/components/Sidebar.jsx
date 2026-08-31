@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Bell, Boxes, ClipboardCheck, ClipboardList, Factory, FileClock, LayoutDashboard,
-  PackageCheck, PackageSearch, RefreshCcw, RotateCcw, Trash2,
+  PackageCheck, PackageOpen, PackageSearch, RefreshCcw, RotateCcw, Trash2,
   Truck, Users, X,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
@@ -14,6 +14,7 @@ const NAV = [
     { to: '/devoluciones', icon: RotateCcw, label: 'Devoluciones', capability: 'returns.read' },
     { to: '/inventario', icon: Boxes, label: 'Inventario', capability: 'inventory.read' },
     { to: '/produccion', icon: Factory, label: 'Produccion', capability: 'production.read' },
+    { to: '/maquila', icon: PackageOpen, label: 'Maquila 3Q', capability: 'outsourcing.read' },
     { to: '/mermas', icon: Trash2, label: 'Mermas', capability: 'waste.read' },
   ] },
   { group: 'Trazabilidad', items: [
