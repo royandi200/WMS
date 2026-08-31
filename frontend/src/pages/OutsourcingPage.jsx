@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, Factory, Plus, Send, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Factory, FileText, Plus, Send, X } from 'lucide-react'
 import {
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
   createOutsourcingOrder,
   listOutsourcingOrders,
+  listWarehouseDocumentDrafts,
   prepareAdditionalOutsourcingShipment,
 } from '../api/outsourcing.api'
 import { listPurchaseOrders } from '../api/purchaseOrders.api'
@@ -22,7 +23,7 @@ export default function OutsourcingPage() {
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
   const canManage = capabilities.includes('*') || capabilities.includes('outsourcing.manage')
   const [tab, setTab] = useState('list')
-  const [data, setData] = useState({ rows: [], pending_shipments: [] })
+  const [data, setData] = useState({ rows: [], pending_shipments: [], document_drafts: [] })
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(null)
@@ -30,11 +31,15 @@ export default function OutsourcingPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [outsourcing, orders] = await Promise.all([
+      const [outsourcing, orders, documents] = await Promise.all([
         listOutsourcingOrders({ limit: 200 }),
         listPurchaseOrders({ limit: 200 }),
+        listWarehouseDocumentDrafts({ limit: 200 }),
       ])
-      setData(outsourcing?.data || { rows: [], pending_shipments: [] })
+      setData({
+        ...(outsourcing?.data || { rows: [], pending_shipments: [] }),
+        document_drafts: documents?.data?.rows || [],
+      })
       setPurchaseOrders(orders?.data?.rows || [])
     } catch (error) {
       showToast(error.response?.data?.error || 'Error al cargar la maquila 3Q', false)
@@ -67,6 +72,7 @@ export default function OutsourcingPage() {
 
   const tabs = [
     ['list', 'Seguimiento'],
+    ['documents', 'Documentos leidos'],
     ...(canManage ? [['create', 'Nueva orden'], ['additional', 'Material adicional']] : []),
   ]
 
@@ -106,6 +112,7 @@ export default function OutsourcingPage() {
           }}
         />
       )}
+      {tab === 'documents' && <DocumentDraftsPanel rows={data.document_drafts || []} loading={loading} />}
       {tab === 'create' && canManage && (
         <CreateForm
           purchaseOrders={purchaseOrders.filter((order) => order.documento_id && !['CANCELADA', 'CERRADA'].includes(order.estado))}
@@ -122,6 +129,47 @@ export default function OutsourcingPage() {
       )}
     </div>
   )
+}
+
+function DocumentDraftsPanel({ rows, loading }) {
+  return <div className="space-y-4">
+    <div className="border-y border-border py-4">
+      <div className="flex items-start gap-3">
+        <FileText size={19} className="mt-0.5 text-primary" />
+        <div><h2 className="text-sm font-semibold text-foreground">Lecturas documentales pendientes</h2><p className="mt-1 max-w-3xl text-xs text-muted">El PDF completa este borrador. Antes de descontar inventario, Sofi debe validar las referencias y vincularlo con una remision 3Q.</p></div>
+      </div>
+    </div>
+    {loading && !rows.length && <p className="py-12 text-center text-sm text-muted">Cargando documentos...</p>}
+    {!loading && !rows.length && <p className="py-12 text-center text-sm text-muted">No hay documentos leidos</p>}
+    {rows.map((row) => {
+      const needsCorrection = row.estado === 'REQUIERE_CORRECCION'
+      return <article key={row.id} className="border border-border bg-surface/40">
+        <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px] lg:items-center">
+          <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere correccion' : 'Pendiente de revision'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {row.origen} | Leido por {row.creado_por_nombre}</p></div>
+          <div><p className="text-xs uppercase text-muted">Fecha documento</p><p className="mt-1 text-sm text-foreground">{formatDateOnly(row.fecha_documento)}</p></div>
+          <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} bultos` : ''}</p></div>
+        </header>
+        <div className="grid gap-4 border-b border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-4">
+          <DocumentField label="Destinatario" value={row.destinatario_nombre} />
+          <DocumentField label="Ciudad / departamento" value={row.ciudad_departamento} />
+          <DocumentField label="Direccion" value={row.direccion} />
+          <DocumentField label="NIT / documento" value={row.nit} />
+          <DocumentField label="Telefono" value={row.telefono} />
+          <DocumentField label="Entrega" value={row.entrega} />
+          <DocumentField label="Recibe" value={row.recibe} />
+          <DocumentField label="Remision WMS" value={row.remision_numero || 'Sin vincular'} emphasis={!row.remision_numero} />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] text-sm"><thead><tr className="border-b border-border bg-surface">{['Codigo / SKU', 'Producto leido', 'Cantidad', 'Vencimiento', 'Lote', 'Catalogo WMS'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}</tr></thead><tbody>{(row.items || []).map((item, index) => <tr key={`${row.id}-${item.sku_extraido}-${index}`} className="border-b border-border/50"><td className="px-4 py-3 font-mono text-xs text-foreground">{item.sku_extraido}</td><td className="px-4 py-3 text-xs">{item.descripcion_extraida}</td><td className="px-4 py-3 tabular-nums">{Number(item.cantidad)}</td><td className="px-4 py-3 text-xs">{formatDateOnly(item.fecha_vencimiento)}</td><td className="px-4 py-3 font-mono text-xs">{item.lote || '-'}</td><td className={`px-4 py-3 text-xs ${item.producto_id ? 'text-green-400' : 'text-red-400'}`}>{item.producto_id ? `${item.sku_catalogo} - ${item.producto_catalogo}` : 'SKU no encontrado'}</td></tr>)}</tbody></table>
+        </div>
+        {(row.advertencias || []).length > 0 && <div className="border-t border-border bg-red-500/5 px-4 py-3"><p className="mb-1 text-xs font-semibold text-red-400">Validaciones pendientes</p>{row.advertencias.map((warning) => <p key={warning} className="text-xs text-muted">- {warning}</p>)}</div>}
+      </article>
+    })}
+  </div>
+}
+
+function DocumentField({ label, value, emphasis = false }) {
+  return <div><p className="text-xs uppercase text-muted">{label}</p><p className={`mt-1 text-sm ${emphasis ? 'text-yellow-400' : 'text-foreground'}`}>{value || '-'}</p></div>
 }
 
 function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCancel }) {
@@ -221,4 +269,8 @@ function Field({ label, children }) {
 
 function formatDate(value) {
   return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+}
+
+function formatDateOnly(value) {
+  return value ? String(value).slice(0, 10) : '-'
 }

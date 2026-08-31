@@ -6,7 +6,8 @@ Estado: implementado localmente y migrado en QA; pendiente de despliegue y prueb
 
 - La orden de compra se origina fuera del WMS y se carga como PDF.
 - Como la API publica de Siigo no entrega la OC, el PDF es la evidencia documental primaria.
-- El PDF no se interpreta automaticamente. Los items se transcriben de forma estructurada para poder conciliar OC, factura y recepcion.
+- El PDF de OC se conserva como evidencia y sus items se transcriben de forma estructurada para conciliar OC, factura y recepcion.
+- Una salida de bodega hacia 3Q puede leerse desde el flujo documental de BuilderBot. La lectura crea un borrador revisable; no confirma ni descuenta inventario.
 - 3Q no se representa como bodega ni ubicacion del WMS.
 - El material confirmado como enviado sale del stock disponible de la bodega y queda bajo custodia externa de 3Q.
 - El WMS conserva la ubicacion interna de origen, pero no inventa una ubicacion dentro de 3Q.
@@ -44,6 +45,20 @@ El BOM `ENVIO` es la lista de materiales que se entrega a 3Q. No se filtran prod
 Al crear la orden, el WMS reserva los materiales y genera una remision 3Q en borrador. Todavia no descuenta inventario.
 
 ## 3. Confirmacion de la salida
+
+### Lectura del documento de salida
+
+El flujo `Documentos de Bodega` de BuilderBot acepta un PDF de salida hacia 3Q y extrae:
+
+- referencia y fecha del documento;
+- destinatario, direccion, ciudad/departamento, NIT y telefono;
+- quien entrega y quien recibe;
+- total de bultos y unidades;
+- por linea: codigo/SKU exacto, descripcion, cantidad, vencimiento y lote.
+
+El WMS compara cada codigo exacto con el catalogo activo y la suma de items con el total declarado. Datos faltantes, SKU inexistentes o diferencias dejan el borrador en `REQUIERE_CORRECCION`; un documento consistente queda en `PENDIENTE_REVISION`.
+
+La descripcion nunca se usa para adivinar un SKU. La persona responsable debe revisar y vincular el borrador con una remision WMS antes de confirmar la salida. El PDF es suficiente para diligenciar el borrador si incluye una referencia visible y todos los campos; no sustituye la segunda confirmacion humana.
 
 La remision muestra SKU, cantidad, unidad, lote y ubicacion interna de origen. Sofi confirma la salida fisica mediante una segunda accion explicita.
 
@@ -113,4 +128,4 @@ El dashboard aplica controles visuales, pero la autorizacion definitiva siempre 
 2. Cargar inventario de prueba para los materiales del BOM `ENVIO`; actualmente 11 de las 12 lineas PT no tienen saldo disponible.
 3. Desplegar API y dashboard juntos.
 4. Ejecutar una prueba con entrega parcial, producto no conforme, material adicional, reintento y cancelacion de remision.
-5. Incorporar handlers de WhatsApp solo despues de aprobar el flujo del dashboard; deben reutilizar estos servicios y no escribir stock por una ruta paralela.
+5. Validar el lector documental con el PDF de prueba antes de usar documentos reales; revisar especialmente referencia, SKU, total, lote y vencimiento.

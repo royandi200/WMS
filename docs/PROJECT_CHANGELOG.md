@@ -15,6 +15,16 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-08-31 - Lectura documental de salidas hacia 3Q
+
+- Se definio un flujo documental dedicado para leer PDF de `SALIDA DE BODEGA` y registrar un borrador estructurado en el WMS.
+- El contrato incluye referencia, fecha, destinatario, datos de contacto, entrega/recibe, bultos, unidades y lineas con SKU, descripcion, cantidad, vencimiento y lote.
+- La coincidencia de producto usa exclusivamente el SKU exacto. Totales diferentes, campos faltantes o codigos desconocidos quedan marcados para correccion.
+- La ingestion es idempotente y restringida a `outsourcing.manage`; los logs omiten direccion, NIT, telefono y detalle de items.
+- El dashboard de Maquila 3Q incorpora la vista `Documentos leidos` con cruce al catalogo y remision WMS.
+- La lectura nunca reserva ni descuenta inventario. Sofi conserva la confirmacion humana de la remision como unica accion de salida.
+- Se agrego un PDF sintetico, claramente marcado como prueba, para validar el flujo sin datos reales del cliente.
+
 ### 2026-08-30 - OC en PDF y flujo de maquila 3Q
 
 - La orden de compra exige PDF validado por firma, tipo, tamano y SHA-256, ademas de items estructurados para conciliacion.

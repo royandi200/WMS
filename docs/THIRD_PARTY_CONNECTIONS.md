@@ -1,6 +1,6 @@
 # Conexiones e integraciones externas del WMS
 
-Última actualización: 2026-08-04
+Última actualización: 2026-08-31
 
 ## Objetivo
 
@@ -28,15 +28,21 @@ Nombre: Bodega Inventarios
 Project ID: 5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d
 ```
 
-Flujos comprobados el 2026-08-04:
+Flujos comprobados el 2026-08-31:
 
 | Flujo | Evento | Flow ID | Answer ID |
 | --- | --- | --- | --- |
 | Entrada | `EVENTS.WELCOME` | `fa49edb8-5ecb-414c-b4d6-aa005ed19343` | `b4e6d905-70c6-4a30-a519-e3eb7e0adcce` |
 | Voz | `EVENTS.VOICE_NOTE` | `79ce1f41-00f7-45ba-a3f3-8f042aebe0a4` | `bca07485-2ad1-449c-aa38-3b851b57f79c` |
 | Salida | `EVENTS.ACTION` | `b2f0efac-6ecd-4133-ae42-9869496feb1c` | `6a45016f-accf-410c-a6bd-9c7118456918` |
+| Reinicio | `Rest@rt` | `af03d6c8-2dfc-4d26-b8fa-723830261f8e` | Legacy, dos answers |
+| Documentos de Bodega | `EVENTS.DOCUMENT` | `bf550a01-5016-4708-90f7-15de95cf9d39` | `eb75fd55-4f16-4361-a235-68ebd834831b` |
 
 Entrada y Voz usan `docs/Prompt WMS.txt`. Voz redirige a Salida. Entrada conserva la regla `body includes g0m@s` hacia Salida.
+
+Documentos de Bodega usa `docs/Prompt WMS Documentos BBC.txt`, tiene analisis documental y contenido sensible habilitados y redirige a Salida. Solo admite salidas de bodega hacia 3Q y produce `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. La API registra un borrador, omite datos de contacto y lineas en logs, y no modifica inventario.
+
+El validador Manager reporta `Entrada` como dead end porque su `rules` legacy contiene objetos que la herramienta moderna no puede interpretar. La lectura directa confirma que Entrada conserva su answer operativo. No reemplazarlo automaticamente para corregir ese falso positivo.
 
 ### Flujo funcional
 

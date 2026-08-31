@@ -97,6 +97,7 @@ const { workflowFlags } = require('../../_lib/feature-flags');
 const { formatPendingApprovals } = require('../../_lib/pending-approvals');
 const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufacturing-capacity');
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
+const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -400,12 +401,27 @@ function normalizeOperationalParams(action, params) {
 }
 
 async function saveLog(db, { from, action, priority, payload, response, status }) {
+  const safePayload = sanitizeWebhookLogPayload(payload, action);
   await db.execute(
     `INSERT INTO webhook_logs (from_phone, action, priority, payload, response, status)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [from || null, action, priority || 'baja',
-     JSON.stringify(payload), JSON.stringify(response || {}), status]
+     JSON.stringify(safePayload), JSON.stringify(response || {}), status]
   ).catch(() => {});
+}
+
+function sanitizeWebhookLogPayload(payload, action) {
+  if (String(action || '').toUpperCase() !== 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO') return payload;
+  const source = payload && typeof payload === 'object' ? payload : {};
+  const info = parseBuilderBotInfo(source);
+  const params = info.params && typeof info.params === 'object' ? info.params : {};
+  return {
+    document_intake: true,
+    action: 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
+    reference: params.referencia_documento || null,
+    document_type: params.tipo_documento || null,
+    item_count: Array.isArray(params.items) ? params.items.length : 0,
+  };
 }
 
 async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload }) {
@@ -1262,6 +1278,31 @@ module.exports = async (req, res) => {
     let mensaje = '';
 
     switch (action) {
+
+      // Document extraction only creates a reviewable draft. It never reserves,
+      // confirms a shipment or changes inventory.
+      case 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO': {
+        const draft = await registerWarehouseDocumentDraft({
+          db,
+          body: params,
+          userId: user.id,
+          origin: 'BUILDERBOT',
+        });
+        const warningLines = (draft.warnings || []).slice(0, 5).map((warning) => `- ${warning}`);
+        mensaje = [
+          draft.duplicate
+            ? `El documento ${draft.referencia_documento} ya estaba registrado. No se duplico.`
+            : `Documento ${draft.referencia_documento} leido y guardado como borrador.`,
+          `Items: ${draft.itemCount} | Total: ${Number(draft.totalUnits || 0)}`,
+          `Estado: ${draft.estado}`,
+          warningLines.length ? 'Revisiones necesarias:' : null,
+          ...warningLines,
+          'Sofi debe revisarlo y vincularlo con la remision 3Q antes de confirmar la salida. No se modifico inventario.',
+        ].filter(Boolean).join('\n');
+        responseContext.document_draft_id = draft.id;
+        responseContext.inventory_changed = false;
+        break;
+      }
 
       // ── 1. INGRESO_RECEPCION ──────────────────────────────────
       case 'INGRESO_RECEPCION': {

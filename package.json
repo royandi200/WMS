@@ -20,6 +20,8 @@
     "data:acta:apply": "node scripts/import-acta-5-2.js --apply --yes-i-understand-this-replaces-bom",
     "data:outsourcing:dry-run": "node scripts/apply-outsourcing-migration.js",
     "data:outsourcing:apply": "node scripts/apply-outsourcing-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:documents:dry-run": "node scripts/apply-document-intake-migration.js",
+    "data:documents:apply": "node scripts/apply-document-intake-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {
