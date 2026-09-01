@@ -148,6 +148,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /Confirmo la orden de compra ID N/u);
   assert.match(prompt, /Confirmo la recepcion ID N/u);
   assert.match(prompt, /todos los productos pendientes/u);
+  assert.match(prompt, /el WMS creara una partida interna/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);
   assert.match(migration, /UNIQUE KEY uk_recepcion_confirmacion_clave/u);
   assert.match(reception, /confirmation_key/u);

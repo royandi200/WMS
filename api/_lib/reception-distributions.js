@@ -10,12 +10,28 @@ const CONDITION_ALIASES = Object.freeze({
   PENDIENTE_DISPOSICION: 'PENDIENTE_DISPOSICION',
 });
 
-function normalizeReceptionDistributions(input = {}) {
+function internalReceptionLot(receptionId, itemId, distributionIndex = 0) {
+  const reception = Number(receptionId);
+  const item = Number(itemId);
+  const index = Number(distributionIndex);
+  if (!Number.isSafeInteger(reception) || reception <= 0
+      || !Number.isSafeInteger(item) || item <= 0
+      || !Number.isSafeInteger(index) || index < 0) {
+    throw inputError('No se pudo generar la partida interna de recepcion');
+  }
+  return `RECINT-${reception}-${item}-${String(index + 1).padStart(2, '0')}`;
+}
+
+function normalizeReceptionDistributions(input = {}, options = {}) {
   if (!Array.isArray(input.distributions) || !input.distributions.length) return null;
+  const requiresLot = options.requiresLot !== false;
   const distributions = input.distributions.map((entry, index) => {
     const condition = CONDITION_ALIASES[String(entry.condicion || entry.condition || '').trim().toUpperCase()];
     const quantity = Number(entry.cantidad ?? entry.quantity);
-    const lot = String(entry.lote || entry.lpn || entry.lot_id || '').trim();
+    const supplierLot = String(entry.lote || entry.lpn || entry.lot_id || '').trim();
+    const lot = supplierLot || (!requiresLot
+      ? internalReceptionLot(options.receptionId, options.itemId, index)
+      : '');
     const locationId = Number(entry.ubicacion_id || entry.location_id || 0) || null;
     const reason = String(entry.motivo || entry.reason || '').trim() || null;
     if (!condition) throw inputError(`Condicion invalida en distribucion ${index + 1}`);
@@ -31,6 +47,8 @@ function normalizeReceptionDistributions(input = {}) {
       condition,
       quantity,
       lot,
+      supplierLot: supplierLot || null,
+      internalLot: !supplierLot,
       locationId,
       expiryDate: entry.fecha_venc || entry.expiry_date || null,
       reason,
@@ -64,4 +82,4 @@ function inputError(message) {
   return error;
 }
 
-module.exports = { normalizeReceptionDistributions };
+module.exports = { internalReceptionLot, normalizeReceptionDistributions };

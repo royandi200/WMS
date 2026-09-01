@@ -49,7 +49,7 @@ async function loadPreparedReception(conn, preparationKey) {
   const reception = rows[0];
   const [items] = await conn.execute(
     `SELECT ri.id AS item_id, ri.producto_id, p.siigo_code AS sku,
-            p.nombre AS producto, p.modalidad_operativa,
+            p.nombre AS producto, p.modalidad_operativa, p.requiere_lote,
             ri.cantidad_esp AS cantidad_pendiente,
             COALESCE(NULLIF(oci.unidad, ''), p.unit_label, 'und') AS unidad
        FROM recepcion_items ri
@@ -58,7 +58,7 @@ async function loadPreparedReception(conn, preparationKey) {
          ON oci.orden_compra_id = ? AND oci.producto_id = ri.producto_id
       WHERE ri.recepcion_id = ?
       GROUP BY ri.id, ri.producto_id, p.siigo_code, p.nombre,
-               p.modalidad_operativa, ri.cantidad_esp, oci.unidad, p.unit_label
+               p.modalidad_operativa, p.requiere_lote, ri.cantidad_esp, oci.unidad, p.unit_label
       ORDER BY ri.id`,
     [reception.orden_compra_id, reception.id]
   );
@@ -88,13 +88,14 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
 
   const [orderedItems] = await conn.execute(
     `SELECT oci.producto_id, p.siigo_code AS sku, p.nombre AS producto,
-            p.modalidad_operativa, SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
+            p.modalidad_operativa, p.requiere_lote,
+            SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
             CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
                  THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad
        FROM orden_compra_proveedor_items oci
        JOIN productos p ON p.id = oci.producto_id
       WHERE oci.orden_compra_id = ?
-      GROUP BY oci.producto_id, p.siigo_code, p.nombre, p.modalidad_operativa
+      GROUP BY oci.producto_id, p.siigo_code, p.nombre, p.modalidad_operativa, p.requiere_lote
       ORDER BY MIN(oci.id)`,
     [orderId]
   );
@@ -160,6 +161,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
       sku: item.sku,
       producto: item.producto,
       modalidad_operativa: item.modalidad_operativa,
+      requiere_lote: Boolean(item.requiere_lote),
       cantidad_ordenada: item.cantidad_ordenada,
       cantidad_aceptada: item.cantidad_aceptada,
       cantidad_pendiente: item.cantidad_pendiente,

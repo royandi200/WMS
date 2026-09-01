@@ -1322,7 +1322,7 @@ module.exports = async (req, res) => {
           const lines = available.flatMap(order => [
             `- ID ${order.id} | ${order.numero} | ${order.proveedor_nombre || 'Proveedor N/A'} | ${formatDateOnly(order.fecha_orden)}`,
             ...order.items.map(item =>
-              `  ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad}`
+              `  ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad}${item.requiere_lote ? ' | lote proveedor requerido' : ''}`
             ),
           ]);
           mensaje = [
@@ -1399,7 +1399,7 @@ module.exports = async (req, res) => {
           break;
         }
         const pending = prepared.reception.items.map(item =>
-          `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
+          `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}${item.requiere_lote ? ' | lote proveedor requerido' : ' | lote opcional'}`
         );
         mensaje = [
           `Recepcion preparada para OC ${prepared.order.numero}.`,
@@ -1407,7 +1407,7 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, lote, vencimiento, condicion y ubicacion.',
+          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, condicion y ubicacion; agrega lote y vencimiento cuando el proveedor los informe.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ID ${prepared.order.id}`,
         ].join('\n');
         responseContext.reception = {

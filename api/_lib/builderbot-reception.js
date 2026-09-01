@@ -39,13 +39,14 @@ async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
   const placeholders = orderIds.map(() => '?').join(',');
   const [orderedItems] = await db.execute(
     `SELECT oci.orden_compra_id, oci.producto_id, p.siigo_code AS sku,
-            p.nombre AS producto, SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
+            p.nombre AS producto, p.requiere_lote,
+            SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
             CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
                  THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad
        FROM orden_compra_proveedor_items oci
        JOIN productos p ON p.id = oci.producto_id
       WHERE oci.orden_compra_id IN (${placeholders})
-      GROUP BY oci.orden_compra_id, oci.producto_id, p.siigo_code, p.nombre
+      GROUP BY oci.orden_compra_id, oci.producto_id, p.siigo_code, p.nombre, p.requiere_lote
       ORDER BY MIN(oci.id)`,
     orderIds
   );
@@ -88,6 +89,7 @@ async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
       producto_id: Number(item.producto_id),
       sku: item.sku,
       producto: item.producto,
+      requiere_lote: Boolean(item.requiere_lote),
       cantidad_pendiente: pending,
       unidad: item.unidad || 'und',
     });
@@ -334,7 +336,7 @@ async function findPreparedReception(db, orderId, params = {}) {
 function suppliedItems(params = {}) {
   const items = params.items || params.productos || params.lineas;
   if (!Array.isArray(items) || !items.length) {
-    throw inputError('Incluye todos los items recibidos con sus lotes, cantidades, condiciones y ubicaciones');
+    throw inputError('Incluye todos los items recibidos con cantidades, condiciones, ubicaciones y el lote del proveedor cuando sea obligatorio');
   }
   if (items.length > 100) throw inputError('La recepcion supera el maximo de 100 items');
   return items;

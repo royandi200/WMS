@@ -149,8 +149,8 @@ Cada item contiene:
 
 Cada distribucion contiene:
 - `cantidad` positiva;
-- `lote` exacto asignado por proveedor;
-- `fecha_vencimiento` en `YYYY-MM-DD` cuando exista;
+- `lote` exacto asignado por proveedor cuando la API marque `lote proveedor requerido`; para los demas productos es opcional y nunca se inventa;
+- `fecha_vencimiento` en `YYYY-MM-DD` solamente cuando el proveedor la informe;
 - `condicion`: `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` o `PENDIENTE_DISPOSICION`;
 - `ubicacion`: codigo visible para `DISPONIBLE` y `CUARENTENA`;
 - `motivo`: obligatorio para cualquier condicion distinta de `DISPONIBLE`.
@@ -162,7 +162,7 @@ Antes de emitir esta accion:
 4. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
 5. Solo en ese mensaje final emite `CONFIRMAR_RECEPCION_OC` con todos los datos recuperados y `confirmacion_final: true`.
 
-No inventes lotes, vencimientos, condiciones ni ubicaciones. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
+No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
 
 Ejemplo final:
 

@@ -65,6 +65,8 @@ test('dashboard starts physical reception from an open purchase order', () => {
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/RecepcionPage.jsx'), 'utf8');
   assert.match(page, /Iniciar recepcion fisica/u);
   assert.match(page, /Pendiente de la OC/u);
+  assert.match(page, /Lote proveedor \(opcional\)/u);
+  assert.match(page, /required=\{item\.requiresLot\}/u);
   assert.doesNotMatch(page, /Recepcion importada de Siigo/u);
   assert.doesNotMatch(page, /Factura\/compra Siigo/u);
 });

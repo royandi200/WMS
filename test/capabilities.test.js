@@ -9,7 +9,7 @@ const {
 } = require('../api/_lib/capabilities');
 const { envFlag, workflowFlags } = require('../api/_lib/feature-flags');
 const { normalizePurchaseOrderInput } = require('../api/_lib/purchase-orders');
-const { normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
+const { internalReceptionLot, normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
 const { notificationsEnabled, normalizePhone, maskPhone, recipientPhones } = require('../api/_lib/builderbot-notifications');
 const {
@@ -164,9 +164,32 @@ test('reception distributions separate available and blocked inventory', () => {
   );
 });
 
+test('reception requires supplier lots only for lot-controlled products', () => {
+  assert.throws(
+    () => normalizeReceptionDistributions({
+      distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1 }],
+    }),
+    /Lote requerido/u
+  );
+
+  const internal = normalizeReceptionDistributions({
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1 }],
+  }, { requiresLot: false, receptionId: 60, itemId: 82 });
+  assert.equal(internal.distributions[0].lot, 'RECINT-60-82-01');
+  assert.equal(internal.distributions[0].internalLot, true);
+  assert.equal(internalReceptionLot(60, 82, 1), 'RECINT-60-82-02');
+
+  const supplied = normalizeReceptionDistributions({
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1, lote: 'PROV-123' }],
+  }, { requiresLot: false, receptionId: 60, itemId: 82 });
+  assert.equal(supplied.distributions[0].lot, 'PROV-123');
+  assert.equal(supplied.distributions[0].internalLot, false);
+});
+
 test('reception writes a complete movement reference and inventory kardex', () => {
   const source = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
   assert.match(source, /'recepcion_siigo_import'/u);
+  assert.match(source, /supplierLotProvided\s*\?\s*'Lote informado por el proveedor'/u);
   assert.match(source, /'recepcion_orden_compra'/u);
   assert.match(source, /'INGRESO_RECEPCION'/u);
   assert.match(source, /reasonsFor\(\['CUARENTENA'\]\)/u);

@@ -4,7 +4,7 @@ const { createConnection, query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { pushCompraToSiigo } = require('../_lib/siigo.purchases');
-const { normalizeReceptionDistributions } = require('../_lib/reception-distributions');
+const { internalReceptionLot, normalizeReceptionDistributions } = require('../_lib/reception-distributions');
 const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
 const { workflowFlags } = require('../_lib/feature-flags');
 const { PRODUCT_MODES } = require('../_lib/product-modes');
@@ -145,7 +145,11 @@ function receivedItemInput(body, item, totalItems) {
 }
 
 async function processDistributedItem(conn, { item, input, reception, user, receptionId, body, txId }) {
-  const normalized = normalizeReceptionDistributions(input);
+  const normalized = normalizeReceptionDistributions(input, {
+    requiresLot: Boolean(item.requiere_lote),
+    receptionId,
+    itemId: item.id,
+  });
   if (!normalized) return null;
   const { distributions, totals } = normalized;
   const expected = Number(item.cantidad_esp);
@@ -176,6 +180,13 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     if (existing.length) throw httpError(409, `El lote ${lot.lot} ya existe`);
     const lotId = crypto.randomUUID();
     lot.id = lotId;
+    const lotNotes = [
+      body.notes,
+      `Recepcion ${reception.numero}`,
+      lot.internalLot
+        ? 'Partida interna generada para producto sin lote obligatorio'
+        : 'Lote informado por el proveedor',
+    ].filter(Boolean).join(' | ');
     await conn.execute(
       `INSERT INTO lots
          (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier,
@@ -183,7 +194,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
        VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', ?, ?, ?, ?, NOW())`,
       [lotId, lot.lot, item.producto_id, reception.bodega_id,
        lot.quantity, lot.quantity, reception.proveedor_nombre || null, lot.condition,
-       user.id, body.notes || `Recepcion ${reception.numero}`, lot.expiryDate]
+       user.id, lotNotes, lot.expiryDate]
     );
   }
 
@@ -358,7 +369,7 @@ async function confirmReceptionForUser({ body = {}, user }) {
     }
 
     const [items] = await conn.execute(
-      `SELECT ri.*, p.siigo_code, p.modalidad_operativa
+      `SELECT ri.*, p.siigo_code, p.modalidad_operativa, p.requiere_lote
        FROM recepcion_items ri
        JOIN productos p ON p.id = ri.producto_id
        WHERE ri.recepcion_id = ?
@@ -433,7 +444,8 @@ async function confirmReceptionForUser({ body = {}, user }) {
 
       const received = Number(input.qty_received ?? input.cantidad_recibida ?? input.qty_total);
       const damaged = Number(input.qty_damaged ?? input.cantidad_danada ?? 0);
-      const lot = String(input.lot_id || input.lpn || input.lote || '').trim();
+      let lot = String(input.lot_id || input.lpn || input.lote || '').trim();
+      const supplierLotProvided = Boolean(lot);
       const expiryDate = input.expiry_date || input.fecha_vencimiento || null;
       if (!Number.isFinite(received) || received < 0) {
         throw httpError(400, `Cantidad recibida invalida para ${item.siigo_code}`);
@@ -453,7 +465,10 @@ async function confirmReceptionForUser({ body = {}, user }) {
       }
       const shortage = Math.max(expected - received, 0);
       const overage = Math.max(good - accepted, 0);
-      if (accepted > 0 && !lot) throw httpError(400, `Lote requerido para ${item.siigo_code}`);
+      if (accepted > 0 && !lot) {
+        if (item.requiere_lote) throw httpError(400, `Lote del proveedor requerido para ${item.siigo_code}`);
+        lot = internalReceptionLot(receptionId, item.id, 0);
+      }
       hasDifference = hasDifference
         || shortage > 0
         || damaged > 0
@@ -474,6 +489,13 @@ async function confirmReceptionForUser({ body = {}, user }) {
         if (existingLots.length) throw httpError(409, `El lote ${lot} ya existe`);
 
         const lotId = crypto.randomUUID();
+        const lotNotes = [
+          body.notes,
+          `Recepcion fisica de OC ${purchaseOrder?.numero || reception.orden_compra_id || ''}`,
+          supplierLotProvided
+            ? 'Lote informado por el proveedor'
+            : 'Partida interna generada para producto sin lote obligatorio',
+        ].filter(Boolean).join(' | ');
         await conn.execute(
           `INSERT INTO lots
              (id, lpn, product_id, bodega_id, qty_initial, qty_current,
@@ -481,7 +503,7 @@ async function confirmReceptionForUser({ body = {}, user }) {
            VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', 'DISPONIBLE', ?, ?, ?, NOW())`,
           [lotId, lot, item.producto_id, reception.bodega_id, accepted, accepted,
            reception.proveedor_nombre || null, user.id,
-           body.notes || `Recepcion fisica de OC ${purchaseOrder?.numero || reception.orden_compra_id || ''}`,
+           lotNotes,
            expiryDate]
         );
 

@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Lote de proveedor segun politica del producto
+
+- La recepcion fisica ahora respeta `productos.requiere_lote` en API, dashboard y WhatsApp.
+- Cuando el producto controla lote, el operario debe registrar exactamente el lote informado por el proveedor; el WMS no lo inventa.
+- Para productos sin control obligatorio, el lote del proveedor puede registrarse si existe. Si se omite, el WMS genera una partida interna determinista `RECINT-...` para conservar FIFO, ubicacion, movimientos y trazabilidad.
+- El vencimiento permanece opcional y solo se registra cuando el proveedor lo informa.
+- Las partidas internas no cambian la cantidad recibida ni evitan los controles de condicion, ubicacion, diferencias, RBAC, transaccion e idempotencia.
+
 ### 2026-09-01 - Alias humanos e identificadores operativos cortos
 
 - Se agrego `producto_aliases` como catalogo separado de los SKU externos. Cubre los 79 productos activos con nombre oficial y nombres comunes documentados; el SKU maestro no se modifica.
