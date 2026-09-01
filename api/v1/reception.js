@@ -267,9 +267,8 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
   };
 }
 
-async function handlePut(req, res) {
-  const user = await requireCapability(req, CAPABILITIES.RECEPTION_CONFIRM);
-  const body = req.body || {};
+async function confirmReceptionForUser({ body = {}, user }) {
+  if (!user?.id) throw httpError(401, 'Usuario requerido para confirmar la recepcion');
   const receptionId = Number(body.reception_id || body.recepcion_id || 0);
   if (!Number.isInteger(receptionId) || receptionId <= 0) {
     throw httpError(400, 'recepcion_id es obligatorio');
@@ -288,18 +287,46 @@ async function handlePut(req, res) {
     const reception = receptions[0];
     if (reception.estado === 'completada') {
       await conn.commit();
-      return res.status(200).json({
-        ok: true,
-        data: {
-          recepcion_id: receptionId,
-          numero: reception.numero,
-          estado: reception.estado,
-          already_completed: true,
-        },
-      });
+      return {
+        recepcion_id: receptionId,
+        numero: reception.numero,
+        estado: reception.estado,
+        already_completed: true,
+      };
     }
     if (!['borrador', 'en_proceso'].includes(reception.estado)) {
       throw httpError(409, `La recepcion esta ${reception.estado} y no puede completarse`);
+    }
+
+    const confirmationKey = String(body.confirmation_key || body.confirmacion_clave || '').trim() || null;
+    if (confirmationKey && !/^[A-Za-z0-9:_-]{8,80}$/u.test(confirmationKey)) {
+      throw httpError(400, 'confirmation_key invalida');
+    }
+    if (confirmationKey) {
+      const [previousConfirmations] = await conn.execute(
+        `SELECT id, numero, estado
+           FROM recepciones
+          WHERE confirmacion_clave = ? AND id <> ?
+          LIMIT 1 FOR UPDATE`,
+        [confirmationKey, receptionId]
+      );
+      if (previousConfirmations.length) {
+        const previous = previousConfirmations[0];
+        if (previous.estado !== 'completada') {
+          throw httpError(409, 'La misma confirmacion de recepcion ya esta en proceso');
+        }
+        await conn.commit();
+        return {
+          recepcion_id: previous.id,
+          numero: previous.numero,
+          estado: previous.estado,
+          already_completed: true,
+        };
+      }
+      await conn.execute(
+        `UPDATE recepciones SET confirmacion_clave = ? WHERE id = ?`,
+        [confirmationKey, receptionId]
+      );
     }
 
     const linkedPurchaseOrderId = Number(reception.orden_compra_id || 0) || null;
@@ -630,26 +657,29 @@ async function handlePut(req, res) {
     }
 
     await conn.commit();
-    return res.status(200).json({
-      ok: true,
-      data: {
-        recepcion_id: receptionId,
-        numero: reception.numero,
-        estado: 'completada',
-        siigo_purchase_id: reception.siigo_purchase_id,
-        origen: reception.siigo_purchase_id ? 'SIIGO' : 'ORDEN_COMPRA',
-        diferencia: hasDifference,
-        items: results,
-        conciliacion: reconciliation,
-        maquila: outsourcing,
-      },
-    });
+    return {
+      recepcion_id: receptionId,
+      numero: reception.numero,
+      estado: 'completada',
+      siigo_purchase_id: reception.siigo_purchase_id,
+      origen: reception.siigo_purchase_id ? 'SIIGO' : 'ORDEN_COMPRA',
+      diferencia: hasDifference,
+      items: results,
+      conciliacion: reconciliation,
+      maquila: outsourcing,
+    };
   } catch (err) {
     if (conn) await conn.rollback().catch(() => {});
     throw err;
   } finally {
     if (conn) await conn.end().catch(() => {});
   }
+}
+
+async function handlePut(req, res) {
+  const user = await requireCapability(req, CAPABILITIES.RECEPTION_CONFIRM);
+  const data = await confirmReceptionForUser({ body: req.body || {}, user });
+  return res.status(200).json({ ok: true, data });
 }
 
 async function handlePost(req, res) {
@@ -812,3 +842,5 @@ module.exports = async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
   }
 };
+
+module.exports.confirmReceptionForUser = confirmReceptionForUser;

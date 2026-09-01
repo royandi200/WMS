@@ -232,9 +232,8 @@ async function loadPurchaseOrderDraft(conn, draftId) {
   return draft;
 }
 
-async function handlePost(req, res) {
-  const user = await requireCapability(req, CAPABILITIES.RECEPTION_CREATE);
-  const body = req.body || {};
+async function createPurchaseOrderForUser({ body = {}, user }) {
+  if (!user?.id) throw httpError(401, 'Usuario requerido para crear la orden de compra');
   const draftId = Number(body.document_draft_id || body.documento_borrador_id || 0) || null;
   const input = normalizePurchaseOrderInput(body);
   let conn;
@@ -247,10 +246,10 @@ async function handlePost(req, res) {
       draft = await loadPurchaseOrderDraft(conn, draftId);
       if (draft.orden_compra_id) {
         await conn.commit();
-        return res.status(200).json({
-          ok: true,
+        return {
+          status: 200,
           data: { id: draft.orden_compra_id, numero: input.numero, estado: 'CARGADA', duplicate: true },
-        });
+        };
       }
       document = {
         name: draft.nombre_original,
@@ -288,13 +287,19 @@ async function handlePost(req, res) {
       );
     }
     await conn.commit();
-    return res.status(created.status).json({ ok: true, data: created.data });
+    return created;
   } catch (error) {
     if (conn) await conn.rollback().catch(() => {});
     throw error;
   } finally {
     if (conn) await conn.end().catch(() => {});
   }
+}
+
+async function handlePost(req, res) {
+  const user = await requireCapability(req, CAPABILITIES.RECEPTION_CREATE);
+  const created = await createPurchaseOrderForUser({ body: req.body || {}, user });
+  return res.status(created.status).json({ ok: true, data: created.data });
 }
 
 module.exports = async (req, res) => {
@@ -311,3 +316,5 @@ module.exports = async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
   }
 };
+
+module.exports.createPurchaseOrderForUser = createPurchaseOrderForUser;

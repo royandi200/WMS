@@ -15,6 +15,17 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Orden de compra y recepcion fisica operables por WhatsApp
+
+- El canal WhatsApp puede revisar un borrador de OC, crear la OC operativa, preparar su recepcion fisica y confirmar la entrada sin depender del dashboard.
+- El PDF conserva su rol de evidencia: solo crea un borrador. Una OC con advertencias, proveedor ambiguo o SKU desconocido debe corregirse desde el dashboard.
+- Crear la OC exige la frase exacta `Confirmo la orden de compra NUMERO-OC`; confirmar inventario exige `Confirmo la recepcion NUMERO-OC` y el numero completo en el mensaje actual.
+- La confirmacion exige todos los SKU pendientes y distribuciones por cantidad, lote, vencimiento, condicion y ubicacion. Faltantes, sobrantes y condiciones bloqueadas requieren motivo.
+- Dashboard y WhatsApp ejecutan las mismas funciones transaccionales de creacion y recepcion. `INGRESO_RECEPCION` queda bloqueado mientras `ALLOW_MANUAL_RECEPTION=false`.
+- La migracion `21_reception_confirmation_idempotency.sql` agrega una identidad unica a cada confirmacion WhatsApp. Cada entrega parcial usa el borrador `REC-...` generado por el WMS; un reintento no puede convertirse en una entrega nueva ni ingresar inventario dos veces.
+- Los logs del nuevo flujo conservan accion, referencia, cantidad de items y presencia de confirmacion, sin guardar el detalle de lotes o ubicaciones recibido en el JSON.
+- Validacion local: 114 pruebas aprobadas; migracion aplicada y verificada en QA.
+
 ### 2026-09-01 - Recepcion fisica iniciada directamente desde la OC
 
 - Las compras normales ya no dependen de una factura o recepcion importada desde Siigo.
@@ -25,7 +36,7 @@ No reemplaza:
 - Los productos `PR` deben ingresar por produccion interna y los `PT` por orden de maquila 3Q. La recepcion directa admite materias primas, insumos y productos `IO`.
 - Las cantidades mixtas se presentan agrupadas por unidad, por ejemplo `46 und + 2000 gr`, sin producir un total aritmetico enganoso.
 - La migracion `20_direct_purchase_order_receptions.sql` se aplico y verifico en QA. La recepcion sintetica usada para simular una compra Siigo se elimino sin afectar inventario.
-- Validacion local: 110 pruebas aprobadas, build Vite de produccion aprobado y preparacion real repetida sin duplicados ni movimientos.
+- Validacion local inicial: 110 pruebas aprobadas, build Vite de produccion aprobado y preparacion real repetida sin duplicados ni movimientos.
 
 ### 2026-09-01 - Ordenes de compra leidas desde WhatsApp
 

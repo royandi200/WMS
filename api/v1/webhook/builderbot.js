@@ -99,6 +99,12 @@ const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufactur
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
 const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
 const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
+const {
+  reviewPurchaseOrderDocumentDraft,
+  confirmPurchaseOrderDocumentDraft,
+  prepareReceptionFromPurchaseOrder,
+  confirmReceptionFromWhatsApp,
+} = require('../../_lib/builderbot-reception');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -417,7 +423,24 @@ function sanitizeWebhookLogPayload(payload, action) {
     'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO',
     'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
   ]);
+  const receptionActions = new Set([
+    'REVISAR_BORRADOR_ORDEN_COMPRA',
+    'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
+    'PREPARAR_RECEPCION_OC',
+    'CONFIRMAR_RECEPCION_OC',
+  ]);
   const source = payload && typeof payload === 'object' ? payload : {};
+  if (receptionActions.has(normalizedAction)) {
+    const info = parseBuilderBotInfo(source);
+    const params = info.params && typeof info.params === 'object' ? info.params : {};
+    return {
+      reception_workflow: true,
+      action: normalizedAction,
+      reference: params.numero_oc || params.referencia_documento || null,
+      item_count: Array.isArray(params.items) ? params.items.length : 0,
+      final_confirmation: params.confirmacion_final === true || params.confirmacion_final === 'true',
+    };
+  }
   if (!documentActions.has(normalizedAction)) {
     const sanitized = { ...source };
     delete sanitized.document_text;
@@ -1298,8 +1321,111 @@ module.exports = async (req, res) => {
 
     switch (action) {
 
-      // A purchase-order PDF creates a reviewable draft. Only the dashboard
-      // can convert it into an operational purchase order used by receptions.
+      case 'REVISAR_BORRADOR_ORDEN_COMPRA': {
+        const draft = await reviewPurchaseOrderDocumentDraft({ db, params });
+        const items = draft.items.map(item =>
+          `- ${item.sku}: ${Number(item.cantidad)} ${item.unidad || ''}`
+        );
+        mensaje = [
+          `Revision de OC ${draft.referencia_documento}.`,
+          `Proveedor: ${draft.destinatario_nombre || 'N/A'}`,
+          `Fecha: ${formatDateOnly(draft.fecha_documento)}`,
+          ...items,
+          ...(draft.warnings || []).map(warning => `Advertencia: ${warning}`),
+          draft.orden_compra_id
+            ? `Ya fue creada como OC operativa #${draft.orden_compra_id}.`
+            : draft.estado === 'PENDIENTE_REVISION' && !(draft.warnings || []).length
+              ? `Para crearla escribe: Confirmo la orden de compra ${draft.referencia_documento}`
+              : 'Debe corregirse desde el dashboard antes de crear la OC.',
+          'No se modifico inventario.',
+        ].join('\n');
+        responseContext.purchase_order_draft = {
+          id: draft.id,
+          state: draft.estado,
+          purchase_order_id: draft.orden_compra_id || null,
+          inventory_changed: false,
+        };
+        break;
+      }
+
+      case 'CONFIRMAR_BORRADOR_ORDEN_COMPRA': {
+        const order = await confirmPurchaseOrderDocumentDraft({ db, params, rawText, user });
+        mensaje = order.duplicate
+          ? `La OC ${order.numero} ya estaba creada. No se duplico y no se modifico inventario.`
+          : `OC ${order.numero} creada y disponible para recepcion fisica. No se modifico inventario.`;
+        responseContext.purchase_order = {
+          id: order.id,
+          number: order.numero,
+          state: order.estado,
+          duplicate: Boolean(order.duplicate),
+          inventory_changed: false,
+        };
+        break;
+      }
+
+      case 'PREPARAR_RECEPCION_OC': {
+        const prepared = await prepareReceptionFromPurchaseOrder({
+          db,
+          params,
+          userId: user.id,
+        });
+        if (prepared.alreadyCompleted) {
+          mensaje = `La OC ${prepared.order.numero} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;
+          responseContext.reception = {
+            reception_id: prepared.reception.id,
+            purchase_order_id: prepared.order.id,
+            already_completed: true,
+          };
+          break;
+        }
+        const pending = prepared.reception.items.map(item =>
+          `- ${item.sku}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
+        );
+        mensaje = [
+          `Recepcion preparada para OC ${prepared.order.numero}.`,
+          `Borrador: ${prepared.reception.numero}`,
+          `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
+          'Pendiente fisico:',
+          ...pending,
+          'Indica para cada SKU: cantidad, lote, vencimiento, condicion y ubicacion.',
+          `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${prepared.order.numero}`,
+        ].join('\n');
+        responseContext.reception = {
+          reception_id: prepared.reception.id,
+          reception_number: prepared.reception.numero,
+          purchase_order_id: prepared.order.id,
+          inventory_changed: false,
+        };
+        break;
+      }
+
+      case 'CONFIRMAR_RECEPCION_OC': {
+        const confirmation = await confirmReceptionFromWhatsApp({
+          db,
+          params,
+          rawText,
+          user,
+        });
+        if (confirmation.already_completed) {
+          mensaje = `La OC ${confirmation.orden_compra_numero} ya fue recibida en ${confirmation.numero}. No se modifico inventario.`;
+        } else {
+          const lines = (confirmation.items || []).map(item =>
+            `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`
+          );
+          mensaje = [
+            `Recepcion ${confirmation.numero} confirmada contra OC ${confirmation.orden_compra_numero}.`,
+            ...lines,
+            confirmation.diferencia
+              ? 'Se registraron diferencias para seguimiento.'
+              : 'La recepcion coincide con las cantidades esperadas.',
+          ].join('\n');
+        }
+        responseContext.reception = confirmation;
+        break;
+      }
+
+      // A purchase-order PDF creates a reviewable draft. Conversion remains a
+      // separate, explicit action in dashboard or WhatsApp.
       case 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO': {
         const draft = await registerPurchaseOrderDocumentDraft({
           db,
@@ -1320,7 +1446,7 @@ module.exports = async (req, res) => {
           ...warningLines,
           draft.ordenCompraId
             ? `Ya fue convertida en la OC operativa #${draft.ordenCompraId}.`
-            : 'Debe revisarse en Recepciones > Ordenes de compra. No se modifico inventario.',
+            : `Revisala en el dashboard o escribe: revisa la orden ${draft.referencia_documento}. No se modifico inventario.`,
         ].filter(Boolean).join('\n');
         responseContext.document_draft_id = draft.id;
         responseContext.purchase_order_id = draft.ordenCompraId || null;
@@ -1356,6 +1482,9 @@ module.exports = async (req, res) => {
 
       // ── 1. INGRESO_RECEPCION ──────────────────────────────────
       case 'INGRESO_RECEPCION': {
+        if (!workflowFlags().allowManualReception) {
+          throw { status: 409, message: 'La recepcion libre esta desactivada. Usa una orden de compra cargada.' };
+        }
         const p         = await findProductBySku(db, params.id_item);
         const numero    = await nextRecepcionNumero(db);
         const cantTotal = Number(params.cantidad) || 0;

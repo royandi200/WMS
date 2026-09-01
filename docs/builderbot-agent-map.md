@@ -62,15 +62,16 @@ Los roles heredados `supervisor`, `operario` y `validador` conservan compatibili
 
 Flujo principal:
 
-1. Se registra una orden de compra de proveedor en el dashboard.
-2. El importador de Siigo crea una recepcion pendiente a partir de la factura de compra.
-3. Nelly vincula OC y factura, cuenta fisicamente y distribuye cada SKU por lote, ubicacion y condicion.
-4. Las condiciones admitidas son `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` y `PENDIENTE_DISPOSICION`.
-5. Solo `DISPONIBLE` crea stock utilizable y movimiento de entrada.
-6. Cuarentena y rechazo permanecen trazables, pero no suman inventario disponible.
-7. Se persisten diferencias OC-factura y factura-fisico.
+1. El PDF crea un borrador mediante `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`.
+2. `REVISAR_BORRADOR_ORDEN_COMPRA` muestra la extraccion sin modificar datos.
+3. `CONFIRMAR_BORRADOR_ORDEN_COMPRA` crea la OC operativa solo si no hay advertencias y el mensaje actual contiene la frase de confirmacion con el numero exacto.
+4. `PREPARAR_RECEPCION_OC` crea o reutiliza un borrador con el saldo pendiente por SKU y unidad.
+5. Nelly registra todos los SKU por cantidad, lote, vencimiento, ubicacion y condicion.
+6. `CONFIRMAR_RECEPCION_OC` exige el borrador `REC-...`, un resumen previo y la frase exacta con el numero de OC. Solo entonces ejecuta la misma transaccion usada por el dashboard.
+7. Solo `DISPONIBLE` crea stock utilizable. Cuarentena, rechazo y disposicion permanecen trazables sin sumar inventario disponible.
+8. Una recepcion parcial deja la OC abierta y la siguiente entrega recibe un nuevo `REC-...`. La identidad canonica de la confirmacion impide que un reintento ingrese inventario dos veces.
 
-La recepcion manual historica no sustituye este flujo y debe reservarse para contingencias controladas.
+La factura de compra de Siigo no es requisito para este flujo. `INGRESO_RECEPCION` permanece bloqueado por defecto y no puede omitir la OC.
 
 ## Maquila 3Q
 
@@ -84,7 +85,7 @@ El flujo de maquila tercerizada esta implementado inicialmente en API y dashboar
 6. Nelly vincula cada producto `PT` a su orden 3Q y registra lote, vencimiento, ubicacion WMS y condicion.
 7. Las entregas parciales acumulan cantidad disponible hasta completar el objetivo.
 
-El flujo documental separado de BuilderBot acepta dos contratos. `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create`, conserva PDF y extraccion y exige revision en el dashboard antes de crear una OC operativa. `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO` requiere `outsourcing.manage` y deja una salida 3Q pendiente de revision. Ambos exigen SKU exactos, son idempotentes y no reservan materiales ni ejecutan movimientos de inventario. Los handlers operativos deben reutilizar los servicios existentes; no se autoriza una ruta documental de mutacion paralela.
+El flujo documental separado de BuilderBot acepta dos contratos. `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create` y conserva PDF y extraccion. Una OC consistente puede revisarse y confirmarse despues por WhatsApp; cualquier correccion sigue exigiendo dashboard. `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO` requiere `outsourcing.manage` y deja una salida 3Q pendiente de revision. Ambos exigen SKU exactos, son idempotentes y no reservan materiales ni ejecutan movimientos de inventario. Los handlers operativos reutilizan los servicios existentes; no se autoriza una ruta documental de mutacion paralela.
 
 Contrato completo: `docs/flujo-orden-compra-y-maquila-3q.md`.
 

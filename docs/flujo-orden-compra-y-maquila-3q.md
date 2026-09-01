@@ -1,6 +1,6 @@
 # Flujo de orden de compra y maquila 3Q
 
-Estado: lectura y revision de OC verificadas por WhatsApp. Recepcion directa desde OC implementada y migrada en QA; despliegue y confirmacion fisica de la demo pendientes.
+Estado: dashboard de recepcion directa desplegado. Flujo equivalente por WhatsApp implementado y migrado en QA; prueba conversacional final pendiente.
 
 ## Principios
 
@@ -19,7 +19,9 @@ Estado: lectura y revision de OC verificadas por WhatsApp. Recepcion directa des
 
 El flujo `Documentos de Bodega` acepta una OC legible y produce `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`. BuilderBot envia al WMS la extraccion literal y una URL temporal del PDF. La API valida la evidencia, descarga el archivo con lista de dominios permitidos, verifica firma y tamano y registra un borrador.
 
-El borrador aparece en `Recepciones > Ordenes de compra`. Un usuario con `reception.create` revisa proveedor sincronizado, fecha, SKU, cantidades y unidades. Solo `Confirmar y crear OC` genera la OC operativa y conserva el PDF; hasta entonces no puede usarse para una recepcion.
+El borrador aparece en `Recepciones > Ordenes de compra`. Un usuario con `reception.create` revisa proveedor sincronizado, fecha, SKU, cantidades y unidades. La revision puede hacerse en el dashboard o con `REVISAR_BORRADOR_ORDEN_COMPRA` por WhatsApp.
+
+Una OC sin advertencias, con proveedor inequivoco y todos sus SKU validos puede crearse por WhatsApp mediante `CONFIRMAR_BORRADOR_ORDEN_COMPRA`. La API exige que el mensaje actual contenga `Confirmo la orden de compra NUMERO-OC`. Las correcciones nunca se aceptan por WhatsApp y deben hacerse desde el dashboard. Hasta crear la OC operativa no puede iniciarse una recepcion.
 
 El numero visible de la OC no se puede cambiar durante la revision. Las correcciones de lineas quedan conservadas junto con la extraccion original. Repetir el mismo documento no crea otro borrador; cambiar proveedor, SKU, cantidad, unidad o PDF con la misma referencia produce conflicto.
 
@@ -41,6 +43,8 @@ La carga no crea stock. Un reintento con el mismo contenido y PDF devuelve la OC
 
 Nelly selecciona una OC abierta. El WMS prepara una recepcion en borrador usando exclusivamente el saldo pendiente de cada SKU y conserva la unidad de la linea.
 
+Por WhatsApp, `PREPARAR_RECEPCION_OC` devuelve ese mismo saldo y el codigo del borrador `REC-...`. Nelly aporta todos los SKU pendientes con sus distribuciones y recibe un resumen antes de confirmar. La API solo acepta `CONFIRMAR_RECEPCION_OC` para ese borrador cuando el mensaje actual contiene `Confirmo la recepcion NUMERO-OC` y el numero exacto.
+
 La preparacion es idempotente: dos clics, pestanas o reintentos reutilizan el mismo borrador abierto. Esta etapa no crea lotes, stock, movimientos ni kardex.
 
 Por cada linea se registra:
@@ -52,6 +56,8 @@ Por cada linea se registra:
 - motivo obligatorio para faltantes, sobrantes o condiciones no disponibles.
 
 Solo la aprobacion fisica crea inventario. La operacion bloquea las filas relevantes, escribe lote, stock, movimiento y kardex en una sola transaccion y registra el usuario aprobador.
+
+Las confirmaciones WhatsApp conservan una clave idempotente canonica basada en OC, borrador `REC-...`, SKU, lotes, cantidades, condiciones y ubicaciones. Un reintento devuelve la recepcion ya procesada. Una entrega parcial posterior exige preparar un nuevo borrador, incluso si sus cantidades coinciden con una entrega anterior.
 
 Una entrega parcial deja la OC en `RECIBIDA_PARCIAL`. Solo la cantidad `DISPONIBLE` reduce el saldo; cuarentena y rechazo mantienen la diferencia abierta. Cuando todos los productos alcanzan la cantidad aceptada, la OC pasa a `CERRADA`.
 
