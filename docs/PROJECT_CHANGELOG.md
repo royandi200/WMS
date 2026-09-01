@@ -24,7 +24,7 @@ No reemplaza:
 - Confirmar una OC o recepcion sigue exigiendo una frase explicita; el ID corto debe coincidir con la entidad elegida. Reintentos e IDs distintos no mutan inventario.
 - `CONSULTAR_ESTADO_PRODUCCION` sin ID lista OP activas y `CONSULTAR_DESPACHOS_PENDIENTES` lista tareas originadas en factura Siigo, ambas sin modificar inventario.
 - Migracion `22_product_aliases.sql` aplicada en QA: 139 alias activos para 79 productos y cero colisiones entre productos.
-- Validacion local: 120 pruebas aprobadas, build Vite de produccion aprobado y revision `standard` de seguridad sin hallazgos bloqueantes en este cambio.
+- Validacion local: 121 pruebas aprobadas, build Vite de produccion aprobado y revision `standard` de seguridad sin hallazgos bloqueantes en este cambio.
 
 ### 2026-09-01 - Seleccion corta de recepciones por WhatsApp
 

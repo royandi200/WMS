@@ -2177,7 +2177,7 @@ module.exports = async (req, res) => {
         const [dispatches] = await db.execute(
           `SELECT d.id, d.numero, d.siigo_invoice_name, d.cliente_nombre, d.estado, d.creado_en
              FROM despachos d
-            WHERE d.estado NOT IN ('despachado', 'cancelado')
+            WHERE d.estado = 'picking'
               AND (d.siigo_invoice_id IS NOT NULL OR d.siigo_invoice_name IS NOT NULL)
             ORDER BY d.creado_en ASC, d.id ASC
             LIMIT 10`

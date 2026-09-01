@@ -85,6 +85,12 @@ test('dashboard dispatch route enforces the direct-dispatch feature flag', () =>
   assert.match(source, /new Set\(rows\.map\(\(row\) => row\.id\)\)\.size/u);
 });
 
+test('BuilderBot lists only dispatches that can actually be confirmed', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
+  assert.match(source, /case 'CONSULTAR_DESPACHOS_PENDIENTES'/u);
+  assert.match(source, /WHERE d\.estado = 'picking'/u);
+});
+
 test('notifications route uses a validated literal LIMIT for MySQL compatibility', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'notifications.js'), 'utf8');
   assert.match(source, /Math\.min\(Math\.max\(Number\(req\.query\?\.limit/u);
