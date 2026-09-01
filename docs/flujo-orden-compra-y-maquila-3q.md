@@ -1,6 +1,6 @@
 # Flujo de orden de compra y maquila 3Q
 
-Estado: flujo base implementado, migracion QA y BuilderBot sincronizados; la lectura de OC por WhatsApp esta pendiente de despliegue y prueba funcional.
+Estado: flujo base implementado, migracion QA, BuilderBot y WMS desplegados; la lectura de OC por WhatsApp esta pendiente de prueba funcional punta a punta.
 
 ## Principios
 

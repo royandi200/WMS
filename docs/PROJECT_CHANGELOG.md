@@ -23,7 +23,7 @@ No reemplaza:
 - `Recepciones > Ordenes de compra` muestra los borradores y exige revision de proveedor sincronizado, SKU, cantidades y unidades antes de convertirlos en una OC operativa.
 - La conversion conserva PDF, hash, datos extraidos, correcciones humanas, actor y fecha. El numero revisado no puede diferir de la referencia visible del PDF.
 - La accion `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create`; los logs omiten texto OCR, URL firmada y detalle de items.
-- Validacion local: 105 pruebas aprobadas y build Vite de produccion aprobado. Migracion QA y sincronizacion BBC aplicadas; despliegue y prueba E2E pendientes.
+- Validacion local: 105 pruebas aprobadas y build Vite de produccion aprobado. Migracion QA, sincronizacion BBC y despliegue aplicados; prueba E2E por WhatsApp pendiente.
 
 ### 2026-09-01 - Cancelacion auditable de ordenes de compra
 
