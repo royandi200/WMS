@@ -8,6 +8,7 @@ const {
   explicitPurchaseOrderConfirmation,
   receptionConfirmationKey,
   buildConfirmationItems,
+  listAvailablePurchaseOrderReceptions,
 } = require('../api/_lib/builderbot-reception');
 const { capabilityForAction } = require('../api/_lib/capabilities');
 
@@ -104,6 +105,7 @@ test('WhatsApp reception maps visible locations and requires every pending SKU o
 
 test('BuilderBot reception actions share domain handlers and disable free receipt by default', () => {
   for (const action of [
+    'CONSULTAR_RECEPCIONES_PENDIENTES',
     'REVISAR_BORRADOR_ORDEN_COMPRA',
     'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
     'PREPARAR_RECEPCION_OC',
@@ -123,6 +125,42 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /Confirmo la orden de compra NUMERO-OC/u);
   assert.match(prompt, /Confirmo la recepcion NUMERO-OC/u);
   assert.match(prompt, /todos los SKU pendientes/u);
+  assert.match(prompt, /prepara la recepcion ID 5/u);
   assert.match(migration, /UNIQUE KEY uk_recepcion_confirmacion_clave/u);
   assert.match(reception, /confirmation_key/u);
+});
+
+test('available receptions expose stable IDs and only real pending balances', async () => {
+  let call = 0;
+  const db = {
+    async execute() {
+      call += 1;
+      if (call === 1) {
+        return [[
+          { id: 5, numero: 'OC-LARGA-2026-001', proveedor_nombre: 'Proveedor A', fecha_orden: '2026-09-01', estado: 'CARGADA' },
+          { id: 6, numero: 'OC-COMPLETA', proveedor_nombre: 'Proveedor B', fecha_orden: '2026-09-02', estado: 'RECIBIDA' },
+        ]];
+      }
+      if (call === 2) {
+        return [[
+          { orden_compra_id: 5, producto_id: 10, sku: 'SKU-A', producto: 'Producto A', cantidad_ordenada: 12, unidad: 'und' },
+          { orden_compra_id: 5, producto_id: 11, sku: 'SKU-B', producto: 'Producto B', cantidad_ordenada: 2000, unidad: 'gr' },
+          { orden_compra_id: 6, producto_id: 12, sku: 'SKU-C', producto: 'Producto C', cantidad_ordenada: 4, unidad: 'und' },
+        ]];
+      }
+      return [[
+        { orden_compra_id: 5, producto_id: 10, cantidad_aceptada: 2 },
+        { orden_compra_id: 6, producto_id: 12, cantidad_aceptada: 4 },
+      ]];
+    },
+  };
+
+  const available = await listAvailablePurchaseOrderReceptions({ db });
+  assert.equal(call, 3);
+  assert.equal(available.length, 1);
+  assert.equal(available[0].id, 5);
+  assert.deepEqual(available[0].items.map(item => [item.sku, item.cantidad_pendiente]), [
+    ['SKU-A', 10],
+    ['SKU-B', 2000],
+  ]);
 });

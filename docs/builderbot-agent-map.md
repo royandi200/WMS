@@ -65,11 +65,12 @@ Flujo principal:
 1. El PDF crea un borrador mediante `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`.
 2. `REVISAR_BORRADOR_ORDEN_COMPRA` muestra la extraccion sin modificar datos.
 3. `CONFIRMAR_BORRADOR_ORDEN_COMPRA` crea la OC operativa solo si no hay advertencias y el mensaje actual contiene la frase de confirmacion con el numero exacto.
-4. `PREPARAR_RECEPCION_OC` crea o reutiliza un borrador con el saldo pendiente por SKU y unidad.
-5. Nelly registra todos los SKU por cantidad, lote, vencimiento, ubicacion y condicion.
-6. `CONFIRMAR_RECEPCION_OC` exige el borrador `REC-...`, un resumen previo y la frase exacta con el numero de OC. Solo entonces ejecuta la misma transaccion usada por el dashboard.
-7. Solo `DISPONIBLE` crea stock utilizable. Cuarentena, rechazo y disposicion permanecen trazables sin sumar inventario disponible.
-8. Una recepcion parcial deja la OC abierta y la siguiente entrega recibe un nuevo `REC-...`. La identidad canonica de la confirmacion impide que un reintento ingrese inventario dos veces.
+4. `CONSULTAR_RECEPCIONES_PENDIENTES` lista las OC aptas con saldo, número completo e ID corto estable; es de solo lectura.
+5. `PREPARAR_RECEPCION_OC` acepta ese ID y crea o reutiliza un borrador con el saldo pendiente por SKU y unidad.
+6. Nelly registra todos los SKU por cantidad, lote, vencimiento, ubicacion y condicion.
+7. `CONFIRMAR_RECEPCION_OC` exige el borrador `REC-...`, un resumen previo y la frase exacta con el numero de OC. Solo entonces ejecuta la misma transaccion usada por el dashboard.
+8. Solo `DISPONIBLE` crea stock utilizable. Cuarentena, rechazo y disposicion permanecen trazables sin sumar inventario disponible.
+9. Una recepcion parcial deja la OC abierta y la siguiente entrega recibe un nuevo `REC-...`. La identidad canonica de la confirmacion impide que un reintento ingrese inventario dos veces.
 
 La factura de compra de Siigo no es requisito para este flujo. `INGRESO_RECEPCION` permanece bloqueado por defecto y no puede omitir la OC.
 

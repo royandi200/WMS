@@ -15,6 +15,15 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Seleccion corta de recepciones por WhatsApp
+
+- `CONSULTAR_RECEPCIONES_PENDIENTES` lista hasta diez OC aptas para recepcion directa y con saldo fisico real, sin preparar recepciones ni modificar inventario.
+- Cada opcion conserva el numero documental completo y agrega el ID numerico estable de la OC. El usuario puede decir `prepara la recepcion ID 5`, evitando dictar por audio referencias largas.
+- La consulta excluye OC de produccion interna (`PR`), maquila 3Q (`PT`), unidades incompatibles y ordenes totalmente recibidas.
+- La seleccion no depende de posiciones variables como `la primera`; `PREPARAR_RECEPCION_OC` recibe el `orden_compra_id` exacto devuelto por la API.
+- El handler requiere solo permiso de lectura de recepciones. Las confirmaciones destructivas conservan sus controles actuales.
+- Validacion local: 115 pruebas aprobadas y build Vite de produccion aprobado.
+
 ### 2026-09-01 - Orden de compra y recepcion fisica operables por WhatsApp
 
 - El canal WhatsApp puede revisar un borrador de OC, crear la OC operativa, preparar su recepcion fisica y confirmar la entrada sin depender del dashboard.

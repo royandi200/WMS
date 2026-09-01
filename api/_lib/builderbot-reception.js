@@ -12,6 +12,92 @@ function purchaseOrderReference(params = {}) {
   };
 }
 
+async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const [orders] = await db.execute(
+    `SELECT oc.id, oc.numero, oc.proveedor_nombre, oc.fecha_orden, oc.estado
+       FROM ordenes_compra_proveedor oc
+      WHERE oc.estado IN ('CARGADA', 'RECIBIDA', 'RECIBIDA_PARCIAL')
+        AND EXISTS (
+          SELECT 1 FROM orden_compra_proveedor_items existing
+           WHERE existing.orden_compra_id = oc.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM orden_compra_proveedor_items blocked
+            JOIN productos blocked_product ON blocked_product.id = blocked.producto_id
+           WHERE blocked.orden_compra_id = oc.id
+             AND blocked_product.modalidad_operativa IN ('PR', 'PT')
+        )
+      ORDER BY COALESCE(oc.fecha_orden, DATE(oc.creado_en)), oc.id
+      LIMIT 50`
+  );
+  if (!orders.length) return [];
+
+  const orderIds = orders.map(order => Number(order.id));
+  const placeholders = orderIds.map(() => '?').join(',');
+  const [orderedItems] = await db.execute(
+    `SELECT oci.orden_compra_id, oci.producto_id, p.siigo_code AS sku,
+            p.nombre AS producto, SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
+            CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
+                 THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad
+       FROM orden_compra_proveedor_items oci
+       JOIN productos p ON p.id = oci.producto_id
+      WHERE oci.orden_compra_id IN (${placeholders})
+      GROUP BY oci.orden_compra_id, oci.producto_id, p.siigo_code, p.nombre
+      ORDER BY MIN(oci.id)`,
+    orderIds
+  );
+  const [acceptedItems] = await db.execute(
+    `SELECT accepted.orden_compra_id, accepted.producto_id,
+            SUM(accepted.cantidad) AS cantidad_aceptada
+       FROM (
+         SELECT r.orden_compra_id, ri.id, ri.producto_id,
+                CASE WHEN COUNT(rd.id) > 0
+                     THEN COALESCE(SUM(CASE WHEN rd.condicion = 'DISPONIBLE' THEN rd.cantidad ELSE 0 END), 0)
+                     ELSE LEAST(ri.cantidad_rec, ri.cantidad_esp) END AS cantidad
+           FROM recepciones r
+           JOIN recepcion_items ri ON ri.recepcion_id = r.id
+           LEFT JOIN recepcion_distribuciones rd
+             ON rd.recepcion_id = r.id AND rd.recepcion_item_id = ri.id
+          WHERE r.orden_compra_id IN (${placeholders}) AND r.estado = 'completada'
+          GROUP BY r.orden_compra_id, ri.id, ri.producto_id, ri.cantidad_rec, ri.cantidad_esp
+       ) accepted
+      GROUP BY accepted.orden_compra_id, accepted.producto_id`,
+    orderIds
+  );
+
+  const acceptedByOrderProduct = new Map(acceptedItems.map(item => [
+    `${Number(item.orden_compra_id)}:${Number(item.producto_id)}`,
+    Number(item.cantidad_aceptada || 0),
+  ]));
+  const incompatibleUnitOrders = new Set(
+    orderedItems.filter(item => !item.unidad).map(item => Number(item.orden_compra_id))
+  );
+  const itemsByOrder = new Map();
+  for (const item of orderedItems) {
+    const orderId = Number(item.orden_compra_id);
+    if (incompatibleUnitOrders.has(orderId)) continue;
+    const ordered = Number(item.cantidad_ordenada || 0);
+    const accepted = acceptedByOrderProduct.get(`${orderId}:${Number(item.producto_id)}`) || 0;
+    const pending = Number(Math.max(ordered - accepted, 0).toFixed(4));
+    if (pending <= 0.0001) continue;
+    if (!itemsByOrder.has(orderId)) itemsByOrder.set(orderId, []);
+    itemsByOrder.get(orderId).push({
+      producto_id: Number(item.producto_id),
+      sku: item.sku,
+      producto: item.producto,
+      cantidad_pendiente: pending,
+      unidad: item.unidad || 'und',
+    });
+  }
+
+  return orders
+    .map(order => ({ ...order, items: itemsByOrder.get(Number(order.id)) || [] }))
+    .filter(order => !incompatibleUnitOrders.has(Number(order.id)) && order.items.length)
+    .slice(0, safeLimit);
+}
+
 function parseWarnings(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -380,6 +466,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
 }
 
 module.exports = {
+  listAvailablePurchaseOrderReceptions,
   findPurchaseOrderDocumentDraft,
   reviewPurchaseOrderDocumentDraft,
   explicitPurchaseOrderConfirmation,

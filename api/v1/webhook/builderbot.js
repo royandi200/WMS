@@ -100,6 +100,7 @@ const { assertInternalProductionProduct } = require('../../_lib/product-modes');
 const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
 const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
 const {
+  listAvailablePurchaseOrderReceptions,
   reviewPurchaseOrderDocumentDraft,
   confirmPurchaseOrderDocumentDraft,
   prepareReceptionFromPurchaseOrder,
@@ -424,6 +425,7 @@ function sanitizeWebhookLogPayload(payload, action) {
     'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
   ]);
   const receptionActions = new Set([
+    'CONSULTAR_RECEPCIONES_PENDIENTES',
     'REVISAR_BORRADOR_ORDEN_COMPRA',
     'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
     'PREPARAR_RECEPCION_OC',
@@ -1320,6 +1322,33 @@ module.exports = async (req, res) => {
     let mensaje = '';
 
     switch (action) {
+
+      case 'CONSULTAR_RECEPCIONES_PENDIENTES': {
+        const available = await listAvailablePurchaseOrderReceptions({ db, limit: 10 });
+        if (!available.length) {
+          mensaje = 'No hay ordenes de compra con saldo pendiente aptas para recepcion directa.';
+        } else {
+          const lines = available.flatMap(order => [
+            `- ID ${order.id} | ${order.numero} | ${order.proveedor_nombre || 'Proveedor N/A'} | ${formatDateOnly(order.fecha_orden)}`,
+            ...order.items.map(item =>
+              `  ${item.sku}: ${Number(item.cantidad_pendiente)} ${item.unidad}`
+            ),
+          ]);
+          mensaje = [
+            `Recepciones disponibles (${available.length}):`,
+            ...lines,
+            `Para continuar responde, por ejemplo: prepara la recepcion ID ${available[0].id}.`,
+            'Esta consulta no modifica inventario.',
+          ].join('\n');
+        }
+        responseContext.available_receptions = available.map(order => ({
+          purchase_order_id: Number(order.id),
+          purchase_order_number: order.numero,
+          pending_items: order.items.length,
+        }));
+        responseContext.inventory_changed = false;
+        break;
+      }
 
       case 'REVISAR_BORRADOR_ORDEN_COMPRA': {
         const draft = await reviewPurchaseOrderDocumentDraft({ db, params });
