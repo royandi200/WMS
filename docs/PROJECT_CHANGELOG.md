@@ -30,6 +30,7 @@ No reemplaza:
 - El contrato incluye referencia, fecha, destinatario, datos de contacto, entrega/recibe, bultos, unidades y lineas con SKU, descripcion, cantidad, vencimiento y lote.
 - La coincidencia de producto usa exclusivamente el SKU exacto. Totales diferentes, campos faltantes o codigos desconocidos quedan marcados para correccion.
 - La ingestion es idempotente y restringida a `outsourcing.manage`; los logs omiten direccion, NIT, telefono y detalle de items.
+- Los reintentos comparan una identidad operativa canonica: referencia, fecha, bultos, total, SKU, cantidad, lote y vencimiento. Metadatos variables del OCR, como nombre del archivo, nombres o descripciones, no generan falsos conflictos.
 - El dashboard de Maquila 3Q incorpora la vista `Documentos leidos` con cruce al catalogo y remision WMS.
 - La lectura nunca reserva ni descuenta inventario. Sofi conserva la confirmacion humana de la remision como unica accion de salida.
 - Se agrego un PDF sintetico, claramente marcado como prueba, para validar el flujo sin datos reales del cliente.
@@ -371,7 +372,7 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 
 ## Validación acumulada
 
-- `npm test`: 95 subpruebas aprobadas en la entrega del 2026-09-01.
+- `npm test`: 98 subpruebas aprobadas en la entrega del 2026-09-01.
 - `npm run build`: build de producción aprobado en la última entrega funcional.
 - Smokes integrados de producción, recepción y despacho aprobados.
 - Idempotencia comprobada en cierre de OP, recepción y despacho.

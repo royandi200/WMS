@@ -51,6 +51,9 @@ function normalizeWarehouseDocumentInput(body = {}) {
     items: normalizedItems,
   };
   normalized.hash = createHash('sha256').update(canonicalJson(documentIdentity(normalized))).digest('hex');
+  normalized.operationalHash = createHash('sha256')
+    .update(canonicalJson(operationalDocumentIdentity(normalized)))
+    .digest('hex');
   return normalized;
 }
 
@@ -62,7 +65,8 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
   await db.beginTransaction();
   try {
     const [existing] = await db.execute(
-      `SELECT id, referencia_documento, sha256, estado, total_unidades, advertencias
+      `SELECT id, tipo_documento, referencia_documento, fecha_documento,
+              total_bultos, total_unidades, sha256, estado, advertencias
          FROM documentos_bodega_borrador
         WHERE origen = ? AND referencia_documento = ?
         LIMIT 1 FOR UPDATE`,
@@ -70,7 +74,38 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
     );
     if (existing.length) {
       if (existing[0].sha256 !== input.hash) {
-        throw conflictError(`El documento ${input.reference} ya existe con contenido diferente`);
+        const [storedItems] = await db.execute(
+          `SELECT sku_extraido, cantidad, fecha_vencimiento, lote
+             FROM documento_bodega_borrador_items
+            WHERE documento_id = ?
+            ORDER BY id`,
+          [existing[0].id]
+        );
+        const storedOperationalIdentity = operationalDocumentIdentity({
+          documentType: existing[0].tipo_documento,
+          reference: existing[0].referencia_documento,
+          documentDate: dateOnly(existing[0].fecha_documento),
+          totalPackages: nullableNumber(existing[0].total_bultos),
+          totalUnits: Number(existing[0].total_unidades),
+          items: storedItems.map(item => ({
+            sku: item.sku_extraido,
+            quantity: Number(item.cantidad),
+            expiryDate: dateOnly(item.fecha_vencimiento),
+            lot: item.lote || null,
+          })),
+        });
+        const storedOperationalHash = createHash('sha256')
+          .update(canonicalJson(storedOperationalIdentity))
+          .digest('hex');
+        if (storedOperationalHash !== input.operationalHash) {
+          const differences = operationalDifferences(
+            storedOperationalIdentity,
+            operationalDocumentIdentity(input)
+          );
+          throw conflictError(
+            `El documento ${input.reference} ya existe, pero cambian datos operativos: ${differences.join(', ')}`
+          );
+        }
       }
       await db.commit();
       return {
@@ -200,8 +235,50 @@ function canonicalJson(value) {
 }
 
 function documentIdentity(normalized) {
-  const { warnings, sourceReference, hash, ...stableDocument } = normalized;
+  const { warnings, sourceReference, hash, operationalHash, ...stableDocument } = normalized;
   return stableDocument;
+}
+
+function operationalDocumentIdentity(normalized) {
+  const items = (normalized.items || []).map(item => ({
+    sku: String(item.sku || '').toUpperCase(),
+    quantity: roundQty(item.quantity),
+    expiryDate: item.expiryDate || null,
+    lot: item.lot || null,
+  })).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+  return {
+    documentType: normalized.documentType,
+    reference: normalized.reference,
+    documentDate: normalized.documentDate,
+    totalPackages: normalized.totalPackages == null ? null : roundQty(normalized.totalPackages),
+    totalUnits: roundQty(normalized.totalUnits),
+    items,
+  };
+}
+
+function operationalDifferences(stored, incoming) {
+  const differences = [];
+  for (const [field, label] of [
+    ['documentType', 'tipo'],
+    ['reference', 'referencia'],
+    ['documentDate', 'fecha'],
+    ['totalPackages', 'bultos'],
+    ['totalUnits', 'total'],
+  ]) {
+    if (canonicalJson(stored[field]) !== canonicalJson(incoming[field])) differences.push(label);
+  }
+  if (canonicalJson(stored.items) !== canonicalJson(incoming.items)) differences.push('items, cantidades, lotes o vencimientos');
+  return differences.length ? differences : ['contenido critico'];
+}
+
+function dateOnly(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function nullableNumber(value) {
+  return value == null || value === '' ? null : Number(value);
 }
 
 function parseStoredWarnings(value) {
@@ -229,4 +306,5 @@ module.exports = {
   registerWarehouseDocumentDraft,
   canonicalJson,
   documentIdentity,
+  operationalDocumentIdentity,
 };

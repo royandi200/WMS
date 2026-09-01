@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   normalizeWarehouseDocumentInput,
+  operationalDocumentIdentity,
   registerWarehouseDocumentDraft,
 } = require('../api/_lib/warehouse-document-intake');
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
@@ -60,6 +61,33 @@ test('document identity ignores model warnings and ephemeral message references'
   assert.notEqual(first.hash, changedQuantity.hash);
 });
 
+test('operational document identity ignores OCR metadata but protects inventory fields', () => {
+  const first = normalizeWarehouseDocumentInput(validInput({
+    nombre_archivo: 'salida-original.pdf',
+    nombre_cliente: '3Q - DATOS DE PRUEBA',
+    entrega: 'SOFI - USUARIO DE PRUEBA',
+  }));
+  const retry = normalizeWarehouseDocumentInput(validInput({
+    nombre_archivo: null,
+    nombre_cliente: '3Q',
+    entrega: null,
+    items: [
+      { sku: '00006-TRP', descripcion: 'Envase pequeño', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+      { sku: '00007-TRG', descripcion: 'Envase grande', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+    ],
+  }));
+  const changedLot = normalizeWarehouseDocumentInput(validInput({
+    items: [
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'OTRO-LOTE' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+    ],
+  }));
+  assert.notEqual(first.hash, retry.hash);
+  assert.equal(first.operationalHash, retry.operationalHash);
+  assert.notEqual(first.operationalHash, changedLot.operationalHash);
+  assert.deepEqual(operationalDocumentIdentity(first), operationalDocumentIdentity(retry));
+});
+
 test('duplicate document returns persisted total and warnings without inserting', async () => {
   const normalized = normalizeWarehouseDocumentInput(validInput());
   const calls = [];
@@ -69,7 +97,7 @@ test('duplicate document returns persisted total and warnings without inserting'
     rollback: async () => calls.push('rollback'),
     execute: async (sql) => {
       calls.push(sql);
-      if (/SELECT id, referencia_documento/u.test(sql)) {
+      if (/SELECT id, tipo_documento/u.test(sql)) {
         return [[{
           id: 7,
           referencia_documento: normalized.reference,
@@ -93,6 +121,78 @@ test('duplicate document returns persisted total and warnings without inserting'
   assert.deepEqual(result.warnings, ['Revision persistida']);
   assert.ok(calls.includes('commit'));
   assert.ok(!calls.includes('rollback'));
+});
+
+test('duplicate accepts equivalent operational data when OCR metadata changes', async () => {
+  const calls = [];
+  const db = {
+    beginTransaction: async () => calls.push('begin'),
+    commit: async () => calls.push('commit'),
+    rollback: async () => calls.push('rollback'),
+    execute: async (sql) => {
+      calls.push(sql);
+      if (/SELECT id, tipo_documento/u.test(sql)) {
+        return [[{
+          id: 7,
+          tipo_documento: 'SALIDA_BODEGA_3Q',
+          referencia_documento: 'SB-TEST-20260831-001',
+          fecha_documento: '2026-08-31',
+          total_bultos: '125.0000',
+          total_unidades: '8200.0000',
+          sha256: 'hash-anterior-con-metadatos',
+          estado: 'PENDIENTE_REVISION',
+          advertencias: null,
+        }]];
+      }
+      if (/FROM documento_bodega_borrador_items/u.test(sql)) {
+        return [[
+          { sku_extraido: '00007-TRG', cantidad: '7000.0000', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+          { sku_extraido: '00006-TRP', cantidad: '1200.0000', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+        ]];
+      }
+      throw new Error('An equivalent retry must not execute writes');
+    },
+  };
+  const result = await registerWarehouseDocumentDraft({
+    db,
+    body: validInput({ nombre_archivo: null, entrega: null }),
+    userId: 5,
+  });
+  assert.equal(result.duplicate, true);
+  assert.equal(result.totalUnits, 8200);
+  assert.ok(calls.includes('commit'));
+  assert.ok(!calls.includes('rollback'));
+});
+
+test('duplicate rejects changes to operational items with a specific conflict', async () => {
+  const db = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    execute: async (sql) => {
+      if (/SELECT id, tipo_documento/u.test(sql)) {
+        return [[{
+          id: 7,
+          tipo_documento: 'SALIDA_BODEGA_3Q',
+          referencia_documento: 'SB-TEST-20260831-001',
+          fecha_documento: '2026-08-31',
+          total_bultos: '125.0000',
+          total_unidades: '8200.0000',
+          sha256: 'hash-anterior',
+          estado: 'PENDIENTE_REVISION',
+          advertencias: null,
+        }]];
+      }
+      return [[
+        { sku_extraido: '00007-TRG', cantidad: '6999.0000', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+        { sku_extraido: '00006-TRP', cantidad: '1200.0000', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+      ]];
+    },
+  };
+  await assert.rejects(
+    registerWarehouseDocumentDraft({ db, body: validInput(), userId: 5 }),
+    /items, cantidades, lotes o vencimientos/u
+  );
 });
 
 test('document intake fails closed without exact SKU or with an invalid date', () => {
