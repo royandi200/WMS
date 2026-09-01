@@ -32,6 +32,7 @@ No reemplaza:
 - La ingestion es idempotente y restringida a `outsourcing.manage`; los logs omiten direccion, NIT, telefono y detalle de items.
 - Los reintentos comparan una identidad operativa canonica: referencia, fecha, bultos, total, SKU y cantidad. Metadatos variables del OCR, lotes/vencimientos documentales, nombres o descripciones no generan falsos conflictos ni sobrescriben el primer borrador.
 - La API exige evidencia literal para referencias y SKU extraidos por BuilderBot. Un lote o vencimiento inventado se convierte en dato pendiente con advertencia; el lote operativo de la remision sigue proviniendo del FEFO del WMS.
+- El flujo documental de BuilderBot enruta el JSON interno mediante la regla `body includes g0m@s`; se retiro el `gotoFlow` directo que lo hacia visible por WhatsApp antes de la respuesta del WMS.
 - El dashboard de Maquila 3Q incorpora la vista `Documentos leidos` con cruce al catalogo y remision WMS.
 - La lectura nunca reserva ni descuenta inventario. Sofi conserva la confirmacion humana de la remision como unica accion de salida.
 - Se agrego un PDF sintetico, claramente marcado como prueba, para validar el flujo sin datos reales del cliente.

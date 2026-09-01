@@ -40,7 +40,7 @@ Flujos comprobados el 2026-08-31:
 
 Entrada y Voz usan `docs/Prompt WMS.txt`. Voz redirige a Salida. Entrada conserva la regla `body includes g0m@s` hacia Salida.
 
-Documentos de Bodega usa `docs/Prompt WMS Documentos BBC.txt`, tiene analisis documental y contenido sensible habilitados y redirige a Salida. Solo admite salidas de bodega hacia 3Q y produce `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. La API registra un borrador, omite datos de contacto y lineas en logs, y no modifica inventario.
+Documentos de Bodega usa `docs/Prompt WMS Documentos BBC.txt`, tiene analisis documental y contenido sensible habilitados. Usa la regla interna `body includes g0m@s` para cambiar a Salida; no debe usar `gotoFlow` directo porque BuilderBot mostraria el JSON interno antes de llamar a la API. Solo admite salidas de bodega hacia 3Q y produce `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. La API registra un borrador, omite datos de contacto y lineas en logs, y no modifica inventario.
 
 El validador Manager reporta `Entrada` como dead end porque su `rules` legacy contiene objetos que la herramienta moderna no puede interpretar. La lectura directa confirma que Entrada conserva su answer operativo. No reemplazarlo automaticamente para corregir ese falso positivo.
 
@@ -54,6 +54,10 @@ WhatsApp -> BBC -> LLM clasificador -> {aiResponse}
 ```
 
 La respuesta del LLM debe contener `kw`, `@ction`, `body`, `text`, `query` y `params`. `body`, `text` y `query` conservan el mensaje real.
+
+El JSON del LLM es interno y nunca se envia a WhatsApp. Para respuestas `add_chatpdf`, el cambio al flujo HTTP debe realizarse mediante la regla `body includes g0m@s`; un `gotoFlow` directo envia primero el JSON al usuario.
+
+La version actual de `builderbot_update_answer` no puede reescribir answers que ya contienen reglas legacy como objetos. Para cambiar este enrutamiento, usar el editor de BBC, guardar el asistente con el boton de nube, confirmar la regla por lectura Manager y reiniciar el bot. No sustituir la regla por `gotoFlow` como atajo.
 
 ### HTTP activo de BBC hacia WMS
 
