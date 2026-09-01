@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Ban, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 import { useReceptionStore } from '../store/receptionStore'
-import { cancelPurchaseOrder, createPurchaseOrder, downloadPurchaseOrderDocument, listPurchaseOrders } from '../api/purchaseOrders.api'
+import {
+  cancelPurchaseOrder,
+  createPurchaseOrder,
+  downloadPurchaseOrderDocument,
+  downloadPurchaseOrderDraftDocument,
+  listPurchaseOrderDocumentDrafts,
+  listPurchaseOrders,
+} from '../api/purchaseOrders.api'
 import { listOutsourcingOrders } from '../api/outsourcing.api'
 import { listSuppliers } from '../api/suppliers.api'
 import { confirmReception } from '../api/reception.api'
@@ -18,6 +25,7 @@ export default function RecepcionPage() {
   const [tab, setTab] = useState('orders')
   const [toast, setToast] = useState(null)
   const [purchaseOrders, setPurchaseOrders] = useState([])
+  const [purchaseOrderDrafts, setPurchaseOrderDrafts] = useState([])
   const [purchaseLoading, setPurchaseLoading] = useState(false)
   const [locations, setLocations] = useState([])
   const [outsourcingOrders, setOutsourcingOrders] = useState([])
@@ -39,6 +47,11 @@ export default function RecepcionPage() {
         .then((payload) => setPurchaseOrders(payload?.data?.rows || []))
         .catch((error) => showToast(error.response?.data?.error || 'Error al cargar ordenes de compra', false))
         .finally(() => setPurchaseLoading(false))
+      if (tab === 'orders') {
+        listPurchaseOrderDocumentDrafts({ limit: 100 })
+          .then((payload) => setPurchaseOrderDrafts(payload?.data?.rows || []))
+          .catch((error) => showToast(error.response?.data?.error || 'Error al cargar borradores de OC', false))
+      }
     }
     if (tab === 'orders') {
       listSuppliers()
@@ -82,6 +95,7 @@ export default function RecepcionPage() {
       {tab === 'orders' && (
         <PurchaseOrdersPanel
           rows={purchaseOrders}
+          drafts={purchaseOrderDrafts}
           suppliers={suppliers}
           loading={purchaseLoading}
           canCancel={allowed('purchase_order.cancel')}
@@ -90,7 +104,9 @@ export default function RecepcionPage() {
             try {
               const payload = await createPurchaseOrder(body)
               const refreshed = await listPurchaseOrders({ limit: 100 })
+              const refreshedDrafts = await listPurchaseOrderDocumentDrafts({ limit: 100 })
               setPurchaseOrders(refreshed?.data?.rows || [])
+              setPurchaseOrderDrafts(refreshedDrafts?.data?.rows || [])
               showToast(`Orden ${payload?.data?.numero || body.numero} cargada`, true)
               return { ok: true }
             } catch (error) {
@@ -274,6 +290,7 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, outsourcingOrd
 }
 
 const EMPTY_PO = {
+  document_draft_id: null,
   numero: '',
   tercero_id: '',
   fecha_orden: '',
@@ -281,7 +298,7 @@ const EMPTY_PO = {
   items: [{ sku: '', cantidad: '', unidad: 'und' }],
 }
 
-function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, onCancel }) {
+function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, onCreate, onCancel }) {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(EMPTY_PO)
   const [formError, setFormError] = useState('')
@@ -298,35 +315,58 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, on
     ...current,
     items: current.items.filter((_, itemIndex) => itemIndex !== index),
   }))
+  const reviewDraft = (draft) => {
+    setForm({
+      document_draft_id: draft.id,
+      numero: draft.referencia_documento,
+      tercero_id: draft.tercero_id || '',
+      fecha_orden: String(draft.fecha_documento || '').slice(0, 10),
+      documento_pdf: null,
+      items: (draft.items || []).map((item) => ({
+        sku: item.sku_extraido || '',
+        cantidad: Number(item.cantidad),
+        unidad: item.unidad || '',
+      })),
+    })
+    setFormError('')
+    setCreating(true)
+  }
+  const closeForm = () => {
+    setForm(EMPTY_PO)
+    setFormError('')
+    setCreating(false)
+  }
   const submit = async (event) => {
     event.preventDefault()
     setFormError('')
-    if (!form.documento_pdf) {
+    if (!form.documento_pdf && !form.document_draft_id) {
       setFormError('Debes seleccionar la orden de compra en PDF.')
       return
     }
     try {
-      const base64 = await readFileAsDataUrl(form.documento_pdf)
-      const result = await onCreate({
+      const pdf = form.documento_pdf ? await readFileAsDataUrl(form.documento_pdf) : null
+      const payload = {
         ...form,
         tercero_id: Number(form.tercero_id),
         fecha_orden: form.fecha_orden || undefined,
-        archivo_nombre: form.documento_pdf.name,
-        documento_pdf: {
-          nombre: form.documento_pdf.name,
-          mime_type: form.documento_pdf.type || 'application/pdf',
-          base64,
-        },
         items: form.items.map((item) => ({
           ...item,
           sku: item.sku.trim(),
           unidad: item.unidad.trim(),
           cantidad: Number(item.cantidad),
         })),
-      })
+      }
+      if (form.documento_pdf) {
+        payload.archivo_nombre = form.documento_pdf.name
+        payload.documento_pdf = {
+          nombre: form.documento_pdf.name,
+          mime_type: form.documento_pdf.type || 'application/pdf',
+          base64: pdf,
+        }
+      }
+      const result = await onCreate(payload)
       if (result.ok) {
-        setForm(EMPTY_PO)
-        setCreating(false)
+        closeForm()
       } else {
         setFormError(result.message || 'No fue posible cargar la orden de compra.')
       }
@@ -337,12 +377,13 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, on
 
   return (
     <div className="space-y-4">
+      <PurchaseOrderDrafts rows={drafts} loading={loading} onReview={reviewDraft} />
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">Ordenes esperadas</p>
           <p className="text-xs text-muted">No generan stock hasta confirmar la recepcion fisica.</p>
         </div>
-        <button type="button" onClick={() => setCreating((value) => !value)} className="btn-primary inline-flex items-center gap-2">
+        <button type="button" onClick={() => creating ? closeForm() : setCreating(true)} className="btn-primary inline-flex items-center gap-2">
           <Plus size={16} /> Nueva OC
         </button>
       </div>
@@ -350,7 +391,7 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, on
       {creating && (
         <form onSubmit={submit} className="border-y border-border py-5 space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Numero de OC *"><input value={form.numero} onChange={setHeader('numero')} className="input-field" required /></Field>
+            <Field label="Numero de OC *"><input value={form.numero} onChange={setHeader('numero')} readOnly={Boolean(form.document_draft_id)} className="input-field read-only:opacity-70" required /></Field>
             <Field label="Proveedor sincronizado *">
               <select value={form.tercero_id} onChange={setHeader('tercero_id')} className="input-field" required>
                 <option value="">Seleccionar proveedor</option>
@@ -363,7 +404,12 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, on
             </Field>
             <Field label="Fecha de orden"><input type="date" value={form.fecha_orden} onChange={setHeader('fecha_orden')} className="input-field" /></Field>
           </div>
-          <Field label="Orden de compra en PDF *">
+          {form.document_draft_id ? (
+            <div className="flex items-center gap-3 border border-border bg-surface/40 px-4 py-3 text-sm text-foreground">
+              <FileText size={20} className="text-primary" />
+              PDF recibido por WhatsApp. Revisa los datos extraidos antes de crear la OC operativa.
+            </div>
+          ) : <Field label="Orden de compra en PDF *">
             <label className="flex min-h-20 cursor-pointer items-center gap-3 border border-dashed border-border px-4 py-3 hover:border-primary/60">
               <FileText size={20} className="text-primary" />
               <span className="min-w-0 flex-1 text-sm text-foreground">
@@ -386,7 +432,7 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, on
                 }}
               />
             </label>
-          </Field>
+          </Field>}
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted">Items</p>
             {form.items.map((item, index) => (
@@ -409,13 +455,45 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, on
             <button type="button" onClick={addItem} className="px-3 py-2 border border-border text-sm text-foreground hover:bg-white/5 inline-flex items-center gap-2">
               <Plus size={15} /> Agregar item
             </button>
-            <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Cargando...' : 'Cargar orden'}</button>
+            <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Cargando...' : form.document_draft_id ? 'Confirmar y crear OC' : 'Cargar orden'}</button>
+            <button type="button" onClick={closeForm} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground">Cancelar</button>
           </div>
         </form>
       )}
 
       <PurchaseOrderTable rows={rows} loading={loading} canCancel={canCancel} onCancel={onCancel} />
     </div>
+  )
+}
+
+function PurchaseOrderDrafts({ rows = [], loading, onReview }) {
+  const pending = rows.filter((row) => !['VINCULADO', 'DESCARTADO'].includes(row.estado))
+  if (!loading && pending.length === 0) return null
+  return (
+    <section className="border-y border-border py-4 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">PDF recibidos por WhatsApp</h2>
+        <p className="text-xs text-muted">Son borradores. No habilitan recepciones ni modifican inventario hasta su revision.</p>
+      </div>
+      {loading && !pending.length && <p className="text-sm text-muted">Cargando borradores...</p>}
+      {pending.map((row) => (
+        <article key={row.id} className="grid gap-3 border border-border bg-surface/40 p-4 lg:grid-cols-[minmax(0,1fr)_170px_150px_auto] lg:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span>
+              <span className={`px-2 py-1 text-xs font-semibold ${row.estado === 'REQUIERE_CORRECCION' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>
+                {row.estado === 'REQUIERE_CORRECCION' ? 'Requiere correccion' : 'Pendiente de revision'}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {Number(row.total_unidades)} unidades</p>
+            {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className="mt-1 text-xs text-red-400">{warning}</p>)}
+          </div>
+          <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(row.fecha_documento || '').slice(0, 10)}</p></div>
+          <div><p className="text-xs uppercase text-muted">PDF</p>{row.archivo_id ? <button type="button" onClick={() => downloadPurchaseOrderDraftDocument(row.archivo_id, row.archivo_nombre)} className="mt-1 inline-flex items-center gap-2 text-sm text-primary"><Download size={15} /> Descargar</button> : <p className="mt-1 text-xs text-danger">No conservado</p>}</div>
+          <button type="button" onClick={() => onReview(row)} disabled={!row.archivo_id} className="btn-primary disabled:opacity-40">Revisar</button>
+        </article>
+      ))}
+    </section>
   )
 }
 

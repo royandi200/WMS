@@ -1,6 +1,6 @@
 # Conexiones e integraciones externas del WMS
 
-Última actualización: 2026-08-31
+Última actualización: 2026-09-01
 
 ## Objetivo
 
@@ -40,7 +40,9 @@ Flujos comprobados el 2026-08-31:
 
 Entrada y Voz usan `docs/Prompt WMS.txt`. Voz redirige a Salida. Entrada conserva la regla `body includes g0m@s` hacia Salida.
 
-Documentos de Bodega usa `docs/Prompt WMS Documentos BBC.txt`, tiene analisis documental y contenido sensible habilitados. Usa la regla interna `body includes g0m@s` para cambiar a Salida; no debe usar `gotoFlow` directo porque BuilderBot mostraria el JSON interno antes de llamar a la API. Solo admite salidas de bodega hacia 3Q y produce `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. La API registra un borrador, omite datos de contacto y lineas en logs, y no modifica inventario.
+Documentos de Bodega usa `docs/Prompt WMS Documentos BBC.txt`, tiene analisis documental y contenido sensible habilitados. Usa la regla interna `body includes g0m@s` para cambiar a Salida; no debe usar `gotoFlow` directo porque BuilderBot mostraria el JSON interno antes de llamar a la API. Admite `ORDEN_COMPRA` y `SALIDA_BODEGA_3Q`; produce respectivamente `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` y `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. Ambas acciones crean borradores, omiten datos sensibles y lineas del documento en logs y no modifican inventario.
+
+Para conservar la evidencia literal y el PDF de una OC, el body HTTP de Salida agrega `document_text: {aiDocument}` y `document_url: {urlTempFile}`. La API nunca registra esos valores en logs. La URL temporal se acepta solo por HTTPS desde dominios permitidos de BuilderBot, sin redirecciones, con descarga limitada a 2.5 MB y firma PDF verificada. No ampliar la lista de dominios sin evidencia del proveedor.
 
 El validador Manager reporta `Entrada` como dead end porque su `rules` legacy contiene objetos que la herramienta moderna no puede interpretar. La lectura directa confirma que Entrada conserva su answer operativo. No reemplazarlo automaticamente para corregir ese falso positivo.
 
@@ -64,11 +66,11 @@ La version actual de `builderbot_update_answer` no puede reescribir answers que 
 ```text
 Método: POST
 URL: https://wms-seven-ebon.vercel.app/api/v1/webhook/builderbot
-Body: from + info
+Body: from + info + document_text + document_url
 Mapeo de respuesta: {mensaje}
 ```
 
-No modificar el mapeo a texto literal ni sustituir `info` por un resumen.
+No modificar el mapeo a texto literal ni sustituir `info` por un resumen. `document_text` y `document_url` solo se consumen en acciones documentales y deben permanecer fuera de logs y respuestas.
 
 ### Tres credenciales distintas
 

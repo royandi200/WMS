@@ -86,9 +86,9 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
       `SELECT id, tipo_documento, referencia_documento, fecha_documento,
               total_bultos, total_unidades, sha256, estado, advertencias
          FROM documentos_bodega_borrador
-        WHERE origen = ? AND referencia_documento = ?
+        WHERE tipo_documento = ? AND origen = ? AND referencia_documento = ?
         LIMIT 1 FOR UPDATE`,
-      [normalizedOrigin, input.reference]
+      [input.documentType, normalizedOrigin, input.reference]
     );
     if (existing.length) {
       if (existing[0].sha256 !== input.hash) {

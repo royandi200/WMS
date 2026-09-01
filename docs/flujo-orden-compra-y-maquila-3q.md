@@ -1,6 +1,6 @@
 # Flujo de orden de compra y maquila 3Q
 
-Estado: implementado localmente y migrado en QA; pendiente de despliegue y pruebas funcionales.
+Estado: flujo base implementado, migracion QA y BuilderBot sincronizados; la lectura de OC por WhatsApp esta pendiente de despliegue y prueba funcional.
 
 ## Principios
 
@@ -13,6 +13,16 @@ Estado: implementado localmente y migrado en QA; pendiente de despliegue y prueb
 - El WMS conserva la ubicacion interna de origen, pero no inventa una ubicacion dentro de 3Q.
 
 ## 1. Carga de la orden de compra
+
+### Entrada por WhatsApp
+
+El flujo `Documentos de Bodega` acepta una OC legible y produce `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`. BuilderBot envia al WMS la extraccion literal y una URL temporal del PDF. La API valida la evidencia, descarga el archivo con lista de dominios permitidos, verifica firma y tamano y registra un borrador.
+
+El borrador aparece en `Recepciones > Ordenes de compra`. Un usuario con `reception.create` revisa proveedor sincronizado, fecha, SKU, cantidades y unidades. Solo `Confirmar y crear OC` genera la OC operativa y conserva el PDF; hasta entonces no puede usarse para una recepcion.
+
+El numero visible de la OC no se puede cambiar durante la revision. Las correcciones de lineas quedan conservadas junto con la extraccion original. Repetir el mismo documento no crea otro borrador; cambiar proveedor, SKU, cantidad, unidad o PDF con la misma referencia produce conflicto.
+
+### Entrada manual por dashboard
 
 Un usuario con capacidad `reception.create` registra:
 

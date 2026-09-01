@@ -34,7 +34,7 @@ export default function OutsourcingPage() {
       const [outsourcing, orders, documents] = await Promise.all([
         listOutsourcingOrders({ limit: 200 }),
         listPurchaseOrders({ limit: 200 }),
-        listWarehouseDocumentDrafts({ limit: 200 }),
+        listWarehouseDocumentDrafts({ limit: 200, type: 'SALIDA_BODEGA_3Q' }),
       ])
       setData({
         ...(outsourcing?.data || { rows: [], pending_shipments: [] }),

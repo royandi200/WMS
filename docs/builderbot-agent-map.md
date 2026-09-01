@@ -84,7 +84,7 @@ El flujo de maquila tercerizada esta implementado inicialmente en API y dashboar
 6. Nelly vincula cada producto `PT` a su orden 3Q y registra lote, vencimiento, ubicacion WMS y condicion.
 7. Las entregas parciales acumulan cantidad disponible hasta completar el objetivo.
 
-El flujo documental separado de BuilderBot puede registrar `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. La accion requiere `outsourcing.manage`, exige SKU exactos y crea un borrador idempotente. No reserva materiales ni ejecuta movimientos de inventario. Los handlers para crear, confirmar o recibir maquila siguen deshabilitados y deben reutilizar `outsourcing-workflow.js`; no se autoriza una ruta de mutacion paralela.
+El flujo documental separado de BuilderBot acepta dos contratos. `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create`, conserva PDF y extraccion y exige revision en el dashboard antes de crear una OC operativa. `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO` requiere `outsourcing.manage` y deja una salida 3Q pendiente de revision. Ambos exigen SKU exactos, son idempotentes y no reservan materiales ni ejecutan movimientos de inventario. Los handlers operativos deben reutilizar los servicios existentes; no se autoriza una ruta documental de mutacion paralela.
 
 Contrato completo: `docs/flujo-orden-compra-y-maquila-3q.md`.
 

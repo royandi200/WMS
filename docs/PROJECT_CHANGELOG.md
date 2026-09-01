@@ -15,6 +15,16 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Ordenes de compra leidas desde WhatsApp
+
+- El flujo `Documentos de Bodega` distingue `ORDEN_COMPRA` de `SALIDA_BODEGA_3Q` y mantiene el JSON interno oculto.
+- Una OC recibida por PDF crea un borrador idempotente; no habilita recepciones, no reserva y no modifica inventario.
+- La API valida referencia, fecha, proveedor, SKU y cantidades contra el texto documental, descarga el PDF solo desde dominios permitidos de BuilderBot, limita su tamano y verifica la firma `%PDF-`.
+- `Recepciones > Ordenes de compra` muestra los borradores y exige revision de proveedor sincronizado, SKU, cantidades y unidades antes de convertirlos en una OC operativa.
+- La conversion conserva PDF, hash, datos extraidos, correcciones humanas, actor y fecha. El numero revisado no puede diferir de la referencia visible del PDF.
+- La accion `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create`; los logs omiten texto OCR, URL firmada y detalle de items.
+- Validacion local: 105 pruebas aprobadas y build Vite de produccion aprobado. Migracion QA y sincronizacion BBC aplicadas; despliegue y prueba E2E pendientes.
+
 ### 2026-09-01 - Cancelacion auditable de ordenes de compra
 
 - Se habilito la cancelacion logica de OC desde el dashboard solo para usuarios con `purchase_order.cancel`.

@@ -24,6 +24,8 @@
     "data:documents:apply": "node scripts/apply-document-intake-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:purchase-order-cancel:dry-run": "node scripts/apply-purchase-order-cancellation-migration.js",
     "data:purchase-order-cancel:apply": "node scripts/apply-purchase-order-cancellation-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:purchase-order-documents:dry-run": "node scripts/apply-purchase-order-document-intake-migration.js",
+    "data:purchase-order-documents:apply": "node scripts/apply-purchase-order-document-intake-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {

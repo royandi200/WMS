@@ -98,6 +98,7 @@ const { formatPendingApprovals } = require('../../_lib/pending-approvals');
 const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufacturing-capacity');
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
 const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
+const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
 
 const DB = () => mysql.createConnection({
   host:           process.env.DB_HOST,
@@ -411,17 +412,35 @@ async function saveLog(db, { from, action, priority, payload, response, status }
 }
 
 function sanitizeWebhookLogPayload(payload, action) {
-  if (String(action || '').toUpperCase() !== 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO') return payload;
+  const normalizedAction = String(action || '').toUpperCase();
+  const documentActions = new Set([
+    'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO',
+    'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
+  ]);
   const source = payload && typeof payload === 'object' ? payload : {};
+  if (!documentActions.has(normalizedAction)) {
+    const sanitized = { ...source };
+    delete sanitized.document_text;
+    delete sanitized.document_url;
+    delete sanitized.document_name;
+    return sanitized;
+  }
   const info = parseBuilderBotInfo(source);
   const params = info.params && typeof info.params === 'object' ? info.params : {};
   return {
     document_intake: true,
-    action: 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
+    action: normalizedAction,
     reference: params.referencia_documento || null,
     document_type: params.tipo_documento || null,
     item_count: Array.isArray(params.items) ? params.items.length : 0,
+    pdf_reference_received: Boolean(source.document_url),
   };
+}
+
+function builderBotDocumentValue(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (/^\{[^{}]+\}$/u.test(normalized)) return '';
+  return normalized;
 }
 
 async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload }) {
@@ -1279,6 +1298,36 @@ module.exports = async (req, res) => {
 
     switch (action) {
 
+      // A purchase-order PDF creates a reviewable draft. Only the dashboard
+      // can convert it into an operational purchase order used by receptions.
+      case 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO': {
+        const draft = await registerPurchaseOrderDocumentDraft({
+          db,
+          body: params,
+          userId: user.id,
+          evidenceText: builderBotDocumentValue(rawBody.document_text),
+          documentUrl: builderBotDocumentValue(rawBody.document_url),
+          documentName: builderBotDocumentValue(rawBody.document_name) || params.nombre_archivo || '',
+        });
+        const warningLines = (draft.warnings || []).slice(0, 5).map((warning) => `- ${warning}`);
+        mensaje = [
+          draft.duplicate
+            ? `La orden ${draft.referencia_documento} ya estaba registrada. No se duplico.`
+            : `Orden ${draft.referencia_documento} leida y guardada como borrador.`,
+          `Items: ${draft.itemCount} | Total: ${Number(draft.totalUnits || 0)}`,
+          `Estado: ${draft.estado}`,
+          warningLines.length ? 'Revisiones necesarias:' : null,
+          ...warningLines,
+          draft.ordenCompraId
+            ? `Ya fue convertida en la OC operativa #${draft.ordenCompraId}.`
+            : 'Debe revisarse en Recepciones > Ordenes de compra. No se modifico inventario.',
+        ].filter(Boolean).join('\n');
+        responseContext.document_draft_id = draft.id;
+        responseContext.purchase_order_id = draft.ordenCompraId || null;
+        responseContext.inventory_changed = false;
+        break;
+      }
+
       // Document extraction only creates a reviewable draft. It never reserves,
       // confirms a shipment or changes inventory.
       case 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO': {
@@ -1287,7 +1336,7 @@ module.exports = async (req, res) => {
           body: params,
           userId: user.id,
           origin: 'BUILDERBOT',
-          evidenceText: rawText,
+          evidenceText: builderBotDocumentValue(rawBody.document_text) || rawText,
         });
         const warningLines = (draft.warnings || []).slice(0, 5).map((warning) => `- ${warning}`);
         mensaje = [
