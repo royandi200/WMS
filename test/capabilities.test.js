@@ -43,6 +43,7 @@ test('BuilderBot actions map to stable capabilities', () => {
   assert.equal(capabilityForAction('CONFIRMAR_MATERIALES_PRODUCCION'), CAPABILITIES.PRODUCTION_PICK);
   assert.equal(capabilityForAction('CERRAR_ORDEN_PRODUCCION'), CAPABILITIES.PRODUCTION_CLOSE);
   assert.equal(capabilityForAction('CONFIRMAR_DESPACHO_SIIGO'), CAPABILITIES.DISPATCH_CONFIRM);
+  assert.equal(capabilityForAction('CONSULTAR_DESPACHOS_PENDIENTES'), CAPABILITIES.DISPATCH_READ);
   assert.equal(capabilityForAction('APROBAR_SOLICITUD'), CAPABILITIES.APPROVALS_DECIDE);
   assert.equal(capabilityForAction('not-an-action'), null);
 });

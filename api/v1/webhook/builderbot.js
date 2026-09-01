@@ -97,6 +97,7 @@ const { workflowFlags } = require('../../_lib/feature-flags');
 const { formatPendingApprovals } = require('../../_lib/pending-approvals');
 const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufacturing-capacity');
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
+const { resolveProductReference } = require('../../_lib/product-references');
 const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
 const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
 const {
@@ -567,17 +568,7 @@ async function getStockBalance(db, product_id, bodega_id) {
 }
 
 async function findProductBySku(db, sku) {
-  const [rows] = await db.execute(
-    `SELECT p.* FROM productos p
-     INNER JOIN skus s ON s.producto_id = p.id
-     WHERE s.sku = ? AND p.activo = 1 LIMIT 1`, [sku]
-  );
-  if (rows.length) return rows[0];
-  const [rows2] = await db.execute(
-    `SELECT * FROM productos WHERE siigo_code = ? AND activo = 1 LIMIT 1`, [sku]
-  );
-  if (!rows2.length) throw { status: 404, message: `Producto "${sku}" no encontrado` };
-  return rows2[0];
+  return resolveProductReference(db, sku);
 }
 
 async function getDefaultBodega(db) {
@@ -1331,7 +1322,7 @@ module.exports = async (req, res) => {
           const lines = available.flatMap(order => [
             `- ID ${order.id} | ${order.numero} | ${order.proveedor_nombre || 'Proveedor N/A'} | ${formatDateOnly(order.fecha_orden)}`,
             ...order.items.map(item =>
-              `  ${item.sku}: ${Number(item.cantidad_pendiente)} ${item.unidad}`
+              `  ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad}`
             ),
           ]);
           mensaje = [
@@ -1353,10 +1344,10 @@ module.exports = async (req, res) => {
       case 'REVISAR_BORRADOR_ORDEN_COMPRA': {
         const draft = await reviewPurchaseOrderDocumentDraft({ db, params });
         const items = draft.items.map(item =>
-          `- ${item.sku}: ${Number(item.cantidad)} ${item.unidad || ''}`
+          `- ${item.sku} - ${item.descripcion || 'Producto'}: ${Number(item.cantidad)} ${item.unidad || ''}`
         );
         mensaje = [
-          `Revision de OC ${draft.referencia_documento}.`,
+          `Revision de OC ID ${draft.id} | ${draft.referencia_documento}.`,
           `Proveedor: ${draft.destinatario_nombre || 'N/A'}`,
           `Fecha: ${formatDateOnly(draft.fecha_documento)}`,
           ...items,
@@ -1364,7 +1355,7 @@ module.exports = async (req, res) => {
           draft.orden_compra_id
             ? `Ya fue creada como OC operativa #${draft.orden_compra_id}.`
             : draft.estado === 'PENDIENTE_REVISION' && !(draft.warnings || []).length
-              ? `Para crearla escribe: Confirmo la orden de compra ${draft.referencia_documento}`
+              ? `Para crearla escribe: Confirmo la orden de compra ID ${draft.id}`
               : 'Debe corregirse desde el dashboard antes de crear la OC.',
           'No se modifico inventario.',
         ].join('\n');
@@ -1408,7 +1399,7 @@ module.exports = async (req, res) => {
           break;
         }
         const pending = prepared.reception.items.map(item =>
-          `- ${item.sku}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
+          `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
         );
         mensaje = [
           `Recepcion preparada para OC ${prepared.order.numero}.`,
@@ -1416,8 +1407,8 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          'Indica para cada SKU: cantidad, lote, vencimiento, condicion y ubicacion.',
-          `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${prepared.order.numero}`,
+          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, lote, vencimiento, condicion y ubicacion.',
+          `Antes de afectar inventario deberas escribir: Confirmo la recepcion ID ${prepared.order.id}`,
         ].join('\n');
         responseContext.reception = {
           reception_id: prepared.reception.id,
@@ -2182,6 +2173,51 @@ module.exports = async (req, res) => {
         break;
       }
 
+      case 'CONSULTAR_DESPACHOS_PENDIENTES': {
+        const [dispatches] = await db.execute(
+          `SELECT d.id, d.numero, d.siigo_invoice_name, d.cliente_nombre, d.estado, d.creado_en
+             FROM despachos d
+            WHERE d.estado NOT IN ('despachado', 'cancelado')
+              AND (d.siigo_invoice_id IS NOT NULL OR d.siigo_invoice_name IS NOT NULL)
+            ORDER BY d.creado_en ASC, d.id ASC
+            LIMIT 10`
+        );
+        if (!dispatches.length) {
+          mensaje = 'No hay despachos pendientes importados desde facturas de Siigo.';
+        } else {
+          const ids = dispatches.map(dispatch => Number(dispatch.id));
+          const [items] = await db.execute(
+            `SELECT di.despacho_id, p.siigo_code AS sku, p.nombre AS producto,
+                    SUM(di.cantidad_sol) AS cantidad
+               FROM despacho_items di
+               JOIN productos p ON p.id = di.producto_id
+              WHERE di.despacho_id IN (${ids.map(() => '?').join(',')})
+              GROUP BY di.despacho_id, p.id, p.siigo_code, p.nombre
+              ORDER BY di.despacho_id, p.siigo_code`,
+            ids
+          );
+          const itemsByDispatch = new Map();
+          for (const item of items) {
+            const list = itemsByDispatch.get(Number(item.despacho_id)) || [];
+            list.push(item);
+            itemsByDispatch.set(Number(item.despacho_id), list);
+          }
+          mensaje = [
+            `Despachos pendientes (${dispatches.length}):`,
+            ...dispatches.flatMap(dispatch => [
+              `- ID ${dispatch.id} | ${dispatch.numero} | Factura ${dispatch.siigo_invoice_name || 'N/A'} | ${dispatch.cliente_nombre || 'Cliente N/A'} | ${dispatch.estado}`,
+              ...(itemsByDispatch.get(Number(dispatch.id)) || []).map(item =>
+                `  ${item.sku} - ${item.producto}: ${Number(item.cantidad)} und`
+              ),
+            ]),
+            `Para confirmar responde, por ejemplo: confirma el despacho ID ${dispatches[0].id}.`,
+            'Esta consulta no modifica inventario.',
+          ].join('\n');
+        }
+        responseContext.inventory_changed = false;
+        break;
+      }
+
       case 'LIBERAR_ORDEN_PRODUCCION': {
         const productionResult = await releaseProductionOrder({
           product: params.id_producto_final || params.id_item || params.sku,
@@ -2193,14 +2229,15 @@ module.exports = async (req, res) => {
           userId: user.id,
         });
         const picking = productionResult.picking.map(item =>
-          `- ${item.sku}: ${item.cantidad} ${item.unidad || ''} | lote ${item.lote} | ubicacion ${item.ubicacion || item.ubicacion_id}`
+          `- ${item.sku} - ${item.producto}: ${item.cantidad} ${item.unidad || ''} | lote ${item.lote} | ubicacion ${item.ubicacion || item.ubicacion_id}`
         );
         mensaje = [
-          `Orden ${productionResult.order_code} liberada.`,
+          `Orden ID ${productionResult.order_id} | ${productionResult.order_code} liberada.`,
+          `Producto: ${productionResult.product.siigo_code} - ${productionResult.product.nombre}`,
           `Destino: ${productionResult.origin_type === 'OC_CLIENTE' ? `OC ${productionResult.customer_reference} - ${productionResult.final_customer}` : 'stock de seguridad'}`,
           'Alistamiento FEFO:',
           ...picking,
-          `Cuando esten listos, confirma materiales de ${productionResult.order_code}.`,
+          `Cuando esten listos, confirma materiales de la orden ID ${productionResult.order_id}.`,
         ].join('\n');
         responseContext.production = productionResult;
         break;
@@ -2281,8 +2318,16 @@ module.exports = async (req, res) => {
         );
         const bodegaCodigo = bodegaRow[0]?.codigo || 'BG-PPAL';
 
+        const requestedProduct = params.id_item
+          ? await findProductBySku(db, params.id_item)
+          : null;
+        const canonicalSku = requestedProduct?.siigo_code || null;
+        const productLabel = requestedProduct
+          ? `${requestedProduct.nombre} (${requestedProduct.siigo_code})`
+          : null;
+        const stockUnit = requestedProduct?.unit_label || 'und';
         const result = await queryStockDisponible(db, {
-          sku: params.id_item || null,
+          sku: canonicalSku,
           bodega: bodegaCodigo,
           tipoFiltro,
         });
@@ -2290,7 +2335,7 @@ module.exports = async (req, res) => {
         if (params.id_item) {
           const totalDisp = result.rows.reduce((s, r) => s + parseFloat(r.disponible || 0), 0);
           if (!result.rows.length) {
-            mensaje = `📊 *Stock: ${params.id_item}*\n  Sin stock disponible`;
+            mensaje = `📊 *Stock: ${productLabel}*\n  Sin stock disponible`;
           } else {
             // [FIX 22] Separar lotes por estado: vencidos, cuarentena, disponibles
             const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
@@ -2318,7 +2363,7 @@ module.exports = async (req, res) => {
               }
               // 3) Disponible real
               const venceStr = r.vence ? ` (vence ${new Date(r.vence).toLocaleDateString('es-CO')})` : '';
-              lotesDispLines.push(`  • ${lpnCorto}: *${disp} und*${venceStr}`);
+              lotesDispLines.push(`  • ${lpnCorto}: *${disp} ${stockUnit}*${venceStr}`);
               totalNeto += disp;
             }
 
@@ -2328,7 +2373,7 @@ module.exports = async (req, res) => {
 
             const secCuarentena = lotesCuarentenaInfo.length
               ? `\n⚠️ *En cuarentena (${lotesCuarentenaInfo.length} lote${lotesCuarentenaInfo.length > 1 ? 's' : ''}):*\n`
-                + lotesCuarentenaInfo.map(l => `  🔒 ${l.lpnCorto}: *${l.disp} und*`).join('\n')
+                + lotesCuarentenaInfo.map(l => `  🔒 ${l.lpnCorto}: *${l.disp} ${stockUnit}*`).join('\n')
                 + `\n_No disponible para despacho. Requiere aprobación._`
               : '';
 
@@ -2339,8 +2384,8 @@ module.exports = async (req, res) => {
               : '';
 
             mensaje = [
-              `📊 *Stock ${label}: ${params.id_item}*`,
-              `Total disponible: *${totalNeto} und*`,
+              `📊 *Stock ${label}: ${productLabel}*`,
+              `Total disponible: *${totalNeto} ${stockUnit}*`,
               ``,
               secDisp,
               secCuarentena,
@@ -2358,6 +2403,29 @@ module.exports = async (req, res) => {
 
       // ── Consulta estado de orden ──────────────────────────────
       case 'CONSULTAR_ESTADO_PRODUCCION': {
+        if (!params.id_orden) {
+          const [activeOrders] = await db.execute(
+            `SELECT o.id, o.codigo_orden, o.estado, o.cantidad_planeada,
+                    p.nombre AS producto, p.siigo_code
+               FROM ordenes_produccion o
+               JOIN productos p ON p.id = o.producto_id
+              WHERE o.estado NOT IN ('CERRADA', 'CANCELADA')
+              ORDER BY o.creado_en ASC, o.id ASC
+              LIMIT 10`
+          );
+          mensaje = activeOrders.length
+            ? [
+                `Ordenes de produccion activas (${activeOrders.length}):`,
+                ...activeOrders.map(order =>
+                  `- ID ${order.id} | ${order.codigo_orden} | ${order.siigo_code} - ${order.producto} | ${Number(order.cantidad_planeada)} und | ${order.estado}`
+                ),
+                `Para continuar usa el ID corto; por ejemplo: consulta la orden ID ${activeOrders[0].id}.`,
+                'Esta consulta no modifica inventario.',
+              ].join('\n')
+            : 'No hay ordenes de produccion activas.';
+          responseContext.inventory_changed = false;
+          break;
+        }
         const [rows] = await db.execute(
           `SELECT o.id, o.codigo_orden, o.estado, o.fase,
                   o.cantidad_planeada, o.cantidad_real,
@@ -2371,7 +2439,7 @@ module.exports = async (req, res) => {
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         const o = rows[0];
         mensaje = [
-          `🔍 *Orden: ${o.codigo_orden || o.id}*`,
+          `🔍 *Orden ID ${o.id} | ${o.codigo_orden || o.id}*`,
           `Producto: ${o.producto} (${o.siigo_code})`,
           `Estado: ${o.estado}  |  Fase: ${o.fase || 'F0'}`,
           `Planeado: ${o.cantidad_planeada} und`,
@@ -2692,11 +2760,11 @@ module.exports = async (req, res) => {
         }
         mensaje = desired == null
           ? [
-              `*Capacidad actual de ${productReference}: ${Number.isFinite(capacidadMaxima) ? capacidadMaxima : 0} uds*`,
+              `*Capacidad actual de ${p.nombre} (${p.siigo_code}): ${Number.isFinite(capacidadMaxima) ? capacidadMaxima : 0} uds*`,
               ...checks,
             ].join('\n')
           : [
-              `${puedeProd ? '✅' : '❌'} *Capacidad para ${desired} uds de ${productReference}:*`,
+              `${puedeProd ? '✅' : '❌'} *Capacidad para ${desired} uds de ${p.nombre} (${p.siigo_code}):*`,
               ...checks,
             ].join('\n');
         break;

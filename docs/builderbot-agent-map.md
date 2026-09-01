@@ -39,7 +39,9 @@ Ejemplo de entrada:
 Reglas invariables:
 
 - `body`, `text` y `query` contienen el mensaje real, sin resumir ni corregir.
-- Los codigos de producto, lote, OP, factura y despacho se conservan completos.
+- Los PDF, BOM, lotes, facturas y movimientos conservan los codigos canonicos completos.
+- En conversaciones, un producto puede llegar como SKU o alias humano exacto. La API lo resuelve contra `producto_aliases`, falla ante ambiguedad y registra el producto canonico.
+- OC, recepciones, OP y despachos pueden seleccionarse mediante el ID numerico corto que el WMS mostro previamente. El ID no omite permisos ni confirmaciones.
 - Una operacion no se autoriza por lo que diga el JSON: el rol se consulta nuevamente en la base de datos.
 - Las respuestas funcionales usan HTTP 200 cuando BuilderBot necesita mostrar el mensaje, incluso si `ok` es `false`.
 - No se deben registrar tokens, secretos ni telefonos completos en logs de aplicacion.
@@ -64,11 +66,11 @@ Flujo principal:
 
 1. El PDF crea un borrador mediante `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`.
 2. `REVISAR_BORRADOR_ORDEN_COMPRA` muestra la extraccion sin modificar datos.
-3. `CONFIRMAR_BORRADOR_ORDEN_COMPRA` crea la OC operativa solo si no hay advertencias y el mensaje actual contiene la frase de confirmacion con el numero exacto.
+3. `CONFIRMAR_BORRADOR_ORDEN_COMPRA` crea la OC operativa solo si no hay advertencias y el mensaje actual contiene la frase de confirmacion con el numero exacto o el ID corto del borrador.
 4. `CONSULTAR_RECEPCIONES_PENDIENTES` lista las OC aptas con saldo, número completo e ID corto estable; es de solo lectura.
 5. `PREPARAR_RECEPCION_OC` acepta ese ID y crea o reutiliza un borrador con el saldo pendiente por SKU y unidad.
-6. Nelly registra todos los SKU por cantidad, lote, vencimiento, ubicacion y condicion.
-7. `CONFIRMAR_RECEPCION_OC` exige el borrador `REC-...`, un resumen previo y la frase exacta con el numero de OC. Solo entonces ejecuta la misma transaccion usada por el dashboard.
+6. Nelly registra todos los productos por cantidad, lote, vencimiento, ubicacion y condicion. Puede usar el SKU o un alias inequivoco dentro de los productos pendientes de esa OC.
+7. `CONFIRMAR_RECEPCION_OC` exige el borrador `REC-...`, un resumen previo y la frase exacta con el numero o ID corto de la OC. Solo entonces ejecuta la misma transaccion usada por el dashboard.
 8. Solo `DISPONIBLE` crea stock utilizable. Cuarentena, rechazo y disposicion permanecen trazables sin sumar inventario disponible.
 9. Una recepcion parcial deja la OC abierta y la siguiente entrega recibe un nuevo `REC-...`. La identidad canonica de la confirmacion impide que un reintento ingrese inventario dos veces.
 

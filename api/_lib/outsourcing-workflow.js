@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { resolvePrimaryWarehouse } = require('./warehouses');
 const { PRODUCT_MODES } = require('./product-modes');
+const { resolveProductReference } = require('./product-references');
 const {
   normalizeOutsourcingOrderInput,
   normalizeAdditionalShipmentInput,
@@ -19,19 +20,6 @@ function httpError(status, message, data) {
 function codeForId(prefix, id) {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   return `${prefix}-${date}-${String(id).padStart(6, '0')}`;
-}
-
-async function resolveProduct(conn, value) {
-  const term = String(value || '').trim();
-  const [rows] = await conn.execute(
-    `SELECT id, siigo_code, nombre, modalidad_operativa
-       FROM productos
-      WHERE id = ? OR siigo_code = ?
-      LIMIT 1`,
-    [Number(term) || 0, term]
-  );
-  if (!rows.length) throw httpError(404, `Producto no encontrado: ${term}`);
-  return rows[0];
 }
 
 async function allocateFefo(conn, { productId, warehouseId, quantity }) {
@@ -102,7 +90,7 @@ async function createOutsourcingOrder({ body, userId }) {
       throw httpError(409, 'La orden de compra no tiene un proveedor sincronizado');
     }
 
-    const finalProduct = await resolveProduct(conn, input.product);
+    const finalProduct = await resolveProductReference(conn, input.product, { modes: [PRODUCT_MODES.OUTSOURCED] });
     if (finalProduct.modalidad_operativa !== PRODUCT_MODES.OUTSOURCED) {
       throw httpError(409, `${finalProduct.siigo_code} no es un producto de maquila tercerizada`);
     }
@@ -247,7 +235,7 @@ async function prepareAdditionalShipment({ body, userId }) {
     if (!['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)) {
       throw httpError(409, `La orden esta ${order.estado} y no admite material adicional`);
     }
-    const product = await resolveProduct(conn, input.product);
+    const product = await resolveProductReference(conn, input.product);
     const [replays] = await conn.execute(
       `SELECT id, numero, estado, orden_maquila_id
          FROM maquila_envios WHERE clave_idempotencia = ? LIMIT 1`,

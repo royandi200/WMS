@@ -1,5 +1,6 @@
 const { preparePurchaseOrderReception } = require('./purchase-order-reception');
 const { createHash } = require('crypto');
+const { resolveProductReference } = require('./product-references');
 
 function inputError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -146,11 +147,27 @@ async function reviewPurchaseOrderDocumentDraft({ db, params }) {
   return findPurchaseOrderDocumentDraft(db, params);
 }
 
-function explicitPurchaseOrderConfirmation(rawText, reference, params = {}) {
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function confirmationMatchesReference(text, entity, idParam) {
+  const reference = typeof entity === 'object'
+    ? entity.referencia_documento || entity.numero
+    : entity;
+  const id = Number(typeof entity === 'object' ? entity.id : idParam);
+  const hasReference = reference
+    && text.toUpperCase().includes(String(reference).toUpperCase());
+  const hasShortId = Number.isSafeInteger(id) && id > 0
+    && new RegExp(`\\bid\\s*#?\\s*${escapeRegExp(id)}\\b`, 'iu').test(text);
+  return Boolean(hasReference || hasShortId);
+}
+
+function explicitPurchaseOrderConfirmation(rawText, draft, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
   const text = String(rawText || '').trim();
   return /\bconfirm(?:o|amos)\s+(?:la\s+)?orden\s+de\s+compra\b/iu.test(text)
-    && text.toUpperCase().includes(String(reference || '').toUpperCase());
+    && confirmationMatchesReference(text, draft, params.documento_borrador_id);
 }
 
 async function confirmPurchaseOrderDocumentDraft({ db, params, rawText, user }) {
@@ -175,9 +192,9 @@ async function confirmPurchaseOrderDocumentDraft({ db, params, rawText, user }) 
   if (!draft.items.length || draft.items.some(item => !item.producto_id)) {
     throw inputError('Todos los SKU deben existir en el catalogo antes de confirmar la OC', 409);
   }
-  if (!explicitPurchaseOrderConfirmation(rawText, draft.referencia_documento, params)) {
+  if (!explicitPurchaseOrderConfirmation(rawText, draft, params)) {
     throw inputError(
-      `Para crear la OC escribe: Confirmo la orden de compra ${draft.referencia_documento}`,
+      `Para crear la OC escribe: Confirmo la orden de compra ID ${draft.id}`,
       409
     );
   }
@@ -261,11 +278,11 @@ async function prepareReceptionFromPurchaseOrder({ db, params, userId }) {
   }
 }
 
-function explicitConfirmation(rawText, orderNumber, params = {}) {
+function explicitConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
   const text = String(rawText || '').trim();
   return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepci[oó]n\b/iu.test(text)
-    && text.toUpperCase().includes(String(orderNumber || '').toUpperCase());
+    && confirmationMatchesReference(text, order, params.orden_compra_id);
 }
 
 function receptionConfirmationKey(orderId, receptionId, params = {}) {
@@ -352,18 +369,20 @@ async function resolveLocation(db, code) {
 
 async function buildConfirmationItems(db, preparedItems, params = {}) {
   const incoming = suppliedItems(params);
-  const preparedBySku = new Map(preparedItems.map(item => [String(item.sku).toUpperCase(), item]));
+  const preparedByProduct = new Map(preparedItems.map(item => [Number(item.producto_id), item]));
   const seen = new Set();
   const result = [];
 
   for (const item of incoming) {
-    const sku = itemSku(item);
-    if (!sku || !preparedBySku.has(sku)) {
-      throw inputError(`El SKU ${sku || '(vacio)'} no pertenece al saldo pendiente de la OC`, 409);
-    }
-    if (seen.has(sku)) throw inputError(`El SKU ${sku} esta repetido`);
-    seen.add(sku);
-    const prepared = preparedBySku.get(sku);
+    const reference = itemSku(item);
+    const product = await resolveProductReference(db, reference, {
+      productIds: preparedItems.map(prepared => prepared.producto_id),
+    });
+    const productId = Number(product.id);
+    const prepared = preparedByProduct.get(productId);
+    if (!prepared) throw inputError(`El producto ${reference} no pertenece al saldo pendiente de la OC`, 409);
+    if (seen.has(productId)) throw inputError(`El producto ${product.siigo_code} esta repetido`);
+    seen.add(productId);
     const distributions = [];
     for (const entry of itemDistributions(item)) {
       const location = await resolveLocation(
@@ -388,7 +407,7 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
     });
   }
 
-  const missing = preparedItems.filter(item => !seen.has(String(item.sku).toUpperCase()));
+  const missing = preparedItems.filter(item => !seen.has(Number(item.producto_id)));
   if (missing.length) {
     throw inputError(`Falta confirmar: ${missing.map(item => item.sku).join(', ')}`);
   }
@@ -397,9 +416,9 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
 
 async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const order = await findPurchaseOrder(db, params);
-  if (!explicitConfirmation(rawText, order.numero, params)) {
+  if (!explicitConfirmation(rawText, order, params)) {
     throw inputError(
-      `Para modificar inventario escribe: Confirmo la recepcion ${order.numero}`,
+      `Para modificar inventario escribe: Confirmo la recepcion ID ${order.id}`,
       409
     );
   }

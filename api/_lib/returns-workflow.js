@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
+const { resolveProductReference } = require('./product-references');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -139,16 +140,15 @@ async function createCustomerReturn(input, userId) {
       throw httpError(409, `El cliente del despacho es ${dispatch.cliente_nombre}`);
     }
 
-    const [products] = await conn.execute(
-      `SELECT DISTINCT p.id, p.siigo_code, p.nombre
-       FROM productos p LEFT JOIN skus s ON s.producto_id = p.id
-       WHERE p.id = ? OR p.siigo_code = ? OR s.sku = ?
-       LIMIT 2`,
-      [/^\d+$/.test(data.sku) ? Number(data.sku) : 0, data.sku, data.sku]
+    const [dispatchProducts] = await conn.execute(
+      `SELECT DISTINCT producto_id FROM despacho_items
+        WHERE despacho_id = ? AND lote = ?`,
+      [dispatch.id, data.sourceLot]
     );
-    if (!products.length) throw httpError(404, 'Producto devuelto no encontrado');
-    if (products.length > 1) throw httpError(409, 'La referencia identifica mas de un producto');
-    const product = products[0];
+    if (!dispatchProducts.length) throw httpError(409, 'El lote no pertenece al despacho indicado');
+    const product = await resolveProductReference(conn, data.sku, {
+      productIds: dispatchProducts.map(item => item.producto_id),
+    });
 
     const [items] = await conn.execute(
       `SELECT di.id, di.lote, di.cantidad_des, l.expiry_date

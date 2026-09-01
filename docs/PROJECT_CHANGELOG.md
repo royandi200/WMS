@@ -15,6 +15,17 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Alias humanos e identificadores operativos cortos
+
+- Se agrego `producto_aliases` como catalogo separado de los SKU externos. Cubre los 79 productos activos con nombre oficial y nombres comunes documentados; el SKU maestro no se modifica.
+- El resolvedor usa coincidencia exacta normalizada, reconoce presentaciones dictadas como `sesenta`, `ciento veinte` y `ciento cuarenta`, y falla cerrado cuando un nombre identifica mas de un producto.
+- Recepcion, produccion, consultas de stock y capacidad, mermas, devoluciones y maquila 3Q reutilizan el mismo resolvedor. En recepciones la busqueda se limita a los productos realmente pendientes de la OC.
+- Las respuestas muestran nombre y SKU. Las OC, recepciones, OP y despachos pueden seleccionarse mediante IDs numericos cortos previamente listados.
+- Confirmar una OC o recepcion sigue exigiendo una frase explicita; el ID corto debe coincidir con la entidad elegida. Reintentos e IDs distintos no mutan inventario.
+- `CONSULTAR_ESTADO_PRODUCCION` sin ID lista OP activas y `CONSULTAR_DESPACHOS_PENDIENTES` lista tareas originadas en factura Siigo, ambas sin modificar inventario.
+- Migracion `22_product_aliases.sql` aplicada en QA: 139 alias activos para 79 productos y cero colisiones entre productos.
+- Validacion local: 120 pruebas aprobadas, build Vite de produccion aprobado y revision `standard` de seguridad sin hallazgos bloqueantes en este cambio.
+
 ### 2026-09-01 - Seleccion corta de recepciones por WhatsApp
 
 - `CONSULTAR_RECEPCIONES_PENDIENTES` lista hasta diez OC aptas para recepcion directa y con saldo fisico real, sin preparar recepciones ni modificar inventario.
@@ -28,7 +39,7 @@ No reemplaza:
 
 - El canal WhatsApp puede revisar un borrador de OC, crear la OC operativa, preparar su recepcion fisica y confirmar la entrada sin depender del dashboard.
 - El PDF conserva su rol de evidencia: solo crea un borrador. Una OC con advertencias, proveedor ambiguo o SKU desconocido debe corregirse desde el dashboard.
-- Crear la OC exige la frase exacta `Confirmo la orden de compra NUMERO-OC`; confirmar inventario exige `Confirmo la recepcion NUMERO-OC` y el numero completo en el mensaje actual.
+- Crear la OC exige la frase exacta con el numero documental o ID corto; confirmar inventario exige `Confirmo la recepcion NUMERO-OC` o `Confirmo la recepcion ID N` en el mensaje actual.
 - La confirmacion exige todos los SKU pendientes y distribuciones por cantidad, lote, vencimiento, condicion y ubicacion. Faltantes, sobrantes y condiciones bloqueadas requieren motivo.
 - Dashboard y WhatsApp ejecutan las mismas funciones transaccionales de creacion y recepcion. `INGRESO_RECEPCION` queda bloqueado mientras `ALLOW_MANUAL_RECEPTION=false`.
 - La migracion `21_reception_confirmation_idempotency.sql` agrega una identidad unica a cada confirmacion WhatsApp. Cada entrega parcial usa el borrador `REC-...` generado por el WMS; un reintento no puede convertirse en una entrega nueva ni ingresar inventario dos veces.

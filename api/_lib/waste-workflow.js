@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
+const { resolveProductReference } = require('./product-references');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -78,30 +79,15 @@ async function findExisting(conn, externalReference) {
   return rows[0] || null;
 }
 
-async function findProduct(conn, value) {
-  const numericId = /^\d+$/.test(value) ? Number(value) : 0;
-  const [rows] = await conn.execute(
-    `SELECT DISTINCT p.id, p.siigo_code, p.nombre
-     FROM productos p
-     LEFT JOIN skus s ON s.producto_id = p.id
-     WHERE p.activo = 1 AND (p.id = ? OR p.siigo_code = ? OR s.sku = ?)
-     LIMIT 2`,
-    [numericId, value, value]
-  );
-  if (!rows.length) throw httpError(404, `Producto ${value} no encontrado`);
-  if (rows.length > 1) throw httpError(409, 'La referencia identifica mas de un producto');
-  return rows[0];
-}
-
 async function reportWaste(input, userId) {
   const data = normalizeWasteInput(input);
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
+    const product = await resolveProductReference(conn, data.sku);
     const existing = await findExisting(conn, data.externalReference);
     if (existing) {
-      const sameProduct = String(existing.sku) === data.sku
-        || String(existing.producto_id) === data.sku;
+      const sameProduct = Number(existing.producto_id) === Number(product.id);
       const sameContext = data.order
         ? (String(existing.codigo_orden || '') === data.order
           || String(existing.orden_produccion_id || '') === data.order) && !existing.lote
@@ -119,7 +105,6 @@ async function reportWaste(input, userId) {
       return { ...existing, already_completed: true };
     }
 
-    const product = await findProduct(conn, data.sku);
     let order = null;
     let lotRow = null;
     let stockRow = null;

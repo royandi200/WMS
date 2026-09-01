@@ -22,6 +22,14 @@ test('WhatsApp purchase order and reception require an exact explicit confirmati
   assert.equal(explicitPurchaseOrderConfirmation(
     'Confirmo la orden de compra OC-999', 'OC-123', { confirmacion_final: true }
   ), false);
+  assert.equal(explicitPurchaseOrderConfirmation(
+    'Confirmo la orden de compra ID 17', { id: 17, referencia_documento: 'OC-MUY-LARGA-123' },
+    { confirmacion_final: true, documento_borrador_id: 17 }
+  ), true);
+  assert.equal(explicitPurchaseOrderConfirmation(
+    'Confirmo la orden de compra ID 18', { id: 17, referencia_documento: 'OC-MUY-LARGA-123' },
+    { confirmacion_final: true, documento_borrador_id: 17 }
+  ), false);
 
   assert.equal(explicitConfirmation(
     'Confirmo la recepcion OC-123', 'OC-123', { confirmacion_final: true }
@@ -31,6 +39,14 @@ test('WhatsApp purchase order and reception require an exact explicit confirmati
   ), false);
   assert.equal(explicitConfirmation(
     'Proceda con OC-123', 'OC-123', { confirmacion_final: true }
+  ), false);
+  assert.equal(explicitConfirmation(
+    'Confirmo la recepcion ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' },
+    { confirmacion_final: true, orden_compra_id: 5 }
+  ), true);
+  assert.equal(explicitConfirmation(
+    'Confirmo la recepcion ID 50', { id: 5, numero: 'OC-MUY-LARGA-456' },
+    { confirmacion_final: true, orden_compra_id: 5 }
   ), false);
 });
 
@@ -56,6 +72,13 @@ test('WhatsApp reception confirmation key is stable across harmless ordering cha
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {
   const db = {
     async execute(sql, values) {
+      if (/FROM productos p/u.test(sql)) {
+        const products = {
+          'SKU-A': { id: 100, siigo_code: 'SKU-A', nombre: 'Product A' },
+          'SKU-B': { id: 101, siigo_code: 'SKU-B', nombre: 'Product B' },
+        };
+        return [[products[values[1]]].filter(Boolean)];
+      }
       assert.match(sql, /FROM ubicaciones/u);
       return [[{ id: values[0] === 'PPAL-A-1-01' ? 1 : 2, codigo: values[0] }]];
     },
@@ -122,9 +145,9 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(webhook, /confirmReceptionFromWhatsApp/u);
   assert.match(reception, /confirmReceptionForUser/u);
   assert.match(purchaseOrders, /createPurchaseOrderForUser/u);
-  assert.match(prompt, /Confirmo la orden de compra NUMERO-OC/u);
-  assert.match(prompt, /Confirmo la recepcion NUMERO-OC/u);
-  assert.match(prompt, /todos los SKU pendientes/u);
+  assert.match(prompt, /Confirmo la orden de compra ID N/u);
+  assert.match(prompt, /Confirmo la recepcion ID N/u);
+  assert.match(prompt, /todos los productos pendientes/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);
   assert.match(migration, /UNIQUE KEY uk_recepcion_confirmacion_clave/u);
   assert.match(reception, /confirmation_key/u);

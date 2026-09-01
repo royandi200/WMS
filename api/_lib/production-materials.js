@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
+const { resolveProductReference } = require('./product-references');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -27,19 +28,19 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
     if (!orders.length) throw httpError(404, 'Orden no encontrada');
     const order = orders[0];
     if (order.estado !== 'EN_PROCESO') throw httpError(409, 'La orden debe estar EN_PROCESO');
-    const [products] = await conn.execute(
-      `SELECT id, siigo_code, nombre FROM productos WHERE id = ? OR siigo_code = ? LIMIT 1`,
-      [Number(productValue) || 0, productValue]
-    );
-    if (!products.length) throw httpError(404, 'Producto no encontrado');
-    const product = products[0];
     const [materials] = await conn.execute(
-      `SELECT * FROM produccion_materiales
-       WHERE orden_produccion_id = ? AND producto_id = ? LIMIT 1 FOR UPDATE`,
-      [order.id, product.id]
+      `SELECT pm.*, p.siigo_code, p.nombre
+         FROM produccion_materiales pm
+         JOIN productos p ON p.id = pm.producto_id
+        WHERE pm.orden_produccion_id = ? FOR UPDATE`,
+      [order.id]
     );
-    if (!materials.length) throw httpError(409, 'El producto no pertenece al BOM de la orden');
-    const material = materials[0];
+    if (!materials.length) throw httpError(409, 'La orden no tiene materiales entregados');
+    const product = await resolveProductReference(conn, productValue, {
+      productIds: materials.map(material => material.producto_id),
+    });
+    const material = materials.find(item => Number(item.producto_id) === Number(product.id));
+    if (!material) throw httpError(409, 'El producto no pertenece al BOM de la orden');
     const [stocks] = await conn.execute(
       `SELECT s.id, s.bodega_id, s.cantidad, s.reservada, s.ubicacion_id, u.codigo AS ubicacion_codigo
        FROM stock s

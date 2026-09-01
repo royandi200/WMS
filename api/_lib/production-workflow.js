@@ -3,6 +3,7 @@ const { createConnection } = require('./db');
 const { resolvePrimaryWarehouse } = require('./warehouses');
 const { notifyRoles } = require('./builderbot-notifications');
 const { assertInternalProductionProduct } = require('./product-modes');
+const { resolveProductReference } = require('./product-references');
 
 function httpError(status, message, data) {
   const error = new Error(message);
@@ -19,18 +20,6 @@ function orderCodeForId(id) {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const suffix = String(id).padStart(6, '0');
   return `OP-${date}-${suffix}`;
-}
-
-async function resolveProduct(conn, value) {
-  const term = String(value || '').trim();
-  const numericId = Number(term);
-  const [rows] = await conn.execute(
-    `SELECT id, siigo_code, nombre, modalidad_operativa FROM productos
-     WHERE id = ? OR siigo_code = ? LIMIT 1`,
-    [Number.isFinite(numericId) ? numericId : 0, term]
-  );
-  if (!rows.length) throw httpError(404, 'Producto no encontrado');
-  return rows[0];
 }
 
 async function defaultWarehouse(conn) {
@@ -54,7 +43,7 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
-    const finalProduct = await resolveProduct(conn, product);
+    const finalProduct = await resolveProductReference(conn, product, { modes: ['PR'] });
     assertInternalProductionProduct(finalProduct);
     const warehouseId = await defaultWarehouse(conn);
     const [bom] = await conn.execute(

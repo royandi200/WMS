@@ -30,6 +30,8 @@
     "data:direct-receptions:apply": "node scripts/apply-direct-purchase-order-reception-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:reception-confirmation:dry-run": "node scripts/apply-reception-confirmation-idempotency-migration.js",
     "data:reception-confirmation:apply": "node scripts/apply-reception-confirmation-idempotency-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:product-aliases:dry-run": "node scripts/apply-product-aliases-migration.js",
+    "data:product-aliases:apply": "node scripts/apply-product-aliases-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {
