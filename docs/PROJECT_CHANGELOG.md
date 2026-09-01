@@ -15,6 +15,18 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Recepcion fisica iniciada directamente desde la OC
+
+- Las compras normales ya no dependen de una factura o recepcion importada desde Siigo.
+- Nelly selecciona una OC abierta y el WMS prepara de forma idempotente una recepcion con el saldo pendiente por SKU y unidad.
+- La preparacion no crea lotes, stock, movimientos ni kardex. El inventario cambia unicamente al aprobar la recepcion fisica.
+- La confirmacion conserva distribuciones `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` y `PENDIENTE_DISPOSICION`, con lote, vencimiento, ubicacion y motivo obligatorio para diferencias.
+- Las recepciones parciales dejan la OC en `RECIBIDA_PARCIAL`; solo las cantidades disponibles reducen el saldo y una OC completamente atendida pasa a `CERRADA`.
+- Los productos `PR` deben ingresar por produccion interna y los `PT` por orden de maquila 3Q. La recepcion directa admite materias primas, insumos y productos `IO`.
+- Las cantidades mixtas se presentan agrupadas por unidad, por ejemplo `46 und + 2000 gr`, sin producir un total aritmetico enganoso.
+- La migracion `20_direct_purchase_order_receptions.sql` se aplico y verifico en QA. La recepcion sintetica usada para simular una compra Siigo se elimino sin afectar inventario.
+- Validacion local: 110 pruebas aprobadas, build Vite de produccion aprobado y preparacion real repetida sin duplicados ni movimientos.
+
 ### 2026-09-01 - Ordenes de compra leidas desde WhatsApp
 
 - El flujo `Documentos de Bodega` distingue `ORDEN_COMPRA` de `SALIDA_BODEGA_3Q` y mantiene el JSON interno oculto.
@@ -23,7 +35,7 @@ No reemplaza:
 - `Recepciones > Ordenes de compra` muestra los borradores y exige revision de proveedor sincronizado, SKU, cantidades y unidades antes de convertirlos en una OC operativa.
 - La conversion conserva PDF, hash, datos extraidos, correcciones humanas, actor y fecha. El numero revisado no puede diferir de la referencia visible del PDF.
 - La accion `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create`; los logs omiten texto OCR, URL firmada y detalle de items.
-- Validacion local: 105 pruebas aprobadas y build Vite de produccion aprobado. Migracion QA, sincronizacion BBC y despliegue aplicados; prueba E2E por WhatsApp pendiente.
+- Validacion local: PDF leido por WhatsApp, borrador creado una sola vez, revision humana y conversion a OC operativa aprobadas sin modificar inventario.
 
 ### 2026-09-01 - Cancelacion auditable de ordenes de compra
 

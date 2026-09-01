@@ -9,9 +9,8 @@ import {
   listPurchaseOrderDocumentDrafts,
   listPurchaseOrders,
 } from '../api/purchaseOrders.api'
-import { listOutsourcingOrders } from '../api/outsourcing.api'
 import { listSuppliers } from '../api/suppliers.api'
-import { confirmReception } from '../api/reception.api'
+import { confirmReception, prepareReceptionFromPurchaseOrder } from '../api/reception.api'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 
@@ -21,6 +20,26 @@ const RECEPTION_TABS = [
   { key: 'history', label: 'Historico', capability: 'reception.read' },
 ]
 
+function formatQuantity(value) {
+  return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 4 }).format(Number(value || 0))
+}
+
+function formatUnitTotals(totals = []) {
+  if (!totals.length) return '-'
+  return totals.map((total) => `${formatQuantity(total.quantity)} ${total.unit}`).join(' + ')
+}
+
+function totalsFromItems(items = []) {
+  const totals = new Map()
+  for (const item of items) {
+    const unit = String(item.unidad || 'sin unidad').trim().toLowerCase() || 'sin unidad'
+    totals.set(unit, Number(((totals.get(unit) || 0) + Number(item.cantidad || 0)).toFixed(4)))
+  }
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([unit, quantity]) => ({ unit, quantity }))
+}
+
 export default function RecepcionPage() {
   const [tab, setTab] = useState('orders')
   const [toast, setToast] = useState(null)
@@ -28,7 +47,6 @@ export default function RecepcionPage() {
   const [purchaseOrderDrafts, setPurchaseOrderDrafts] = useState([])
   const [purchaseLoading, setPurchaseLoading] = useState(false)
   const [locations, setLocations] = useState([])
-  const [outsourcingOrders, setOutsourcingOrders] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const { loading, list, fetchList } = useReceptionStore()
   const user = useAuthStore((state) => state.user)
@@ -61,9 +79,6 @@ export default function RecepcionPage() {
     if (tab === 'confirm') {
       fetchList({ limit: 200 })
       listUbicaciones().then((payload) => setLocations(payload?.data?.rows || [])).catch(() => setLocations([]))
-      listOutsourcingOrders({ limit: 200 })
-        .then((payload) => setOutsourcingOrders(payload?.data?.rows || []))
-        .catch(() => setOutsourcingOrders([]))
     }
     if (tab === 'history') fetchList({ limit: 100 })
   }, [tab])
@@ -139,11 +154,20 @@ export default function RecepcionPage() {
 
       {tab === 'confirm' && (
         <ConfirmReceptionPanel
-          rows={list.filter((row) => ['borrador', 'en_proceso'].includes(row.estado))}
           purchaseOrders={purchaseOrders}
           locations={locations}
-          outsourcingOrders={outsourcingOrders}
           loading={loading || purchaseLoading}
+          onPrepare={async (purchaseOrderId) => {
+            try {
+              const payload = await prepareReceptionFromPurchaseOrder(purchaseOrderId)
+              await fetchList({ limit: 200 })
+              return { ok: true, data: payload?.data }
+            } catch (error) {
+              const message = error.response?.data?.error || 'Error al preparar la recepcion desde la OC'
+              showToast(message, false)
+              return { ok: false, message }
+            }
+          }}
           onConfirm={async (body) => {
             try {
               const payload = await confirmReception(body)
@@ -164,29 +188,27 @@ export default function RecepcionPage() {
   )
 }
 
-function ConfirmReceptionPanel({ rows, purchaseOrders, locations, outsourcingOrders, loading, onConfirm }) {
-  const grouped = Object.values(rows.reduce((result, row) => {
-    if (!result[row.id]) result[row.id] = { ...row, items: [] }
-    result[row.id].items.push(row)
-    return result
-  }, {}))
+function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, onConfirm }) {
   const [receptionId, setReceptionId] = useState('')
   const [purchaseOrderId, setPurchaseOrderId] = useState('')
+  const [receptionNumber, setReceptionNumber] = useState('')
   const [items, setItems] = useState([])
-  const selected = grouped.find((reception) => String(reception.id) === String(receptionId))
 
-  const chooseReception = (value) => {
-    setReceptionId(value)
-    const reception = grouped.find((entry) => String(entry.id) === String(value))
-    setItems((reception?.items || []).map((item) => ({
-      item_id: item.recepcion_item_id,
-      reception_item_id: item.recepcion_item_id,
+  const prepare = async () => {
+    const result = await onPrepare(Number(purchaseOrderId))
+    if (!result.ok) return
+    const reception = result.data
+    setReceptionId(String(reception.id))
+    setReceptionNumber(reception.numero)
+    setItems((reception.items || []).map((item) => ({
+      item_id: item.item_id,
+      reception_item_id: item.item_id,
       sku: item.sku,
-      producto: item.producto_nombre,
-      modalidad: item.modalidad_operativa,
-      expected: Number(item.cantidad_esp || 0),
-      orden_maquila_id: '',
-      distributions: [{ condicion: 'DISPONIBLE', cantidad: item.cantidad_esp || '', lote: '', ubicacion_id: '', fecha_venc: item.fecha_venc?.slice?.(0, 10) || '', motivo: '' }],
+      producto: item.producto,
+      expected: Number(item.cantidad_pendiente || 0),
+      unit: item.unidad || 'und',
+      reason: '',
+      distributions: [{ condicion: 'DISPONIBLE', cantidad: item.cantidad_pendiente || '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
     })))
   }
   const setDistribution = (itemIndex, distributionIndex, key, value) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
@@ -208,8 +230,8 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, outsourcingOrd
       orden_compra_id: Number(purchaseOrderId),
       items: items.map((item) => ({
         item_id: item.reception_item_id,
-        orden_maquila_id: item.orden_maquila_id ? Number(item.orden_maquila_id) : undefined,
         qty_received: item.distributions.reduce((sum, distribution) => sum + Number(distribution.cantidad || 0), 0),
+        motivo: item.reason || undefined,
         distributions: item.distributions.map((distribution) => ({
           ...distribution,
           cantidad: Number(distribution.cantidad),
@@ -223,50 +245,33 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, outsourcingOrd
     if (result.ok) {
       setReceptionId('')
       setPurchaseOrderId('')
+      setReceptionNumber('')
       setItems([])
     }
   }
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      <div className="grid md:grid-cols-2 gap-4 max-w-4xl">
-        <Field label="Recepcion importada de Siigo *">
-          <select value={receptionId} onChange={(event) => chooseReception(event.target.value)} className="input-field" required>
-            <option value="">Selecciona una recepcion</option>
-            {grouped.map((reception) => <option key={reception.id} value={reception.id}>{reception.numero} - {reception.proveedor_nombre}</option>)}
-          </select>
-        </Field>
+      <div className="grid md:grid-cols-[minmax(0,1fr)_auto] gap-3 max-w-4xl items-end">
         <Field label="Orden de compra *">
-          <select value={purchaseOrderId} onChange={(event) => setPurchaseOrderId(event.target.value)} className="input-field" required>
+          <select value={purchaseOrderId} onChange={(event) => {
+            setPurchaseOrderId(event.target.value)
+            setReceptionId('')
+            setReceptionNumber('')
+            setItems([])
+          }} className="input-field" required disabled={Boolean(receptionId)}>
             <option value="">Selecciona la OC</option>
-            {purchaseOrders.filter((order) => !['CANCELADA', 'CERRADA'].includes(order.estado)).map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}
+            {purchaseOrders.filter((order) => ['CARGADA', 'RECIBIDA', 'RECIBIDA_PARCIAL'].includes(order.estado)).map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}
           </select>
         </Field>
+        <button type="button" onClick={prepare} disabled={!purchaseOrderId || loading || Boolean(receptionId)} className="btn-primary h-10 disabled:opacity-40">
+          {loading ? 'Preparando...' : 'Iniciar recepcion fisica'}
+        </button>
       </div>
-      {selected && <p className="text-xs text-muted">Factura/compra Siigo: <span className="font-mono text-foreground">{selected.siigo_purchase_name || '-'}</span></p>}
+      {receptionId && <p className="text-xs text-muted">Recepcion preparada: <span className="font-mono text-foreground">{receptionNumber}</span>. El inventario solo cambiara al aprobar.</p>}
       {items.map((item, itemIndex) => (
         <section key={item.item_id} className="border-y border-border py-4 space-y-3">
-          <div><p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p><p className="text-xs text-muted">Factura: {item.expected} unidades</p></div>
-          {item.modalidad === 'PT' && (
-            <Field label="Orden de maquila 3Q *">
-              <select
-                value={item.orden_maquila_id}
-                onChange={(event) => {
-                  const value = event.target.value
-                  const order = outsourcingOrders.find((entry) => String(entry.id) === String(value))
-                  setItems((current) => current.map((entry, index) => index === itemIndex ? { ...entry, orden_maquila_id: value } : entry))
-                  if (order?.orden_compra_id) setPurchaseOrderId(String(order.orden_compra_id))
-                }}
-                className="input-field max-w-xl"
-                required
-              >
-                <option value="">Selecciona la orden correspondiente</option>
-                {outsourcingOrders
-                  .filter((order) => order.sku === item.sku && ['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado))
-                  .map((order) => <option key={order.id} value={order.id}>{order.codigo} - pendiente {Math.max(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida), 0)}</option>)}
-              </select>
-            </Field>
-          )}
+          <div><p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p><p className="text-xs text-muted">Pendiente de la OC: {formatQuantity(item.expected)} {item.unit}</p></div>
           {item.distributions.map((distribution, distributionIndex) => (
             <div key={distributionIndex} className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-[150px_110px_minmax(150px,1fr)_minmax(170px,1fr)_140px_36px] gap-2 items-end">
@@ -280,11 +285,24 @@ function ConfirmReceptionPanel({ rows, purchaseOrders, locations, outsourcingOrd
               {distribution.condicion !== 'DISPONIBLE' && <Field label="Motivo *"><input value={distribution.motivo} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'motivo', event.target.value)} className="input-field max-w-2xl" required /></Field>}
             </div>
           ))}
+          {Math.abs(item.distributions.reduce((sum, distribution) => sum + Number(distribution.cantidad || 0), 0) - item.expected) > 0.0001 && (
+            <Field label="Motivo de la diferencia *"><input value={item.reason} onChange={(event) => setItems((current) => current.map((entry, index) => index === itemIndex ? { ...entry, reason: event.target.value } : entry))} className="input-field max-w-2xl" required /></Field>
+          )}
           <button type="button" onClick={() => addDistribution(itemIndex)} className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80"><Plus size={15} /> Otra ubicacion o condicion</button>
         </section>
       ))}
-      {selected && <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Aprobar recepcion fisica'}</button>}
-      {!loading && grouped.length === 0 && <div className="py-12 text-center text-sm text-muted">Sin recepciones pendientes</div>}
+      {receptionId && (
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Aprobar recepcion fisica'}</button>
+          <button type="button" onClick={() => {
+            setReceptionId('')
+            setReceptionNumber('')
+            setPurchaseOrderId('')
+            setItems([])
+          }} disabled={loading} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground disabled:opacity-40">Cambiar OC</button>
+        </div>
+      )}
+      {!receptionId && !loading && <div className="py-10 text-center text-sm text-muted">Selecciona una orden abierta para registrar lo que llego fisicamente.</div>}
     </form>
   )
 }
@@ -485,7 +503,7 @@ function PurchaseOrderDrafts({ rows = [], loading, onReview }) {
                 {row.estado === 'REQUIERE_CORRECCION' ? 'Requiere correccion' : 'Pendiente de revision'}
               </span>
             </div>
-            <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {Number(row.total_unidades)} unidades</p>
+            <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {formatUnitTotals(totalsFromItems(row.items))}</p>
             {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className="mt-1 text-xs text-red-400">{warning}</p>)}
           </div>
           <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(row.fecha_documento || '').slice(0, 10)}</p></div>
@@ -535,7 +553,7 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
       <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full text-sm min-w-[960px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Unidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
+          {['Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
@@ -564,7 +582,7 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
                 )}
               </td>
               <td className="px-4 py-3 tabular-nums">{row.total_items}</td>
-              <td className="px-4 py-3 tabular-nums">{row.total_unidades}</td>
+              <td className="px-4 py-3 tabular-nums whitespace-nowrap">{formatUnitTotals(row.totales_por_unidad)}</td>
               <td className="px-4 py-3">{row.creado_por_nombre}</td>
               <td className="px-4 py-3 text-muted">{formatDate(row.creado_en)}</td>
               <td className="px-4 py-3">

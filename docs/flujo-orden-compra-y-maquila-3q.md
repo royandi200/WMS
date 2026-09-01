@@ -1,12 +1,13 @@
 # Flujo de orden de compra y maquila 3Q
 
-Estado: flujo base implementado, migracion QA, BuilderBot y WMS desplegados; la lectura de OC por WhatsApp esta pendiente de prueba funcional punta a punta.
+Estado: lectura y revision de OC verificadas por WhatsApp. Recepcion directa desde OC implementada y migrada en QA; despliegue y confirmacion fisica de la demo pendientes.
 
 ## Principios
 
 - La orden de compra se origina fuera del WMS y se carga como PDF.
 - Como la API publica de Siigo no entrega la OC, el PDF es la evidencia documental primaria.
-- El PDF de OC se conserva como evidencia y sus items se transcriben de forma estructurada para conciliar OC, factura y recepcion.
+- El PDF de OC se conserva como evidencia y sus items se transcriben de forma estructurada para conciliar lo ordenado con la recepcion fisica.
+- Una compra normal se recibe directamente contra una OC abierta. Una factura de compra de Siigo no es requisito operativo.
 - Una salida de bodega hacia 3Q puede leerse desde el flujo documental de BuilderBot. La lectura crea un borrador revisable; no confirma ni descuenta inventario.
 - 3Q no se representa como bodega ni ubicacion del WMS.
 - El material confirmado como enviado sale del stock disponible de la bodega y queda bajo custodia externa de 3Q.
@@ -36,7 +37,27 @@ La API valida extension, MIME, firma `%PDF-`, tamano y hash SHA-256. El document
 
 La carga no crea stock. Un reintento con el mismo contenido y PDF devuelve la OC existente; el mismo numero con contenido o PDF diferente se rechaza.
 
-## 2. Preparacion de una orden de maquila
+## 2. Recepcion fisica de una compra normal
+
+Nelly selecciona una OC abierta. El WMS prepara una recepcion en borrador usando exclusivamente el saldo pendiente de cada SKU y conserva la unidad de la linea.
+
+La preparacion es idempotente: dos clics, pestanas o reintentos reutilizan el mismo borrador abierto. Esta etapa no crea lotes, stock, movimientos ni kardex.
+
+Por cada linea se registra:
+
+- cantidad y unidad recibidas;
+- lote y vencimiento;
+- ubicacion dentro de la bodega;
+- condicion `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` o `PENDIENTE_DISPOSICION`;
+- motivo obligatorio para faltantes, sobrantes o condiciones no disponibles.
+
+Solo la aprobacion fisica crea inventario. La operacion bloquea las filas relevantes, escribe lote, stock, movimiento y kardex en una sola transaccion y registra el usuario aprobador.
+
+Una entrega parcial deja la OC en `RECIBIDA_PARCIAL`. Solo la cantidad `DISPONIBLE` reduce el saldo; cuarentena y rechazo mantienen la diferencia abierta. Cuando todos los productos alcanzan la cantidad aceptada, la OC pasa a `CERRADA`.
+
+Este flujo admite materias primas, insumos y productos `IO`. Un producto `PR` debe ingresar mediante produccion interna y un producto `PT` mediante una orden de maquila 3Q.
+
+## 3. Preparacion de una orden de maquila
 
 Sofi, como `admin`, selecciona una OC con PDF, un producto terminado de modalidad `PT` y la cantidad esperada.
 
@@ -54,7 +75,7 @@ El BOM `ENVIO` es la lista de materiales que se entrega a 3Q. No se filtran prod
 
 Al crear la orden, el WMS reserva los materiales y genera una remision 3Q en borrador. Todavia no descuenta inventario.
 
-## 3. Confirmacion de la salida
+## 4. Confirmacion de la salida
 
 ### Lectura del documento de salida
 
@@ -83,7 +104,7 @@ La confirmacion se ejecuta en una transaccion:
 
 Repetir la confirmacion no descuenta inventario otra vez. Una remision en borrador se puede cancelar y libera todas sus reservas. Una remision confirmada no se puede cancelar.
 
-## 4. Material adicional
+## 5. Material adicional
 
 Mientras la orden este `EN_3Q` o `RECIBIDA_PARCIAL`, Sofi puede preparar una remision adicional indicando material, cantidad y motivo.
 
@@ -92,11 +113,11 @@ Mientras la orden este `EN_3Q` o `RECIBIDA_PARCIAL`, Sofi puede preparar una rem
 - La salida sigue requiriendo confirmacion separada.
 - Al completar la orden, el material adicional enviado se clasifica en la conciliacion como merma de maquila.
 
-## 5. Recepcion desde 3Q
+## 6. Recepcion desde 3Q
 
-La factura de compra creada en Siigo sigue generando una recepcion pendiente. Nelly selecciona la OC y, para cada SKU `PT`, la orden 3Q correspondiente.
+La recepcion de 3Q se inicia desde la orden de maquila y la OC asociada. No depende de importar una factura de compra desde Siigo.
 
-La asociacion se realiza por linea de producto. Una factura puede contener varios productos y vincular cada uno con una orden 3Q diferente de la misma OC.
+La asociacion se realiza por linea de producto. Una entrega puede contener varios productos y vincular cada uno con una orden 3Q diferente de la misma OC.
 
 Nelly registra por cada entrega:
 
@@ -109,9 +130,9 @@ Nelly registra por cada entrega:
 
 Solo `DISPONIBLE` suma inventario utilizable. Cuarentena y rechazo conservan trazabilidad sin aumentar disponibilidad.
 
-## 6. Entregas parciales y cierre
+## 7. Entregas parciales y cierre
 
-La OC y la orden 3Q acumulan todas las facturas y recepciones vinculadas.
+La OC y la orden 3Q acumulan todas las recepciones vinculadas.
 
 - `RECIBIDA_PARCIAL`: lo aceptado disponible aun es menor que el objetivo.
 - `COMPLETADA`: la cantidad acumulada disponible alcanza el objetivo.
@@ -121,7 +142,7 @@ La OC y la orden 3Q acumulan todas las facturas y recepciones vinculadas.
 
 Al completar, la conciliacion conserva por material: teorico, reservado, enviado, devuelto, conciliado y merma adicional. Las cantidades se muestran por SKU y unidad; nunca se suman gramos y unidades en un mismo total.
 
-## 7. Permisos
+## 8. Permisos
 
 | Capacidad | Responsable inicial |
 |---|---|
@@ -132,9 +153,9 @@ Al completar, la conciliacion conserva por material: teorico, reservado, enviado
 
 El dashboard aplica controles visuales, pero la autorizacion definitiva siempre se valida en la API.
 
-## 8. Pendientes antes de habilitarlo
+## 9. Pendientes antes de habilitarlo
 
-1. Sincronizar la identidad de 3Q en `terceros` y comprobar que coincide con el proveedor de la OC y la factura Siigo. El WMS no admite nombres de proveedor escritos libremente en nuevas OC.
+1. Sincronizar la identidad de 3Q en `terceros` y comprobar que coincide con el proveedor de la OC. El WMS no admite nombres de proveedor escritos libremente en nuevas OC.
 2. Cargar inventario de prueba para los materiales del BOM `ENVIO`; actualmente 11 de las 12 lineas PT no tienen saldo disponible.
 3. Desplegar API y dashboard juntos.
 4. Ejecutar una prueba con entrega parcial, producto no conforme, material adicional, reintento y cancelacion de remision.

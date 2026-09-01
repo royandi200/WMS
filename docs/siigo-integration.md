@@ -1,5 +1,12 @@
 # Guía de Integración SIIGO
 
+## Decisión operativa vigente
+
+- Las recepciones de compras normales se realizan directamente contra una OC cargada en el WMS. No dependen de una factura de compra importada desde Siigo.
+- Las recepciones de producto terminado tercerizado se realizan contra una orden de maquila 3Q y su OC asociada.
+- Las facturas de venta de Siigo son el origen contable de los despachos: el WMS crea la tarea pendiente, asigna lotes y descuenta inventario solo cuando se confirma la salida fisica.
+- Siigo conserva su papel contable; el WMS conserva la verdad operativa de lotes, ubicaciones, condiciones y movimientos fisicos.
+
 ## Requisitos
 
 1. Cuenta activa en SIIGO con API habilitada
@@ -24,11 +31,9 @@ POST https://api.siigo.com/auth
 | Módulo WMS | Endpoint SIIGO | Método |
 |---|---|---|
 | Sincronizar productos | `/v1/products` | GET |
-| Órdenes de compra | `/v1/purchase-orders` | GET |
-| Órdenes de venta | `/v1/invoices` | GET |
-| Clientes | `/v1/customers` | GET |
-| Proveedores | `/v1/suppliers` | GET |
-| Ajuste de inventario | `/v1/inventory-adjustments` | POST |
+| Facturas de venta para despachos | `/v1/invoices` | GET |
+| Terceros usados como clientes o proveedores | `/v1/customers` | GET |
+| Compras de prueba heredadas, no requeridas para recibir | `/v1/purchases` | GET/POST |
 
 ## Sincronización de Productos
 
@@ -40,11 +45,9 @@ GET /api/v1/siigo/sync/productos
 
 Esto trae todos los productos activos de SIIGO y los inserta/actualiza en la tabla `productos` local.
 
-## Registro de Movimientos
+## Registro de movimientos
 
-Cada vez que se completa una recepción o despacho en el WMS,
-se envía automáticamente un ajuste de inventario a SIIGO.
-Si falla, queda en cola (`siigo_sync = 0`) para reintento.
+Los movimientos fisicos se registran primero en el WMS con lote, ubicacion, usuario y referencia operativa. El flujo vigente no debe asumir que cada recepcion o despacho genera automaticamente un ajuste de inventario en Siigo. Cualquier sincronizacion contable adicional se habilitara solo despues de validarla con la cuenta real del cliente.
 
 ## Referencias
 

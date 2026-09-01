@@ -9,6 +9,7 @@ const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
 const { workflowFlags } = require('../_lib/feature-flags');
 const { PRODUCT_MODES } = require('../_lib/product-modes');
 const { reconcileOutsourcingReception } = require('../_lib/outsourcing-workflow');
+const { preparePurchaseOrderReception } = require('../_lib/purchase-order-reception');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -38,6 +39,10 @@ async function findProduct(conn, value) {
 
 function canSyncSiigo(user) {
   return hasCapability(user.rol, CAPABILITIES.SIIGO_SYNC);
+}
+
+function receptionMovementReference(reception) {
+  return reception.siigo_purchase_id ? 'recepcion_siigo_import' : 'recepcion_orden_compra';
 }
 
 async function validateSiigoReception(conn, { terceroId, product, price, invoiceNumber }) {
@@ -88,8 +93,10 @@ async function handleGet(req, res) {
          WHERE mr.recepcion_id = r.id) AS ordenes_maquila,
        r.proveedor_nombre,
        r.estado,
-       r.siigo_purchase_id,
-       r.siigo_purchase_name,
+      r.siigo_purchase_id,
+      r.siigo_purchase_name,
+       CASE WHEN r.siigo_purchase_id IS NULL AND r.orden_compra_id IS NOT NULL
+            THEN 'ORDEN_COMPRA' ELSE 'SIIGO' END AS origen_recepcion,
        r.observaciones,
        r.creado_en,
        r.completado_en,
@@ -144,6 +151,10 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
   const expected = Number(item.cantidad_esp);
   const shortage = Math.max(expected - totals.received, 0);
   const overage = Math.max(totals.received - expected, 0);
+  const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
+  if ((shortage > 0.0001 || overage > 0.0001) && !reason) {
+    throw httpError(400, `Debes indicar el motivo de la diferencia para ${item.siigo_code}`);
+  }
   const locationIds = [...new Set(distributions.map(entry => entry.locationId).filter(Boolean))];
   if (locationIds.length) {
     const placeholders = locationIds.map(() => '?').join(',');
@@ -198,9 +209,9 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
         `INSERT INTO movimientos
            (tipo, producto_id, bodega_dest, ubicacion_dest, lote, cantidad,
             referencia_id, referencia_tipo, usuario_id, siigo_sync)
-         VALUES ('entrada', ?, ?, ?, ?, ?, ?, 'recepcion_siigo_import', ?, 1)`,
+       VALUES ('entrada', ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         [item.producto_id, reception.bodega_id, entry.locationId, entry.lot,
-         entry.quantity, receptionId, user.id]
+         entry.quantity, receptionId, receptionMovementReference(reception), user.id]
       );
       const balanceAfter = Number((Number(availableBalances.get(entry.lot) || 0) + entry.quantity).toFixed(4));
       availableBalances.set(entry.lot, balanceAfter);
@@ -216,7 +227,6 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     }
   }
 
-  const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
   const reasonsFor = conditions => [...new Set(distributions
     .filter(entry => conditions.includes(entry.condition) && entry.reason)
     .map(entry => entry.reason))].join('; ');
@@ -292,9 +302,15 @@ async function handlePut(req, res) {
       throw httpError(409, `La recepcion esta ${reception.estado} y no puede completarse`);
     }
 
-    const purchaseOrderId = Number(body.orden_compra_id || body.purchase_order_id || reception.orden_compra_id || 0) || null;
+    const linkedPurchaseOrderId = Number(reception.orden_compra_id || 0) || null;
+    const requestedPurchaseOrderId = Number(body.orden_compra_id || body.purchase_order_id || 0) || null;
+    if (linkedPurchaseOrderId && requestedPurchaseOrderId
+        && linkedPurchaseOrderId !== requestedPurchaseOrderId) {
+      throw httpError(409, 'La recepcion ya pertenece a otra orden de compra');
+    }
+    const purchaseOrderId = linkedPurchaseOrderId || requestedPurchaseOrderId;
     if (reception.siigo_purchase_id && workflowFlags().requirePurchaseOrderForSiigoReceipt && !purchaseOrderId) {
-      throw httpError(400, 'Debes vincular una orden de compra antes de confirmar esta recepcion Siigo');
+      throw httpError(400, 'Debes vincular una orden de compra antes de confirmar esta recepcion');
     }
     let purchaseOrder = null;
     if (purchaseOrderId) {
@@ -309,7 +325,7 @@ async function handlePut(req, res) {
       }
       if (purchaseOrder.tercero_id && reception.tercero_id
           && Number(purchaseOrder.tercero_id) !== Number(reception.tercero_id)) {
-        throw httpError(409, 'El proveedor de la OC no coincide con la factura Siigo');
+        throw httpError(409, 'El proveedor de la OC no coincide con la recepcion');
       }
       await conn.execute(`UPDATE recepciones SET orden_compra_id = ? WHERE id = ?`, [purchaseOrderId, receptionId]);
     }
@@ -438,7 +454,7 @@ async function handlePut(req, res) {
            VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', 'DISPONIBLE', ?, ?, ?, NOW())`,
           [lotId, lot, item.producto_id, reception.bodega_id, accepted, accepted,
            reception.proveedor_nombre || null, user.id,
-           body.notes || `Recepcion desde SIIGO ${reception.siigo_purchase_name || ''}`,
+           body.notes || `Recepcion fisica de OC ${purchaseOrder?.numero || reception.orden_compra_id || ''}`,
            expiryDate]
         );
 
@@ -453,8 +469,9 @@ async function handlePut(req, res) {
           `INSERT INTO movimientos
              (tipo, producto_id, bodega_dest, lote, cantidad, referencia_id,
               referencia_tipo, usuario_id, siigo_sync)
-           VALUES ('entrada', ?, ?, ?, ?, ?, 'recepcion_siigo_import', ?, 1)`,
-          [item.producto_id, reception.bodega_id, lot, accepted, receptionId, user.id]
+           VALUES ('entrada', ?, ?, ?, ?, ?, ?, ?, 1)`,
+          [item.producto_id, reception.bodega_id, lot, accepted, receptionId,
+           receptionMovementReference(reception), user.id]
         );
         await conn.execute(
           `INSERT INTO kardex
@@ -521,14 +538,21 @@ async function handlePut(req, res) {
             WHERE r.orden_compra_id = ? AND r.estado <> 'anulada' AND ri.producto_id = ?`,
           [purchaseOrder.id, productId]
         );
-        const [acceptedRows] = await conn.execute(
-          `SELECT COALESCE(SUM(rd.cantidad), 0) AS aceptada
-             FROM recepciones r
-             JOIN recepcion_items ri ON ri.recepcion_id = r.id
-             JOIN recepcion_distribuciones rd
-               ON rd.recepcion_id = r.id AND rd.recepcion_item_id = ri.id
-            WHERE r.orden_compra_id = ? AND r.estado <> 'anulada'
-              AND ri.producto_id = ? AND rd.condicion = 'DISPONIBLE'`,
+      const [acceptedRows] = await conn.execute(
+          `SELECT COALESCE(SUM(accepted.cantidad), 0) AS aceptada
+             FROM (
+               SELECT ri.id,
+                      CASE WHEN COUNT(rd.id) > 0
+                           THEN COALESCE(SUM(CASE WHEN rd.condicion = 'DISPONIBLE' THEN rd.cantidad ELSE 0 END), 0)
+                           ELSE LEAST(ri.cantidad_rec, ri.cantidad_esp) END AS cantidad
+                 FROM recepciones r
+                 JOIN recepcion_items ri ON ri.recepcion_id = r.id
+                 LEFT JOIN recepcion_distribuciones rd
+                   ON rd.recepcion_id = r.id AND rd.recepcion_item_id = ri.id
+                WHERE r.orden_compra_id = ? AND r.estado <> 'anulada'
+                  AND ri.producto_id = ?
+                GROUP BY ri.id, ri.cantidad_rec, ri.cantidad_esp
+             ) accepted`,
           [purchaseOrder.id, productId]
         );
         const cumulativeInvoiced = Number(cumulativeRows[0]?.facturada || 0);
@@ -571,7 +595,12 @@ async function handlePut(req, res) {
       const anyAccepted = [...cumulativeProgress.values()].some(progress => progress.accepted > 0.0001);
       await conn.execute(
         `UPDATE ordenes_compra_proveedor SET estado = ?, actualizado_en = NOW() WHERE id = ?`,
-        [allFulfilled ? 'CERRADA' : anyAccepted ? 'RECIBIDA' : 'FACTURA_VINCULADA', purchaseOrder.id]
+        [allFulfilled
+          ? 'CERRADA'
+          : anyAccepted
+            ? 'RECIBIDA_PARCIAL'
+            : reception.siigo_purchase_id ? 'FACTURA_VINCULADA' : 'CARGADA',
+         purchaseOrder.id]
       );
     }
 
@@ -582,6 +611,7 @@ async function handlePut(req, res) {
       `UPDATE recepciones
        SET estado = 'completada', completado_en = NOW(), usuario_id = ?,
            aprobado_por = ?, aprobado_en = NOW(),
+           preparacion_clave = NULL,
            observaciones = CASE
              WHEN ? IS NULL THEN observaciones
              WHEN observaciones IS NULL OR observaciones = '' THEN ?
@@ -607,6 +637,7 @@ async function handlePut(req, res) {
         numero: reception.numero,
         estado: 'completada',
         siigo_purchase_id: reception.siigo_purchase_id,
+        origen: reception.siigo_purchase_id ? 'SIIGO' : 'ORDEN_COMPRA',
         diferencia: hasDifference,
         items: results,
         conciliacion: reconciliation,
@@ -623,10 +654,29 @@ async function handlePut(req, res) {
 
 async function handlePost(req, res) {
   const user = await requireCapability(req, CAPABILITIES.RECEPTION_CONFIRM);
-  if (!workflowFlags().allowManualReception) {
-    throw httpError(409, 'La recepcion manual esta desactivada. Vincula una OC con la factura de compra de Siigo.');
-  }
   const body = req.body || {};
+  const action = String(body.action || body.accion || '').trim().toUpperCase();
+  if (action === 'PREPARAR_DESDE_OC') {
+    let conn;
+    try {
+      conn = await createConnection();
+      await conn.beginTransaction();
+      const prepared = await preparePurchaseOrderReception(conn, {
+        purchaseOrderId: body.orden_compra_id || body.purchase_order_id,
+        userId: user.id,
+      });
+      await conn.commit();
+      return res.status(prepared.duplicate ? 200 : 201).json({ ok: true, data: prepared });
+    } catch (error) {
+      if (conn) await conn.rollback().catch(() => {});
+      throw error;
+    } finally {
+      if (conn) await conn.end().catch(() => {});
+    }
+  }
+  if (!workflowFlags().allowManualReception) {
+    throw httpError(409, 'Inicia la recepcion desde una orden de compra abierta.');
+  }
   const qtyTotal = Number(body.qty_total || body.cantidad || body.qty);
   const qtyDamaged = Number(body.qty_damaged || 0);
   const syncSiigo = body.sync_siigo === true;

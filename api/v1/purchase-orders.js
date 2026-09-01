@@ -3,6 +3,7 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const { normalizePurchaseOrderInput } = require('../_lib/purchase-orders');
 const { normalizePurchaseOrderPdf, safeDownloadName } = require('../_lib/purchase-order-documents');
+const { groupQuantitiesByUnit } = require('../_lib/purchase-order-reception');
 const {
   cancelPurchaseOrder,
   normalizePurchaseOrderCancellation,
@@ -63,6 +64,22 @@ async function handleGet(req, res) {
      LIMIT ?`,
     params
   );
+  const orderIds = rows.map((row) => row.id);
+  const quantities = orderIds.length ? await query(
+    `SELECT orden_compra_id, cantidad_ordenada, unidad
+       FROM orden_compra_proveedor_items
+      WHERE orden_compra_id IN (${orderIds.map(() => '?').join(',')})
+      ORDER BY orden_compra_id, id`,
+    orderIds
+  ) : [];
+  const byOrder = new Map();
+  for (const quantity of quantities) {
+    if (!byOrder.has(quantity.orden_compra_id)) byOrder.set(quantity.orden_compra_id, []);
+    byOrder.get(quantity.orden_compra_id).push(quantity);
+  }
+  for (const row of rows) {
+    row.totales_por_unidad = groupQuantitiesByUnit(byOrder.get(row.id) || []);
+  }
   return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
 }
 

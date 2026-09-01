@@ -155,6 +155,7 @@ test('reception distributions separate available and blocked inventory', () => {
 test('reception writes a complete movement reference and inventory kardex', () => {
   const source = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
   assert.match(source, /'recepcion_siigo_import'/u);
+  assert.match(source, /'recepcion_orden_compra'/u);
   assert.match(source, /'INGRESO_RECEPCION'/u);
   assert.match(source, /reasonsFor\(\['CUARENTENA'\]\)/u);
 });
