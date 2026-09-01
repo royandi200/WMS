@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Download, FileText, Plus, Trash2 } from 'lucide-react'
+import { Ban, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 import { useReceptionStore } from '../store/receptionStore'
-import { createPurchaseOrder, downloadPurchaseOrderDocument, listPurchaseOrders } from '../api/purchaseOrders.api'
+import { cancelPurchaseOrder, createPurchaseOrder, downloadPurchaseOrderDocument, listPurchaseOrders } from '../api/purchaseOrders.api'
 import { listOutsourcingOrders } from '../api/outsourcing.api'
 import { listSuppliers } from '../api/suppliers.api'
 import { confirmReception } from '../api/reception.api'
@@ -84,6 +84,7 @@ export default function RecepcionPage() {
           rows={purchaseOrders}
           suppliers={suppliers}
           loading={purchaseLoading}
+          canCancel={allowed('purchase_order.cancel')}
           onCreate={async (body) => {
             setPurchaseLoading(true)
             try {
@@ -94,6 +95,23 @@ export default function RecepcionPage() {
               return { ok: true }
             } catch (error) {
               const message = error.response?.data?.error || 'Error al cargar la orden de compra'
+              showToast(message, false)
+              return { ok: false, message }
+            } finally {
+              setPurchaseLoading(false)
+            }
+          }}
+          onCancel={async (id, motivo) => {
+            setPurchaseLoading(true)
+            try {
+              const payload = await cancelPurchaseOrder(id, motivo)
+              const refreshed = await listPurchaseOrders({ limit: 100 })
+              setPurchaseOrders(refreshed?.data?.rows || [])
+              const duplicate = payload?.data?.duplicate
+              showToast(duplicate ? 'La orden ya estaba cancelada' : `Orden ${payload?.data?.numero || ''} cancelada`, true)
+              return { ok: true }
+            } catch (error) {
+              const message = error.response?.data?.error || 'Error al cancelar la orden de compra'
               showToast(message, false)
               return { ok: false, message }
             } finally {
@@ -263,9 +281,10 @@ const EMPTY_PO = {
   items: [{ sku: '', cantidad: '', unidad: 'und' }],
 }
 
-function PurchaseOrdersPanel({ rows, suppliers, loading, onCreate }) {
+function PurchaseOrdersPanel({ rows, suppliers, loading, canCancel, onCreate, onCancel }) {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(EMPTY_PO)
+  const [formError, setFormError] = useState('')
   const setHeader = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
   const setItem = (index, key, value) => setForm((current) => ({
     ...current,
@@ -281,23 +300,38 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, onCreate }) {
   }))
   const submit = async (event) => {
     event.preventDefault()
-    if (!form.documento_pdf) return
-    const base64 = await readFileAsDataUrl(form.documento_pdf)
-    const result = await onCreate({
-      ...form,
-      tercero_id: Number(form.tercero_id),
-      fecha_orden: form.fecha_orden || undefined,
-      archivo_nombre: form.documento_pdf.name,
-      documento_pdf: {
-        nombre: form.documento_pdf.name,
-        mime_type: form.documento_pdf.type || 'application/pdf',
-        base64,
-      },
-      items: form.items.map((item) => ({ ...item, cantidad: Number(item.cantidad) })),
-    })
-    if (result.ok) {
-      setForm(EMPTY_PO)
-      setCreating(false)
+    setFormError('')
+    if (!form.documento_pdf) {
+      setFormError('Debes seleccionar la orden de compra en PDF.')
+      return
+    }
+    try {
+      const base64 = await readFileAsDataUrl(form.documento_pdf)
+      const result = await onCreate({
+        ...form,
+        tercero_id: Number(form.tercero_id),
+        fecha_orden: form.fecha_orden || undefined,
+        archivo_nombre: form.documento_pdf.name,
+        documento_pdf: {
+          nombre: form.documento_pdf.name,
+          mime_type: form.documento_pdf.type || 'application/pdf',
+          base64,
+        },
+        items: form.items.map((item) => ({
+          ...item,
+          sku: item.sku.trim(),
+          unidad: item.unidad.trim(),
+          cantidad: Number(item.cantidad),
+        })),
+      })
+      if (result.ok) {
+        setForm(EMPTY_PO)
+        setCreating(false)
+      } else {
+        setFormError(result.message || 'No fue posible cargar la orden de compra.')
+      }
+    } catch (error) {
+      setFormError(error.message || 'No fue posible leer el PDF seleccionado.')
     }
   }
 
@@ -357,7 +391,7 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, onCreate }) {
             <p className="text-xs font-medium text-muted">Items</p>
             {form.items.map((item, index) => (
               <div key={index} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_120px_100px_36px] gap-2">
-                <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" className="input-field" required />
+                <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, numeros, punto, guion, guion bajo o &amp;" className="input-field" required />
                 <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} placeholder="Cantidad" className="input-field" required />
                 <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" />
                 <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar item" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
@@ -366,6 +400,11 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, onCreate }) {
               </div>
             ))}
           </div>
+          {formError && (
+            <div role="alert" className="border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+              {formError}
+            </div>
+          )}
           <div className="flex gap-2">
             <button type="button" onClick={addItem} className="px-3 py-2 border border-border text-sm text-foreground hover:bg-white/5 inline-flex items-center gap-2">
               <Plus size={15} /> Agregar item
@@ -375,24 +414,56 @@ function PurchaseOrdersPanel({ rows, suppliers, loading, onCreate }) {
         </form>
       )}
 
-      <PurchaseOrderTable rows={rows} loading={loading} />
+      <PurchaseOrderTable rows={rows} loading={loading} canCancel={canCancel} onCancel={onCancel} />
     </div>
   )
 }
 
-function PurchaseOrderTable({ rows, loading }) {
-  const formatDate = (value) => value ? String(value).slice(0, 10) : '-'
+function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [cancelError, setCancelError] = useState('')
+  const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  const closeCancel = () => {
+    setCancelTarget(null)
+    setCancelReason('')
+    setConfirmed(false)
+    setCancelError('')
+  }
+  const submitCancellation = async (event) => {
+    event.preventDefault()
+    setCancelError('')
+    if (cancelReason.trim().length < 5) {
+      setCancelError('Escribe un motivo de al menos 5 caracteres.')
+      return
+    }
+    if (!confirmed) {
+      setCancelError('Confirma que deseas cancelar esta orden.')
+      return
+    }
+    setSubmitting(true)
+    const result = await onCancel(cancelTarget.id, cancelReason.trim())
+    setSubmitting(false)
+    if (result.ok) closeCancel()
+    else setCancelError(result.message)
+  }
+  const statusClass = (status) => status === 'CANCELADA'
+    ? 'text-danger'
+    : ['RECIBIDA', 'CERRADA'].includes(status) ? 'text-green-400' : 'text-sky-400'
   return (
-    <div className="overflow-x-auto border border-border rounded-lg">
-      <table className="w-full text-sm min-w-[760px]">
+    <>
+      <div className="overflow-x-auto border border-border rounded-lg">
+      <table className="w-full text-sm min-w-[960px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Unidades', 'Cargada por', 'Creada'].map((label) => (
+          {['Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Unidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
         <tbody>
-          {loading && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">Cargando ordenes...</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-muted">Sin ordenes de compra cargadas</td></tr>}
+          {loading && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Cargando ordenes...</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Sin ordenes de compra cargadas</td></tr>}
           {!loading && rows.map((row) => (
             <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs text-foreground">{row.numero}</td>
@@ -404,17 +475,80 @@ function PurchaseOrderTable({ rows, loading }) {
                 ) : <span className="text-xs text-danger">Falta</span>}
               </td>
               <td className="px-4 py-3">{row.proveedor_nombre || '-'}</td>
-              <td className="px-4 py-3 text-muted">{formatDate(row.fecha_orden)}</td>
-              <td className="px-4 py-3"><span className="text-xs font-semibold text-sky-400">{row.estado}</span></td>
+              <td className="px-4 py-3 text-muted">{formatDate(row.fecha_orden).slice(0, 10)}</td>
+              <td className="px-4 py-3 max-w-64">
+                <span className={`text-xs font-semibold ${statusClass(row.estado)}`}>{row.estado}</span>
+                {row.estado === 'CANCELADA' && (
+                  <span className="block mt-1 text-xs text-muted">
+                    {row.motivo_cancelacion}<br />
+                    {row.cancelada_por_nombre || 'Usuario'} · {formatDate(row.cancelada_en)}
+                  </span>
+                )}
+              </td>
               <td className="px-4 py-3 tabular-nums">{row.total_items}</td>
               <td className="px-4 py-3 tabular-nums">{row.total_unidades}</td>
               <td className="px-4 py-3">{row.creado_por_nombre}</td>
               <td className="px-4 py-3 text-muted">{formatDate(row.creado_en)}</td>
+              <td className="px-4 py-3">
+                {canCancel && row.estado === 'CARGADA' ? (
+                  <button
+                    type="button"
+                    title="Cancelar orden de compra"
+                    aria-label={`Cancelar orden ${row.numero}`}
+                    onClick={() => setCancelTarget(row)}
+                    className="inline-flex h-8 w-8 items-center justify-center text-muted hover:bg-danger/10 hover:text-danger"
+                  >
+                    <Ban size={16} />
+                  </button>
+                ) : <span className="text-muted">-</span>}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="cancel-po-title">
+          <form onSubmit={submitCancellation} className="w-full max-w-lg border border-border bg-surface shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <h2 id="cancel-po-title" className="text-base font-semibold text-foreground">Cancelar {cancelTarget.numero}</h2>
+                <p className="mt-1 text-sm text-muted">La orden dejara de estar disponible para recepcion o procesos 3Q. El PDF y su historial se conservaran.</p>
+              </div>
+              <button type="button" onClick={closeCancel} title="Cerrar" className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted hover:text-foreground">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <Field label="Motivo de cancelacion *">
+                <textarea
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  maxLength={500}
+                  rows={4}
+                  className="input-field resize-y"
+                  placeholder="Ej. Orden duplicada o anulada por el proveedor"
+                  autoFocus
+                  required
+                />
+              </Field>
+              <label className="flex cursor-pointer items-start gap-3 text-sm text-foreground">
+                <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" />
+                <span>Confirmo que esta orden no debe recibirse ni vincularse a una salida 3Q.</span>
+              </label>
+              {cancelError && <div role="alert" className="border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{cancelError}</div>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button type="button" onClick={closeCancel} disabled={submitting} className="px-4 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50">Volver</button>
+              <button type="submit" disabled={submitting || !confirmed || cancelReason.trim().length < 5} className="inline-flex items-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90 disabled:cursor-not-allowed disabled:opacity-50">
+                <Ban size={15} /> {submitting ? 'Cancelando...' : 'Cancelar orden'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
   )
 }
 

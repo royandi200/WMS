@@ -2,6 +2,7 @@ import client from './client'
 
 export const listPurchaseOrders = (params) => client.get('/purchase-orders', { params }).then((r) => r.data)
 export const createPurchaseOrder = (body) => client.post('/purchase-orders', body).then((r) => r.data)
+export const cancelPurchaseOrder = (id, motivo) => client.patch('/purchase-orders', { id, motivo }).then((r) => r.data)
 export const downloadPurchaseOrderDocument = (documentId, filename = 'orden-compra.pdf') => client
   .get('/purchase-orders', { params: { document_id: documentId }, responseType: 'blob' })
   .then((response) => {

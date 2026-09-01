@@ -3,6 +3,10 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const { normalizePurchaseOrderInput } = require('../_lib/purchase-orders');
 const { normalizePurchaseOrderPdf, safeDownloadName } = require('../_lib/purchase-order-documents');
+const {
+  cancelPurchaseOrder,
+  normalizePurchaseOrderCancellation,
+} = require('../_lib/purchase-order-cancellation');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -38,24 +42,46 @@ async function handleGet(req, res) {
   const rows = await query(
     `SELECT oc.id, oc.numero, oc.tercero_id, oc.proveedor_nombre, oc.fecha_orden,
             oc.estado, oc.archivo_nombre, oc.creado_en, oc.actualizado_en,
+            oc.motivo_cancelacion, oc.cancelada_en, oc.cancelada_por,
             d.id AS documento_id, d.nombre_original AS documento_nombre,
             d.tamano_bytes AS documento_tamano, d.sha256 AS documento_sha256,
             u.nombre AS creado_por_nombre,
+            cu.nombre AS cancelada_por_nombre,
             COUNT(oci.id) AS total_items,
             COALESCE(SUM(oci.cantidad_ordenada), 0) AS total_unidades
      FROM ordenes_compra_proveedor oc
      JOIN usuarios u ON u.id = oc.creado_por
+     LEFT JOIN usuarios cu ON cu.id = oc.cancelada_por
      LEFT JOIN orden_compra_proveedor_items oci ON oci.orden_compra_id = oc.id
      LEFT JOIN orden_compra_documentos d ON d.orden_compra_id = oc.id AND d.activo = 1
      ${where}
      GROUP BY oc.id, oc.numero, oc.tercero_id, oc.proveedor_nombre, oc.fecha_orden,
               oc.estado, oc.archivo_nombre, oc.creado_en, oc.actualizado_en,
-              d.id, d.nombre_original, d.tamano_bytes, d.sha256, u.nombre
+              oc.motivo_cancelacion, oc.cancelada_en, oc.cancelada_por,
+              d.id, d.nombre_original, d.tamano_bytes, d.sha256, u.nombre, cu.nombre
      ORDER BY oc.creado_en DESC
      LIMIT ?`,
     params
   );
   return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
+}
+
+async function handlePatch(req, res) {
+  const user = await requireCapability(req, CAPABILITIES.PURCHASE_ORDER_CANCEL);
+  const input = normalizePurchaseOrderCancellation(req.body || {});
+  let conn;
+  try {
+    conn = await createConnection();
+    await conn.beginTransaction();
+    const result = await cancelPurchaseOrder(conn, { ...input, userId: user.id });
+    await conn.commit();
+    return res.status(200).json({ ok: true, data: result });
+  } catch (error) {
+    if (conn) await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    if (conn) await conn.end().catch(() => {});
+  }
 }
 
 async function resolveProduct(conn, item) {
@@ -192,11 +218,12 @@ async function handlePost(req, res) {
 }
 
 module.exports = async (req, res) => {
-  cors(res, 'GET,POST');
+  cors(res, 'GET,POST,PATCH');
   if (req.method === 'OPTIONS') return res.status(200).end();
   try {
     if (req.method === 'GET') return await handleGet(req, res);
     if (req.method === 'POST') return await handlePost(req, res);
+    if (req.method === 'PATCH') return await handlePatch(req, res);
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ ok: false, error: error.message });

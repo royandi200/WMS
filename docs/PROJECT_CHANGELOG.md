@@ -1,6 +1,6 @@
 # Estado y bitácora del proyecto WMS
 
-Última actualización: 2026-08-30
+Última actualización: 2026-09-01
 
 ## Propósito
 
@@ -14,6 +14,15 @@ No reemplaza:
 - `docs/validacion-flujos-bodega-2026-08-04.md`, que documenta los smokes integrados.
 
 ## Resumen actual
+
+### 2026-09-01 - Cancelacion auditable de ordenes de compra
+
+- Se habilito la cancelacion logica de OC desde el dashboard solo para usuarios con `purchase_order.cancel`.
+- Solo una OC en estado `CARGADA` puede cancelarse; cualquier recepcion o proceso 3Q asociado bloquea la operacion.
+- El motivo y una confirmacion explicita son obligatorios. MySQL conserva actor, fecha, motivo, PDF e items originales.
+- La transicion usa bloqueo de fila, transaccion e idempotencia; repetir una cancelacion no altera el primer registro ni genera una segunda mutacion.
+- La migracion `18_purchase_order_cancellation.sql` se aplico y verifico en la base QA sin modificar inventario.
+- Validacion local: 95 pruebas aprobadas y build Vite de produccion aprobado.
 
 ### 2026-08-31 - Lectura documental de salidas hacia 3Q
 
@@ -362,7 +371,7 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 
 ## Validación acumulada
 
-- `npm test`: 12 subpruebas aprobadas tras el ajuste del prompt.
+- `npm test`: 95 subpruebas aprobadas en la entrega del 2026-09-01.
 - `npm run build`: build de producción aprobado en la última entrega funcional.
 - Smokes integrados de producción, recepción y despacho aprobados.
 - Idempotencia comprobada en cierre de OP, recepción y despacho.

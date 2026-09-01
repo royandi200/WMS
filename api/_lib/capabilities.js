@@ -5,6 +5,7 @@ const CAPABILITIES = Object.freeze({
   RECEPTION_READ: 'reception.read',
   RECEPTION_CREATE: 'reception.create',
   RECEPTION_CONFIRM: 'reception.confirm',
+  PURCHASE_ORDER_CANCEL: 'purchase_order.cancel',
   PRODUCTION_READ: 'production.read',
   PRODUCTION_RELEASE: 'production.release',
   PRODUCTION_PICK: 'production.pick',
