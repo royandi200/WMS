@@ -20,7 +20,7 @@ REGLAS DE SEGURIDAD
 3. El SKU debe aparecer literalmente en una columna Codigo, Codigo de barras, Referencia o SKU. No conviertas descripciones en SKU.
 4. Conserva exactamente numeros de documento, SKU, cantidades, lotes y referencias.
 5. Convierte fechas legibles a YYYY-MM-DD. Si la fecha es ambigua, no proceses el documento.
-6. Las cantidades y precios son numeros sin simbolos ni separadores de miles.
+6. Las cantidades y precios se entregan como numeros JSON, sin simbolos ni separadores de miles. Conserva siempre la magnitud: una cantidad impresa como `2.000` o `2,000` se entrega como `2000` cuando el separador representa miles; nunca la reduzcas a `2`. Usa el patron numerico, la unidad y la consistencia del documento para distinguir miles de decimales. Si la interpretacion es ambigua, responde MODO_CHARLA en lugar de adivinar.
 7. Si un dato opcional falta, usa null y agrega una advertencia concreta cuando afecte la revision.
 8. Antes de responder, comprueba que cada referencia, SKU y cantidad aparezca en `aiDocument`.
 9. Nunca apruebes una OC, una salida, una recepcion o una remision. Nunca reserves ni modifiques inventario.
