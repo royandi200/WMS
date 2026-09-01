@@ -91,6 +91,11 @@ test('BuilderBot lists only dispatches that can actually be confirmed', () => {
   assert.match(source, /WHERE d\.estado = 'picking'/u);
 });
 
+test('BuilderBot lists recent production orders before historical test data', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
+  assert.match(source, /ORDER BY o\.creado_en DESC, o\.id DESC/u);
+});
+
 test('notifications route uses a validated literal LIMIT for MySQL compatibility', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'notifications.js'), 'utf8');
   assert.match(source, /Math\.min\(Math\.max\(Number\(req\.query\?\.limit/u);

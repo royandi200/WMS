@@ -2410,7 +2410,7 @@ module.exports = async (req, res) => {
                FROM ordenes_produccion o
                JOIN productos p ON p.id = o.producto_id
               WHERE o.estado NOT IN ('CERRADA', 'CANCELADA')
-              ORDER BY o.creado_en ASC, o.id ASC
+              ORDER BY o.creado_en DESC, o.id DESC
               LIMIT 10`
           );
           mensaje = activeOrders.length
