@@ -128,4 +128,4 @@ El dashboard aplica controles visuales, pero la autorizacion definitiva siempre 
 2. Cargar inventario de prueba para los materiales del BOM `ENVIO`; actualmente 11 de las 12 lineas PT no tienen saldo disponible.
 3. Desplegar API y dashboard juntos.
 4. Ejecutar una prueba con entrega parcial, producto no conforme, material adicional, reintento y cancelacion de remision.
-5. Validar el lector documental con el PDF de prueba antes de usar documentos reales; revisar especialmente referencia, SKU, total, lote y vencimiento.
+5. Ejecutar la prueba pendiente del lector documental enviando `salida-bodega-3q-prueba.pdf` desde un usuario `admin` al agente. Resultado esperado: borrador `SB-TEST-20260831-001`, seis items, 24.600 unidades, estado `PENDIENTE_REVISION`, visible en `Maquila 3Q > Documentos leidos` y sin cambios en stock, lotes, movimientos o kardex. Repetir el mismo PDF no debe crear un segundo borrador.
