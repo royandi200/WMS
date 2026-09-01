@@ -82,9 +82,17 @@ test('operational document identity ignores OCR metadata but protects inventory 
       { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
     ],
   }));
+  const changedQuantity = normalizeWarehouseDocumentInput(validInput({
+    total_unidades: 8201,
+    items: [
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7001, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+    ],
+  }));
   assert.notEqual(first.hash, retry.hash);
   assert.equal(first.operationalHash, retry.operationalHash);
-  assert.notEqual(first.operationalHash, changedLot.operationalHash);
+  assert.equal(first.operationalHash, changedLot.operationalHash);
+  assert.notEqual(first.operationalHash, changedQuantity.operationalHash);
   assert.deepEqual(operationalDocumentIdentity(first), operationalDocumentIdentity(retry));
 });
 
@@ -155,8 +163,20 @@ test('duplicate accepts equivalent operational data when OCR metadata changes', 
   };
   const result = await registerWarehouseDocumentDraft({
     db,
-    body: validInput({ nombre_archivo: null, entrega: null }),
+    body: validInput({
+      nombre_archivo: null,
+      entrega: null,
+      items: [
+        { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+        { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-LNTP60' },
+      ],
+    }),
     userId: 5,
+    evidenceText: [
+      'SALIDA DE BODEGA SB-TEST-20260831-001',
+      '00007-TRG 7000 2027-12-31 L-TEST-120',
+      '00006-TRP 1200 2027-12-31 L-TEST-60',
+    ].join('\n'),
   });
   assert.equal(result.duplicate, true);
   assert.equal(result.totalUnits, 8200);
@@ -191,7 +211,29 @@ test('duplicate rejects changes to operational items with a specific conflict', 
   };
   await assert.rejects(
     registerWarehouseDocumentDraft({ db, body: validInput(), userId: 5 }),
-    /items, cantidades, lotes o vencimientos/u
+    /SKU o cantidades/u
+  );
+});
+
+test('BuilderBot document evidence rejects invented SKU and clears invented optional data', () => {
+  const evidence = [
+    'SALIDA DE BODEGA SB-TEST-20260831-001',
+    '00007-TRG 7000 2027-12-31 L-TEST-120',
+    '00006-TRP 1200 2027-12-31 L-TEST-60',
+  ].join('\n');
+  const normalized = normalizeWarehouseDocumentInput(validInput({
+    items: [
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-INVENTADO' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+    ],
+  }), { evidenceText: evidence });
+  assert.equal(normalized.items[0].lot, null);
+  assert.match(normalized.warnings.join(' | '), /no aparece literalmente/u);
+  assert.throws(
+    () => normalizeWarehouseDocumentInput(validInput({
+      items: [{ sku: 'SKU-INVENTADO', descripcion: 'Inventado', cantidad: 8200 }],
+    }), { evidenceText: evidence }),
+    /no aparece literalmente/u
   );
 });
 

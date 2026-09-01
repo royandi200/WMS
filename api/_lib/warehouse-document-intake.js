@@ -2,7 +2,7 @@ const { createHash } = require('crypto');
 
 const MAX_DOCUMENT_ITEMS = 100;
 
-function normalizeWarehouseDocumentInput(body = {}) {
+function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) {
   const source = body.params && typeof body.params === 'object' ? body.params : body;
   const documentType = cleanText(source.tipo_documento || source.document_type, 50).toUpperCase();
   const reference = cleanText(source.referencia_documento || source.document_reference, 80);
@@ -19,10 +19,28 @@ function normalizeWarehouseDocumentInput(body = {}) {
   if (!items.length) throw inputError('El documento debe incluir al menos un item');
   if (items.length > MAX_DOCUMENT_ITEMS) throw inputError(`El documento supera ${MAX_DOCUMENT_ITEMS} items`);
 
-  const normalizedItems = items.map((item, index) => normalizeItem(item, index));
+  const warnings = normalizeWarnings(source.advertencias || source.warnings);
+  const evidence = cleanEvidenceText(evidenceText);
+  if (evidence && !evidenceIncludes(evidence, reference)) {
+    throw inputError('La referencia_documento no aparece literalmente en el documento');
+  }
+  const normalizedItems = items.map((item, index) => {
+    const normalized = normalizeItem(item, index);
+    if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
+      throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
+    }
+    if (evidence && normalized.lot && !evidenceIncludes(evidence, normalized.lot)) {
+      warnings.push(`El lote propuesto para ${normalized.sku} no aparece literalmente en el documento; se dejo pendiente`);
+      normalized.lot = null;
+    }
+    if (evidence && normalized.expiryDate && !evidenceIncludes(evidence, normalized.expiryDate)) {
+      warnings.push(`El vencimiento propuesto para ${normalized.sku} no aparece literalmente en el documento; se dejo pendiente`);
+      normalized.expiryDate = null;
+    }
+    return normalized;
+  });
   const calculatedTotal = roundQty(normalizedItems.reduce((sum, item) => sum + item.quantity, 0));
   const suppliedTotal = optionalPositiveNumber(source.total_unidades ?? source.total_units, 'total_unidades');
-  const warnings = normalizeWarnings(source.advertencias || source.warnings);
   if (suppliedTotal != null && Math.abs(suppliedTotal - calculatedTotal) > 0.0001) {
     warnings.push(`El total declarado (${suppliedTotal}) no coincide con la suma de items (${calculatedTotal})`);
   }
@@ -57,8 +75,8 @@ function normalizeWarehouseDocumentInput(body = {}) {
   return normalized;
 }
 
-async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUILDERBOT' }) {
-  const input = normalizeWarehouseDocumentInput(body);
+async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUILDERBOT', evidenceText = '' }) {
+  const input = normalizeWarehouseDocumentInput(body, { evidenceText });
   const normalizedOrigin = String(origin || 'BUILDERBOT').trim().toUpperCase();
   if (!['BUILDERBOT', 'DASHBOARD'].includes(normalizedOrigin)) throw inputError('Origen documental no soportado');
 
@@ -243,8 +261,6 @@ function operationalDocumentIdentity(normalized) {
   const items = (normalized.items || []).map(item => ({
     sku: String(item.sku || '').toUpperCase(),
     quantity: roundQty(item.quantity),
-    expiryDate: item.expiryDate || null,
-    lot: item.lot || null,
   })).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
   return {
     documentType: normalized.documentType,
@@ -267,7 +283,7 @@ function operationalDifferences(stored, incoming) {
   ]) {
     if (canonicalJson(stored[field]) !== canonicalJson(incoming[field])) differences.push(label);
   }
-  if (canonicalJson(stored.items) !== canonicalJson(incoming.items)) differences.push('items, cantidades, lotes o vencimientos');
+  if (canonicalJson(stored.items) !== canonicalJson(incoming.items)) differences.push('SKU o cantidades');
   return differences.length ? differences : ['contenido critico'];
 }
 
@@ -279,6 +295,14 @@ function dateOnly(value) {
 
 function nullableNumber(value) {
   return value == null || value === '' ? null : Number(value);
+}
+
+function cleanEvidenceText(value) {
+  return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function evidenceIncludes(evidence, value) {
+  return evidence.includes(String(value || '').trim().toUpperCase());
 }
 
 function parseStoredWarnings(value) {

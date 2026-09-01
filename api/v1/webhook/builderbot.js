@@ -1287,6 +1287,7 @@ module.exports = async (req, res) => {
           body: params,
           userId: user.id,
           origin: 'BUILDERBOT',
+          evidenceText: rawText,
         });
         const warningLines = (draft.warnings || []).slice(0, 5).map((warning) => `- ${warning}`);
         mensaje = [
