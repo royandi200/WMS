@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   normalizeWarehouseDocumentInput,
+  registerWarehouseDocumentDraft,
 } = require('../api/_lib/warehouse-document-intake');
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
 
@@ -37,6 +38,61 @@ test('document intake is deterministic and accepts BuilderBot params envelope', 
   const direct = normalizeWarehouseDocumentInput(validInput());
   const enveloped = normalizeWarehouseDocumentInput({ params: validInput() });
   assert.equal(direct.hash, enveloped.hash);
+});
+
+test('document identity ignores model warnings and ephemeral message references', () => {
+  const first = normalizeWarehouseDocumentInput(validInput({
+    advertencias: ['Observacion redactada por el modelo'],
+    referencia_origen: 'event-document-1',
+  }));
+  const retry = normalizeWarehouseDocumentInput(validInput({
+    advertencias: [],
+    referencia_origen: 'event-document-2',
+  }));
+  const changedQuantity = normalizeWarehouseDocumentInput(validInput({
+    total_unidades: 8201,
+    items: [
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7001, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+    ],
+  }));
+  assert.equal(first.hash, retry.hash);
+  assert.notEqual(first.hash, changedQuantity.hash);
+});
+
+test('duplicate document returns persisted total and warnings without inserting', async () => {
+  const normalized = normalizeWarehouseDocumentInput(validInput());
+  const calls = [];
+  const db = {
+    beginTransaction: async () => calls.push('begin'),
+    commit: async () => calls.push('commit'),
+    rollback: async () => calls.push('rollback'),
+    execute: async (sql) => {
+      calls.push(sql);
+      if (/SELECT id, referencia_documento/u.test(sql)) {
+        return [[{
+          id: 7,
+          referencia_documento: normalized.reference,
+          sha256: normalized.hash,
+          estado: 'PENDIENTE_REVISION',
+          total_unidades: '8200.0000',
+          advertencias: JSON.stringify(['Revision persistida']),
+        }]];
+      }
+      throw new Error('A duplicate must not execute writes');
+    },
+  };
+
+  const result = await registerWarehouseDocumentDraft({
+    db,
+    body: validInput(),
+    userId: 5,
+  });
+  assert.equal(result.duplicate, true);
+  assert.equal(result.totalUnits, 8200);
+  assert.deepEqual(result.warnings, ['Revision persistida']);
+  assert.ok(calls.includes('commit'));
+  assert.ok(!calls.includes('rollback'));
 });
 
 test('document intake fails closed without exact SKU or with an invalid date', () => {

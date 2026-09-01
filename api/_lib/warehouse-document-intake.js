@@ -50,7 +50,7 @@ function normalizeWarehouseDocumentInput(body = {}) {
     warnings: [...new Set(warnings)].slice(0, 50),
     items: normalizedItems,
   };
-  normalized.hash = createHash('sha256').update(canonicalJson(normalized)).digest('hex');
+  normalized.hash = createHash('sha256').update(canonicalJson(documentIdentity(normalized))).digest('hex');
   return normalized;
 }
 
@@ -62,7 +62,7 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
   await db.beginTransaction();
   try {
     const [existing] = await db.execute(
-      `SELECT id, referencia_documento, sha256, estado
+      `SELECT id, referencia_documento, sha256, estado, total_unidades, advertencias
          FROM documentos_bodega_borrador
         WHERE origen = ? AND referencia_documento = ?
         LIMIT 1 FOR UPDATE`,
@@ -73,7 +73,13 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
         throw conflictError(`El documento ${input.reference} ya existe con contenido diferente`);
       }
       await db.commit();
-      return { ...existing[0], duplicate: true, warnings: input.warnings, itemCount: input.items.length };
+      return {
+        ...existing[0],
+        duplicate: true,
+        warnings: parseStoredWarnings(existing[0].advertencias),
+        itemCount: input.items.length,
+        totalUnits: Number(existing[0].total_unidades || 0),
+      };
     }
 
     const resolved = [];
@@ -193,6 +199,22 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+function documentIdentity(normalized) {
+  const { warnings, sourceReference, hash, ...stableDocument } = normalized;
+  return stableDocument;
+}
+
+function parseStoredWarnings(value) {
+  if (Array.isArray(value)) return normalizeWarnings(value);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? normalizeWarnings(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
 function inputError(message) {
   return Object.assign(new Error(message), { status: 400 });
 }
@@ -206,4 +228,5 @@ module.exports = {
   normalizeWarehouseDocumentInput,
   registerWarehouseDocumentDraft,
   canonicalJson,
+  documentIdentity,
 };
