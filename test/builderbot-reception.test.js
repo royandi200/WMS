@@ -8,6 +8,7 @@ const {
   explicitPurchaseOrderConfirmation,
   receptionConfirmationKey,
   buildConfirmationItems,
+  buildReceptionReview,
   findPreparedReception,
   listAvailablePurchaseOrderReceptions,
 } = require('../api/_lib/builderbot-reception');
@@ -101,6 +102,30 @@ test('WhatsApp fails closed when an OC has multiple active receipts', async () =
   );
 });
 
+test('WhatsApp renders a canonical receipt review before inventory confirmation', () => {
+  const review = buildReceptionReview(
+    { id: 5, numero: 'OC-DEMO-5' },
+    { id: 60, numero: 'REC-OC-5-001' },
+    [{
+      sku: '00051-MPASH',
+      producto: 'Gomas Ashwa',
+      unidad: 'gr',
+      requiere_lote: true,
+      distributions: [{
+        cantidad: 2000,
+        condicion: 'DISPONIBLE',
+        ubicacion: 'PPAL-A-1-01',
+        lote: 'DEMO-GOMAS-001',
+        fecha_venc: '2027-12-31',
+      }],
+    }]
+  );
+  assert.match(review, /Resumen de recepcion para OC OC-DEMO-5 \(ID 5\)/u);
+  assert.match(review, /2000 gr \| DISPONIBLE \| PPAL-A-1-01 \| lote DEMO-GOMAS-001/u);
+  assert.match(review, /No se modifico inventario/u);
+  assert.match(review, /Confirmo la recepcion ID 5/u);
+});
+
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {
   const db = {
     async execute(sql, values) {
@@ -182,6 +207,8 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /Confirmo la recepcion de ID N/u);
   assert.match(prompt, /No aceptes confirmaciones vagas/u);
   assert.match(prompt, /no lo preguntes ni lo inventes/u);
+  assert.match(prompt, /vista previa validada/u);
+  assert.match(webhook, /confirmation\.requires_confirmation/u);
   assert.match(prompt, /todos los productos pendientes/u);
   assert.match(prompt, /el WMS creara una partida interna/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);

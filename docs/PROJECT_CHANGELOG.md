@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Vista previa validada antes de confirmar recepcion
+
+- Si el agente envia prematuramente la accion con datos fisicos pero sin confirmacion explicita en el texto, la API ya no devuelve un error generico.
+- La API valida OC, borrador, productos, cantidades, condiciones, ubicaciones y lotes, y responde un resumen canonico sin modificar inventario.
+- La confirmacion posterior sigue requiriendo intencion explicita e ID coincidente; el texto del usuario, no la bandera generada por el LLM, autoriza el movimiento.
+
 ### 2026-09-01 - Recepcion por ID sin dictar codigo REC
 
 - El operario ya no necesita recordar o dictar el codigo tecnico `REC-...` para confirmar una recepcion.

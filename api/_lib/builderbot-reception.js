@@ -412,11 +412,16 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
         condicion: entry.condicion || entry.condition,
         motivo: entry.motivo || entry.reason || null,
         ubicacion_id: location?.id || null,
+        ubicacion: location?.codigo || null,
       });
     }
     result.push({
       item_id: prepared.item_id,
       product_id: prepared.producto_id,
+      sku: product.siigo_code,
+      producto: product.nombre || prepared.producto,
+      unidad: prepared.unidad || 'und',
+      requiere_lote: Boolean(prepared.requiere_lote),
       cantidad_recibida: item.cantidad_recibida ?? item.cantidad_total ?? null,
       motivo: item.motivo_diferencia || item.motivo || null,
       distributions,
@@ -430,14 +435,41 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
   return result;
 }
 
+function buildReceptionReview(order, reception, items) {
+  const lines = items.flatMap(item => {
+    const total = item.distributions.reduce(
+      (sum, entry) => sum + Number(entry.cantidad || 0),
+      0
+    );
+    const header = `- ${item.sku} - ${item.producto}: ${Number(total.toFixed(4))} ${item.unidad}`;
+    const details = item.distributions.map(entry => {
+      const parts = [
+        `${Number(entry.cantidad)} ${item.unidad}`,
+        String(entry.condicion || '').toUpperCase(),
+        entry.ubicacion || 'sin ubicacion',
+        entry.lote
+          ? `lote ${entry.lote}`
+          : item.requiere_lote
+            ? 'lote proveedor faltante'
+            : 'sin lote proveedor; partida interna WMS',
+        entry.fecha_venc ? `vence ${entry.fecha_venc}` : null,
+        entry.motivo ? `motivo ${entry.motivo}` : null,
+      ].filter(Boolean);
+      return `  ${parts.join(' | ')}`;
+    });
+    return [header, ...details];
+  });
+  return [
+    `Resumen de recepcion para OC ${order.numero} (ID ${order.id}).`,
+    `Borrador interno: ${reception.numero}`,
+    ...lines,
+    'No se modifico inventario.',
+    `Si todo coincide, escribe: Confirmo la recepcion ID ${order.id}`,
+  ].join('\n');
+}
+
 async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const order = await findPurchaseOrder(db, params);
-  if (!explicitConfirmation(rawText, order, params)) {
-    throw inputError(
-      `Para modificar inventario escribe: Confirmo la recepcion ID ${order.id}`,
-      409
-    );
-  }
   const requestedReception = await findPreparedReception(db, order.id, params, {
     allowCompleted: order.estado === 'CERRADA',
   });
@@ -452,23 +484,6 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   }
   if (!['borrador', 'en_proceso'].includes(requestedReception.estado)) {
     throw inputError(`La recepcion esta ${requestedReception.estado}`, 409);
-  }
-  const confirmationKey = receptionConfirmationKey(order.id, requestedReception.id, params);
-  const [previous] = await db.execute(
-    `SELECT id, numero, estado FROM recepciones WHERE confirmacion_clave = ? LIMIT 1`,
-    [confirmationKey]
-  );
-  if (previous.length) {
-    if (previous[0].estado !== 'completada') {
-      throw inputError('La misma confirmacion de recepcion ya esta en proceso', 409);
-    }
-    return {
-      recepcion_id: previous[0].id,
-      numero: previous[0].numero,
-      estado: previous[0].estado,
-      already_completed: true,
-      orden_compra_numero: order.numero,
-    };
   }
   const prepared = await prepareReceptionFromPurchaseOrder({
     db,
@@ -488,6 +503,35 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
     throw inputError('El borrador REC- no coincide con el saldo activo de la OC', 409);
   }
   const items = await buildConfirmationItems(db, prepared.reception.items, params);
+  if (!explicitConfirmation(rawText, order, params)) {
+    return {
+      requires_confirmation: true,
+      inventory_changed: false,
+      recepcion_id: prepared.reception.id,
+      numero: prepared.reception.numero,
+      orden_compra_id: order.id,
+      orden_compra_numero: order.numero,
+      item_count: items.length,
+      message: buildReceptionReview(order, prepared.reception, items),
+    };
+  }
+  const confirmationKey = receptionConfirmationKey(order.id, requestedReception.id, params);
+  const [previous] = await db.execute(
+    `SELECT id, numero, estado FROM recepciones WHERE confirmacion_clave = ? LIMIT 1`,
+    [confirmationKey]
+  );
+  if (previous.length) {
+    if (previous[0].estado !== 'completada') {
+      throw inputError('La misma confirmacion de recepcion ya esta en proceso', 409);
+    }
+    return {
+      recepcion_id: previous[0].id,
+      numero: previous[0].numero,
+      estado: previous[0].estado,
+      already_completed: true,
+      orden_compra_numero: order.numero,
+    };
+  }
   const { confirmReceptionForUser } = require('../v1/reception');
   const result = await confirmReceptionForUser({
     user: { id: user.id, rol: user.rol_nombre || user.rol },
@@ -515,5 +559,6 @@ module.exports = {
   receptionConfirmationKey,
   findPreparedReception,
   buildConfirmationItems,
+  buildReceptionReview,
   confirmReceptionFromWhatsApp,
 };

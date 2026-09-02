@@ -1426,8 +1426,19 @@ module.exports = async (req, res) => {
           rawText,
           user,
         });
-        if (confirmation.already_completed) {
+        if (confirmation.requires_confirmation) {
+          mensaje = confirmation.message;
+          responseContext.reception = {
+            reception_id: confirmation.recepcion_id,
+            reception_number: confirmation.numero,
+            purchase_order_id: confirmation.orden_compra_id,
+            item_count: confirmation.item_count,
+            requires_confirmation: true,
+            inventory_changed: false,
+          };
+        } else if (confirmation.already_completed) {
           mensaje = `La OC ${confirmation.orden_compra_numero} ya fue recibida en ${confirmation.numero}. No se modifico inventario.`;
+          responseContext.reception = confirmation;
         } else {
           const lines = (confirmation.items || []).map(item =>
             `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`
@@ -1439,8 +1450,8 @@ module.exports = async (req, res) => {
               ? 'Se registraron diferencias para seguimiento.'
               : 'La recepcion coincide con las cantidades esperadas.',
           ].join('\n');
+          responseContext.reception = confirmation;
         }
-        responseContext.reception = confirmation;
         break;
       }
 
