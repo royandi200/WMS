@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Guia funcional y validacion integral para socios
+
+- Se creo `docs/guia-funcional-y-validacion-integral-wms.md` como referencia funcional compartible de dashboard, WhatsApp, roles, modalidades PR/IO/PT e integraciones.
+- Cada capacidad distingue evidencia automatizada, validacion manual, cobertura parcial, pendientes y funciones desactivadas para evitar presentar implementacion como aceptacion operativa.
+- La bateria conjunta cubre acceso, OC/PDF, recepcion, produccion, reposicion, In-and-Out, maquila 3Q, despachos, devoluciones, mermas, trazabilidad, lenguaje natural, notificaciones y conciliacion final.
+- Se incluyeron formato de evidencia, orden recomendado de ejecucion y decisiones de negocio que deben salir de la siguiente reunion.
+- Evidencia vigente: `172/172` pruebas locales y build Vite de `1530` modulos aprobados el 2026-09-02. Este cambio es solo documental; no modifica base, runtime ni despliegue.
+
 ### 2026-09-02 - Trazabilidad legible de ingresos por recepcion
 
 - El historial de un lote recibido muestra el codigo fisico de ubicacion, por ejemplo `B13`, en vez del ID numerico interno.
