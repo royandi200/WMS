@@ -3,6 +3,7 @@ const { createConnection } = require('./db');
 const { resolvePrimaryWarehouse } = require('./warehouses');
 const { PRODUCT_MODES } = require('./product-modes');
 const { resolveProductReference } = require('./product-references');
+const { addPreferredLocations } = require('./product-locations');
 const {
   normalizeOutsourcingOrderInput,
   normalizeAdditionalShipmentInput,
@@ -589,10 +590,136 @@ async function reconcileOutsourcingReception(conn, { outsourcingOrderId, userId 
   };
 }
 
+async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) {
+  const reference = String(orderId || '').trim();
+  if (!reference) throw httpError(400, 'orden_maquila_id es obligatorio');
+  const [orders] = await conn.execute(
+    `SELECT om.id, om.codigo, om.orden_compra_id, om.tercero_id,
+            om.proveedor_nombre, om.producto_id, om.cantidad_objetivo,
+            om.cantidad_recibida, om.estado, oc.numero AS orden_compra_numero,
+            p.siigo_code AS sku, p.nombre AS producto, p.requiere_lote,
+            p.unit_label AS unidad
+       FROM ordenes_maquila om
+       JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
+       JOIN productos p ON p.id = om.producto_id
+      WHERE om.id = ? OR om.codigo = ? LIMIT 1 FOR UPDATE`,
+    [Number(reference) || 0, reference]
+  );
+  if (!orders.length) throw httpError(404, 'Orden de maquila no encontrada');
+  const order = orders[0];
+  if (!['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)) {
+    throw httpError(409, `La orden ${order.codigo} esta ${order.estado} y no puede recibir producto`);
+  }
+
+  const preparationKey = `MAQUILA_3Q:${order.id}`;
+  const [preparedRows] = await conn.execute(
+    `SELECT r.id, r.numero, r.estado, ri.id AS item_id, ri.cantidad_esp
+       FROM recepciones r
+       JOIN recepcion_items ri ON ri.recepcion_id = r.id AND ri.producto_id = ?
+      WHERE r.preparacion_clave = ? AND r.estado IN ('borrador','en_proceso')
+      LIMIT 1`,
+    [order.producto_id, preparationKey]
+  );
+  if (preparedRows.length) {
+    const existingItems = await addPreferredLocations(conn, [{
+      item_id: preparedRows[0].item_id,
+      producto_id: order.producto_id,
+      sku: order.sku,
+      producto: order.producto,
+      modalidad_operativa: PRODUCT_MODES.OUTSOURCED,
+      requiere_lote: Boolean(order.requiere_lote),
+      cantidad_pendiente: Number(preparedRows[0].cantidad_esp),
+      unidad: order.unidad || 'und',
+      orden_maquila_id: order.id,
+      orden_maquila_codigo: order.codigo,
+    }]);
+    return {
+      id: preparedRows[0].id,
+      numero: preparedRows[0].numero,
+      orden_compra_id: order.orden_compra_id,
+      orden_compra_numero: order.orden_compra_numero,
+      orden_maquila_id: order.id,
+      orden_maquila_codigo: order.codigo,
+      proveedor_nombre: order.proveedor_nombre,
+      estado: preparedRows[0].estado,
+      items: existingItems,
+      duplicate: true,
+    };
+  }
+
+  const remaining = roundQty(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida));
+  if (remaining <= 0) throw httpError(409, `La orden ${order.codigo} no tiene cantidades pendientes`);
+  const deliveryQuantity = quantity == null || quantity === '' ? remaining : roundQty(Number(quantity));
+  if (!Number.isFinite(deliveryQuantity) || deliveryQuantity <= 0) {
+    throw httpError(400, 'La cantidad de esta entrega debe ser positiva');
+  }
+  if (deliveryQuantity > remaining + 0.0001) {
+    throw httpError(409, 'La cantidad de esta entrega supera el saldo pendiente de la orden 3Q', {
+      saldo_pendiente: remaining,
+      cantidad_entrega: deliveryQuantity,
+    });
+  }
+
+  const warehouseId = await resolvePrimaryWarehouse(conn);
+  const [sequenceRows] = await conn.execute(
+    `SELECT COUNT(*) AS cantidad FROM recepciones
+      WHERE orden_compra_id = ? AND numero LIKE ?`,
+    [order.orden_compra_id, `REC-3Q-${order.id}-%`]
+  );
+  const sequence = Number(sequenceRows[0]?.cantidad || 0) + 1;
+  const number = `REC-3Q-${order.id}-${String(sequence).padStart(3, '0')}`;
+  const [created] = await conn.execute(
+    `INSERT INTO recepciones
+       (numero, orden_compra_id, tercero_id, proveedor_nombre, bodega_id, estado,
+        usuario_id, observaciones, preparacion_clave, creado_en)
+     VALUES (?, ?, ?, ?, ?, 'borrador', ?, ?, ?, NOW())`,
+    [number, order.orden_compra_id, order.tercero_id, order.proveedor_nombre,
+     warehouseId, userId,
+     `Recepcion fisica preparada desde orden 3Q ${order.codigo}`,
+     preparationKey]
+  );
+  const [createdItem] = await conn.execute(
+    `INSERT INTO recepcion_items
+       (recepcion_id, producto_id, cantidad_esp, cantidad_rec)
+     VALUES (?, ?, ?, 0)`,
+    [created.insertId, order.producto_id, deliveryQuantity]
+  );
+  const items = await addPreferredLocations(conn, [{
+    item_id: createdItem.insertId,
+    producto_id: order.producto_id,
+    sku: order.sku,
+    producto: order.producto,
+    modalidad_operativa: PRODUCT_MODES.OUTSOURCED,
+    requiere_lote: Boolean(order.requiere_lote),
+    cantidad_ordenada: Number(order.cantidad_objetivo),
+    cantidad_aceptada: Number(order.cantidad_recibida),
+    cantidad_pendiente: deliveryQuantity,
+    saldo_orden_maquila: remaining,
+    unidad: order.unidad || 'und',
+    orden_maquila_id: order.id,
+    orden_maquila_codigo: order.codigo,
+  }]);
+  return {
+    id: created.insertId,
+    numero: number,
+    orden_compra_id: order.orden_compra_id,
+    orden_compra_numero: order.orden_compra_numero,
+    orden_maquila_id: order.id,
+    orden_maquila_codigo: order.codigo,
+    proveedor_nombre: order.proveedor_nombre,
+    estado: 'borrador',
+    cantidad_entrega: deliveryQuantity,
+    saldo_orden_maquila: remaining,
+    items,
+    duplicate: false,
+  };
+}
+
 module.exports = {
   createOutsourcingOrder,
   prepareAdditionalShipment,
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
+  prepareOutsourcingReception,
   reconcileOutsourcingReception,
 };

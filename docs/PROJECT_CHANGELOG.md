@@ -15,6 +15,15 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Recepcion fisica desde orden de maquila 3Q
+
+- `Recepciones > Confirmar recepcion` separa `Compra directa` de `Producto desde 3Q`.
+- Nelly puede seleccionar una orden 3Q enviada, indicar la cantidad de la entrega actual y preparar una recepcion sin modificar inventario.
+- La API valida estado, saldo y cantidad dentro de una transaccion y reutiliza el borrador abierto ante reintentos.
+- La aprobacion conserva orden 3Q, OC, producto, lote definido por 3Q, vencimiento, condicion y ubicacion WMS; despues actualiza el acumulado a `RECIBIDA_PARCIAL` o `COMPLETADA`.
+- Se preparo la OC sintetica `DEMO-20260902-OC-3Q-001`, su PDF y un guion integrado para produccion propia, In-and-out y maquila.
+- No se agregaron handlers ni notificaciones 3Q por WhatsApp. Esas decisiones siguen abiertas y estan documentadas para el cliente.
+
 ### 2026-09-02 - Lote documental como ayuda segura de recepcion
 
 - Los PDF de orden de compra pueden conservar lote y vencimiento por item cuando ambos aparecen de forma verificable en el documento.

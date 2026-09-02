@@ -12,7 +12,10 @@ const {
 const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
 const { workflowFlags } = require('../_lib/feature-flags');
 const { PRODUCT_MODES } = require('../_lib/product-modes');
-const { reconcileOutsourcingReception } = require('../_lib/outsourcing-workflow');
+const {
+  prepareOutsourcingReception,
+  reconcileOutsourcingReception,
+} = require('../_lib/outsourcing-workflow');
 const { preparePurchaseOrderReception } = require('../_lib/purchase-order-reception');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
@@ -721,6 +724,25 @@ async function handlePost(req, res) {
       await conn.beginTransaction();
       const prepared = await preparePurchaseOrderReception(conn, {
         purchaseOrderId: body.orden_compra_id || body.purchase_order_id,
+        userId: user.id,
+      });
+      await conn.commit();
+      return res.status(prepared.duplicate ? 200 : 201).json({ ok: true, data: prepared });
+    } catch (error) {
+      if (conn) await conn.rollback().catch(() => {});
+      throw error;
+    } finally {
+      if (conn) await conn.end().catch(() => {});
+    }
+  }
+  if (action === 'PREPARAR_DESDE_MAQUILA') {
+    let conn;
+    try {
+      conn = await createConnection();
+      await conn.beginTransaction();
+      const prepared = await prepareOutsourcingReception(conn, {
+        orderId: body.orden_maquila_id || body.outsourcing_order_id,
+        quantity: body.cantidad_entrega ?? body.delivery_quantity,
         userId: user.id,
       });
       await conn.commit();

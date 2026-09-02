@@ -106,6 +106,19 @@ test('3Q reception is mapped per product instead of one order per invoice', () =
   assert.match(reception, /modalidad_operativa === PRODUCT_MODES\.OUTSOURCED/u);
 });
 
+test('3Q reception can be prepared from an active outsourcing order without Siigo', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../api/_lib/outsourcing-workflow.js'), 'utf8');
+  const reception = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/RecepcionPage.jsx'), 'utf8');
+  assert.match(workflow, /async function prepareOutsourcingReception/u);
+  assert.match(workflow, /\['EN_3Q', 'RECIBIDA_PARCIAL'\]/u);
+  assert.match(workflow, /MAQUILA_3Q:\$\{order\.id\}/u);
+  assert.match(workflow, /La cantidad de esta entrega supera el saldo pendiente/u);
+  assert.match(reception, /action === 'PREPARAR_DESDE_MAQUILA'/u);
+  assert.match(page, /Producto desde 3Q/u);
+  assert.match(page, /orden_maquila_id: item\.outsourcingOrderId/u);
+});
+
 test('purchase orders fail closed to active Siigo suppliers', () => {
   const purchaseOrders = fs.readFileSync(path.join(__dirname, '../api/v1/purchase-orders.js'), 'utf8');
   const suppliers = fs.readFileSync(path.join(__dirname, '../api/v1/suppliers.js'), 'utf8');

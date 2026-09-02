@@ -1,6 +1,6 @@
 # Flujo de orden de compra y maquila 3Q
 
-Estado: dashboard de recepcion directa desplegado. Flujo equivalente por WhatsApp implementado y migrado en QA; prueba conversacional final pendiente.
+Estado: compra normal operable por dashboard y WhatsApp. La recepcion fisica desde una orden 3Q esta implementada en dashboard y pendiente de ensayo vivo; las acciones operativas 3Q por WhatsApp no forman parte del alcance actual.
 
 ## Principios
 
@@ -123,7 +123,9 @@ Mientras la orden este `EN_3Q` o `RECIBIDA_PARCIAL`, Sofi puede preparar una rem
 
 La recepcion de 3Q se inicia desde la orden de maquila y la OC asociada. No depende de importar una factura de compra desde Siigo.
 
-La asociacion se realiza por linea de producto. Una entrega puede contener varios productos y vincular cada uno con una orden 3Q diferente de la misma OC.
+En `Recepciones > Confirmar recepcion`, Nelly elige `Producto desde 3Q`, selecciona una orden en estado `EN_3Q` o `RECIBIDA_PARCIAL` e indica la cantidad de la entrega actual. La API valida que la cantidad sea positiva y no supere el saldo, bloquea la orden y prepara un borrador idempotente. Preparar no crea inventario.
+
+Cada borrador queda vinculado a la OC, la orden 3Q y el producto terminado. Al confirmar, el mismo motor transaccional de recepciones escribe lote, stock, movimiento y kardex y luego concilia el acumulado de la orden 3Q.
 
 Nelly registra por cada entrega:
 
@@ -135,6 +137,8 @@ Nelly registra por cada entrega:
 - motivo cuando la condicion no es disponible.
 
 Solo `DISPONIBLE` suma inventario utilizable. Cuarentena y rechazo conservan trazabilidad sin aumentar disponibilidad.
+
+El canal WhatsApp aun no permite crear, enviar ni recibir ordenes 3Q operativas. El lector documental solo registra borradores de PDF y no los vincula automaticamente con la remision operativa.
 
 ## 7. Entregas parciales y cierre
 
@@ -159,10 +163,12 @@ Al completar, la conciliacion conserva por material: teorico, reservado, enviado
 
 El dashboard aplica controles visuales, pero la autorizacion definitiva siempre se valida en la API.
 
-## 9. Pendientes antes de habilitarlo
+## 9. Pendientes y decisiones abiertas
 
-1. Sincronizar la identidad de 3Q en `terceros` y comprobar que coincide con el proveedor de la OC. El WMS no admite nombres de proveedor escritos libremente en nuevas OC.
-2. Cargar inventario de prueba para los materiales del BOM `ENVIO`; actualmente 11 de las 12 lineas PT no tienen saldo disponible.
-3. Desplegar API y dashboard juntos.
-4. Ejecutar una prueba con entrega parcial, producto no conforme, material adicional, reintento y cancelacion de remision.
-5. Ejecutar la prueba pendiente del lector documental enviando `salida-bodega-3q-prueba.pdf` desde un usuario `admin` al agente. Resultado esperado: borrador `SB-TEST-20260831-001`, seis items, 24.600 unidades, estado `PENDIENTE_REVISION`, visible en `Maquila 3Q > Documentos leidos` y sin cambios en stock, lotes, movimientos o kardex. Repetir el mismo PDF no debe crear un segundo borrador.
+1. Ejecutar el ensayo vivo completo: salida principal, reintento, recepcion parcial, segunda recepcion, cierre y trazabilidad.
+2. Confirmar con el cliente si una misma referencia de lote 3Q puede llegar en varias entregas. La implementacion actual exige un lote nuevo por recepcion para no agregar cantidad silenciosamente a un lote existente.
+3. Definir receptores y eventos de notificacion 3Q antes de habilitarlos.
+4. Definir si las acciones 3Q tambien deben operarse por WhatsApp. Hoy son de dashboard.
+5. Definir el documento que acompana el retorno desde 3Q y si debe vincularse a la recepcion ademas de la OC.
+6. Probar no conformidad, material adicional, devolucion de sobrantes y exceso sobre la cantidad objetivo despues de obtener las reglas del cliente.
+7. Ejecutar la prueba pendiente del lector documental con el PDF sintetico. Debe crear un borrador revisable sin movimientos y el reintento no debe duplicarlo.

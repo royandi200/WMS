@@ -90,6 +90,8 @@ El flujo de maquila tercerizada esta implementado inicialmente en API y dashboar
 
 El flujo documental separado de BuilderBot acepta dos contratos. `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` requiere `reception.create` y conserva PDF y extraccion. Una OC consistente puede revisarse y confirmarse despues por WhatsApp; cualquier correccion sigue exigiendo dashboard. `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO` requiere `outsourcing.manage` y deja una salida 3Q pendiente de revision. Ambos exigen SKU exactos, son idempotentes y no reservan materiales ni ejecutan movimientos de inventario. Los handlers operativos reutilizan los servicios existentes; no se autoriza una ruta documental de mutacion paralela.
 
+Limite vigente: BuilderBot no crea ordenes de maquila, no confirma remisiones 3Q y no prepara ni aprueba recepciones desde 3Q. Esas acciones se realizan en dashboard. Tampoco existen notificaciones operativas 3Q acordadas; agregarlas requiere definir eventos y destinatarios con el cliente.
+
 Contrato completo: `docs/flujo-orden-compra-y-maquila-3q.md`.
 
 ## Produccion

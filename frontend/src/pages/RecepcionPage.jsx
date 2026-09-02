@@ -10,7 +10,12 @@ import {
   listPurchaseOrders,
 } from '../api/purchaseOrders.api'
 import { listSuppliers } from '../api/suppliers.api'
-import { confirmReception, prepareReceptionFromPurchaseOrder } from '../api/reception.api'
+import {
+  confirmReception,
+  prepareReceptionFromOutsourcing,
+  prepareReceptionFromPurchaseOrder,
+} from '../api/reception.api'
+import { listOutsourcingOrders } from '../api/outsourcing.api'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 
@@ -48,6 +53,7 @@ export default function RecepcionPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false)
   const [locations, setLocations] = useState([])
   const [suppliers, setSuppliers] = useState([])
+  const [outsourcingOrders, setOutsourcingOrders] = useState([])
   const { loading, list, fetchList } = useReceptionStore()
   const user = useAuthStore((state) => state.user)
   const capabilities = user?.capabilities || []
@@ -79,6 +85,9 @@ export default function RecepcionPage() {
     if (tab === 'confirm') {
       fetchList({ limit: 200 })
       listUbicaciones().then((payload) => setLocations(payload?.data?.rows || [])).catch(() => setLocations([]))
+      listOutsourcingOrders({ limit: 200 })
+        .then((payload) => setOutsourcingOrders(payload?.data?.rows || []))
+        .catch(() => setOutsourcingOrders([]))
     }
     if (tab === 'history') fetchList({ limit: 100 })
   }, [tab])
@@ -155,6 +164,7 @@ export default function RecepcionPage() {
       {tab === 'confirm' && (
         <ConfirmReceptionPanel
           purchaseOrders={purchaseOrders}
+          outsourcingOrders={outsourcingOrders}
           locations={locations}
           loading={loading || purchaseLoading}
           onPrepare={async (purchaseOrderId) => {
@@ -168,11 +178,26 @@ export default function RecepcionPage() {
               return { ok: false, message }
             }
           }}
+          onPrepareOutsourcing={async (outsourcingOrderId, deliveryQuantity) => {
+            try {
+              const payload = await prepareReceptionFromOutsourcing(outsourcingOrderId, deliveryQuantity)
+              await fetchList({ limit: 200 })
+              return { ok: true, data: payload?.data }
+            } catch (error) {
+              const message = error.response?.data?.error || 'Error al preparar la recepcion desde 3Q'
+              showToast(message, false)
+              return { ok: false, message }
+            }
+          }}
           onConfirm={async (body) => {
             try {
               const payload = await confirmReception(body)
               showToast(`Recepcion ${payload?.data?.numero || ''} confirmada`, true)
-              await fetchList({ limit: 200 })
+              const [outsourcingPayload] = await Promise.all([
+                listOutsourcingOrders({ limit: 200 }),
+                fetchList({ limit: 200 }),
+              ])
+              setOutsourcingOrders(outsourcingPayload?.data?.rows || [])
               return { ok: true }
             } catch (error) {
               const message = error.response?.data?.error || 'Error al confirmar la recepcion'
@@ -188,18 +213,24 @@ export default function RecepcionPage() {
   )
 }
 
-function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, onConfirm }) {
+function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, loading, onPrepare, onPrepareOutsourcing, onConfirm }) {
+  const [source, setSource] = useState('purchase')
   const [receptionId, setReceptionId] = useState('')
   const [purchaseOrderId, setPurchaseOrderId] = useState('')
+  const [outsourcingOrderId, setOutsourcingOrderId] = useState('')
+  const [deliveryQuantity, setDeliveryQuantity] = useState('')
   const [receptionNumber, setReceptionNumber] = useState('')
   const [items, setItems] = useState([])
 
   const prepare = async () => {
-    const result = await onPrepare(Number(purchaseOrderId))
+    const result = source === 'outsourcing'
+      ? await onPrepareOutsourcing(Number(outsourcingOrderId), Number(deliveryQuantity))
+      : await onPrepare(Number(purchaseOrderId))
     if (!result.ok) return
     const reception = result.data
     setReceptionId(String(reception.id))
     setReceptionNumber(reception.numero)
+    setPurchaseOrderId(String(reception.orden_compra_id || purchaseOrderId))
     setItems((reception.items || []).map((item) => ({
       item_id: item.item_id,
       reception_item_id: item.item_id,
@@ -207,6 +238,7 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
       producto: item.producto,
       expected: Number(item.cantidad_pendiente || 0),
       unit: item.unidad || 'und',
+      outsourcingOrderId: item.orden_maquila_id || reception.orden_maquila_id || null,
       requiresLot: Boolean(item.requiere_lote),
       suggestedLocation: item.ubicacion_sugerida || '',
       reason: '',
@@ -234,6 +266,7 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
         item_id: item.reception_item_id,
         qty_received: item.distributions.reduce((sum, distribution) => sum + Number(distribution.cantidad || 0), 0),
         motivo: item.reason || undefined,
+        orden_maquila_id: item.outsourcingOrderId || undefined,
         distributions: item.distributions.map((distribution) => ({
           ...distribution,
           cantidad: Number(distribution.cantidad),
@@ -247,6 +280,8 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
     if (result.ok) {
       setReceptionId('')
       setPurchaseOrderId('')
+      setOutsourcingOrderId('')
+      setDeliveryQuantity('')
       setReceptionNumber('')
       setItems([])
     }
@@ -254,8 +289,19 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      <div className="grid md:grid-cols-[minmax(0,1fr)_auto] gap-3 max-w-4xl items-end">
-        <Field label="Orden de compra *">
+      <div className="inline-flex border border-border p-1" aria-label="Origen de la recepcion">
+        <button type="button" onClick={() => {
+          setSource('purchase')
+          setOutsourcingOrderId('')
+          setDeliveryQuantity('')
+        }} disabled={Boolean(receptionId)} className={`px-3 py-2 text-sm ${source === 'purchase' ? 'bg-primary text-white' : 'text-muted hover:text-foreground'}`}>Compra directa</button>
+        <button type="button" onClick={() => {
+          setSource('outsourcing')
+          setPurchaseOrderId('')
+        }} disabled={Boolean(receptionId)} className={`px-3 py-2 text-sm ${source === 'outsourcing' ? 'bg-primary text-white' : 'text-muted hover:text-foreground'}`}>Producto desde 3Q</button>
+      </div>
+      <div className={`grid gap-3 max-w-4xl items-end ${source === 'outsourcing' ? 'md:grid-cols-[minmax(0,1fr)_170px_auto]' : 'md:grid-cols-[minmax(0,1fr)_auto]'}`}>
+        {source === 'purchase' ? <Field label="Orden de compra *">
           <select value={purchaseOrderId} onChange={(event) => {
             setPurchaseOrderId(event.target.value)
             setReceptionId('')
@@ -265,8 +311,28 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
             <option value="">Selecciona la OC</option>
             {purchaseOrders.filter((order) => ['CARGADA', 'RECIBIDA', 'RECIBIDA_PARCIAL'].includes(order.estado)).map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}
           </select>
-        </Field>
-        <button type="button" onClick={prepare} disabled={!purchaseOrderId || loading || Boolean(receptionId)} className="btn-primary h-10 disabled:opacity-40">
+        </Field> : <>
+          <Field label="Orden de maquila 3Q *">
+            <select value={outsourcingOrderId} onChange={(event) => {
+              const id = event.target.value
+              const order = outsourcingOrders.find((item) => String(item.id) === id)
+              setOutsourcingOrderId(id)
+              setDeliveryQuantity(order ? String(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida)) : '')
+              setReceptionId('')
+              setReceptionNumber('')
+              setItems([])
+            }} className="input-field" required disabled={Boolean(receptionId)}>
+              <option value="">Selecciona la orden 3Q</option>
+              {outsourcingOrders.filter((order) => ['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)).map((order) => (
+                <option key={order.id} value={order.id}>{order.codigo} - {order.sku} - saldo {formatQuantity(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida))}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Cantidad de esta entrega *">
+            <input type="number" min="0.0001" step="any" value={deliveryQuantity} onChange={(event) => setDeliveryQuantity(event.target.value)} className="input-field" required disabled={Boolean(receptionId)} />
+          </Field>
+        </>}
+        <button type="button" onClick={prepare} disabled={(source === 'purchase' ? !purchaseOrderId : !outsourcingOrderId || !Number(deliveryQuantity)) || loading || Boolean(receptionId)} className="btn-primary h-10 disabled:opacity-40">
           {loading ? 'Preparando...' : 'Iniciar recepcion fisica'}
         </button>
       </div>
@@ -275,7 +341,7 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
         <section key={item.item_id} className="border-y border-border py-4 space-y-3">
           <div>
             <p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p>
-            <p className="text-xs text-muted">Pendiente de la OC: {formatQuantity(item.expected)} {item.unit}</p>
+            <p className="text-xs text-muted">{item.outsourcingOrderId ? 'Cantidad de esta entrega 3Q' : 'Pendiente de la OC'}: {formatQuantity(item.expected)} {item.unit}</p>
             {item.suggestedLocation && <p className="text-xs text-primary">Ubicacion sugerida: {item.suggestedLocation}. Puedes cambiarla si la operacion lo requiere.</p>}
             <p className="text-xs text-muted">{item.requiresLot ? 'Registra el lote informado por el proveedor.' : 'El lote del proveedor es opcional; si no existe, el WMS crea una partida interna.'}</p>
           </div>
@@ -309,8 +375,10 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
             setReceptionId('')
             setReceptionNumber('')
             setPurchaseOrderId('')
+            setOutsourcingOrderId('')
+            setDeliveryQuantity('')
             setItems([])
-          }} disabled={loading} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground disabled:opacity-40">Cambiar OC</button>
+          }} disabled={loading} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground disabled:opacity-40">Cambiar origen</button>
         </div>
       )}
       {!receptionId && !loading && <div className="py-10 text-center text-sm text-muted">Selecciona una orden abierta para registrar lo que llego fisicamente.</div>}
