@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Paquetes documentales completos para ensayo y presentacion
+
+- Se generaron dos paquetes independientes de cuatro PDF: OC de insumos, OC in-and-out, OC de producto esperado desde 3Q y salida de materiales hacia 3Q.
+- Las seis OC documentales no estan precargadas en la base; permiten demostrar el recorrido WhatsApp -> borrador -> revision dashboard -> OC operativa.
+- La salida 3Q contiene los cuatro componentes `ENVIO` de Booster 60 y crea solamente un borrador documental. La remision WMS conserva la seleccion FEFO y la segunda confirmacion humana.
+- `prepare-repeatable-demo.js --pdf-only` permite regenerar una OC o el paquete completo sin escribir en base. `create-demo-3q-exit-pdf.js` genera la salida 3Q sin tocar inventario.
+- Los ocho PDF A4 fueron renderizados y revisados visualmente. Las pruebas enfocadas de documentos y maquila aprobaron `25/25`.
+
 ### 2026-09-02 - Demo repetible sin revertir trazabilidad
 
 - El ensayo y la presentacion usan juegos separados de OC, PDF, lotes y facturas sinteticas.

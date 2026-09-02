@@ -45,6 +45,17 @@ No se borran ni revierten movimientos para repetir la demo. Hay dos juegos docum
 
 Durante el ensayo se usan exclusivamente ID `4`, `6` y `7`. Los ID `8`, `9` y `10` quedan intactos para la presentacion.
 
+Los ID anteriores son contingencias precargadas. El camino principal para mostrar la carga desde el documento usa dos paquetes PDF que no existen previamente en la base:
+
+| Documento | Ensayo final | Presentacion |
+|---|---|---|
+| OC de insumos | `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-OC-INSUMOS.pdf` | `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-INSUMOS.pdf` |
+| OC in-and-out | `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-OC-IO.pdf` | `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-IO.pdf` |
+| OC de producto esperado 3Q | `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-OC-3Q.pdf` | `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-3Q.pdf` |
+| Salida de materiales hacia 3Q | `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-SALIDA-3Q.pdf` | `output/pdf/demo-presentacion/DEMO-PRESENTACION-SALIDA-3Q.pdf` |
+
+Las tres OC se envian al flujo documental y luego se revisan en el dashboard. La salida 3Q se lee como borrador documental; la remision operativa del WMS sigue asignando lotes FEFO y exigiendo confirmacion. Ninguno de estos PDF crea inventario por si solo.
+
 Valores que cambian en la corrida del cliente:
 
 | Dato | Ensayo | Cliente |
@@ -178,9 +189,9 @@ La tarea debe reservar 1 und por FEFO, idealmente del lote producido en vivo. Jo
 
 Camino principal: mostrar la carga documental completa. La OC ID 6 queda como respaldo y no se usa mientras funcione este recorrido.
 
-1. En el ensayo, enviar por WhatsApp `output/pdf/demo-ensayo-io2/DEMO-ENSAYO-IO2-OC-IO.pdf` con el texto: `Carga esta orden de compra de producto in-and-out para recepcion.`
-2. Verificar que el agente cree el borrador `DEMO-ENSAYO-IO2-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
-3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-ENSAYO-IO2-IO-ZENOVA-001` y vencimiento `2027-11-30`.
+1. En el ensayo, enviar por WhatsApp `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-OC-IO.pdf` con el texto: `Carga esta orden de compra de producto in-and-out para recepcion.`
+2. Verificar que el agente cree el borrador `DEMO-ENSAYO-FINAL-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
+3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` y vencimiento `2027-11-30`.
 4. Pulsar `Confirmar y crear OC` y anotar el ID corto asignado: `<ID_IO>`.
 5. Datana consulta recepciones y dice: `Prepara la recepcion ID <ID_IO>`.
 6. Reportar: `Para la recepcion ID <ID_IO> llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
@@ -189,10 +200,13 @@ Camino principal: mostrar la carga documental completa. La OC ID 6 queda como re
 9. Repetir y comprobar idempotencia.
 10. Mostrar ingreso e historico. No debe aparecer BOM, consumo de MP ni OP.
 
-Antes de la presentacion puede generarse otro PDF sin precargar la OC ni modificar la base:
+Los dos paquetes completos pueden regenerarse sin precargar OC ni modificar la base:
 
 ```powershell
-node scripts\qa\prepare-repeatable-demo.js --run=PRESENTACION-IO --date=2026-09-03 --io-expiry=2027-11-29 --pdf-only --only=io
+node scripts\qa\prepare-repeatable-demo.js --run=ENSAYO-FINAL --date=2026-09-02 --io-expiry=2027-11-30 --pdf-only --only=all
+node scripts\qa\create-demo-3q-exit-pdf.js --run=ENSAYO-FINAL --date=2026-09-02
+node scripts\qa\prepare-repeatable-demo.js --run=PRESENTACION --date=2026-09-03 --io-expiry=2027-11-29 --pdf-only --only=all
+node scripts\qa\create-demo-3q-exit-pdf.js --run=PRESENTACION --date=2026-09-03
 ```
 
 La OC precargada ID 6 y la OC reservada ID 9 se conservan como contingencia si el servicio de lectura documental no responde.

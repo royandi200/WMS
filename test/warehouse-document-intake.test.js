@@ -9,6 +9,7 @@ const {
   registerWarehouseDocumentDraft,
 } = require('../api/_lib/warehouse-document-intake');
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
+const { buildWarehouseExitPdf } = require('../scripts/qa/demo-pdf');
 
 function validInput(overrides = {}) {
   return {
@@ -25,6 +26,19 @@ function validInput(overrides = {}) {
     ...overrides,
   };
 }
+
+test('demo 3Q warehouse exit PDF is stable and exposes the operational reference', () => {
+  const input = {
+    number: 'DEMO-PRESENTACION-SALIDA-3Q', recipient: '3Q', date: '2026-09-03',
+    sender: 'SOFI', totalPackages: 1,
+    items: [{ sku: '00006-TRP', description: 'TARRO CUADRADO x 60', quantity: 4, unit: 'und' }],
+  };
+  const first = buildWarehouseExitPdf(input);
+  const retry = buildWarehouseExitPdf(input);
+  assert.deepEqual(first, retry);
+  assert.match(first.toString('ascii'), /^%PDF-1\.4/u);
+  assert.match(first.toString('ascii'), /DEMO-PRESENTACION-SALIDA-3Q/u);
+});
 
 test('document intake normalizes an exact, complete 3Q warehouse exit', () => {
   const input = normalizeWarehouseDocumentInput(validInput());

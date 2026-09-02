@@ -1,0 +1,80 @@
+%PDF-1.4
+%WMS-DEMO
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1912 >>
+stream
+0.10 0.13 0.17 rg 0 0 595 842 re f
+1 1 1 rg 36 42 523 758 re f
+0.98 0.45 0.09 rg 36 770 523 30 re f
+1 1 1 rg
+BT /F2 16 Tf 54 780 Td (SALIDA DE BODEGA HACIA 3Q) Tj ET
+0.10 0.13 0.17 rg
+BT /F2 10 Tf 54 742 Td (DOCUMENTO DE DEMOSTRACION - SIN VALIDEZ COMERCIAL) Tj ET
+BT /F2 9 Tf 54 714 Td (Numero de salida: DEMO-ENSAYO-FINAL-SALIDA-3Q) Tj ET
+BT /F1 9 Tf 54 698 Td (Destinatario: 3Q - MAQUILA EXTERNA) Tj ET
+BT /F1 9 Tf 54 682 Td (Fecha: 2026-09-02) Tj ET
+BT /F1 9 Tf 54 666 Td (Entrega: SOFI - ADMINISTRADORA) Tj ET
+BT /F1 9 Tf 54 650 Td (Bultos: 1 | Total unidades: 16) Tj ET
+0.10 0.13 0.17 rg 54 610 487 24 re f
+1 1 1 rg
+BT /F2 8 Tf 62 618 Td (SKU) Tj ET
+BT /F2 8 Tf 170 618 Td (MATERIAL) Tj ET
+BT /F2 8 Tf 454 618 Td (CANT.) Tj ET
+BT /F2 8 Tf 505 618 Td (UND.) Tj ET
+0.95 0.96 0.97 rg 54 580 487 24 re f
+0.10 0.13 0.17 rg
+BT /F2 8 Tf 62 588 Td (00001-TPBI) Tj ET
+BT /F1 8 Tf 170 588 Td (TAPA TARRO CUADRADO BLANCO \(60 UNID\)) Tj ET
+BT /F1 8 Tf 454 588 Td (4) Tj ET
+BT /F1 8 Tf 505 588 Td (und) Tj ET
+0.10 0.13 0.17 rg
+BT /F2 8 Tf 62 560 Td (00006-TRP) Tj ET
+BT /F1 8 Tf 170 560 Td (TARRO CUADRADO x 60) Tj ET
+BT /F1 8 Tf 454 560 Td (4) Tj ET
+BT /F1 8 Tf 505 560 Td (und) Tj ET
+0.95 0.96 0.97 rg 54 524 487 24 re f
+0.10 0.13 0.17 rg
+BT /F2 8 Tf 62 532 Td (00018-ETBOS60) Tj ET
+BT /F1 8 Tf 170 532 Td (ETIQUETA BOOSTER x 60) Tj ET
+BT /F1 8 Tf 454 532 Td (4) Tj ET
+BT /F1 8 Tf 505 532 Td (und) Tj ET
+0.10 0.13 0.17 rg
+BT /F2 8 Tf 62 504 Td (00035-LNTP60) Tj ET
+BT /F1 8 Tf 170 504 Td (LINER TARRO x 60) Tj ET
+BT /F1 8 Tf 454 504 Td (4) Tj ET
+BT /F1 8 Tf 505 504 Td (und) Tj ET
+0.40 0.47 0.55 rg
+BT /F1 8 Tf 54 108 Td (Este documento se lee como borrador y no descuenta inventario por si solo.) Tj ET
+BT /F1 8 Tf 54 92 Td (La remision operativa WMS asigna lotes FEFO y requiere confirmacion humana.) Tj ET
+BT /F1 8 Tf 54 76 Td (3Q se registra como custodia externa, no como una bodega o ubicacion del WMS.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000019 00000 n 
+0000000068 00000 n 
+0000000125 00000 n 
+0000000261 00000 n 
+0000002224 00000 n 
+0000002294 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2369
+%%EOF

@@ -1,0 +1,64 @@
+%PDF-1.4
+%WMS-DEMO
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1329 >>
+stream
+0.10 0.13 0.17 rg 0 0 595 842 re f
+1 1 1 rg 36 42 523 758 re f
+0.98 0.45 0.09 rg 36 770 523 30 re f
+1 1 1 rg
+BT /F2 16 Tf 54 780 Td (ORDEN DE COMPRA - PRODUCTO IN-AND-OUT) Tj ET
+0.10 0.13 0.17 rg
+BT /F2 10 Tf 54 742 Td (DOCUMENTO DE DEMOSTRACION - SIN VALIDEZ COMERCIAL) Tj ET
+BT /F2 9 Tf 54 714 Td (Numero de OC: DEMO-PRESENTACION-OC-IO) Tj ET
+BT /F1 9 Tf 54 698 Td (Proveedor: WMSQA260721 Proveedor) Tj ET
+BT /F1 9 Tf 54 682 Td (Fecha: 2026-09-03) Tj ET
+BT /F1 9 Tf 54 666 Td (Flujo: Recepcion directa de producto terminado sin orden de produccion) Tj ET
+0.10 0.13 0.17 rg 54 626 487 24 re f
+1 1 1 rg
+BT /F2 8 Tf 62 634 Td (SKU) Tj ET
+BT /F2 8 Tf 170 634 Td (PRODUCTO) Tj ET
+BT /F2 8 Tf 454 634 Td (CANT.) Tj ET
+BT /F2 8 Tf 505 634 Td (UND.) Tj ET
+0.95 0.96 0.97 rg 54 582 487 38 re f
+0.10 0.13 0.17 rg
+BT /F2 8 Tf 62 604 Td (00276-PTZNASHWA) Tj ET
+BT /F1 8 Tf 170 604 Td (PRODUCTO TERMINADO ZENOVA ASHWAGANDHA) Tj ET
+BT /F1 8 Tf 454 604 Td (5) Tj ET
+BT /F1 8 Tf 505 604 Td (und) Tj ET
+0.40 0.47 0.55 rg
+BT /F1 7 Tf 170 590 Td (Lote propuesto: DEMO-PRESENTACION-IO-ZENOVA-001 | Vence: 2027-11-29) Tj ET
+0.40 0.47 0.55 rg
+BT /F1 8 Tf 54 92 Td (La recepcion fisica y las diferencias se confirman posteriormente en el WMS.) Tj ET
+BT /F1 8 Tf 54 76 Td (Este PDF solo representa la expectativa documental de la demostracion.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000019 00000 n 
+0000000068 00000 n 
+0000000125 00000 n 
+0000000261 00000 n 
+0000001641 00000 n 
+0000001711 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1786
+%%EOF
