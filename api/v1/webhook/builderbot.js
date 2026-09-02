@@ -1750,12 +1750,16 @@ module.exports = async (req, res) => {
       // ── 4. REPORTE_MERMA ──────────────────────────────────────
       case 'REPORTE_MERMA': {
         const inferred = parseWasteReferences(rawText);
-        const result = await reportWaste({ ...inferred, ...params }, user.id);
+        const result = await reportWaste(
+          { ...inferred, ...params },
+          user.id,
+          { allowGeneratedReference: true }
+        );
         mensaje = result.already_completed
           ? `La merma ${result.numero} ya estaba registrada. No se modifico inventario.`
           : [
               `Merma ${result.numero} registrada.`,
-              `Referencia: ${result.referencia_externa}`,
+              `${result.generated_reference ? 'Referencia generada por WMS' : 'Referencia'}: ${result.referencia_externa}`,
               `Producto: ${result.sku}`,
               `Cantidad: ${result.cantidad}`,
               `Motivo: ${result.motivo}`,

@@ -1,6 +1,6 @@
 # Estado y bitácora del proyecto WMS
 
-Última actualización: 2026-09-01
+Última actualización: 2026-09-02
 
 ## Propósito
 
@@ -14,6 +14,14 @@ No reemplaza:
 - `docs/validacion-flujos-bodega-2026-08-04.md`, que documenta los smokes integrados.
 
 ## Resumen actual
+
+### 2026-09-02 - Referencias automaticas para mermas por WhatsApp
+
+- El operario ya no debe inventar una referencia para reportar una merma de proceso o bodega desde WhatsApp.
+- BuilderBot envia producto, cantidad, motivo y contexto de orden o lote; el WMS genera una referencia `AUTO-MER-...` con fecha operativa de Bogota.
+- Reintentos operativamente identicos se serializan y deduplican durante una ventana corta antes de cualquier descuento de inventario.
+- Las referencias aportadas desde formatos o documentos reales siguen siendo aceptadas y conservadas exactamente.
+- El endpoint del dashboard mantiene obligatoria la referencia externa para no debilitar integraciones existentes.
 
 ### 2026-09-01 - Destino explicito al liberar produccion
 

@@ -8,7 +8,7 @@ function httpError(status, message) {
   return error;
 }
 
-function normalizeWasteInput(input = {}) {
+function normalizeWasteInput(input = {}, { allowGeneratedReference = false } = {}) {
   const quantity = Number(input.cantidad ?? input.qty);
   const order = String(input.id_orden ?? input.production_order_id ?? '').trim();
   const lot = String(input.id_lote ?? input.lot_id ?? input.lote ?? '').trim();
@@ -26,7 +26,9 @@ function normalizeWasteInput(input = {}) {
     requestedType: String(input.tipo ?? input.type ?? '').trim().toUpperCase(),
   };
 
-  if (!data.externalReference) throw httpError(400, 'Referencia de merma es obligatoria');
+  if (!data.externalReference && !allowGeneratedReference) {
+    throw httpError(400, 'Referencia de merma es obligatoria');
+  }
   if (!data.sku) throw httpError(400, 'Producto de la merma es obligatorio');
   if (!Number.isFinite(quantity) || quantity <= 0) throw httpError(400, 'Cantidad de merma invalida');
   if (quantity > 999999999) throw httpError(400, 'Cantidad de merma fuera de rango');
@@ -47,6 +49,34 @@ function normalizeWasteInput(input = {}) {
     if (value.length > max) throw httpError(400, `${label} supera ${max} caracteres`);
   }
   return data;
+}
+
+function bogotaDateStamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}${value.month}${value.day}`;
+}
+
+function generateWasteReference(date = new Date()) {
+  return `AUTO-MER-${bogotaDateStamp(date)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
+function buildWasteDedupeKey({ userId, productId, orderId, lot, locationId, quantity, reason }) {
+  const canonical = JSON.stringify({
+    userId: Number(userId),
+    productId: Number(productId),
+    orderId: orderId == null ? null : Number(orderId),
+    lot: lot || null,
+    locationId: locationId == null ? null : Number(locationId),
+    quantity: Number(quantity),
+    reason: String(reason || '').trim().toLowerCase(),
+  });
+  return `wms_waste_${crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 48)}`;
 }
 
 function parseWasteReferences(text) {
@@ -79,13 +109,43 @@ async function findExisting(conn, externalReference) {
   return rows[0] || null;
 }
 
-async function reportWaste(input, userId) {
-  const data = normalizeWasteInput(input);
+async function findRecentGenerated(conn, data, userId, productId, orderId, locationId) {
+  const [rows] = await conn.execute(
+    `SELECT m.id, m.numero, m.tipo, m.producto_id, m.orden_produccion_id,
+            m.cantidad, m.motivo, m.lote,
+            m.referencia_externa, p.siigo_code AS sku,
+            op.codigo_orden, u.codigo AS ubicacion
+     FROM mermas m
+     JOIN productos p ON p.id = m.producto_id
+     LEFT JOIN ordenes_produccion op ON op.id = m.orden_produccion_id
+     LEFT JOIN ubicaciones u ON u.id = m.ubicacion_id
+     WHERE m.referencia_externa LIKE 'AUTO-MER-%'
+       AND m.usuario_id = ?
+       AND m.producto_id = ?
+       AND m.orden_produccion_id <=> ?
+       AND m.lote <=> ?
+       AND m.ubicacion_id <=> ?
+       AND ABS(m.cantidad - ?) < 0.000001
+       AND m.motivo = ?
+       AND m.creado_en >= DATE_SUB(NOW(), INTERVAL 2 MINUTE)
+     ORDER BY m.creado_en DESC, m.id DESC
+     LIMIT 1 FOR UPDATE`,
+    [userId, productId, orderId, data.lot || null, locationId,
+     data.quantity, data.reason]
+  );
+  return rows[0] || null;
+}
+
+async function reportWaste(input, userId, { allowGeneratedReference = false } = {}) {
+  const data = normalizeWasteInput(input, { allowGeneratedReference });
   const conn = await createConnection();
+  let dedupeLock = null;
   try {
     await conn.beginTransaction();
     const product = await resolveProductReference(conn, data.sku);
-    const existing = await findExisting(conn, data.externalReference);
+    const existing = data.externalReference
+      ? await findExisting(conn, data.externalReference)
+      : null;
     if (existing) {
       const sameProduct = Number(existing.producto_id) === Number(product.id);
       const sameContext = data.order
@@ -151,6 +211,39 @@ async function reportWaste(input, userId) {
       if (!stocks.length) throw httpError(409, 'Lote y ubicacion no coinciden en el inventario disponible');
       if (stocks.length > 1) throw httpError(409, 'Hay mas de un saldo para el lote y ubicacion; requiere conciliacion');
       stockRow = stocks[0];
+    }
+
+    if (!data.externalReference) {
+      dedupeLock = buildWasteDedupeKey({
+        userId,
+        productId: product.id,
+        orderId: order?.id,
+        lot: data.lot,
+        locationId: stockRow?.ubicacion_id,
+        quantity: data.quantity,
+        reason: data.reason,
+      });
+      const [lockRows] = await conn.execute('SELECT GET_LOCK(?, 5) AS acquired', [dedupeLock]);
+      if (Number(lockRows[0]?.acquired) !== 1) {
+        throw httpError(409, 'No fue posible confirmar la merma; intenta nuevamente');
+      }
+
+      const recent = await findRecentGenerated(
+        conn,
+        data,
+        userId,
+        product.id,
+        order?.id || null,
+        stockRow?.ubicacion_id || null
+      );
+      if (recent) {
+        await conn.commit();
+        return { ...recent, already_completed: true, generated_reference: true };
+      }
+      data.externalReference = generateWasteReference();
+    }
+
+    if (stockRow) {
       const available = Number(stockRow.cantidad) - Number(stockRow.reservada);
       if (data.quantity > available + 0.000001) {
         throw httpError(409, `Stock disponible insuficiente: ${available}`);
@@ -234,6 +327,10 @@ async function reportWaste(input, userId) {
       ubicacion: stockRow?.codigo || null,
       balance_disponible: balance,
       already_completed: false,
+      generated_reference: allowGeneratedReference && !String(
+        input.external_reference ?? input.referencia_merma ?? input.referencia_externa
+          ?? input.reference ?? input.referencia ?? ''
+      ).trim(),
     };
   } catch (error) {
     await conn.rollback().catch(() => {});
@@ -242,8 +339,17 @@ async function reportWaste(input, userId) {
     }
     throw error;
   } finally {
+    if (dedupeLock) {
+      await conn.execute('SELECT RELEASE_LOCK(?) AS released', [dedupeLock]).catch(() => {});
+    }
     await conn.end().catch(() => {});
   }
 }
 
-module.exports = { normalizeWasteInput, parseWasteReferences, reportWaste };
+module.exports = {
+  normalizeWasteInput,
+  parseWasteReferences,
+  reportWaste,
+  buildWasteDedupeKey,
+  generateWasteReference,
+};

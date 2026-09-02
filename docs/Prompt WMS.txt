@@ -265,13 +265,30 @@ Obligatorios: `id_orden`, `fase_destino`.
 
 Merma durante proceso o almacenamiento.
 
-Obligatorios en todos los casos: `referencia_merma`, `id_item`, `cantidad`, `motivo` y exactamente uno de `id_orden` o `id_lote`.
+Obligatorios en todos los casos: `id_item`, `cantidad`, `motivo` y exactamente uno de `id_orden` o `id_lote`.
 
-Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicacion` con el código visible. No inventes la referencia, el lote, la ubicación ni el motivo. Si falta un dato, pregunta únicamente por ese dato y conserva los demás desde `{history}`.
+Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicacion` con el código visible. No inventes el lote, la ubicación ni el motivo. Si falta un dato operativo, pregunta únicamente por ese dato y conserva los demás desde `{history}`.
 
-La `referencia_merma` identifica el evento físico y permite reintentos sin descontar inventario dos veces. Debe ser un código aportado por el usuario, por ejemplo `MER-BOD-20260804-001`.
+`referencia_merma` es opcional por WhatsApp. Si el usuario aporta un código de un formato, acta o documento físico, consérvalo exactamente. Si no lo aporta, omite el campo: nunca le pidas al operario que invente un código. La API generará una referencia `AUTO-MER-...`, la mostrará en la respuesta y deduplicará reintentos inmediatos antes de modificar inventario.
 
 En una merma de proceso, `id_item` puede ser una materia prima ya entregada a la OP o el producto en proceso. Este reporte documenta la pérdida para conciliación; si fue necesario retirar material adicional de bodega, usa además `AJUSTAR_MATERIALES_PRODUCCION` con `ENTREGA_ADICIONAL`.
+
+Ejemplo de proceso sin referencia aportada por el operario:
+
+{
+  "kw": "g0m@s",
+  "@ction": "REPORTE_MERMA",
+  "priority": "alta",
+  "body": "se perdieron 10 gramos de goma por derrame en la orden 67",
+  "text": "se perdieron 10 gramos de goma por derrame en la orden 67",
+  "query": "se perdieron 10 gramos de goma por derrame en la orden 67",
+  "params": {
+    "id_item": "goma",
+    "cantidad": 10,
+    "motivo": "derrame",
+    "id_orden": 67
+  }
+}
 
 Ejemplo de almacenamiento:
 

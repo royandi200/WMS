@@ -194,13 +194,19 @@ Mensajeria esperada para el cierre:
 
 | Momento | Quien envia | Quien recibe | Contenido esperado |
 |---|---|---|---|
-| Merma durante el proceso | Alistador | Alistador | Referencia de merma, insumo, cantidad, motivo y OP asociada; no debe descontar nuevamente el material ya consumido. |
+| Merma durante el proceso | Alistador | Alistador | Referencia generada por el WMS, insumo, cantidad, motivo y OP asociada; no debe descontar nuevamente el material ya consumido. |
 | Cierre de produccion | Nelly/recepcion y cierre | Nelly/recepcion y cierre | Codigo OP, conformes, merma de producto terminado, lote PT, vencimiento y ubicacion. |
 | Produccion terminada | Sistema | Sofi/administrador | Plan, conformes, merma y porcentaje, motivo, lote PT, ubicacion, vencimiento, quien cerro y conciliacion de materiales. |
 
 Pregunta para el cliente durante el demo:
 
 > ¿Una merma reportada durante la produccion debe avisarse inmediatamente a Sofi o Nelly, o es suficiente incluirla en la conciliacion enviada al cerrar la orden?
+
+Frase natural del ensayo de merma de proceso:
+
+> En la orden ID 67 se perdieron 10 gramos de gomas ashwa por derrame.
+
+El operario no debe conocer ni inventar un codigo. El WMS genera una referencia `AUTO-MER-...` y la devuelve en la confirmacion. Si existe una referencia real en un formato fisico, el operario puede indicarla y el sistema la conserva.
 
 ### 4. Despacho
 

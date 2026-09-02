@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizeWasteInput, parseWasteReferences } = require('../api/_lib/waste-workflow');
+const {
+  normalizeWasteInput,
+  parseWasteReferences,
+  buildWasteDedupeKey,
+  generateWasteReference,
+} = require('../api/_lib/waste-workflow');
 
 test('normalizes a location-specific warehouse waste report', () => {
   const result = normalizeWasteInput({
@@ -47,6 +52,39 @@ test('requires reason, reference and location for warehouse waste', () => {
   assert.throws(() => normalizeWasteInput({ ...base, referencia_merma: 'MER-QA-003', motivo: 'QA' }), /Ubicacion/);
 });
 
+test('allows BuilderBot to omit a field-generated waste reference', () => {
+  const result = normalizeWasteInput({
+    id_item: '00051-MPASH',
+    cantidad: 10,
+    motivo: 'derrame',
+    id_orden: 67,
+  }, { allowGeneratedReference: true });
+  assert.equal(result.externalReference, '');
+  assert.equal(result.order, '67');
+});
+
+test('generated waste references use the Bogota business date', () => {
+  const reference = generateWasteReference(new Date('2026-09-02T03:30:00.000Z'));
+  assert.match(reference, /^AUTO-MER-20260901-[A-F0-9]{8}$/u);
+});
+
+test('waste retry lock is deterministic for the same operational event', () => {
+  const event = {
+    userId: 18,
+    productId: 51,
+    orderId: 67,
+    lot: null,
+    locationId: null,
+    quantity: 10,
+    reason: 'Derrame',
+  };
+  const first = buildWasteDedupeKey(event);
+  const retry = buildWasteDedupeKey({ ...event, reason: ' derrame ' });
+  assert.equal(first, retry);
+  assert.notEqual(first, buildWasteDedupeKey({ ...event, quantity: 11 }));
+  assert.match(first, /^wms_waste_[a-f0-9]{48}$/u);
+});
+
 test('extracts immutable references from the original user message', () => {
   const parsed = parseWasteReferences(
     'reporta merma del lote LOT-QA-1 ubicacion PPAL-A-1-01 referencia MER-QA-004'
@@ -65,5 +103,6 @@ test('dashboard and BuilderBot use the shared transactional waste workflow', () 
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
   assert.match(dashboard, /reportWaste\(req\.body \|\| \{\}, user\.id\)/u);
   assert.match(webhook, /parseWasteReferences\(rawText\)/u);
-  assert.match(webhook, /reportWaste\(\{ \.\.\.inferred, \.\.\.params \}, user\.id\)/u);
+  assert.match(webhook, /allowGeneratedReference: true/u);
+  assert.match(webhook, /Referencia generada por WMS/u);
 });
