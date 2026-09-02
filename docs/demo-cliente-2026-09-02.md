@@ -291,7 +291,7 @@ Se revisaron codigo, pruebas locales y MySQL en modo de auditoria `standard`, si
 | Produccion interna | Bloqueada para modalidad `IO`; el producto no tiene filas de BOM. |
 | Ubicacion preferida | `B13` en `BG-PPAL`. Es una sugerencia operativa, no una ubicacion exclusiva. |
 | Stock existente | 24 und en `DEMO-MAPA-B13-00276-PTZNASHWA`, vencimiento `2027-12-31`, creadas por ajuste del mapa. No usar este lote como evidencia de recepcion desde un documento de proveedor. |
-| Documento de entrada, recepcion y despacho IO | No existe actualmente ningun registro de esos tres tipos para este SKU. El recorrido punta a punta sigue pendiente de ensayo. |
+| Documento de entrada, recepcion y despacho IO | PDF demo y OC provisional `DEMO-20260902-DOC-IO-001` verificados en base de datos con 5 und. La preparacion por WhatsApp creo el borrador `REC-OC-6-001` en estado `borrador`, sin lote, ubicacion ni cantidad recibida todavia. La confirmacion fisica y el despacho siguen pendientes. |
 | Roles actuales | Juan conserva `admin`; Datana esta en `recepcion_cierre`. No se modificaron roles durante el preflight. |
 | Pruebas locales enfocadas | 37 de 37 aprobadas: modalidad, recepcion desde OC, confirmacion por WhatsApp, ubicaciones, despacho e idempotencia de referencias. No equivalen a un ensayo vivo del SKU IO. |
 
@@ -309,10 +309,10 @@ Diseño recomendado para evitar dos flujos duplicados: crear un unico concepto d
 
 ### Preparacion tecnica obligatoria antes de la reunion
 
-Estas tareas no estan ejecutadas ni validadas todavia:
+Estado de preparacion al 2026-09-02:
 
-1. Preparar un PDF demo de tipo `REMISION` o `FACTURA_PROVEEDOR`, con numero `DEMO-20260902-DOC-IO-001`, proveedor de prueba, una linea de `00276-PTZNASHWA`, cantidad `5 und`, lote `DEMO-IO-ZENOVA-001` y vencimiento `2027-11-30`.
-2. Si el ajuste para documentos IO queda listo antes del ensayo, cargarlo con su tipo real y dejar una recepcion esperada pendiente. Si no queda listo, usar una OC demo provisional para recorrer el motor existente y declarar expresamente durante la reunion que la pantalla aun sera adaptada para aceptar remision o factura de proveedor sin disfrazarlas de OC.
+1. **Completado:** PDF demo `DEMO-20260902-DOC-IO-001.pdf` creado con una linea de `00276-PTZNASHWA` por 5 und, lote `DEMO-IO-ZENOVA-001` y vencimiento `2027-11-30`.
+2. **Completado con mecanismo provisional:** OC demo ID `6`, numero `DEMO-20260902-DOC-IO-001`, cargada con el PDF. WhatsApp preparo correctamente el borrador `REC-OC-6-001`; durante la reunion se debe declarar que la pantalla aun sera adaptada para aceptar remision o factura de proveedor sin disfrazarlas de OC.
 3. Usar para la recepcion el lote `DEMO-IO-ZENOVA-001`, vencimiento `2027-11-30` y ubicacion `B13`. Ese vencimiento es anterior al lote del mapa y permite comprobar FEFO en el despacho.
 4. Despues de recibir las 5 und, precargar una factura **sintetica** `FV-DEMO-IO-20260902-001` para el cliente de prueba `WMSQA260721 Cliente`, con 2 und de `00276-PTZNASHWA`.
 5. La precarga debe invocar directamente el importador determinista `importInvoice()` con notificaciones externas desactivadas. No debe consultar, crear ni modificar documentos en Siigo. Debe producir una tarea `picking` con 2 und reservadas del lote recibido.
