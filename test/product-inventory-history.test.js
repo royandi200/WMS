@@ -14,11 +14,12 @@ test('product inventory endpoint returns recent parameterized Kardex movements',
   assert.match(endpoint, /movements,/u);
 });
 
-test('product search renders movement date, quantity, lot, reference and balance', () => {
+test('product search renders movement date, quantity, lot, reference and lot balance', () => {
   assert.match(page, /Movimientos recientes/u);
-  for (const label of ['Fecha y hora', 'Cantidad', 'Lote', 'Referencia', 'Saldo posterior']) {
+  for (const label of ['Fecha y hora', 'Cantidad', 'Lote', 'Referencia', 'Saldo del lote']) {
     assert.match(page, new RegExp(label, 'u'));
   }
   assert.match(page, /CONSUMO_MATERIAL: 'Consumo de produccion'/u);
+  assert.match(page, /AJUSTE_MANUAL: 'Ajuste manual'/u);
   assert.match(page, /timeZone: 'America\/Bogota'/u);
 });

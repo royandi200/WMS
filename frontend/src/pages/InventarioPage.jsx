@@ -218,7 +218,7 @@ function ProductResult({ data }) {
             <table className="w-full min-w-[860px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-background/30">
-                  {['Fecha y hora', 'Movimiento', 'Cantidad', 'Lote', 'Referencia', 'Saldo posterior'].map((column) => (
+                  {['Fecha y hora', 'Movimiento', 'Cantidad', 'Lote', 'Referencia', 'Saldo del lote'].map((column) => (
                     <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{column}</th>
                   ))}
                 </tr>
@@ -304,6 +304,7 @@ function formatMovement(action) {
     DESPACHO: 'Despacho',
     MERMA_BODEGA: 'Merma de bodega',
     MERMA_PROCESO: 'Merma de proceso',
+    AJUSTE_MANUAL: 'Ajuste manual',
     AJUSTE_DEMO_MAPA: 'Ajuste de inventario demo',
   }
   return labels[action] || String(action || 'Movimiento').replace(/_/g, ' ')
