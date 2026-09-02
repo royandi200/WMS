@@ -9,6 +9,9 @@ const {
   receptionConfirmationKey,
   buildConfirmationItems,
   buildReceptionReview,
+  canonicalJson,
+  receptionDraftPayload,
+  parseReceptionDraft,
   findPreparedReception,
   listAvailablePurchaseOrderReceptions,
 } = require('../api/_lib/builderbot-reception');
@@ -126,6 +129,31 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
   assert.match(review, /Confirmo la recepcion ID 5/u);
 });
 
+test('WhatsApp receipt draft is canonical, actor-bound and integrity checked', () => {
+  const payload = receptionDraftPayload(
+    { id: 5 },
+    { id: 60 },
+    [{ sku: '00051-MPASH', distributions: [{ cantidad: 2000 }] }]
+  );
+  const payloadJson = canonicalJson(payload);
+  const payloadHash = require('node:crypto').createHash('sha256').update(payloadJson).digest('hex');
+  const row = { usuario_id: 7, payload_json: payloadJson, payload_hash: payloadHash };
+  assert.deepEqual(
+    parseReceptionDraft(row, { orderId: 5, receptionId: 60, userId: 7 }),
+    payload
+  );
+  assert.throws(
+    () => parseReceptionDraft(row, { orderId: 5, receptionId: 60, userId: 8 }),
+    /otro usuario/u
+  );
+  assert.throws(
+    () => parseReceptionDraft({ ...row, payload_hash: '0'.repeat(64) }, {
+      orderId: 5, receptionId: 60, userId: 7,
+    }),
+    /no es valido/u
+  );
+});
+
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {
   const db = {
     async execute(sql, values) {
@@ -194,10 +222,11 @@ test('BuilderBot reception actions share domain handlers and disable free receip
     assert.notEqual(capabilityForAction(action), null);
   }
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
+  const receptionWorkflow = fs.readFileSync(path.join(__dirname, '../api/_lib/builderbot-reception.js'), 'utf8');
   const reception = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
   const purchaseOrders = fs.readFileSync(path.join(__dirname, '../api/v1/purchase-orders.js'), 'utf8');
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
-  const migration = fs.readFileSync(path.join(__dirname, '../database/21_reception_confirmation_idempotency.sql'), 'utf8');
+  const idempotencyMigration = fs.readFileSync(path.join(__dirname, '../database/21_reception_confirmation_idempotency.sql'), 'utf8');
   assert.match(webhook, /workflowFlags\(\)\.allowManualReception/u);
   assert.match(webhook, /confirmReceptionFromWhatsApp/u);
   assert.match(reception, /confirmReceptionForUser/u);
@@ -209,10 +238,18 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /no lo preguntes ni lo inventes/u);
   assert.match(prompt, /vista previa validada/u);
   assert.match(webhook, /confirmation\.requires_confirmation/u);
+  const draftMigration = fs.readFileSync(
+    path.join(__dirname, '../database/23_reception_confirmation_drafts.sql'),
+    'utf8'
+  );
+  assert.match(draftMigration, /UNIQUE KEY uk_recepcion_confirmacion_borrador \(recepcion_id\)/u);
+  assert.match(draftMigration, /payload_hash CHAR\(64\) NOT NULL/u);
+  assert.match(receptionWorkflow, /La vista previa vigente pertenece a otro usuario/u);
+  assert.match(receptionWorkflow, /estado = 'CONSUMIDO'/u);
   assert.match(prompt, /todos los productos pendientes/u);
   assert.match(prompt, /el WMS creara una partida interna/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);
-  assert.match(migration, /UNIQUE KEY uk_recepcion_confirmacion_clave/u);
+  assert.match(idempotencyMigration, /UNIQUE KEY uk_recepcion_confirmacion_clave/u);
   assert.match(reception, /confirmation_key/u);
 });
 

@@ -468,6 +468,105 @@ function buildReceptionReview(order, reception, items) {
   ].join('\n');
 }
 
+function receptionDraftPayload(order, reception, items) {
+  return {
+    version: 1,
+    orderId: Number(order.id),
+    receptionId: Number(reception.id),
+    items,
+  };
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(
+      key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+    ).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function parseReceptionDraft(row, { orderId, receptionId, userId }) {
+  if (!row) return null;
+  if (Number(row.usuario_id) !== Number(userId)) {
+    throw inputError('La vista previa fue creada por otro usuario; vuelve a registrar los datos fisicos', 409);
+  }
+  let payload;
+  try {
+    payload = typeof row.payload_json === 'string'
+      ? JSON.parse(row.payload_json)
+      : row.payload_json;
+  } catch {
+    throw inputError('El borrador fisico de recepcion no es valido; vuelve a registrar los datos', 409);
+  }
+  const canonical = canonicalJson(payload);
+  const hash = createHash('sha256').update(canonical).digest('hex');
+  if (hash !== row.payload_hash
+      || payload?.version !== 1
+      || Number(payload.orderId) !== Number(orderId)
+      || Number(payload.receptionId) !== Number(receptionId)
+      || !Array.isArray(payload.items)
+      || !payload.items.length) {
+    throw inputError('El borrador fisico de recepcion no es valido; vuelve a registrar los datos', 409);
+  }
+  return payload;
+}
+
+async function saveReceptionDraft(db, { order, reception, items, userId }) {
+  const payload = receptionDraftPayload(order, reception, items);
+  const payloadJson = canonicalJson(payload);
+  const payloadHash = createHash('sha256').update(payloadJson).digest('hex');
+  const [active] = await db.execute(
+    `SELECT usuario_id
+       FROM recepcion_confirmacion_borradores
+      WHERE recepcion_id = ? AND estado = 'PENDIENTE' AND expira_en > NOW()
+      LIMIT 1`,
+    [reception.id]
+  );
+  if (active.length && Number(active[0].usuario_id) !== Number(userId)) {
+    throw inputError('La vista previa vigente pertenece a otro usuario', 409);
+  }
+  await db.execute(
+    `INSERT INTO recepcion_confirmacion_borradores
+       (recepcion_id, orden_compra_id, usuario_id, payload_json, payload_hash,
+        estado, expira_en, creado_en, actualizado_en)
+     VALUES (?, ?, ?, ?, ?, 'PENDIENTE', DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW(), NOW())
+     ON DUPLICATE KEY UPDATE
+       orden_compra_id = VALUES(orden_compra_id),
+       usuario_id = VALUES(usuario_id),
+       payload_json = VALUES(payload_json),
+       payload_hash = VALUES(payload_hash),
+       estado = 'PENDIENTE',
+       expira_en = VALUES(expira_en),
+       consumido_en = NULL,
+       actualizado_en = NOW()`,
+    [reception.id, order.id, userId, payloadJson, payloadHash]
+  );
+  return payload;
+}
+
+async function loadReceptionDraft(db, { orderId, receptionId, userId }) {
+  const [rows] = await db.execute(
+    `SELECT usuario_id, payload_json, payload_hash
+       FROM recepcion_confirmacion_borradores
+      WHERE recepcion_id = ? AND orden_compra_id = ?
+        AND estado = 'PENDIENTE' AND expira_en > NOW()
+      LIMIT 1`,
+    [receptionId, orderId]
+  );
+  return parseReceptionDraft(rows[0], { orderId, receptionId, userId });
+}
+
+async function consumeReceptionDraft(db, receptionId, userId) {
+  await db.execute(
+    `UPDATE recepcion_confirmacion_borradores
+        SET estado = 'CONSUMIDO', consumido_en = NOW(), actualizado_en = NOW()
+      WHERE recepcion_id = ? AND usuario_id = ? AND estado = 'PENDIENTE'`,
+    [receptionId, userId]
+  );
+}
+
 async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const order = await findPurchaseOrder(db, params);
   const requestedReception = await findPreparedReception(db, order.id, params, {
@@ -502,8 +601,16 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   if (Number(prepared.reception.id) !== Number(requestedReception.id)) {
     throw inputError('El borrador REC- no coincide con el saldo activo de la OC', 409);
   }
-  const items = await buildConfirmationItems(db, prepared.reception.items, params);
-  if (!explicitConfirmation(rawText, order, params)) {
+  const isExplicitConfirmation = explicitConfirmation(rawText, order, params);
+  let items;
+  if (!isExplicitConfirmation) {
+    items = await buildConfirmationItems(db, prepared.reception.items, params);
+    await saveReceptionDraft(db, {
+      order,
+      reception: prepared.reception,
+      items,
+      userId: user.id,
+    });
     return {
       requires_confirmation: true,
       inventory_changed: false,
@@ -515,7 +622,21 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       message: buildReceptionReview(order, prepared.reception, items),
     };
   }
-  const confirmationKey = receptionConfirmationKey(order.id, requestedReception.id, params);
+  const draft = await loadReceptionDraft(db, {
+    orderId: order.id,
+    receptionId: prepared.reception.id,
+    userId: user.id,
+  });
+  if (!draft) {
+    throw inputError('No hay una vista previa vigente. Registra primero los datos fisicos de la recepcion', 409);
+  }
+  items = await buildConfirmationItems(db, prepared.reception.items, { items: draft.items });
+  const effectiveParams = { ...params, items };
+  const confirmationKey = receptionConfirmationKey(
+    order.id,
+    requestedReception.id,
+    effectiveParams
+  );
   const [previous] = await db.execute(
     `SELECT id, numero, estado FROM recepciones WHERE confirmacion_clave = ? LIMIT 1`,
     [confirmationKey]
@@ -543,6 +664,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       items,
     },
   });
+  await consumeReceptionDraft(db, prepared.reception.id, user.id);
   return { ...result, orden_compra_numero: prepared.order.numero };
 }
 
@@ -560,5 +682,10 @@ module.exports = {
   findPreparedReception,
   buildConfirmationItems,
   buildReceptionReview,
+  canonicalJson,
+  receptionDraftPayload,
+  parseReceptionDraft,
+  saveReceptionDraft,
+  loadReceptionDraft,
   confirmReceptionFromWhatsApp,
 };

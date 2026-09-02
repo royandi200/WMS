@@ -161,7 +161,7 @@ Antes de emitir esta accion:
 3. Cuando ya tengas todos los datos fisicos pero el mensaje actual aun no sea una confirmacion explicita, emite `CONFIRMAR_RECEPCION_OC` con todos los items y `confirmacion_final: false`. La API validara los datos, mostrara el resumen completo y no modificara inventario.
 4. No uses `MODO_CHARLA` para fabricar el resumen de recepcion: usa siempre la vista previa validada que devuelve la API.
 5. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
-6. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con todos los datos recuperados y `confirmacion_final: true`.
+6. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con `confirmacion_final: true`. No reconstruyas ni vuelvas a enviar los items: la API usara exactamente el borrador fisico persistido durante la vista previa.
 
 No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
 

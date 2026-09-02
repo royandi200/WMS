@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Borrador fisico persistente de recepcion
+
+- La vista previa validada se guarda durante 24 horas en `recepcion_confirmacion_borradores`, asociada a OC, recepcion y usuario.
+- La confirmacion final recupera exactamente el payload revisado; ya no depende del historial de BuilderBot ni permite que el LLM cambie items entre resumen y confirmacion.
+- El payload guarda solo datos operacionales canonicos, incluye hash de integridad y queda marcado como consumido tras completar la recepcion.
+
 ### 2026-09-01 - Vista previa validada antes de confirmar recepcion
 
 - Si el agente envia prematuramente la accion con datos fisicos pero sin confirmacion explicita en el texto, la API ya no devuelve un error generico.
