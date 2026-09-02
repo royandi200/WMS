@@ -22,17 +22,30 @@ El WMS controla lo que ocurre fisicamente en la bodega. La OC define lo esperado
 | Recepcion y cierre | Datana, linea `3125031367`, rol `recepcion_cierre`. |
 | Alistamiento | Jobana, linea `3158269583`, rol `alistador`. |
 | Linea del agente | `573173292904`. |
-| OC de insumos del ensayo | ID `4`, `DEMO-20260902-OC-INSUMOS`, abierta y con PDF. |
-| OC In-and-out del ensayo | ID `6`, `DEMO-20260902-DOC-IO-001`, abierta y con PDF. |
-| OC de 3Q del ensayo | ID `7`, `DEMO-20260902-OC-3Q-001`, abierta y con PDF. |
-| PDF 3Q | `output/pdf/DEMO-20260902-OC-3Q-001.pdf`. |
+| PDF de insumos para el cliente | `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-INSUMOS.pdf`. |
+| PDF In-and-out para el cliente | `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-IO.pdf`. |
+| PDF de salida a 3Q para el cliente | `output/pdf/demo-presentacion/DEMO-PRESENTACION-SALIDA-3Q.pdf`. |
+| PDF de OC 3Q para el cliente | `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-3Q.pdf`. |
 | Produccion propia | `00102-PTASH60`, Ashwagandha x 60, objetivo 3 und. |
 | In-and-out | `00276-PTZNASHWA`, Zenova Ashwagandha, recepcion de 5 und. |
 | Maquila 3Q | `00105-PTBOS60`, Booster x 60, objetivo 4 und. |
-| Stock | La OC ID 4 completa los insumos de produccion y 3Q. No se requiere inventario arbitrario adicional. |
+| Stock | La OC de insumos de la presentacion completa los materiales de produccion propia y 3Q. |
 | Siigo | Fuera de la demo. Los despachos nacen de facturas sinteticas locales procesadas por el importador determinista. |
 
-La OC ID 4 debe recibirse primero. Aporta, entre otros, 10 etiquetas Booster `00018-ETBOS60`, cuyo saldo disponible inicial es cero.
+La OC de insumos debe recibirse primero. Aporta, entre otros, 10 etiquetas Booster `00018-ETBOS60`, necesarias para el ejemplo de 3Q.
+
+## Paquete que se usa frente al cliente
+
+Usar exclusivamente los archivos de `output/pdf/demo-presentacion/`. Los documentos de `demo-ensayo-final` son evidencia de la prueba previa y no deben cargarse de nuevo durante la presentacion.
+
+| Orden | Archivo | Referencia que debe leer el WMS | Contenido clave |
+|---|---|---|---|
+| 1 | `DEMO-PRESENTACION-OC-INSUMOS.pdf` | `DEMO-PRESENTACION-OC-INSUMOS` | Seis insumos: tapas, tarros, etiquetas Ashwagandha, liners, 2000 g de gomas y etiquetas Booster. |
+| 2 | `DEMO-PRESENTACION-OC-IO.pdf` | `DEMO-PRESENTACION-OC-IO` | 5 und de `00276-PTZNASHWA`, lote propuesto `DEMO-PRESENTACION-IO-ZENOVA-001`, vence `2027-11-29`. |
+| 3 | `DEMO-PRESENTACION-SALIDA-3Q.pdf` | `DEMO-PRESENTACION-SALIDA-3Q` | Salida esperada de 4 tapas, 4 tarros, 4 etiquetas Booster y 4 liners hacia 3Q. |
+| 4 | `DEMO-PRESENTACION-OC-3Q.pdf` | `DEMO-PRESENTACION-OC-3Q` | OC por 4 und de `00105-PTBOS60` esperadas desde 3Q. |
+
+Los ID cortos se asignan al crear cada registro. Anotarlos durante la demo como `<ID_INSUMOS>`, `<ID_IO>`, `<ID_OC_3Q>`, `<ID_OP>` y `<ID_DESPACHO>`; no reutilizar los ID del ensayo.
 
 ## Corridas independientes
 
@@ -43,9 +56,9 @@ No se borran ni revierten movimientos para repetir la demo. Hay dos juegos docum
 | Ensayo actual | ID `4` / `DEMO-20260902-OC-INSUMOS` | ID `6` / `DEMO-20260902-DOC-IO-001` | ID `7` / `DEMO-20260902-OC-3Q-001` |
 | Presentacion al cliente | ID `8` / `DEMO-CLIENTE-OC-INSUMOS` | ID `9` / `DEMO-CLIENTE-OC-IO` | ID `10` / `DEMO-CLIENTE-OC-3Q` |
 
-Durante el ensayo se usan exclusivamente ID `4`, `6` y `7`. Los ID `8`, `9` y `10` quedan intactos para la presentacion.
+Los ID `8`, `9` y `10` son contingencias precargadas. El recorrido principal frente al cliente carga los PDF de `demo-presentacion` y usa los nuevos ID que asigne el WMS.
 
-Los ID anteriores son contingencias precargadas. El camino principal para mostrar la carga desde el documento usa dos paquetes PDF que no existen previamente en la base:
+Los ID anteriores son contingencias precargadas. El camino principal para mostrar la carga desde documentos usa dos paquetes documentales independientes:
 
 | Documento | Ensayo final | Presentacion |
 |---|---|---|
@@ -60,15 +73,15 @@ Valores que cambian en la corrida del cliente:
 
 | Dato | Ensayo | Cliente |
 |---|---|---|
-| Lote de gomas recibido | `DEMO-GOMAS-E2E-001` | `DEMO-CLIENTE-GOMAS-001` |
+| Lote de gomas recibido | `DEMO-GOMAS-E2E-001` | `DEMO-PRESENTACION-GOMAS-001` |
 | Vencimiento de gomas | `2026-09-15` | `2026-09-14` |
-| Lote IO | `DEMO-IO-ZENOVA-001` | `DEMO-CLIENTE-IO-ZENOVA-001` |
+| Lote IO | `DEMO-IO-ZENOVA-001` | `DEMO-PRESENTACION-IO-ZENOVA-001` |
 | Vencimiento IO | `2027-11-30` | `2027-11-29` |
-| Lotes 3Q | `3Q-DEMO-BOOSTER-A/B` | `3Q-CLIENTE-BOOSTER-A/B` |
+| Lotes 3Q | `3Q-DEMO-BOOSTER-A/B` | `3Q-PRESENTACION-BOOSTER-A/B` |
 | Vencimiento PT 3Q | `2027-12-31` | `2027-12-30` |
-| Facturas sinteticas | Sin `--run` | Agregar `--run=CLIENTE` |
+| Facturas sinteticas | Sin `--run` | Agregar `--run=PRESENTACION` |
 
-Las fechas de la corrida del cliente son anteriores a las del ensayo, pero siguen vigentes. Esto hace que FEFO seleccione los lotes de la presentacion y no remanentes del ensayo.
+Los vencimientos de la corrida del cliente son anteriores a los del ensayo, pero siguen vigentes. Esto hace que FEFO priorice los lotes de la presentacion sobre remanentes del ensayo.
 
 Para crear una nueva corrida futura sin tocar las anteriores:
 
@@ -83,7 +96,7 @@ El primer comando es un dry-run. El segundo genera tres PDF y tres OC. Repetir e
 
 | Bloque | Responsable | Rol | Acciones |
 |---|---|---|---|
-| 1. Entradas | Datana | `recepcion_cierre` | Recibir OC de insumos ID 4 e IO ID 6. |
+| 1. Entradas | Datana | `recepcion_cierre` | Recibir la OC de insumos y la OC IO cargadas desde los PDF de presentacion. |
 | 2. Alistamiento | Jobana | `alistador` | Recibir el aviso, confirmar materiales e iniciar la OP propia. |
 | 3. Cierres y 3Q | Datana | `recepcion_cierre` | Cerrar la OP y recibir dos entregas de 3Q. |
 | 4. Salidas | Jobana | `despacho` | Confirmar los despachos PR, IO y PT. |
@@ -110,18 +123,21 @@ Comprobar el rol efectivo despues de cada cambio antes de una accion de inventar
 
 Prerequisito: Datana en `recepcion_cierre`.
 
-1. Preguntar en WhatsApp: `Que recepciones pendientes hay?`
-2. Decir: `Prepara la recepcion ID 4`.
-3. Reportar con alias:
+1. Enviar por WhatsApp `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-INSUMOS.pdf` con el texto: `Carga esta orden de compra de insumos para recepcion.`
+2. Verificar que el agente cree el borrador `DEMO-PRESENTACION-OC-INSUMOS` en `PENDIENTE_REVISION`, sin crear stock.
+3. En `Recepciones > Ordenes de compra`, revisar proveedor, seis items y cantidades; pulsar `Confirmar y crear OC` y anotar el ID como `<ID_INSUMOS>`.
+4. Preguntar en WhatsApp: `Que recepciones pendientes hay?`
+5. Decir: `Prepara la recepcion ID <ID_INSUMOS>`.
+6. Reportar con alias:
 
-   `Para la recepcion ID 4 llegaron completos: 12 tapas blancas 60 disponibles en A8; 12 tarros 60 disponibles en A11; 10 etiquetas ashwa 60 disponibles en A1; 12 liners 60 disponibles en A14; 2000 gramos de gomas ashwa disponibles en B16, lote DEMO-GOMAS-E2E-001, vencen el 15 de septiembre de 2026; y 10 etiquetas booster 60 disponibles en A1.`
+   `Para la recepcion ID <ID_INSUMOS> llegaron completos: 12 tapas blancas 60 disponibles en A8; 12 tarros 60 disponibles en A11; 10 etiquetas ashwa 60 disponibles en A1; 12 liners 60 disponibles en A14; 2000 gramos de gomas ashwa disponibles en B16, lote DEMO-PRESENTACION-GOMAS-001, vencen el 14 de septiembre de 2026; y 10 etiquetas booster 60 disponibles en A1.`
 
-4. Revisar el resumen: seis productos, cantidades, condiciones y ubicaciones. Solo las gomas requieren lote del proveedor.
-5. Confirmar: `Confirmo la recepcion ID 4`.
-6. Repetir la confirmacion. No debe duplicar stock ni Kardex.
-7. Mostrar OC, PDF, recepcion, diferencias y movimientos.
+7. Revisar el resumen: seis productos, cantidades, condiciones y ubicaciones. Solo las gomas requieren lote del proveedor.
+8. Confirmar: `Confirmo la recepcion ID <ID_INSUMOS>`.
+9. Repetir la confirmacion. No debe duplicar stock ni Kardex.
+10. Mostrar OC, PDF, recepcion, diferencias y movimientos.
 
-Punto para decidir con el cliente: despues de preparar la recepcion, definir si Nelly debe validar y declarar cada SKU con su cantidad, condicion y ubicacion, o si una recepcion completa y sin diferencias puede confirmarse directamente con `Confirmo la recepcion ID 4`. Recomendacion para el demo: mostrar el resumen detallado antes de confirmar y explicar que la confirmacion abreviada solo deberia aplicar cuando todo coincide; cualquier diferencia, cuarentena o rechazo exigiria el detalle por item.
+Punto para decidir con el cliente: despues de preparar la recepcion, definir si Nelly debe validar y declarar cada SKU con su cantidad, condicion y ubicacion, o si una recepcion completa y sin diferencias puede confirmarse directamente con `Confirmo la recepcion ID <ID_INSUMOS>`. Recomendacion para el demo: mostrar el resumen detallado antes de confirmar y explicar que la confirmacion abreviada solo deberia aplicar cuando todo coincide; cualquier diferencia, cuarentena o rechazo exigiria el detalle por item.
 
 El vencimiento corto es sintetico y deliberado: permite demostrar FEFO y que el PT hereda el vencimiento de las gomas consumidas.
 
@@ -155,7 +171,7 @@ El recorrido principal usa 3 conformes y 0 merma. La OP 67 cerrada queda como ev
 
 1. Datana, que permanece en `recepcion_cierre`, dice: `Cerramos la orden ID <ID_OP> con 3 unidades conformes y cero merma. Dejarlas en C2.`
 2. El WMS genera el lote; el usuario no lo dicta.
-3. El vencimiento esperado es `2026-09-15`, heredado de las gomas.
+3. El vencimiento esperado es `2026-09-14`, heredado de las gomas de la presentacion.
 4. Juan debe recibir plan, conformes, merma, lote PT, ubicacion, vencimiento, actor y conciliacion.
 5. Repetir el cierre: debe informar que ya estaba cerrada y no modificar inventario.
 6. Consultar la trazabilidad del lote PT.
@@ -171,8 +187,8 @@ Idempotencia manual validada: Datana repitio el cierre y luego Juan lo intento d
 Ejecutar despues del cierre y antes del bloque final de despachos:
 
 ```powershell
-node scripts\qa\prepare-demo-dispatch.js --scenario=own
-node scripts\qa\prepare-demo-dispatch.js --scenario=own --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
+node scripts\qa\prepare-demo-dispatch.js --scenario=own --run=PRESENTACION
+node scripts\qa\prepare-demo-dispatch.js --scenario=own --run=PRESENTACION --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
 ```
 
 La tarea debe reservar 1 und por FEFO, idealmente del lote producido en vivo. Jobana, ya en `despacho`, confirma por ID corto y repite para demostrar idempotencia.
@@ -187,16 +203,16 @@ La tarea debe reservar 1 und por FEFO, idealmente del lote producido en vivo. Jo
 
 ### 2. Recibir cinco unidades
 
-Camino principal: mostrar la carga documental completa. La OC ID 6 queda como respaldo y no se usa mientras funcione este recorrido.
+Camino principal: mostrar la carga documental completa. La OC precargada ID 9 queda como respaldo y no se usa mientras funcione este recorrido.
 
-1. En el ensayo, enviar por WhatsApp `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-OC-IO.pdf` con el texto: `Carga esta orden de compra de producto in-and-out para recepcion.`
-2. Verificar que el agente cree el borrador `DEMO-ENSAYO-FINAL-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
-3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` y vencimiento `2027-11-30`.
-4. Pulsar `Confirmar y crear OC`. En el ensayo final se asigno el ID corto `11` y quedo en estado `CARGADA`, con el PDF asociado y sin modificar inventario.
-5. Datana consulta recepciones y dice: `Prepara la recepcion ID 11`. La seleccion tambien acepta errores previsibles de voz como `D11` cuando el ID aparece en la bandeja inmediata. En el ensayo se obtuvo el borrador `REC-OC-11-001`, con 5 und pendientes y ubicacion sugerida `B13`. La preparacion debe mostrar el lote documental `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` y el vencimiento `2027-11-30` para cotejarlos contra la etiqueta fisica.
-6. Reportar: `Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
+1. Enviar por WhatsApp `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-IO.pdf` con el texto: `Carga esta orden de compra de producto in-and-out para recepcion.`
+2. Verificar que el agente cree el borrador `DEMO-PRESENTACION-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
+3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-PRESENTACION-IO-ZENOVA-001` y vencimiento `2027-11-29`.
+4. Pulsar `Confirmar y crear OC`, anotar el ID corto como `<ID_IO>` y comprobar que quede `CARGADA`, con PDF asociado y sin modificar inventario.
+5. Datana consulta recepciones y dice: `Prepara la recepcion ID <ID_IO>`. La seleccion tambien acepta errores previsibles de voz como `D<ID_IO>` cuando el ID aparece en la bandeja inmediata. La preparacion debe mostrar el lote documental `DEMO-PRESENTACION-IO-ZENOVA-001`, vencimiento `2027-11-29`, 5 und pendientes y ubicacion sugerida `B13`.
+6. Reportar: `Para la recepcion ID <ID_IO> llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
 7. Revisar el resumen con SKU, cantidad, lote proveedor, vencimiento y ubicacion; aun sin movimiento.
-8. Confirmar: `Confirmo la recepcion ID 11`.
+8. Confirmar: `Confirmo la recepcion ID <ID_IO>`.
 9. Esperar la respuesta antes de reenviar. En el ensayo, el primer ciclo tardo cerca de 38 segundos; un segundo envio durante esa espera genero dos respuestas, aunque la idempotencia evito duplicar inventario.
 10. Mostrar ingreso e historico. No debe aparecer BOM, consumo de MP ni OP.
 
@@ -218,15 +234,15 @@ El lote se lee de la etiqueta o documento fisico del proveedor. El WMS no debe a
 ### 3. Preparar y confirmar despacho IO
 
 ```powershell
-node scripts\qa\prepare-demo-dispatch.js --scenario=io
-node scripts\qa\prepare-demo-dispatch.js --scenario=io --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
+node scripts\qa\prepare-demo-dispatch.js --scenario=io --run=PRESENTACION
+node scripts\qa\prepare-demo-dispatch.js --scenario=io --run=PRESENTACION --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
 ```
 
 1. Jobana en `despacho` pregunta: `Que despachos pendientes hay?`
-2. Confirma el ID de `FV-DEMO-IO-001`.
+2. Confirma el ID de `FV-DEMO-PRESENTACION-IO-001`.
 3. Debe salir 2 und y quedar 3 und del lote recibido.
 4. Repetir sin segundo descuento.
-5. Consultar: `Muestrame la trazabilidad del lote DEMO-ENSAYO-FINAL-IO-ZENOVA-001`.
+5. Consultar: `Muestrame la trazabilidad del lote DEMO-PRESENTACION-IO-ZENOVA-001`.
 6. Mostrar OC/PDF, recepcion, lote, ubicacion, factura sintetica, despacho, cliente y saldo; sin produccion.
 
 Estado del ensayo: se creo el despacho ID `49`, `DSP-SIIGO-FV-DEMO-IO-001`, asociado a la factura sintetica `FV-DEMO-IO-001`. Quedaron reservadas 2 und del lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` en `B13`, sin descuento hasta la confirmacion. La notificacion proactiva no se emitio desde el preparador local porque ese proceso no carga las credenciales de BuilderBot; la tarea si aparece al consultar los despachos pendientes por WhatsApp.
@@ -241,14 +257,16 @@ La demostracion comienza cuando Sofi prepara y envia materiales a 3Q, aun si la 
 
 ### 1. Preparar la remision sin OC
 
-Prerequisito: OC ID 4 recibida y etiquetas Booster disponibles.
+Prerequisito: la OC de insumos `DEMO-PRESENTACION-OC-INSUMOS` debe estar recibida y las etiquetas Booster disponibles.
 
-1. Abrir `Maquila 3Q > Nueva remision`.
-2. Dejar `OC del producto esperado` en `Pendiente de cargar o vincular`.
-3. Elegir `3Q - PROVEEDOR DEMO`, SKU `00105-PTBOS60` y cantidad 4.
-4. Pulsar `Preparar remision y picking` y guardar el codigo `MQ-3Q-...` y la remision `REM-3Q-...`.
-5. Mostrar BOM `ENVIO`: 4 tapas, 4 tarros, 4 etiquetas Booster y 4 liners.
-6. Destacar que el borrador reserva por FEFO, no descuenta; no se envian gomas y 3Q no es una bodega interna.
+1. Enviar por WhatsApp `output/pdf/demo-presentacion/DEMO-PRESENTACION-SALIDA-3Q.pdf` con el texto: `Registra esta salida de materiales hacia 3Q como borrador.`
+2. Verificar en `Maquila 3Q > Documentos leidos` la referencia `DEMO-PRESENTACION-SALIDA-3Q`, cuatro materiales y 16 unidades. El PDF por si solo no reserva ni descuenta inventario.
+3. Abrir `Maquila 3Q > Nueva remision`.
+4. Dejar `OC del producto esperado` en `Pendiente de cargar o vincular`.
+5. Elegir `3Q - PROVEEDOR DEMO`, SKU `00105-PTBOS60` y cantidad 4.
+6. Pulsar `Preparar remision y picking` y guardar el codigo `MQ-3Q-...` y la remision `REM-3Q-...`.
+7. Cotejar el documento con el BOM `ENVIO`: 4 tapas, 4 tarros, 4 etiquetas Booster y 4 liners.
+8. Destacar que la remision preparada reserva por FEFO, no descuenta; no se envian gomas y 3Q no es una bodega interna.
 
 ### 2. Enviar materiales
 
@@ -262,12 +280,14 @@ El WMS solo conserva custodia externa documental: que se envio, cuando, por quie
 
 ### 3. Cargar y vincular la OC esperada
 
-1. Mostrar o cargar el PDF `DEMO-20260902-OC-3Q-001` para el ensayo; en la presentacion usar `DEMO-CLIENTE-OC-3Q`.
-2. Antes de vincular, intentar iniciar la recepcion: debe bloquearla e indicar que falta la OC.
-3. Abrir `Maquila 3Q > Vincular OC`.
-4. Seleccionar la orden `MQ-3Q-...` y la OC compatible: ID 7 para ensayo o ID 10 para presentacion.
-5. Pulsar `Validar y vincular OC`.
-6. Verificar que la orden pasa a `EN_3Q`. La validacion exige PDF, mismo maquilador, mismo PT y cantidad de OC mayor o igual al objetivo.
+1. Enviar por WhatsApp `output/pdf/demo-presentacion/DEMO-PRESENTACION-OC-3Q.pdf` con el texto: `Carga esta orden de compra del producto terminado esperado desde 3Q.`
+2. Verificar el borrador `DEMO-PRESENTACION-OC-3Q` y revisarlo en `Recepciones > Ordenes de compra`.
+3. Confirmar y crear la OC; anotar el ID asignado como `<ID_OC_3Q>`.
+4. Antes de vincular, intentar iniciar la recepcion: debe bloquearla e indicar que falta la OC.
+5. Abrir `Maquila 3Q > Vincular OC`.
+6. Seleccionar la orden `MQ-3Q-...` y la OC `<ID_OC_3Q>`.
+7. Pulsar `Validar y vincular OC`.
+8. Verificar que la orden pasa a `EN_3Q`. La validacion exige PDF, mismo maquilador, mismo PT y cantidad de OC mayor o igual al objetivo.
 
 ### 4. Recibir parcial de tres
 
@@ -276,7 +296,7 @@ Prerequisito: Datana en `recepcion_cierre`.
 1. Abrir `Recepciones > Confirmar recepcion > Producto desde 3Q`.
 2. Seleccionar la orden y escribir `3` como cantidad de esta entrega.
 3. Iniciar recepcion fisica.
-4. Registrar `DISPONIBLE`, 3 und, lote `3Q-DEMO-BOOSTER-A`, ubicacion `C8`, vencimiento `2027-12-31`.
+4. Registrar `DISPONIBLE`, 3 und, lote `3Q-PRESENTACION-BOOSTER-A`, ubicacion `C8`, vencimiento `2027-12-30`.
 5. Aprobar.
 6. Verificar estado `RECIBIDA_PARCIAL`, acumulado 3 y saldo 1. OC y orden siguen abiertas.
 
@@ -284,7 +304,7 @@ Prerequisito: Datana en `recepcion_cierre`.
 
 1. Volver a `Producto desde 3Q`; debe mostrar saldo 1.
 2. Preparar 1 und.
-3. Registrar lote `3Q-DEMO-BOOSTER-B`, ubicacion `C8`, vencimiento `2027-12-31`, `DISPONIBLE`.
+3. Registrar lote `3Q-PRESENTACION-BOOSTER-B`, ubicacion `C8`, vencimiento `2027-12-30`, `DISPONIBLE`.
 4. Aprobar y verificar 4 und acumuladas y orden `COMPLETADA`.
 
 Se usan lotes distintos porque hoy una segunda recepcion no se agrega a un lote ya existente. Esto es una pregunta para el cliente, no una regla definitiva.
@@ -294,15 +314,15 @@ Se usan lotes distintos porque hoy una segunda recepcion no se agrega a un lote 
 Solo despues de completar la recepcion:
 
 ```powershell
-node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing
-node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
+node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing --run=PRESENTACION
+node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing --run=PRESENTACION --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
 ```
 
 1. Jobana en `despacho` consulta pendientes.
-2. Confirma el ID de `FV-DEMO-3Q-001`.
+2. Confirma el ID de `FV-DEMO-PRESENTACION-3Q-001`.
 3. Deben salir 2 und con lote y cliente final, conservando el enlace a materiales enviados a 3Q.
 4. Repetir sin segundo movimiento.
-5. Consultar trazabilidad de `3Q-DEMO-BOOSTER-A`.
+5. Consultar trazabilidad de `3Q-PRESENTACION-BOOSTER-A`.
 
 ### Alcance actual de WhatsApp en 3Q
 
@@ -374,9 +394,9 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 2. `node scripts\qa\prepare-demo-e2e.js --smoke-reception`
 3. Ejecutar suite completa y build.
 4. Verificar las tres OC y las modalidades `Compra directa` / `Producto desde 3Q`.
-5. Confirmar que aun no existen `FV-DEMO-PR-001`, `FV-DEMO-IO-001` ni `FV-DEMO-3Q-001`.
+5. Confirmar que aun no existen `FV-DEMO-PRESENTACION-PR-001`, `FV-DEMO-PRESENTACION-IO-001` ni `FV-DEMO-PRESENTACION-3Q-001`.
 6. Abrir las paginas requeridas y conservar la OP 67 como respaldo visual.
-7. Antes de la presentacion, confirmar que ID `8`, `9` y `10` siguen `CARGADA` y sin recepciones ni ordenes 3Q.
+7. Verificar que las referencias `DEMO-PRESENTACION-OC-INSUMOS`, `DEMO-PRESENTACION-OC-IO`, `DEMO-PRESENTACION-SALIDA-3Q` y `DEMO-PRESENTACION-OC-3Q` no se hayan consumido en una corrida anterior.
 
 ## Contingencia
 
@@ -403,6 +423,27 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 | Despacho PR |  |  |  |
 | Despacho IO |  |  |  |
 | Despacho PT |  |  |  |
+
+## Hoja de control de la presentacion
+
+Completar estos valores en vivo. Esta tabla evita reutilizar por error los ID del ensayo.
+
+| Entidad | Referencia fija | ID/codigo asignado en vivo | Estado esperado |
+|---|---|---|---|
+| OC de insumos | `DEMO-PRESENTACION-OC-INSUMOS` |  | `CARGADA`, luego `RECIBIDA` |
+| Recepcion de insumos | Derivada de la OC anterior |  | `COMPLETADA` |
+| OP propia | `00102-PTASH60`, 3 und |  | `CERRADA` |
+| Lote PT propio | Generado por WMS |  | 3 und disponibles antes del despacho |
+| OC In-and-Out | `DEMO-PRESENTACION-OC-IO` |  | `CARGADA`, luego `RECIBIDA` |
+| Recepcion IO | Lote `DEMO-PRESENTACION-IO-ZENOVA-001` |  | 5 und en `B13` |
+| Documento de salida 3Q | `DEMO-PRESENTACION-SALIDA-3Q` |  | `PENDIENTE_REVISION` |
+| Orden / remision 3Q | `00105-PTBOS60`, 4 und |  | `EN_3Q_PENDIENTE_OC`, luego `EN_3Q` |
+| OC 3Q | `DEMO-PRESENTACION-OC-3Q` |  | Vinculada a la orden 3Q |
+| Recepcion parcial 3Q | Lote `3Q-PRESENTACION-BOOSTER-A` |  | 3 und; orden `RECIBIDA_PARCIAL` |
+| Recepcion final 3Q | Lote `3Q-PRESENTACION-BOOSTER-B` |  | 1 und; orden `COMPLETADA` |
+| Despacho PR | `FV-DEMO-PRESENTACION-PR-001` |  | Confirmado una vez |
+| Despacho IO | `FV-DEMO-PRESENTACION-IO-001` |  | Confirmado una vez |
+| Despacho PT | `FV-DEMO-PRESENTACION-3Q-001` |  | Confirmado una vez |
 
 ## Cierre sugerido
 
