@@ -217,6 +217,21 @@ Pregunta para el cliente durante el demo:
 
 > Cuando un tarro terminado queda no conforme por daño de empaque, ¿las gomas de su interior se desechan, se recuperan para reproceso o se devuelven como materia prima? ¿Quien confirma esa decision y como se cuantifica?
 
+> Si una unidad terminada queda no conforme, ¿la OP puede cerrarse con menos unidades conformes que las planeadas o debe mantenerse abierta y autorizar el alistamiento de otro juego de materiales para fabricar un reemplazo? Si se reemplaza, ¿quien lo autoriza y la nueva entrega se registra como consumo adicional de la misma OP?
+
+Recomendacion provisional basada en practicas de MRP/MES:
+
+1. Tratar la cantidad planeada de la OP como objetivo de unidades conformes, no como numero maximo de intentos.
+2. Registrar por separado unidades conformes, unidades rechazadas o scrap y cantidad conforme pendiente.
+3. Si las conformes son menores que el plan, no cerrar automaticamente. Ofrecer dos decisiones explicitas: `mantener abierta y reponer` o `cerrar con faltante`.
+4. Si se decide reponer, conservar la misma OP, registrar la unidad no conforme y calcular un alistamiento adicional con el BOM de la cantidad faltante. Ese material debe quedar identificado como entrega adicional y requerir autorizacion antes de afectar stock.
+5. Si se decide cerrar con faltante, registrar quien lo autorizo, el motivo y la diferencia contra el plan. Para una OP vinculada a pedido de cliente, la opcion recomendada es mantener abierta o crear una continuacion/backorder hasta completar la demanda.
+6. No asumir que todos los componentes de la unidad rechazada deben reponerse: antes se debe definir cuales se desecharon y cuales se recuperaron.
+
+Referencias revisadas: Microsoft Dynamics 365 separa cantidad buena y cantidad de error al reportar produccion terminada y permite reportes parciales; Odoo permite registrar scrap de componentes o producto terminado, advierte diferencias de consumo y crea ordenes de continuacion para cantidades pendientes; Oracle separa cantidades completadas, rechazadas y scrap.
+
+Estado para la demo: esta decision **no esta implementada**. La OP 67 demuestra el cierre con resultado inferior al plan y una unidad no conforme. Presentar el comportamiento como un punto de validacion con el cliente, no como politica definitiva.
+
 Frase natural del ensayo de merma de proceso:
 
 > En la orden ID 67 se perdieron 10 gramos de gomas ashwa por derrame.
