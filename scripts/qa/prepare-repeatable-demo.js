@@ -255,9 +255,13 @@ async function main() {
   const run = normalizeRun(argument('run'));
   const date = argument('date', '2026-09-03');
   const ioExpiry = argument('io-expiry', '2027-11-29');
+  const only = argument('only', 'all').toLowerCase();
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error('Usa --date=YYYY-MM-DD');
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(ioExpiry)) throw new Error('Usa --io-expiry=YYYY-MM-DD');
+  if (!['all', 'inputs', 'io', 'outsourcing'].includes(only)) throw new Error('Usa --only=all|inputs|io|outsourcing');
   const apply = process.argv.includes(APPLY_FLAG);
+  const pdfOnly = process.argv.includes('--pdf-only');
+  if (apply && pdfOnly) throw new Error('--apply y --pdf-only son excluyentes');
   if (apply && !process.argv.includes(CONFIRM_FLAG)) throw new Error(`Para aplicar usa ${APPLY_FLAG} ${CONFIRM_FLAG}`);
   const conn = await mysql.createConnection(connectionConfig());
   try {
@@ -265,6 +269,23 @@ async function main() {
     const planned = fixtures(run, date, ioExpiry);
     const current = [];
     for (const fixture of planned) current.push({ ...fixture, existing: await loadExisting(conn, fixture.number) });
+    if (pdfOnly) {
+      const selected = only === 'all' ? planned : planned.filter((fixture) => fixture.key === only);
+      const outputDirectory = path.resolve(__dirname, `../../output/pdf/demo-${run.toLowerCase()}`);
+      fs.mkdirSync(outputDirectory, { recursive: true });
+      const files = selected.map((fixture) => {
+        const supplier = context[fixture.supplierKind];
+        const pdf = buildPurchaseOrderPdf({
+          number: fixture.number, supplier: supplier.nombre, date: fixture.date,
+          title: fixture.title, purpose: fixture.purpose, items: fixture.items,
+        });
+        const filePath = path.join(outputDirectory, fixture.fileName);
+        fs.writeFileSync(filePath, pdf);
+        return { key: fixture.key, number: fixture.number, file: filePath, sha256: crypto.createHash('sha256').update(pdf).digest('hex') };
+      });
+      console.log(JSON.stringify({ ok: true, mode: 'pdf-only', run, databaseChanged: false, files }, null, 2));
+      return;
+    }
     if (!apply) {
       console.log(JSON.stringify({ ok: true, mode: 'dry-run', run, date, current }, null, 2));
       return;

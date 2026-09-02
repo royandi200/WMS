@@ -130,6 +130,8 @@ Resultado del ensayo: la OP `OP-20260902-000068` se creo una sola vez y quedo `A
 6. Jobana dice: `Ya aliste los materiales de la orden ID <ID_OP>`.
 7. Verificar `EN_PROCESO` y un solo descuento de cada material.
 
+Resultado del ensayo: Jobana confirmo la OP `68`; quedo `F1 / EN_PROCESO`. Se consumieron una sola vez 3 tarros, 3 tapas, 3 etiquetas, 3 liners y 540 g de gomas. El Kardex contiene seis salidas porque las tres etiquetas se completaron con 1 und de un lote y 2 und de otro por FEFO. Jobana recibio la respuesta operativa; Juan y Datana recibieron exactamente una notificacion `production_started:68` cada uno.
+
 | Evento | Destinatario | Contenido esperado |
 |---|---|---|
 | OP liberada | Alistador | OP, PT, cantidad, destino, BOM, lotes FEFO, ubicaciones e instruccion. |
@@ -146,6 +148,10 @@ El recorrido principal usa 3 conformes y 0 merma. La OP 67 cerrada queda como ev
 4. Juan debe recibir plan, conformes, merma, lote PT, ubicacion, vencimiento, actor y conciliacion.
 5. Repetir el cierre: debe informar que ya estaba cerrada y no modificar inventario.
 6. Consultar la trazabilidad del lote PT.
+
+Resultado del ensayo: OP `OP-20260902-000068` en `F5/CERRADA`, plan 3, conformes 3 y merma 0. Se creo una sola entrada de 3 und en el lote `LPN-OP-20260902-000068`, disponible en `C2`, sin reserva y con vencimiento `2026-09-15` heredado de las gomas. Datana recibio la respuesta directa del cierre y Juan recibio una notificacion `production_closed:68`; no hubo doble movimiento.
+
+Idempotencia manual validada: Datana repitio el cierre y luego Juan lo intento desde `admin`. Ambos recibieron el actor y la hora del cierre original y la indicacion `No se modifico inventario`. La base conserva una sola entrada por 3 und, un solo lote terminado y una sola notificacion de cierre enviada.
 
 `Neto entregado` es lo que salio del disponible hacia produccion; `merma de proceso` es la perdida documentada; `uso productivo estimado` es neto menos merma. Un sobrante fisico debe devolverse antes del cierre para volver a estar disponible.
 
@@ -170,14 +176,26 @@ La tarea debe reservar 1 und por FEFO, idealmente del lote producido en vivo. Jo
 
 ### 2. Recibir cinco unidades
 
-Ejecutar en el primer bloque con Datana en `recepcion_cierre`.
+Camino principal: mostrar la carga documental completa. La OC ID 6 queda como respaldo y no se usa mientras funcione este recorrido.
 
-1. Consultar recepciones y preparar ID 6.
-2. Reportar: `Para la recepcion ID 6 llegaron completas 5 unidades de Zenova Ashwagandha, lote DEMO-IO-ZENOVA-001, vencen el 30 de noviembre de 2027 y estan disponibles en B13.`
-3. Revisar el resumen con SKU, cantidad, lote proveedor, vencimiento y ubicacion; aun sin movimiento.
-4. Confirmar: `Confirmo la recepcion ID 6`.
-5. Repetir y comprobar idempotencia.
-6. Mostrar ingreso e historico. No debe aparecer BOM, consumo de MP ni OP.
+1. En el ensayo, enviar por WhatsApp `output/pdf/demo-ensayo-io2/DEMO-ENSAYO-IO2-OC-IO.pdf` con el texto: `Carga esta orden de compra de producto in-and-out para recepcion.`
+2. Verificar que el agente cree el borrador `DEMO-ENSAYO-IO2-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
+3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-ENSAYO-IO2-IO-ZENOVA-001` y vencimiento `2027-11-30`.
+4. Pulsar `Confirmar y crear OC` y anotar el ID corto asignado: `<ID_IO>`.
+5. Datana consulta recepciones y dice: `Prepara la recepcion ID <ID_IO>`.
+6. Reportar: `Para la recepcion ID <ID_IO> llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
+7. Revisar el resumen con SKU, cantidad, lote proveedor, vencimiento y ubicacion; aun sin movimiento.
+8. Confirmar: `Confirmo la recepcion ID <ID_IO>`.
+9. Repetir y comprobar idempotencia.
+10. Mostrar ingreso e historico. No debe aparecer BOM, consumo de MP ni OP.
+
+Antes de la presentacion puede generarse otro PDF sin precargar la OC ni modificar la base:
+
+```powershell
+node scripts\qa\prepare-repeatable-demo.js --run=PRESENTACION-IO --date=2026-09-03 --io-expiry=2027-11-29 --pdf-only --only=io
+```
+
+La OC precargada ID 6 y la OC reservada ID 9 se conservan como contingencia si el servicio de lectura documental no responde.
 
 El lote se lee de la etiqueta o documento fisico del proveedor. El WMS no debe adivinar ni generar el lote de un producto que exige lote externo.
 
