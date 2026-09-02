@@ -11,5 +11,5 @@ test('lot traceability exposes production result and both waste contexts', () =>
   assert.match(webhook, /\*Mermas asociadas:\*/u);
   assert.match(webhook, /uso productivo estimado/u);
   assert.match(webhook, /m\.referencia_externa \? `proceso/u);
-  assert.match(webhook, /k\.action === 'CIERRE_PRODUCCION' && k\.ubicacion_codigo/u);
+  assert.match(webhook, /\['CIERRE_PRODUCCION', 'INGRESO_RECEPCION'\]\.includes\(k\.action\) && k\.ubicacion_codigo/u);
 });

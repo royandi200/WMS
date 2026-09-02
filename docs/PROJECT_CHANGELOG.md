@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Trazabilidad legible de ingresos por recepcion
+
+- El historial de un lote recibido muestra el codigo fisico de ubicacion, por ejemplo `B13`, en vez del ID numerico interno.
+- La respuesta deja de exponer el UUID tecnico de la operacion de recepcion; la evidencia operativa permanece en Kardex y base de datos.
+- Validacion: suite completa con `169/169` pruebas aprobadas.
+
 ### 2026-09-02 - Lote visible en despachos pendientes por WhatsApp
 
 - La consulta de despachos pendientes muestra cantidad, lote reservado y ubicacion fisica por cada asignacion.

@@ -231,6 +231,8 @@ node scripts\qa\prepare-demo-dispatch.js --scenario=io --apply --yes-i-understan
 
 Estado del ensayo: se creo el despacho ID `49`, `DSP-SIIGO-FV-DEMO-IO-001`, asociado a la factura sintetica `FV-DEMO-IO-001`. Quedaron reservadas 2 und del lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` en `B13`, sin descuento hasta la confirmacion. La notificacion proactiva no se emitio desde el preparador local porque ese proceso no carga las credenciales de BuilderBot; la tarea si aparece al consultar los despachos pendientes por WhatsApp.
 
+Resultado del ensayo: Jobana confirmo el despacho ID `49` por WhatsApp. El despacho quedo `despachado`, `cantidad_des` en 2 und y el lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` paso de 5 a 3 und, con reserva 0. Se creo un unico movimiento `DESPACHO` de -2, saldo posterior 3 y referencia `factura-siigo:FV-DEMO-IO-001`.
+
 ## Escenario 3: maquila 3Q
 
 ### 1. Crear orden

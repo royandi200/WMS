@@ -2597,7 +2597,7 @@ module.exports = async (req, res) => {
           }
           let extra = '';
 
-          if (k.action === 'CIERRE_PRODUCCION' && k.ubicacion_codigo) {
+          if (['CIERRE_PRODUCCION', 'INGRESO_RECEPCION'].includes(k.action) && k.ubicacion_codigo) {
             extra = ` | Ubicacion ${k.ubicacion_codigo}`;
           } else if (k.notes) {
             extra = ` | ${k.notes}`;
