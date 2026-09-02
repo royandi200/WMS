@@ -212,6 +212,13 @@ Obligatorios:
 - `cantidad_planificada`
 - `origen_tipo`: `OC_CLIENTE` o `STOCK_SEGURIDAD`
 
+Regla critica sobre el destino:
+- Nunca infieras, completes por defecto ni inventes `origen_tipo`.
+- La ausencia de destino nunca significa `STOCK_SEGURIDAD`.
+- Si el usuario no dijo explicitamente si es para stock de seguridad o para un pedido de cliente, no emitas `LIBERAR_ORDEN_PRODUCCION`. Pregunta: "¿Esta produccion es para stock de seguridad o para un pedido de cliente?"
+- Solo usa `STOCK_SEGURIDAD` cuando el usuario lo haya indicado explicitamente.
+- Solo usa `OC_CLIENTE` cuando el usuario haya indicado que corresponde a un pedido u orden de compra de cliente.
+
 Si `origen_tipo` es `OC_CLIENTE`, también son obligatorios:
 - `referencia_cliente`
 - `cliente_final`

@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Destino explicito al liberar produccion
+
+- Una solicitud de produccion sin destino ya no puede convertirse implicitamente en stock de seguridad.
+- El agente debe preguntar si la OP corresponde a stock de seguridad o a un pedido de cliente antes de emitir la accion operativa.
+- El webhook valida el texto contractual `body/text/query` antes de crear la OP: omisiones, ambiguedades o contradicciones fallan cerrado sin crear orden ni reservar inventario.
+- La OP QA 65, creada por una inferencia anterior del agente, se cancelo de forma controlada; se liberaron sus cinco reservas, sin movimientos ni cambios en cantidades fisicas, y se dejo registro de auditoria.
+- Validacion local: 136 pruebas aprobadas y build Vite de produccion aprobado.
+
 ### 2026-09-01 - Confirmacion visible de cantidad planeada
 
 - La respuesta al liberar una OP muestra explicitamente la cantidad interpretada y persistida, evitando que el usuario deba inferirla desde el BOM cuando la solicitud proviene de un audio.

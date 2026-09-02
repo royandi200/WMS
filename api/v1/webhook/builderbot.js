@@ -87,6 +87,7 @@ const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
 const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
+const { resolveProductionOrigin } = require('../../_lib/production-origin-evidence');
 const { adjustProductionMaterials } = require('../../_lib/production-materials');
 const { closeProductionOrder } = require('../../_lib/production-close');
 const {
@@ -180,6 +181,16 @@ function getUserText(rawBody, info) {
          rawBody.query ||
          rawBody.texto ||
          rawBody.message ||
+         '';
+}
+
+function getContractUserText(rawBody, info) {
+  return info.body ||
+         info.text ||
+         info.query ||
+         rawBody.body ||
+         rawBody.text ||
+         rawBody.query ||
          '';
 }
 
@@ -1234,6 +1245,7 @@ module.exports = async (req, res) => {
   let params     = info.params || {};
   const priority = info.priority || 'baja';
   const rawText  = getUserText(rawBody, info);
+  const contractUserText = getContractUserText(rawBody, info);
   const responseContext = {};
 
   if ((action === 'UNKNOWN' || action === 'accion_correspondiente') && rawText) {
@@ -2230,10 +2242,11 @@ module.exports = async (req, res) => {
       }
 
       case 'LIBERAR_ORDEN_PRODUCCION': {
+        const originType = resolveProductionOrigin(contractUserText, params.origen_tipo);
         const productionResult = await releaseProductionOrder({
           product: params.id_producto_final || params.id_item || params.sku,
           quantity: params.cantidad_planificada || params.cantidad,
-          originType: params.origen_tipo,
+          originType,
           customerReference: params.referencia_cliente || params.oc_cliente,
           finalCustomer: params.cliente_final,
           notes: params.notas || params.observaciones,
