@@ -1,3 +1,5 @@
+const { randomUUID } = require('crypto');
+
 const CONDITION_ALIASES = Object.freeze({
   DISPONIBLE: 'DISPONIBLE',
   BUENA: 'DISPONIBLE',
@@ -9,6 +11,10 @@ const CONDITION_ALIASES = Object.freeze({
   DESECHADA: 'PENDIENTE_DISPOSICION',
   PENDIENTE_DISPOSICION: 'PENDIENTE_DISPOSICION',
 });
+
+function newKardexEntryIds() {
+  return { id: randomUUID(), txId: randomUUID() };
+}
 
 function internalReceptionLot(receptionId, itemId, distributionIndex = 0) {
   const reception = Number(receptionId);
@@ -82,4 +88,4 @@ function inputError(message) {
   return error;
 }
 
-module.exports = { internalReceptionLot, normalizeReceptionDistributions };
+module.exports = { internalReceptionLot, newKardexEntryIds, normalizeReceptionDistributions };

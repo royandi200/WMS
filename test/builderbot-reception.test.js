@@ -16,6 +16,7 @@ const {
   listAvailablePurchaseOrderReceptions,
 } = require('../api/_lib/builderbot-reception');
 const { capabilityForAction } = require('../api/_lib/capabilities');
+const { newKardexEntryIds } = require('../api/_lib/reception-distributions');
 
 test('WhatsApp purchase order and reception require an exact explicit confirmation', () => {
   assert.equal(explicitPurchaseOrderConfirmation(
@@ -154,6 +155,17 @@ test('WhatsApp receipt draft is canonical, actor-bound and integrity checked', (
   );
   const optionalFields = canonicalJson({ lote: undefined, fecha_venc: null, cantidad: 12 });
   assert.deepEqual(JSON.parse(optionalFields), { cantidad: 12, fecha_venc: null });
+});
+
+test('multi-item reception assigns a unique tx id to every kardex row', () => {
+  const entries = Array.from({ length: 100 }, () => newKardexEntryIds());
+  assert.equal(new Set(entries.map(entry => entry.id)).size, 100);
+  assert.equal(new Set(entries.map(entry => entry.txId)).size, 100);
+  assert.equal(entries.every(entry => entry.id !== entry.txId), true);
+
+  const source = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
+  assert.equal((source.match(/const kardexIds = newKardexEntryIds\(\);/gu) || []).length, 2);
+  assert.doesNotMatch(source, /\[crypto\.randomUUID\(\), receptionTxId,/u);
 });
 
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {

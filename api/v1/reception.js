@@ -4,7 +4,11 @@ const { createConnection, query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { pushCompraToSiigo } = require('../_lib/siigo.purchases');
-const { internalReceptionLot, normalizeReceptionDistributions } = require('../_lib/reception-distributions');
+const {
+  internalReceptionLot,
+  newKardexEntryIds,
+  normalizeReceptionDistributions,
+} = require('../_lib/reception-distributions');
 const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
 const { workflowFlags } = require('../_lib/feature-flags');
 const { PRODUCT_MODES } = require('../_lib/product-modes');
@@ -226,14 +230,15 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
       );
       const balanceAfter = Number((Number(availableBalances.get(entry.lot) || 0) + entry.quantity).toFixed(4));
       availableBalances.set(entry.lot, balanceAfter);
+      const kardexIds = newKardexEntryIds();
       await conn.execute(
         `INSERT INTO kardex
            (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
             reference, notes, approved_by, created_at)
          VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION', ?, ?, ?, ?, ?, NOW())`,
-        [crypto.randomUUID(), txId, groupedLots.get(entry.lot).id, item.producto_id,
+        [kardexIds.id, kardexIds.txId, groupedLots.get(entry.lot).id, item.producto_id,
          user.id, entry.quantity, balanceAfter, `recepcion:${reception.numero}`,
-         `Condicion ${entry.condition} | Ubicacion ${entry.locationId}`, user.id]
+         `Condicion ${entry.condition} | Ubicacion ${entry.locationId} | Operacion ${txId}`, user.id]
       );
     }
   }
@@ -522,14 +527,15 @@ async function confirmReceptionForUser({ body = {}, user }) {
           [item.producto_id, reception.bodega_id, lot, accepted, receptionId,
            receptionMovementReference(reception), user.id]
         );
+        const kardexIds = newKardexEntryIds();
         await conn.execute(
           `INSERT INTO kardex
              (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
               reference, notes, approved_by, created_at)
            VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION', ?, ?, ?, ?, ?, NOW())`,
-          [crypto.randomUUID(), receptionTxId, lotId, item.producto_id, user.id,
+          [kardexIds.id, kardexIds.txId, lotId, item.producto_id, user.id,
            accepted, accepted, `recepcion:${reception.numero}`,
-           `Recepcion simple | Lote ${lot}`, user.id]
+           `Recepcion simple | Lote ${lot} | Operacion ${receptionTxId}`, user.id]
         );
       }
 

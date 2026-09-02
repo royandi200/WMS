@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Kardex multiitem en recepciones
+
+- Cada asiento de kardex de una recepcion recibe su propio `tx_id`, respetando `uq_kardex_tx` cuando una OC contiene varios productos o distribuciones.
+- Los asientos mantienen la misma referencia `recepcion:REC-...` y registran el identificador comun de operacion en notas para conservar agrupacion y auditoria.
+- El error de clave duplicada revierte la transaccion completa; la recepcion demo permanecio en borrador sin lotes ni kardex parciales.
+
 ### 2026-09-01 - Borrador fisico persistente de recepcion
 
 - La vista previa validada se guarda durante 24 horas en `recepcion_confirmacion_borradores`, asociada a OC, recepcion y usuario.
