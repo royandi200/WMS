@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Recepcion por ID sin dictar codigo REC
+
+- El operario ya no necesita recordar o dictar el codigo tecnico `REC-...` para confirmar una recepcion.
+- Con el ID corto de la OC, la API resuelve el unico borrador activo; si encuentra mas de uno, falla cerrado y solicita el codigo para desambiguar.
+- La recepcion sigue exigiendo todos los datos fisicos, resumen previo y confirmacion explicita antes de modificar inventario.
+
 ### 2026-09-01 - Confirmacion natural y explicita de recepciones
 
 - BuilderBot acepta variantes equivalentes como `Confirmo la recepcion de ID 5`, manteniendo obligatorio el tipo de operacion y el identificador correcto.

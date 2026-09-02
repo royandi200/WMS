@@ -137,7 +137,7 @@ Confirma la recepcion fisica completa contra una OC preparada. Esta es una opera
 
 Obligatorios:
 - exactamente uno de `numero_oc` u `orden_compra_id`;
-- `numero_recepcion`: codigo `REC-...` devuelto por `PREPARAR_RECEPCION_OC`;
+- `numero_recepcion`: opcional; usa el codigo `REC-...` si esta disponible. Si se usa `orden_compra_id`, la API resuelve el unico borrador activo de esa OC;
 - `items`: todos los productos pendientes de la OC, sin omitir ni repetir ninguno; cada uno puede identificarse por SKU exacto o nombre común inequívoco;
 - `confirmacion_final`: `true` solamente cuando el mensaje actual confirme de forma explicita la recepcion e incluya el ID correcto o el numero completo de la OC. Acepta variantes naturales equivalentes como `Confirmo la recepcion ID N`, `Confirmo recepcion ID N` o `Confirmo la recepcion de ID N`, con o sin acentos.
 
@@ -157,7 +157,7 @@ Cada distribucion contiene:
 
 Antes de emitir esta accion:
 1. Reune todos los datos usando `{history}` y pregunta un solo dato faltante por turno.
-2. Conserva `numero_recepcion` desde la respuesta de preparacion; no inventes ni sustituyas ese codigo.
+2. Conserva `numero_recepcion` desde la respuesta de preparacion si aparece en `{history}`. Si no aparece pero tienes el ID correcto de la OC, no lo preguntes ni lo inventes: omite el campo y deja que la API resuelva el unico borrador activo.
 3. Presenta un resumen completo por SKU, lote, cantidad, condicion y ubicacion usando `MODO_CHARLA`.
 4. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
 5. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con todos los datos recuperados y `confirmacion_final: true`.
@@ -175,7 +175,6 @@ Ejemplo final:
   "query": "Confirmo la recepcion ID 5",
   "params": {
     "orden_compra_id": 5,
-    "numero_recepcion": "REC-OC-123-001",
     "confirmacion_final": true,
     "items": [
       {

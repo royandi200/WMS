@@ -312,11 +312,25 @@ function receptionConfirmationKey(orderId, receptionId, params = {}) {
   return `WA:${hash}`;
 }
 
-async function findPreparedReception(db, orderId, params = {}) {
+async function findPreparedReception(db, orderId, params = {}, options = {}) {
   const id = Number(params.recepcion_id || params.reception_id || 0) || null;
   const number = String(params.numero_recepcion || params.recepcion || '').trim();
   if (!id && !number) {
-    throw inputError('Prepara primero la recepcion e indica su numero REC-', 409);
+    const [active] = await db.execute(
+      `SELECT id, numero, estado FROM recepciones
+        WHERE orden_compra_id = ? AND estado IN ('borrador', 'en_proceso')
+        ORDER BY id DESC LIMIT 2`,
+      [orderId]
+    );
+    if (active.length === 1) return active[0];
+    if (active.length > 1) {
+      throw inputError('Hay varias recepciones activas para la OC; indica el numero REC-', 409);
+    }
+    if (options.allowCompleted) {
+      const completed = await findCompletedReception(db, orderId);
+      if (completed) return completed;
+    }
+    throw inputError('Prepara primero la recepcion de la OC', 409);
   }
   const [rows] = id
     ? await db.execute(
@@ -424,7 +438,9 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       409
     );
   }
-  const requestedReception = await findPreparedReception(db, order.id, params);
+  const requestedReception = await findPreparedReception(db, order.id, params, {
+    allowCompleted: order.estado === 'CERRADA',
+  });
   if (requestedReception.estado === 'completada') {
     return {
       recepcion_id: requestedReception.id,

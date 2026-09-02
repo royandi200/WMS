@@ -8,6 +8,7 @@ const {
   explicitPurchaseOrderConfirmation,
   receptionConfirmationKey,
   buildConfirmationItems,
+  findPreparedReception,
   listAvailablePurchaseOrderReceptions,
 } = require('../api/_lib/builderbot-reception');
 const { capabilityForAction } = require('../api/_lib/capabilities');
@@ -71,6 +72,33 @@ test('WhatsApp reception confirmation key is stable across harmless ordering cha
   assert.notEqual(receptionConfirmationKey(7, 70, first), receptionConfirmationKey(7, 71, reordered));
   reordered.items[1].distribuciones[0].quantity = 1;
   assert.notEqual(receptionConfirmationKey(7, 70, first), receptionConfirmationKey(7, 70, reordered));
+});
+
+test('WhatsApp resolves the only active receipt without asking for its REC code', async () => {
+  const db = {
+    execute: async (sql, params) => {
+      assert.match(sql, /estado IN \('borrador', 'en_proceso'\)/u);
+      assert.deepEqual(params, [5]);
+      return [[{ id: 60, numero: 'REC-OC-5-001', estado: 'borrador' }]];
+    },
+  };
+  assert.deepEqual(
+    await findPreparedReception(db, 5, {}),
+    { id: 60, numero: 'REC-OC-5-001', estado: 'borrador' }
+  );
+});
+
+test('WhatsApp fails closed when an OC has multiple active receipts', async () => {
+  const db = {
+    execute: async () => [[
+      { id: 61, numero: 'REC-OC-5-002', estado: 'borrador' },
+      { id: 60, numero: 'REC-OC-5-001', estado: 'borrador' },
+    ]],
+  };
+  await assert.rejects(
+    findPreparedReception(db, 5, {}),
+    /varias recepciones activas/u
+  );
 });
 
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {
@@ -153,6 +181,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /Confirmo la recepcion ID N/u);
   assert.match(prompt, /Confirmo la recepcion de ID N/u);
   assert.match(prompt, /No aceptes confirmaciones vagas/u);
+  assert.match(prompt, /no lo preguntes ni lo inventes/u);
   assert.match(prompt, /todos los productos pendientes/u);
   assert.match(prompt, /el WMS creara una partida interna/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);

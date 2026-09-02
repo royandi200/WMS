@@ -70,7 +70,7 @@ Flujo principal:
 4. `CONSULTAR_RECEPCIONES_PENDIENTES` lista las OC aptas con saldo, número completo e ID corto estable; es de solo lectura.
 5. `PREPARAR_RECEPCION_OC` acepta ese ID y crea o reutiliza un borrador con el saldo pendiente por SKU y unidad.
 6. Nelly registra todos los productos por cantidad, ubicacion y condicion. Puede usar el SKU o un alias inequivoco. El lote del proveedor es obligatorio solo cuando `productos.requiere_lote = 1`; para los demas es opcional y, si se omite, el WMS crea una partida interna trazable.
-7. `CONFIRMAR_RECEPCION_OC` exige el borrador `REC-...`, un resumen previo y la frase exacta con el numero o ID corto de la OC. Solo entonces ejecuta la misma transaccion usada por el dashboard.
+7. `CONFIRMAR_RECEPCION_OC` usa el borrador `REC-...` cuando el agente lo conserva; con el ID corto de la OC, la API puede resolver el unico borrador activo sin obligar al operario a dictar ese codigo tecnico. Si hay ambiguedad, falla cerrado. Un resumen previo y una confirmacion explicita siguen siendo obligatorios.
 8. Solo `DISPONIBLE` crea stock utilizable. Cuarentena, rechazo y disposicion permanecen trazables sin sumar inventario disponible.
 9. Una recepcion parcial deja la OC abierta y la siguiente entrega recibe un nuevo `REC-...`. La identidad canonica de la confirmacion impide que un reintento ingrese inventario dos veces.
 
