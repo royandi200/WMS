@@ -230,6 +230,7 @@ test('proactive notifications exclude the actor and deduplicate phones', () => {
 test('production start and close emit stable notification events', () => {
   const startSource = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'production-workflow.js'), 'utf8');
   const closeSource = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'production-close.js'), 'utf8');
+  assert.match(startSource, /production_released:\$\{created\.insertId\}[\s\S]*excludeUserIds: \[userId\]/u);
   assert.match(startSource, /production_started:\$\{order\.id\}/u);
   assert.match(startSource, /roles: \['admin', 'recepcion_cierre'\]/u);
   assert.match(startSource, /excludeUserIds: \[userId\]/u);

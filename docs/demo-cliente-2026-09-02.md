@@ -109,18 +109,25 @@ Prerequisito: Datana en `recepcion_cierre`.
 6. Repetir la confirmacion. No debe duplicar stock ni Kardex.
 7. Mostrar OC, PDF, recepcion, diferencias y movimientos.
 
+Punto para decidir con el cliente: despues de preparar la recepcion, definir si Nelly debe validar y declarar cada SKU con su cantidad, condicion y ubicacion, o si una recepcion completa y sin diferencias puede confirmarse directamente con `Confirmo la recepcion ID 4`. Recomendacion para el demo: mostrar el resumen detallado antes de confirmar y explicar que la confirmacion abreviada solo deberia aplicar cuando todo coincide; cualquier diferencia, cuarentena o rechazo exigiria el detalle por item.
+
 El vencimiento corto es sintetico y deliberado: permite demostrar FEFO y que el PT hereda el vencimiento de las gomas consumidas.
 
+Resultado del ensayo: recepcion `REC-OC-4-001` completada sin diferencias y con seis entradas de Kardex. El lote de gomas quedo como `BEMO-GOMAS-E2E-001` por una transcripcion de voz y fue visible en el resumen confirmado por el usuario. Para el resto de esta corrida se conserva ese identificador real. El caso demuestra que los lotes deben cotejarse visualmente y no depender solo del audio.
+
 ### 2. Liberar e iniciar produccion
+
+Antes de liberar la OP, cambiar Datana de `recepcion_cierre` a `alistador` y verificar que exista exactamente un usuario activo con ese rol. Si no hay alistador, el sistema usa `admin` como respaldo y el administrador que libera puede recibir tanto su respuesta directa como el aviso operativo.
 
 1. Juan dice: `Vamos a producir tres tarros de ashwagandha 60`.
 2. El agente debe preguntar el destino antes de crear la orden.
 3. Responder: `Para stock de seguridad`.
 4. Verificar SKU y nombre, cantidad interpretada 3 und, destino, BOM, FEFO, ubicaciones, ID corto y codigo OP.
 5. Confirmar que Datana recibe el mensaje de alistamiento.
-6. Cambiar Datana a `alistador`.
-7. Datana dice: `Ya aliste los materiales de la orden ID <ID_OP>`.
-8. Verificar `EN_PROCESO` y un solo descuento de cada material.
+
+Resultado del ensayo: la OP `OP-20260902-000068` se creo una sola vez y quedo `APROBADA`, con materiales reservados. Juan recibio dos mensajes porque Datana aun tenia rol `recepcion_cierre`: uno fue la respuesta directa y otro la notificacion del alistador enviada al `admin` de respaldo. Datana se cambio a `alistador` antes de continuar. No hubo doble ejecucion de la orden.
+6. Datana dice: `Ya aliste los materiales de la orden ID <ID_OP>`.
+7. Verificar `EN_PROCESO` y un solo descuento de cada material.
 
 | Evento | Destinatario | Contenido esperado |
 |---|---|---|
@@ -273,6 +280,12 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 - La trazabilidad termina en el cliente final.
 
 ## Preguntas para el cliente
+
+### Recepciones
+
+1. Cuando todo lo recibido coincide con la OC, ¿prefieren confirmar directamente el resumen preparado o volver a declarar cada SKU, cantidad y ubicacion?
+2. ¿La validacion detallada debe ser obligatoria solamente cuando existan diferencias, productos en cuarentena, rechazos o varias ubicaciones?
+3. ¿Como capturan normalmente el lote del proveedor: PDF, etiqueta, codigo de barras, fotografia o digitacion? La voz puede usarse como apoyo, pero el ensayo mostro que un solo caracter mal transcrito puede alterar la trazabilidad.
 
 ### Produccion propia
 

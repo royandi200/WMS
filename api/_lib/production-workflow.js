@@ -160,6 +160,7 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
     result.notification = await notifyRoles({
       event: `production_released:${created.insertId}`,
       roles: ['alistador'],
+      excludeUserIds: [userId],
       text: [
         `Orden ${code} liberada`,
         `${finalProduct.siigo_code} - ${finalProduct.nombre}: ${qty} und`,
