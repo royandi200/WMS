@@ -68,6 +68,22 @@ function argument(name) {
   return String(process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) || '').trim();
 }
 
+function normalizeRun(value) {
+  const run = String(value || '').trim().toUpperCase();
+  if (!run) return '';
+  if (!/^[A-Z0-9][A-Z0-9-]{2,29}$/u.test(run)) throw new Error('El identificador de corrida no es valido');
+  return run;
+}
+
+function scenarioForRun(name, run) {
+  const scenario = { ...SCENARIOS[name] };
+  if (!run) return scenario;
+  const kind = name === 'own' ? 'PR' : name === 'io' ? 'IO' : '3Q';
+  scenario.invoiceId = `DEMO-INVOICE-${run}-${kind}-001`;
+  scenario.invoiceName = `FV-DEMO-${run}-${kind}-001`;
+  return scenario;
+}
+
 async function inspect(conn, scenario) {
   const [users] = await conn.execute(
     `SELECT u.id, u.nombre, u.telefono, LOWER(r.nombre) AS rol
@@ -118,8 +134,9 @@ async function inspect(conn, scenario) {
 
 async function main() {
   const scenarioName = argument('scenario').toLowerCase();
-  const scenario = SCENARIOS[scenarioName];
-  if (!scenario) throw new Error(`Usa --scenario=${Object.keys(SCENARIOS).join('|')}`);
+  if (!SCENARIOS[scenarioName]) throw new Error(`Usa --scenario=${Object.keys(SCENARIOS).join('|')}`);
+  const run = normalizeRun(argument('run'));
+  const scenario = scenarioForRun(scenarioName, run);
   const apply = process.argv.includes(APPLY_FLAG);
   if (apply && !process.argv.includes(CONFIRM_FLAG)) {
     throw new Error(`Para aplicar usa ${APPLY_FLAG} ${CONFIRM_FLAG}`);
@@ -133,7 +150,7 @@ async function main() {
       throw new Error(`Stock insuficiente para ${scenario.sku}: requiere ${scenario.quantity}, disponible ${before.available}`);
     }
     if (!apply) {
-      console.log(JSON.stringify({ ok: true, mode: 'dry-run', scenario: scenarioName, fixture: scenario, before }, null, 2));
+      console.log(JSON.stringify({ ok: true, mode: 'dry-run', run: run || null, scenario: scenarioName, fixture: scenario, before }, null, 2));
       return;
     }
     const { importInvoice } = require('../../api/_lib/siigo.invoice-import');
@@ -157,6 +174,7 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       mode: 'applied',
+      run: run || null,
       scenario: scenarioName,
       notifications_enabled: process.argv.includes('--notify'),
       result,

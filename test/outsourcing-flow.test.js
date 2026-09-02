@@ -14,6 +14,7 @@ const {
   outsourcingStateForReceipt,
 } = require('../api/_lib/outsourcing-domain');
 const { CAPABILITIES, hasCapability } = require('../api/_lib/capabilities');
+const { buildPurchaseOrderPdf } = require('../scripts/qa/demo-pdf');
 
 function pdfPayload(content = '%PDF-1.7\n%%EOF') {
   return {
@@ -45,6 +46,23 @@ test('purchase order PDF rejects disguised and oversized files', () => {
     () => normalizePurchaseOrderPdf({ documento_pdf: { nombre: 'oc.pdf', mime_type: 'application/pdf', base64: oversized.toString('base64') } }),
     /supera el limite/u
   );
+});
+
+test('repeatable demo PDF is deterministic and preserves its visible order identity', () => {
+  const input = {
+    number: 'DEMO-CLIENTE-OC-3Q',
+    supplier: '3Q - PROVEEDOR DEMO',
+    date: '2026-09-03',
+    title: 'ORDEN DE COMPRA - MAQUILA 3Q',
+    purpose: 'Producto terminado esperado desde maquila externa',
+    items: [{ sku: '00105-PTBOS60', description: 'PRODUCTO TERMINADO BOOSTER X 60', quantity: 4, unit: 'und' }],
+  };
+  const first = buildPurchaseOrderPdf(input);
+  const second = buildPurchaseOrderPdf(input);
+  assert.deepEqual(first, second);
+  assert.equal(first.subarray(0, 5).toString('ascii'), '%PDF-');
+  assert.match(first.toString('ascii'), /DEMO-CLIENTE-OC-3Q/u);
+  assert.match(first.toString('ascii'), /00105-PTBOS60/u);
 });
 
 test('download names cannot inject headers or paths', () => {

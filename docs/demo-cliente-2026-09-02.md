@@ -21,9 +21,9 @@ El WMS controla lo que ocurre fisicamente en la bodega. La OC define lo esperado
 | Administrador | Juan, linea `3174442659`, rol `admin`. |
 | Linea operativa | Datana, linea `3125031367`; su rol rota durante la demo. |
 | Linea del agente | `573173292904`. |
-| OC de insumos | ID `4`, `DEMO-20260902-OC-INSUMOS`, abierta y con PDF. |
-| OC In-and-out | ID `6`, `DEMO-20260902-DOC-IO-001`, abierta y con PDF. |
-| OC de 3Q | ID `7`, `DEMO-20260902-OC-3Q-001`, abierta y con PDF. |
+| OC de insumos del ensayo | ID `4`, `DEMO-20260902-OC-INSUMOS`, abierta y con PDF. |
+| OC In-and-out del ensayo | ID `6`, `DEMO-20260902-DOC-IO-001`, abierta y con PDF. |
+| OC de 3Q del ensayo | ID `7`, `DEMO-20260902-OC-3Q-001`, abierta y con PDF. |
 | PDF 3Q | `output/pdf/DEMO-20260902-OC-3Q-001.pdf`. |
 | Produccion propia | `00102-PTASH60`, Ashwagandha x 60, objetivo 3 und. |
 | In-and-out | `00276-PTZNASHWA`, Zenova Ashwagandha, recepcion de 5 und. |
@@ -32,6 +32,40 @@ El WMS controla lo que ocurre fisicamente en la bodega. La OC define lo esperado
 | Siigo | Fuera de la demo. Los despachos nacen de facturas sinteticas locales procesadas por el importador determinista. |
 
 La OC ID 4 debe recibirse primero. Aporta, entre otros, 10 etiquetas Booster `00018-ETBOS60`, cuyo saldo disponible inicial es cero.
+
+## Corridas independientes
+
+No se borran ni revierten movimientos para repetir la demo. Hay dos juegos documentales independientes:
+
+| Uso | Insumos | In-and-out | Maquila 3Q |
+|---|---|---|---|
+| Ensayo actual | ID `4` / `DEMO-20260902-OC-INSUMOS` | ID `6` / `DEMO-20260902-DOC-IO-001` | ID `7` / `DEMO-20260902-OC-3Q-001` |
+| Presentacion al cliente | ID `8` / `DEMO-CLIENTE-OC-INSUMOS` | ID `9` / `DEMO-CLIENTE-OC-IO` | ID `10` / `DEMO-CLIENTE-OC-3Q` |
+
+Durante el ensayo se usan exclusivamente ID `4`, `6` y `7`. Los ID `8`, `9` y `10` quedan intactos para la presentacion.
+
+Valores que cambian en la corrida del cliente:
+
+| Dato | Ensayo | Cliente |
+|---|---|---|
+| Lote de gomas recibido | `DEMO-GOMAS-E2E-001` | `DEMO-CLIENTE-GOMAS-001` |
+| Vencimiento de gomas | `2026-09-15` | `2026-09-14` |
+| Lote IO | `DEMO-IO-ZENOVA-001` | `DEMO-CLIENTE-IO-ZENOVA-001` |
+| Vencimiento IO | `2027-11-30` | `2027-11-29` |
+| Lotes 3Q | `3Q-DEMO-BOOSTER-A/B` | `3Q-CLIENTE-BOOSTER-A/B` |
+| Vencimiento PT 3Q | `2027-12-31` | `2027-12-30` |
+| Facturas sinteticas | Sin `--run` | Agregar `--run=CLIENTE` |
+
+Las fechas de la corrida del cliente son anteriores a las del ensayo, pero siguen vigentes. Esto hace que FEFO seleccione los lotes de la presentacion y no remanentes del ensayo.
+
+Para crear una nueva corrida futura sin tocar las anteriores:
+
+```powershell
+node scripts\qa\prepare-repeatable-demo.js --run=NUEVA-CORRIDA --date=2026-09-03
+node scripts\qa\prepare-repeatable-demo.js --run=NUEVA-CORRIDA --date=2026-09-03 --apply --yes-i-understand-this-creates-demo-purchase-orders
+```
+
+El primer comando es un dry-run. El segundo genera tres PDF y tres OC. Repetir exactamente el segundo comando devuelve los mismos registros y no los duplica. `--refresh-unused` solo puede regenerar un fixture mientras siga `CARGADA` y no tenga recepciones ni ordenes 3Q.
 
 ## Orden y roles
 
@@ -276,6 +310,7 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 4. Verificar las tres OC y las modalidades `Compra directa` / `Producto desde 3Q`.
 5. Confirmar que aun no existen `FV-DEMO-PR-001`, `FV-DEMO-IO-001` ni `FV-DEMO-3Q-001`.
 6. Abrir las paginas requeridas y conservar la OP 67 como respaldo visual.
+7. Antes de la presentacion, confirmar que ID `8`, `9` y `10` siguen `CARGADA` y sin recepciones ni ordenes 3Q.
 
 ## Contingencia
 

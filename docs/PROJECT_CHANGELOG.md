@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Demo repetible sin revertir trazabilidad
+
+- El ensayo y la presentacion usan juegos separados de OC, PDF, lotes y facturas sinteticas.
+- `prepare-repeatable-demo.js` genera tres documentos y crea las OC de una corrida mediante un identificador estable; repetir el comando no duplica registros.
+- La corrida reservada `CLIENTE` quedo en OC ID `8`, `9` y `10`, todas `CARGADA`, con PDF y sin movimientos de inventario.
+- Las fechas de lote de la presentacion se diferencian de las del ensayo para mantener una seleccion FEFO verificable.
+- Un fixture solo puede refrescarse mientras no tenga recepciones ni ordenes 3Q; cualquier uso operativo bloquea la actualizacion.
+
 ### 2026-09-02 - Recepcion fisica desde orden de maquila 3Q
 
 - `Recepciones > Confirmar recepcion` separa `Compra directa` de `Producto desde 3Q`.
