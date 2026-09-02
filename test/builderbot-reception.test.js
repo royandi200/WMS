@@ -168,6 +168,14 @@ test('multi-item reception assigns a unique tx id to every kardex row', () => {
   assert.doesNotMatch(source, /\[crypto\.randomUUID\(\), receptionTxId,/u);
 });
 
+test('receipt distributions use a transactional engine with foreign keys', () => {
+  const baseSchema = fs.readFileSync(path.join(__dirname, '../database/08_warehouse_workflows.sql'), 'utf8');
+  const migration = fs.readFileSync(path.join(__dirname, '../database/24_reception_distributions_atomicity.sql'), 'utf8');
+  assert.match(baseSchema, /CREATE TABLE IF NOT EXISTS recepcion_distribuciones[\s\S]+ENGINE=InnoDB;/u);
+  assert.match(migration, /ALTER TABLE recepcion_distribuciones ENGINE=InnoDB;/u);
+  assert.equal((migration.match(/FOREIGN KEY/gu) || []).length, 4);
+});
+
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {
   const db = {
     async execute(sql, values) {

@@ -32,6 +32,8 @@
     "data:reception-confirmation:apply": "node scripts/apply-reception-confirmation-idempotency-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:reception-drafts:dry-run": "node scripts/apply-reception-confirmation-drafts-migration.js",
     "data:reception-drafts:apply": "node scripts/apply-reception-confirmation-drafts-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:reception-atomicity:dry-run": "node scripts/apply-reception-distributions-atomicity-migration.js",
+    "data:reception-atomicity:apply": "node scripts/apply-reception-distributions-atomicity-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:product-aliases:dry-run": "node scripts/apply-product-aliases-migration.js",
     "data:product-aliases:apply": "node scripts/apply-product-aliases-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"

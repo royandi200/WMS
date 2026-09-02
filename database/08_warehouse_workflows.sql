@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS recepcion_distribuciones (
   FOREIGN KEY (recepcion_item_id) REFERENCES recepcion_items(id),
   FOREIGN KEY (ubicacion_id) REFERENCES ubicaciones(id),
   FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
-);
+) ENGINE=InnoDB;
 
 ALTER TABLE lots MODIFY COLUMN status
   ENUM('DISPONIBLE','CUARENTENA','COMPROMETIDO','DESPACHADO','AGOTADO','RECHAZADO','PENDIENTE_DISPOSICION')

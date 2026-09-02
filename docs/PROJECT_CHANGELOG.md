@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Atomicidad de distribuciones de recepcion
+
+- `recepcion_distribuciones` se migra de MyISAM a InnoDB para que sus filas obedezcan el mismo commit o rollback que lotes, stock, movimientos y kardex.
+- Se restauran las cuatro claves foraneas declaradas por el esquema original y se bloquea la migracion si existen relaciones huerfanas.
+- El esquema base declara explicitamente InnoDB para evitar que una instalacion herede el motor predeterminado del servidor.
+
 ### 2026-09-01 - Kardex multiitem en recepciones
 
 - Cada asiento de kardex de una recepcion recibe su propio `tx_id`, respetando `uq_kardex_tx` cuando una OC contiene varios productos o distribuciones.
