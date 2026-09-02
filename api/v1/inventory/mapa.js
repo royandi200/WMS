@@ -3,6 +3,8 @@
 // con el stock actual por ubicación (JOIN con tabla stock)
 const { query }                = require('../../_lib/db')
 const { cors, requireAuth }    = require('../../_lib/auth')
+const { assignmentsByLocation, manifestAssignments } = require('../../_lib/warehouse-map')
+const warehouseManifest       = require('../../../database/warehouse_positions_master.json')
 
 module.exports = async (req, res) => {
   cors(res, 'GET')
@@ -66,6 +68,31 @@ module.exports = async (req, res) => {
       }
     }
 
+    const documented = manifestAssignments(warehouseManifest)
+    const catalogCodes = [...new Set(documented.map(item => item.catalogSku))]
+    const catalogProducts = catalogCodes.length ? await query(`
+      SELECT id, siigo_code, nombre, modalidad_operativa, activo
+      FROM productos
+      WHERE siigo_code IN (${catalogCodes.map(() => '?').join(',')})
+    `, catalogCodes) : []
+    let linkedAssignments = []
+    try {
+      linkedAssignments = await query(`
+        SELECT u.codigo AS ubicacion_codigo, p.siigo_code
+        FROM producto_ubicaciones pu
+        JOIN ubicaciones u ON u.id = pu.ubicacion_id
+        JOIN productos p ON p.id = pu.producto_id
+        WHERE pu.activa = 1
+      `)
+    } catch (error) {
+      if (error?.code !== 'ER_NO_SUCH_TABLE') throw error
+    }
+    const assignmentMap = assignmentsByLocation({
+      manifest: warehouseManifest,
+      catalogProducts,
+      linkedAssignments,
+    })
+
     // Ensamblar respuesta
     const result = ubicaciones.map(u => {
       const stock  = stockMap[u.id]
@@ -88,6 +115,12 @@ module.exports = async (req, res) => {
         cantidad_total: stock?.cantidad_total || 0,
         num_productos:  stock?.num_productos  || 0,
         items:          stock?.items          || [],
+        asignaciones:   u.bodega_codigo === warehouseManifest.warehouse_code
+          ? assignmentMap.get(u.codigo) || []
+          : [],
+        uso_reservado:  u.bodega_codigo === warehouseManifest.warehouse_code
+          ? warehouseManifest.reserved_locations?.[u.codigo] || null
+          : null,
       }
     })
 

@@ -93,9 +93,9 @@
     "D19": "VACIO PARA IN AND OUTS"
   },
   "known_issues": [
-    "D7 no aparece en el documento y no se crea por inferencia.",
-    "D8 aparece dos veces con el mismo SKU; se conserva una sola posicion D8.",
-    "00276-PTZNASHWAB se normaliza explicitamente al SKU maestro unico 00276-PTZNASHWA.",
-    "Las referencias inexistentes o inactivas no se asignan automaticamente."
+    "D7 no esta documentada y por eso no forma parte del mapa.",
+    "Las dos apariciones de D8 se consolidan bajo el mismo codigo operativo D8.",
+    "00276-PTZNASHWAB se relaciona con 00276-PTZNASHWA para conservar el nombre del catalogo.",
+    "Las referencias sin producto activo se muestran en el mapa como asignaciones documentales."
   ]
 }

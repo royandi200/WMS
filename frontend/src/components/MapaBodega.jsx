@@ -40,7 +40,7 @@ const apiFetch = (path, opts={}) =>
 // ══════════════════════════════════════════════════════════════════════════════
 // VISTA 1 — PLANO DE PLANTA (vista pájaro)
 // ══════════════════════════════════════════════════════════════════════════════
-function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
+function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
   const canvasRef   = useRef(null)
   const dragging    = useRef(null)
   const [zones,     setZones]     = useState({})   // { zoneName: {x,y,w,h} }
@@ -48,7 +48,7 @@ function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
   const [newZone,   setNewZone]   = useState('')
   const [editMode,  setEditMode]  = useState(false)
   const [saving,    setSaving]    = useState(false)
-  const STORAGE_KEY = 'wms_plano_zonas'
+  const STORAGE_KEY = `wms_plano_zonas_${warehouseCode || 'default'}`
 
   // Calcular zonas únicas con posiciones
   const zonaNames = useMemo(() => [...new Set(ubicaciones.map(u=>u.zona))].sort(), [ubicaciones])
@@ -65,7 +65,7 @@ function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
       }
     })
     setZones(z)
-  }, [zonaNames])
+  }, [zonaNames, STORAGE_KEY])
 
   // Drag zona
   const startDrag = useCallback((e, name) => {
@@ -192,6 +192,7 @@ function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
           const ok    = cells.filter(u=>u.estado==='ok').length
           const bajo  = cells.filter(u=>u.estado==='bajo').length
           const vacio = cells.filter(u=>u.estado==='vacio').length
+          const assigned = cells.filter(u=>(u.asignaciones?.length || u.uso_reservado)).length
 
           return (
             <div key={name}
@@ -229,6 +230,7 @@ function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
                       {ok>0    && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/><span className="text-[9px] text-muted">{ok} ok</span></div>}
                       {bajo>0  && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-orange-400"/><span className="text-[9px] text-muted">{bajo} bajo</span></div>}
                       {vacio>0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-border"/><span className="text-[9px] text-muted">{vacio} vacía</span></div>}
+                      {assigned>0 && <div className="flex items-center gap-1"><Package size={8} className="text-primary"/><span className="text-[9px] text-muted">{assigned} asignadas</span></div>}
                     </div>
                   </>
                 )}
@@ -261,6 +263,7 @@ function PlanoPajaro({ ubicaciones, bodegas, onZoneClick, onRefresh }) {
             <span className="text-[10px] text-muted">{l}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1.5"><Package size={10} className="text-primary"/><span className="text-[10px] text-muted">Asignación prevista</span></div>
       </div>
     </div>
   )
@@ -452,7 +455,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
             ) : (
               <div className="p-4 space-y-2">
                 {niveles.map(niv => {
-                  const cells = (pasillos[activePasillo]?.[niv] || []).sort((a,b)=>a.posicion?.localeCompare(b.posicion||'')||0)
+                  const cells = (pasillos[activePasillo]?.[niv] || []).sort((a,b)=>String(a.posicion||'').localeCompare(String(b.posicion||''), 'es', { numeric:true }))
                   return (
                     <div key={niv} className="flex items-center gap-2">
                       {/* Etiqueta nivel */}
@@ -482,6 +485,9 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
                                 <span className="text-[8px] tabular-nums" style={{color:e.dot}}>
                                   {u.cantidad_total>=1000?(u.cantidad_total/1000).toFixed(1)+'k':Math.round(u.cantidad_total)}
                                 </span>
+                              )}
+                              {(u.asignaciones?.length > 0 || u.uso_reservado) && (
+                                <Package size={9} className="absolute right-1 top-1 text-primary"/>
                               )}
                             </button>
                           )
@@ -531,8 +537,27 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
               ))}
             </div>
 
+            {(selected.asignaciones?.length > 0 || selected.uso_reservado) && (
+              <div className="border-b border-border/50 px-4 py-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <Package size={12} className="text-primary"/>
+                  <p className="text-[10px] font-semibold uppercase text-muted">Asignacion prevista</p>
+                </div>
+                {selected.uso_reservado && <p className="mb-2 text-xs font-medium text-primary">{selected.uso_reservado}</p>}
+                <div className="max-h-40 space-y-2 overflow-y-auto">
+                  {(selected.asignaciones || []).map((item, index) => (
+                    <div key={`${item.sku}-${index}`} className="min-w-0">
+                      <p className="truncate font-mono text-xs text-foreground">{item.sku}</p>
+                      <p className="truncate text-[10px] text-muted">{item.nombre}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Items de stock */}
             <div className="max-h-48 overflow-y-auto">
+              <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock fisico</p>
               {selected.items.length === 0 ? (
                 <div className="flex flex-col items-center py-6 gap-1">
                   <Box size={18} className="text-muted opacity-30"/>
@@ -579,25 +604,50 @@ export default function MapaBodega() {
   const { mapa, loadingMapa, fetchMapa } = useInventoryStore()
   const [view,       setView]      = useState('plano')   // 'plano' | 'estantes'
   const [activeZona, setActiveZona] = useState(null)
+  const [activeWarehouseId, setActiveWarehouseId] = useState(null)
 
   useEffect(() => { fetchMapa() }, [])
 
   const ubicaciones = mapa?.ubicaciones ?? []
   const bodegas     = mapa?.bodegas     ?? []
 
+  useEffect(() => {
+    if (!bodegas.length) return
+    const preferred = bodegas.find(bodega => bodega.codigo === 'BG-PPAL') || bodegas[0]
+    if (!bodegas.some(bodega => Number(bodega.id) === Number(activeWarehouseId))) {
+      setActiveWarehouseId(preferred.id)
+    }
+  }, [bodegas, activeWarehouseId])
+
+  const activeWarehouse = bodegas.find(bodega => Number(bodega.id) === Number(activeWarehouseId))
+  const warehouseLocations = ubicaciones.filter(u => Number(u.bodega_id) === Number(activeWarehouseId))
+
   const handleZoneClick = (zona) => {
     setActiveZona(zona)
     setView('estantes')
   }
 
-  const zonaUbicaciones = ubicaciones.filter(u => u.zona === activeZona)
+  const zonaUbicaciones = warehouseLocations.filter(u => u.zona === activeZona)
 
   return (
-    <div>
+    <div className="space-y-4">
+      <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
+        {bodegas.map(bodega => (
+          <button key={bodega.id} type="button" onClick={() => {
+            setActiveWarehouseId(bodega.id)
+            setActiveZona(null)
+            setView('plano')
+          }} className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+            Number(activeWarehouseId) === Number(bodega.id)
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-foreground'
+          }`}>{bodega.nombre}</button>
+        ))}
+      </div>
       {view === 'plano' ? (
         <PlanoPajaro
-          ubicaciones={ubicaciones}
-          bodegas={bodegas}
+          ubicaciones={warehouseLocations}
+          warehouseCode={activeWarehouse?.codigo}
           onZoneClick={handleZoneClick}
           onRefresh={fetchMapa}
         />
