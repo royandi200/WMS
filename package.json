@@ -36,6 +36,8 @@
     "data:reception-atomicity:apply": "node scripts/apply-reception-distributions-atomicity-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:product-aliases:dry-run": "node scripts/apply-product-aliases-migration.js",
     "data:product-aliases:apply": "node scripts/apply-product-aliases-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:product-locations:dry-run": "node scripts/apply-product-locations-migration.js",
+    "data:product-locations:apply": "node scripts/apply-product-locations-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {

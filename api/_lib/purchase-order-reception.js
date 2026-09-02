@@ -1,4 +1,5 @@
 const { resolvePrimaryWarehouse } = require('./warehouses');
+const { addPreferredLocations } = require('./product-locations');
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -47,7 +48,7 @@ async function loadPreparedReception(conn, preparationKey) {
   );
   if (!rows.length) return null;
   const reception = rows[0];
-  const [items] = await conn.execute(
+  const [loadedItems] = await conn.execute(
     `SELECT ri.id AS item_id, ri.producto_id, p.siigo_code AS sku,
             p.nombre AS producto, p.modalidad_operativa, p.requiere_lote,
             ri.cantidad_esp AS cantidad_pendiente,
@@ -62,6 +63,7 @@ async function loadPreparedReception(conn, preparationKey) {
       ORDER BY ri.id`,
     [reception.orden_compra_id, reception.id]
   );
+  const items = await addPreferredLocations(conn, loadedItems);
   return { ...reception, items, duplicate: true };
 }
 
@@ -168,6 +170,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
       unidad: item.unidad,
     });
   }
+  const itemsWithLocations = await addPreferredLocations(conn, preparedItems);
   return {
     id: inserted.insertId,
     numero: number,
@@ -175,7 +178,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
     orden_compra_numero: order.numero,
     proveedor_nombre: order.proveedor_nombre,
     estado: 'borrador',
-    items: preparedItems,
+    items: itemsWithLocations,
     duplicate: false,
   };
 }

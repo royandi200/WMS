@@ -208,8 +208,9 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
       expected: Number(item.cantidad_pendiente || 0),
       unit: item.unidad || 'und',
       requiresLot: Boolean(item.requiere_lote),
+      suggestedLocation: item.ubicacion_sugerida || '',
       reason: '',
-      distributions: [{ condicion: 'DISPONIBLE', cantidad: item.cantidad_pendiente || '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
+      distributions: [{ condicion: 'DISPONIBLE', cantidad: item.cantidad_pendiente || '', lote: '', ubicacion_id: item.ubicacion_sugerida_id || '', fecha_venc: '', motivo: '' }],
     })))
   }
   const setDistribution = (itemIndex, distributionIndex, key, value) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
@@ -275,12 +276,17 @@ function ConfirmReceptionPanel({ purchaseOrders, locations, loading, onPrepare, 
           <div>
             <p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p>
             <p className="text-xs text-muted">Pendiente de la OC: {formatQuantity(item.expected)} {item.unit}</p>
+            {item.suggestedLocation && <p className="text-xs text-primary">Ubicacion sugerida: {item.suggestedLocation}. Puedes cambiarla si la operacion lo requiere.</p>}
             <p className="text-xs text-muted">{item.requiresLot ? 'Registra el lote informado por el proveedor.' : 'El lote del proveedor es opcional; si no existe, el WMS crea una partida interna.'}</p>
           </div>
           {item.distributions.map((distribution, distributionIndex) => (
             <div key={distributionIndex} className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-[150px_110px_minmax(150px,1fr)_minmax(170px,1fr)_140px_36px] gap-2 items-end">
-                <Field label="Condicion"><select value={distribution.condicion} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'condicion', event.target.value)} className="input-field"><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
+                <Field label="Condicion"><select value={distribution.condicion} onChange={(event) => {
+                  const condition = event.target.value
+                  setDistribution(itemIndex, distributionIndex, 'condicion', condition)
+                  if (condition !== 'DISPONIBLE') setDistribution(itemIndex, distributionIndex, 'ubicacion_id', '')
+                }} className="input-field"><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
                 <Field label="Cantidad"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
                 <Field label={item.requiresLot ? 'Lote proveedor *' : 'Lote proveedor (opcional)'}><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" required={item.requiresLot} /></Field>
                 <Field label="Ubicacion"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required={['DISPONIBLE', 'CUARENTENA'].includes(distribution.condicion)}><option value="">Sin ubicacion</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>

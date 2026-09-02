@@ -1414,7 +1414,7 @@ module.exports = async (req, res) => {
           break;
         }
         const pending = prepared.reception.items.map(item =>
-          `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}${item.requiere_lote ? ' | lote proveedor requerido' : ' | lote opcional'}`
+          `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}${item.requiere_lote ? ' | lote proveedor requerido' : ' | lote opcional'}${item.ubicacion_sugerida ? ` | ubicacion sugerida ${item.ubicacion_sugerida}` : ''}`
         );
         mensaje = [
           `Recepcion preparada para OC ${prepared.order.numero}.`,
@@ -1422,7 +1422,7 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, condicion y ubicacion; agrega lote y vencimiento cuando el proveedor los informe.',
+          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad y condicion; usa la ubicacion sugerida o informa otra ubicacion. Agrega lote y vencimiento cuando el proveedor los informe.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ID ${prepared.order.id}`,
         ].join('\n');
         responseContext.reception = {
