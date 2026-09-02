@@ -233,30 +233,43 @@ Estado del ensayo: se creo el despacho ID `49`, `DSP-SIIGO-FV-DEMO-IO-001`, asoc
 
 Resultado del ensayo: Jobana confirmo el despacho ID `49` por WhatsApp. El despacho quedo `despachado`, `cantidad_des` en 2 und y el lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` paso de 5 a 3 und, con reserva 0. Se creo un unico movimiento `DESPACHO` de -2, saldo posterior 3 y referencia `factura-siigo:FV-DEMO-IO-001`.
 
+La consulta de trazabilidad del lote tambien fue validada por WhatsApp. Mostro hacia atras la OC `DEMO-ENSAYO-FINAL-OC-IO`, la recepcion `REC-OC-11-001`, el proveedor, 5 und ingresadas y la ubicacion `B13`; hacia adelante mostro la factura sintetica `FV-DEMO-IO-001`, el despacho, el cliente, 2 und despachadas y saldo 3. La ausencia de BOM y OP es correcta para modalidad In-and-Out.
+
 ## Escenario 3: maquila 3Q
 
-### 1. Crear orden
+La demostracion comienza cuando Sofi prepara y envia materiales a 3Q, aun si la OC del producto terminado todavia no fue cargada. El recorrido visible es: remision -> reserva FEFO -> salida fisica -> custodia externa `EN_3Q_PENDIENTE_OC` -> cargar/revisar OC -> vincular OC -> recepcion parcial -> recepcion final -> trazabilidad -> despacho al cliente. El WMS permite adelantar la operacion fisica, pero bloquea la recepcion del terminado hasta validar una OC con PDF, el mismo maquilador, el producto y una cantidad suficiente.
+
+### 1. Preparar la remision sin OC
 
 Prerequisito: OC ID 4 recibida y etiquetas Booster disponibles.
 
-1. Mostrar OC ID 7 `DEMO-20260902-OC-3Q-001` y descargar su PDF.
-2. Abrir `Maquila 3Q > Nueva orden`.
-3. Elegir OC ID 7, `00105-PTBOS60` y cantidad 4.
-4. Crear la orden y guardar su ID/codigo.
+1. Abrir `Maquila 3Q > Nueva remision`.
+2. Dejar `OC del producto esperado` en `Pendiente de cargar o vincular`.
+3. Elegir `3Q - PROVEEDOR DEMO`, SKU `00105-PTBOS60` y cantidad 4.
+4. Pulsar `Preparar remision y picking` y guardar el codigo `MQ-3Q-...` y la remision `REM-3Q-...`.
 5. Mostrar BOM `ENVIO`: 4 tapas, 4 tarros, 4 etiquetas Booster y 4 liners.
-6. Destacar que no se envian gomas y que 3Q no es una bodega interna.
+6. Destacar que el borrador reserva por FEFO, no descuenta; no se envian gomas y 3Q no es una bodega interna.
 
 ### 2. Enviar materiales
 
 1. Preparar la remision principal.
 2. Revisar cantidades, lotes FEFO y ubicaciones. El borrador reserva, pero no descuenta.
 3. Confirmar la salida en dashboard.
-4. Verificar un solo movimiento por material, menor stock local, reservas liberadas, remision confirmada y orden `EN_3Q`.
+4. Verificar un solo movimiento por material, menor stock local, reservas liberadas, remision confirmada y orden `EN_3Q_PENDIENTE_OC`.
 5. Repetir la confirmacion: no debe descontar nuevamente.
 
 El WMS solo conserva custodia externa documental: que se envio, cuando, por quien y para que orden. No inventa bodega, ubicacion ni stock interno de 3Q.
 
-### 3. Recibir parcial de tres
+### 3. Cargar y vincular la OC esperada
+
+1. Mostrar o cargar el PDF `DEMO-20260902-OC-3Q-001` para el ensayo; en la presentacion usar `DEMO-CLIENTE-OC-3Q`.
+2. Antes de vincular, intentar iniciar la recepcion: debe bloquearla e indicar que falta la OC.
+3. Abrir `Maquila 3Q > Vincular OC`.
+4. Seleccionar la orden `MQ-3Q-...` y la OC compatible: ID 7 para ensayo o ID 10 para presentacion.
+5. Pulsar `Validar y vincular OC`.
+6. Verificar que la orden pasa a `EN_3Q`. La validacion exige PDF, mismo maquilador, mismo PT y cantidad de OC mayor o igual al objetivo.
+
+### 4. Recibir parcial de tres
 
 Prerequisito: Datana en `recepcion_cierre`.
 
@@ -267,7 +280,7 @@ Prerequisito: Datana en `recepcion_cierre`.
 5. Aprobar.
 6. Verificar estado `RECIBIDA_PARCIAL`, acumulado 3 y saldo 1. OC y orden siguen abiertas.
 
-### 4. Completar con una unidad
+### 5. Completar con una unidad
 
 1. Volver a `Producto desde 3Q`; debe mostrar saldo 1.
 2. Preparar 1 und.
@@ -276,7 +289,7 @@ Prerequisito: Datana en `recepcion_cierre`.
 
 Se usan lotes distintos porque hoy una segunda recepcion no se agrega a un lote ya existente. Esto es una pregunta para el cliente, no una regla definitiva.
 
-### 5. Preparar y confirmar despacho PT
+### 6. Preparar y confirmar despacho PT
 
 Solo despues de completar la recepcion:
 
@@ -293,7 +306,7 @@ node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing --apply --yes-i-
 
 ### Alcance actual de WhatsApp en 3Q
 
-El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de salida como borrador, pero hoy no crea, confirma ni recibe una orden 3Q operativa y no vincula automaticamente ese borrador con una remision WMS. Tampoco hay notificaciones 3Q acordadas. No presentar esas capacidades como terminadas.
+El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de salida como borrador documental, pero hoy no convierte automaticamente ese borrador en una remision operativa, no confirma la salida, no vincula la OC y no recibe el terminado. Tampoco hay notificaciones 3Q acordadas. No presentar esas capacidades como terminadas.
 
 ## Bloque final de despachos
 
@@ -340,19 +353,20 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 
 ### Maquila 3Q
 
-8. ¿Una OC a 3Q puede tener entregas parciales con el mismo lote final?
-9. ¿3Q puede entregar varios lotes del mismo PT en una sola entrega?
-10. Ademas de la OC, ¿que documento reciben al retornar el PT y cual debe conservar el WMS?
-11. ¿La remision de salida debe ser obligatoria antes de descontar, quien la firma y quien figura como receptor?
-12. ¿Quienes reciben notificaciones al crear, enviar, recibir parcialmente, completar o detectar diferencias?
-13. ¿Pueden volver materiales no utilizados desde 3Q? ¿Como se clasifican?
-14. Si 3Q reporta PT danado, ¿Sofi envia el BOM completo de reposicion o elige componentes y cantidades?
-15. Si 3Q entrega mas que el objetivo, ¿se rechaza, queda en cuarentena o se acepta con autorizacion?
-16. ¿Las acciones 3Q deben habilitarse por WhatsApp o mantenerse en dashboard?
+8. ¿La OC a 3Q siempre existe antes de enviar los materiales o puede crearse/cargarse despues de la remision? Si puede ser posterior, ¿que autorizacion o referencia interna soporta el envio inicial?
+9. ¿Una OC a 3Q puede tener entregas parciales con el mismo lote final?
+10. ¿3Q puede entregar varios lotes del mismo PT en una sola entrega?
+11. Ademas de la OC, ¿que documento reciben al retornar el PT y cual debe conservar el WMS?
+12. ¿La remision de salida debe ser obligatoria antes de descontar, quien la firma y quien figura como receptor?
+13. ¿Quienes reciben notificaciones al crear, enviar, recibir parcialmente, completar o detectar diferencias?
+14. ¿Pueden volver materiales no utilizados desde 3Q? ¿Como se clasifican?
+15. Si 3Q reporta PT danado, ¿Sofi envia el BOM completo de reposicion o elige componentes y cantidades?
+16. Si 3Q entrega mas que el objetivo, ¿se rechaza, queda en cuarentena o se acepta con autorizacion?
+17. ¿Las acciones 3Q deben habilitarse por WhatsApp o mantenerse en dashboard?
 
 ### Fuera de esta demo
 
-17. Confirmar la politica de consumo de cajas y excepciones. Esta capacidad esta pausada y no participa en los recorridos.
+18. Confirmar la politica de consumo de cajas y excepciones. Esta capacidad esta pausada y no participa en los recorridos.
 
 ## Verificacion tecnica previa
 

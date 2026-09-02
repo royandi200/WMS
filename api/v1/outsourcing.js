@@ -3,6 +3,7 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const {
   createOutsourcingOrder,
+  linkOutsourcingPurchaseOrder,
   prepareAdditionalShipment,
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
@@ -12,16 +13,18 @@ async function handleGet(req, res) {
   await requireCapability(req, CAPABILITIES.OUTSOURCING_READ);
   const limit = Math.min(Math.max(Number(req.query?.limit || 100), 1), 200);
   const rows = await query(
-    `SELECT om.id, om.codigo, om.orden_compra_id, oc.numero AS orden_compra_numero,
+    `SELECT om.id, om.codigo, om.orden_compra_id, om.tercero_id,
+            oc.numero AS orden_compra_numero,
             om.proveedor_nombre, om.producto_id, p.siigo_code AS sku,
             p.nombre AS producto_nombre, om.cantidad_objetivo, om.cantidad_recibida,
             om.estado, om.notas, om.enviado_en, om.completado_en, om.creado_en,
             u.nombre AS creado_por_nombre
        FROM ordenes_maquila om
-       JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
+       LEFT JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
        JOIN productos p ON p.id = om.producto_id
        JOIN usuarios u ON u.id = om.creado_por
-      GROUP BY om.id, om.codigo, om.orden_compra_id, oc.numero, om.proveedor_nombre,
+      GROUP BY om.id, om.codigo, om.orden_compra_id, om.tercero_id,
+               oc.numero, om.proveedor_nombre,
                om.producto_id, p.siigo_code, p.nombre, om.cantidad_objetivo,
                om.cantidad_recibida, om.estado, om.notas, om.enviado_en,
                om.completado_en, om.creado_en, u.nombre
@@ -101,6 +104,10 @@ async function handlePost(req, res) {
   if (action === 'PREPARE_ADDITIONAL') {
     const data = await prepareAdditionalShipment({ body: req.body || {}, userId: user.id });
     return res.status(201).json({ ok: true, data });
+  }
+  if (action === 'LINK_PURCHASE_ORDER') {
+    const data = await linkOutsourcingPurchaseOrder({ body: req.body || {}, userId: user.id });
+    return res.status(200).json({ ok: true, data });
   }
   if (action === 'CONFIRM_SHIPMENT') {
     const data = await confirmOutsourcingShipment({

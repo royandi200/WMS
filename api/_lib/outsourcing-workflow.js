@@ -6,6 +6,7 @@ const { resolveProductReference } = require('./product-references');
 const { addPreferredLocations } = require('./product-locations');
 const {
   normalizeOutsourcingOrderInput,
+  normalizePurchaseOrderLinkInput,
   normalizeAdditionalShipmentInput,
   outsourcingStateForReceipt,
   roundQty,
@@ -73,60 +74,93 @@ async function createOutsourcingOrder({ body, userId }) {
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
-    const [orders] = await conn.execute(
-      `SELECT oc.*,
-              EXISTS(SELECT 1 FROM orden_compra_documentos d
-                      WHERE d.orden_compra_id = oc.id AND d.activo = 1) AS tiene_pdf
-         FROM ordenes_compra_proveedor oc
-        WHERE oc.id = ? LIMIT 1 FOR UPDATE`,
-      [input.purchaseOrderId]
-    );
-    if (!orders.length) throw httpError(404, 'Orden de compra no encontrada');
-    const purchaseOrder = orders[0];
-    if (['CANCELADA', 'CERRADA'].includes(purchaseOrder.estado)) {
-      throw httpError(409, `La orden de compra esta ${purchaseOrder.estado}`);
+    if (input.idempotencyKey) {
+      const [replayed] = await conn.execute(
+        `SELECT me.id AS shipment_id, me.numero AS shipment_number,
+                om.id AS order_id, om.codigo AS order_code, om.estado,
+                om.cantidad_objetivo, p.siigo_code AS sku, p.nombre
+           FROM maquila_envios me
+           JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
+           JOIN productos p ON p.id = om.producto_id
+          WHERE me.clave_idempotencia = ? LIMIT 1 FOR UPDATE`,
+        [input.idempotencyKey]
+      );
+      if (replayed.length) {
+        await conn.commit();
+        return { ...replayed[0], duplicate: true, picking: [] };
+      }
     }
-    if (!purchaseOrder.tiene_pdf) throw httpError(409, 'La orden de compra no tiene PDF de soporte');
-    if (!purchaseOrder.tercero_id) {
-      throw httpError(409, 'La orden de compra no tiene un proveedor sincronizado');
+
+    let purchaseOrder = null;
+    let supplier = null;
+    if (input.purchaseOrderId) {
+      const [orders] = await conn.execute(
+        `SELECT oc.*,
+                EXISTS(SELECT 1 FROM orden_compra_documentos d
+                        WHERE d.orden_compra_id = oc.id AND d.activo = 1) AS tiene_pdf
+           FROM ordenes_compra_proveedor oc
+          WHERE oc.id = ? LIMIT 1 FOR UPDATE`,
+        [input.purchaseOrderId]
+      );
+      if (!orders.length) throw httpError(404, 'Orden de compra no encontrada');
+      purchaseOrder = orders[0];
+      if (['CANCELADA', 'CERRADA'].includes(purchaseOrder.estado)) {
+        throw httpError(409, `La orden de compra esta ${purchaseOrder.estado}`);
+      }
+      if (!purchaseOrder.tiene_pdf) throw httpError(409, 'La orden de compra no tiene PDF de soporte');
+      if (!purchaseOrder.tercero_id) {
+        throw httpError(409, 'La orden de compra no tiene un proveedor sincronizado');
+      }
+      supplier = { id: purchaseOrder.tercero_id, name: purchaseOrder.proveedor_nombre || '3Q' };
+    } else {
+      const [suppliers] = await conn.execute(
+        `SELECT id, COALESCE(NULLIF(nombre_comercial, ''), nombre) AS nombre
+           FROM terceros
+          WHERE id = ? AND tipo = 'Supplier' AND activo = 1 LIMIT 1 FOR UPDATE`,
+        [input.supplierId]
+      );
+      if (!suppliers.length) throw httpError(404, 'Maquilador activo no encontrado');
+      supplier = { id: suppliers[0].id, name: suppliers[0].nombre };
     }
 
     const finalProduct = await resolveProductReference(conn, input.product, { modes: [PRODUCT_MODES.OUTSOURCED] });
     if (finalProduct.modalidad_operativa !== PRODUCT_MODES.OUTSOURCED) {
       throw httpError(409, `${finalProduct.siigo_code} no es un producto de maquila tercerizada`);
     }
-    const [orderedItems] = await conn.execute(
-      `SELECT COALESCE(SUM(cantidad_ordenada), 0) AS cantidad
-         FROM orden_compra_proveedor_items
-        WHERE orden_compra_id = ? AND producto_id = ?`,
-      [purchaseOrder.id, finalProduct.id]
-    );
-    const orderedQuantity = Number(orderedItems[0]?.cantidad || 0);
-    if (orderedQuantity <= 0) throw httpError(409, 'El producto no esta incluido en la orden de compra');
-    const [alreadyPlannedRows] = await conn.execute(
-      `SELECT COALESCE(SUM(cantidad_objetivo), 0) AS cantidad
-         FROM ordenes_maquila
-        WHERE orden_compra_id = ? AND producto_id = ? AND estado <> 'CANCELADA'
-        FOR UPDATE`,
-      [purchaseOrder.id, finalProduct.id]
-    );
-    const alreadyPlanned = Number(alreadyPlannedRows[0]?.cantidad || 0);
-    const [existingOutsourcing] = await conn.execute(
-      `SELECT id, codigo, cantidad_objetivo, estado
-         FROM ordenes_maquila
-        WHERE orden_compra_id = ? AND producto_id = ? AND estado <> 'CANCELADA'
-        LIMIT 1`,
-      [purchaseOrder.id, finalProduct.id]
-    );
-    if (existingOutsourcing.length) {
-      throw httpError(409, `Ya existe la orden ${existingOutsourcing[0].codigo} para este producto y OC`);
-    }
-    if (alreadyPlanned + input.quantity > orderedQuantity + 0.0001) {
-      throw httpError(409, 'La cantidad de maquila supera lo ordenado en la OC', {
-        cantidad_oc: orderedQuantity,
-        ya_programada: alreadyPlanned,
-        solicitada: input.quantity,
-      });
+    if (purchaseOrder) {
+      const [orderedItems] = await conn.execute(
+        `SELECT COALESCE(SUM(cantidad_ordenada), 0) AS cantidad
+           FROM orden_compra_proveedor_items
+          WHERE orden_compra_id = ? AND producto_id = ?`,
+        [purchaseOrder.id, finalProduct.id]
+      );
+      const orderedQuantity = Number(orderedItems[0]?.cantidad || 0);
+      if (orderedQuantity <= 0) throw httpError(409, 'El producto no esta incluido en la orden de compra');
+      const [alreadyPlannedRows] = await conn.execute(
+        `SELECT COALESCE(SUM(cantidad_objetivo), 0) AS cantidad
+           FROM ordenes_maquila
+          WHERE orden_compra_id = ? AND producto_id = ? AND estado <> 'CANCELADA'
+          FOR UPDATE`,
+        [purchaseOrder.id, finalProduct.id]
+      );
+      const alreadyPlanned = Number(alreadyPlannedRows[0]?.cantidad || 0);
+      const [existingOutsourcing] = await conn.execute(
+        `SELECT id, codigo, cantidad_objetivo, estado
+           FROM ordenes_maquila
+          WHERE orden_compra_id = ? AND producto_id = ? AND estado <> 'CANCELADA'
+          LIMIT 1`,
+        [purchaseOrder.id, finalProduct.id]
+      );
+      if (existingOutsourcing.length) {
+        throw httpError(409, `Ya existe la orden ${existingOutsourcing[0].codigo} para este producto y OC`);
+      }
+      if (alreadyPlanned + input.quantity > orderedQuantity + 0.0001) {
+        throw httpError(409, 'La cantidad de maquila supera lo ordenado en la OC', {
+          cantidad_oc: orderedQuantity,
+          ya_programada: alreadyPlanned,
+          solicitada: input.quantity,
+        });
+      }
     }
 
     const [bom] = await conn.execute(
@@ -154,13 +188,18 @@ async function createOutsourcingOrder({ body, userId }) {
          (codigo, orden_compra_id, tercero_id, proveedor_nombre, producto_id,
           cantidad_objetivo, estado, notas, creado_por, creado_en, actualizado_en)
        VALUES (?, ?, ?, ?, ?, ?, 'MATERIALES_RESERVADOS', ?, ?, NOW(), NOW())`,
-      [temporary, purchaseOrder.id, purchaseOrder.tercero_id,
-       purchaseOrder.proveedor_nombre || '3Q', finalProduct.id, input.quantity,
+      [temporary, purchaseOrder?.id || null, supplier.id,
+       supplier.name, finalProduct.id, input.quantity,
        input.notes, userId]
     );
     const orderCode = codeForId('MQ-3Q', created.insertId);
     await conn.execute(`UPDATE ordenes_maquila SET codigo = ? WHERE id = ?`, [orderCode, created.insertId]);
-    const shipment = await insertShipment(conn, { orderId: created.insertId, type: 'INICIAL', userId });
+    const shipment = await insertShipment(conn, {
+      orderId: created.insertId,
+      type: 'INICIAL',
+      userId,
+      idempotencyKey: input.idempotencyKey || crypto.randomUUID(),
+    });
 
     const picking = [];
     for (const item of plan) {
@@ -212,7 +251,95 @@ async function createOutsourcingOrder({ body, userId }) {
       status: 'MATERIALES_RESERVADOS',
       product: finalProduct,
       quantity: input.quantity,
+      purchase_order_pending: !purchaseOrder,
       picking,
+    };
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+async function linkOutsourcingPurchaseOrder({ body, userId }) {
+  const input = normalizePurchaseOrderLinkInput(body);
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const [orders] = await conn.execute(
+      `SELECT id, codigo, orden_compra_id, tercero_id, producto_id,
+              cantidad_objetivo, estado
+         FROM ordenes_maquila
+        WHERE id = ? OR codigo = ? LIMIT 1 FOR UPDATE`,
+      [Number(input.orderId) || 0, input.orderId]
+    );
+    if (!orders.length) throw httpError(404, 'Orden de maquila no encontrada');
+    const order = orders[0];
+    if (order.orden_compra_id) {
+      if (Number(order.orden_compra_id) === input.purchaseOrderId) {
+        await conn.commit();
+        return { order_id: order.id, order_code: order.codigo, purchase_order_id: input.purchaseOrderId, duplicate: true };
+      }
+      throw httpError(409, `La orden ${order.codigo} ya tiene una OC vinculada`);
+    }
+    if (!['MATERIALES_RESERVADOS', 'EN_3Q_PENDIENTE_OC'].includes(order.estado)) {
+      throw httpError(409, `La orden ${order.codigo} esta ${order.estado} y no admite vincular una OC`);
+    }
+    const [purchaseOrders] = await conn.execute(
+      `SELECT oc.*,
+              EXISTS(SELECT 1 FROM orden_compra_documentos d
+                      WHERE d.orden_compra_id = oc.id AND d.activo = 1) AS tiene_pdf
+         FROM ordenes_compra_proveedor oc
+        WHERE oc.id = ? LIMIT 1 FOR UPDATE`,
+      [input.purchaseOrderId]
+    );
+    if (!purchaseOrders.length) throw httpError(404, 'Orden de compra no encontrada');
+    const purchaseOrder = purchaseOrders[0];
+    if (['CANCELADA', 'CERRADA'].includes(purchaseOrder.estado)) {
+      throw httpError(409, `La orden de compra esta ${purchaseOrder.estado}`);
+    }
+    if (!purchaseOrder.tiene_pdf) throw httpError(409, 'La orden de compra no tiene PDF de soporte');
+    if (Number(purchaseOrder.tercero_id) !== Number(order.tercero_id)) {
+      throw httpError(409, 'La OC pertenece a un proveedor diferente del maquilador de la remision');
+    }
+    const [items] = await conn.execute(
+      `SELECT COALESCE(SUM(cantidad_ordenada), 0) AS cantidad
+         FROM orden_compra_proveedor_items
+        WHERE orden_compra_id = ? AND producto_id = ?`,
+      [purchaseOrder.id, order.producto_id]
+    );
+    const orderedQuantity = Number(items[0]?.cantidad || 0);
+    if (orderedQuantity + 0.0001 < Number(order.cantidad_objetivo)) {
+      throw httpError(409, 'La OC no cubre el producto y cantidad esperados de la remision', {
+        cantidad_oc: orderedQuantity,
+        cantidad_maquila: Number(order.cantidad_objetivo),
+      });
+    }
+    const [conflicts] = await conn.execute(
+      `SELECT codigo FROM ordenes_maquila
+        WHERE orden_compra_id = ? AND producto_id = ? AND estado <> 'CANCELADA'
+        LIMIT 1 FOR UPDATE`,
+      [purchaseOrder.id, order.producto_id]
+    );
+    if (conflicts.length) throw httpError(409, `La OC ya esta vinculada a ${conflicts[0].codigo}`);
+
+    const nextState = order.estado === 'EN_3Q_PENDIENTE_OC' ? 'EN_3Q' : order.estado;
+    await conn.execute(
+      `UPDATE ordenes_maquila
+          SET orden_compra_id = ?, proveedor_nombre = ?, estado = ?,
+              oc_vinculada_por = ?, oc_vinculada_en = NOW(), actualizado_en = NOW()
+        WHERE id = ? AND orden_compra_id IS NULL`,
+      [purchaseOrder.id, purchaseOrder.proveedor_nombre || '3Q', nextState, userId, order.id]
+    );
+    await conn.commit();
+    return {
+      order_id: order.id,
+      order_code: order.codigo,
+      purchase_order_id: purchaseOrder.id,
+      purchase_order_number: purchaseOrder.numero,
+      state: nextState,
+      duplicate: false,
     };
   } catch (error) {
     await conn.rollback().catch(() => {});
@@ -396,7 +523,8 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
   try {
     await conn.beginTransaction();
     const [shipments] = await conn.execute(
-      `SELECT me.*, om.codigo AS orden_codigo, om.estado AS orden_estado
+      `SELECT me.*, om.codigo AS orden_codigo, om.estado AS orden_estado,
+              om.orden_compra_id
          FROM maquila_envios me
          JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
         WHERE me.id = ? OR me.numero = ? LIMIT 1 FOR UPDATE`,
@@ -428,7 +556,6 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
       [shipment.id]
     );
     if (!items.length) throw httpError(409, 'La remision no tiene materiales');
-    const txId = crypto.randomUUID();
     const dispatched = [];
     for (const item of items) {
       const quantity = Number(item.cantidad);
@@ -480,7 +607,7 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
            (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
             reference, notes, approved_by, created_at)
          VALUES (?, ?, ?, ?, ?, 'ENVIO_MAQUILA_3Q', ?, ?, ?, ?, ?, NOW())`,
-        [crypto.randomUUID(), txId, lotRows[0]?.id || null, item.producto_id,
+        [crypto.randomUUID(), crypto.randomUUID(), lotRows[0]?.id || null, item.producto_id,
          userId, -quantity, Number(lotRows[0]?.qty_current || 0),
          `maquila:${shipment.orden_codigo}`,
          `Remision ${shipment.numero}; custodia externa 3Q; origen ${item.ubicacion}`,
@@ -496,7 +623,12 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
     );
     await conn.execute(
       `UPDATE ordenes_maquila
-          SET estado = IF(estado = 'MATERIALES_RESERVADOS', 'EN_3Q', estado),
+          SET estado = CASE
+                WHEN estado = 'MATERIALES_RESERVADOS' AND orden_compra_id IS NULL
+                  THEN 'EN_3Q_PENDIENTE_OC'
+                WHEN estado = 'MATERIALES_RESERVADOS' THEN 'EN_3Q'
+                ELSE estado
+              END,
               enviado_por = COALESCE(enviado_por, ?), enviado_en = COALESCE(enviado_en, NOW()),
               actualizado_en = NOW()
         WHERE id = ?`,
@@ -507,6 +639,7 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
       shipment_number: shipment.numero,
       order_code: shipment.orden_codigo,
       state: 'CONFIRMADO',
+      order_state: shipment.orden_compra_id ? 'EN_3Q' : 'EN_3Q_PENDIENTE_OC',
       external_custody: '3Q',
       dispatched,
     };
@@ -600,13 +733,16 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
             p.siigo_code AS sku, p.nombre AS producto, p.requiere_lote,
             p.unit_label AS unidad
        FROM ordenes_maquila om
-       JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
+       LEFT JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
        JOIN productos p ON p.id = om.producto_id
       WHERE om.id = ? OR om.codigo = ? LIMIT 1 FOR UPDATE`,
     [Number(reference) || 0, reference]
   );
-  if (!orders.length) throw httpError(404, 'Orden de maquila no encontrada');
-  const order = orders[0];
+    if (!orders.length) throw httpError(404, 'Orden de maquila no encontrada');
+    const order = orders[0];
+    if (!order.orden_compra_id) {
+      throw httpError(409, `Vincula una orden de compra a ${order.codigo} antes de recibir producto terminado`);
+    }
   if (!['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)) {
     throw httpError(409, `La orden ${order.codigo} esta ${order.estado} y no puede recibir producto`);
   }
@@ -717,6 +853,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
 
 module.exports = {
   createOutsourcingOrder,
+  linkOutsourcingPurchaseOrder,
   prepareAdditionalShipment,
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,

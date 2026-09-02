@@ -633,6 +633,16 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - Dashboard y agente dejaron de solicitar una fecha manual de vencimiento para la produccion interna.
 - El lenguaje natural admite referencias cortas como `orden 67` y ubicaciones del plano como `C2`.
 
+### 2026-09-02: remision 3Q previa a orden de compra
+
+- Sofi puede preparar una remision de materiales hacia 3Q sin una OC previamente cargada.
+- La preparacion reserva por FEFO y la confirmacion descuenta stock en una sola transaccion.
+- Mientras falta la OC, la orden queda `EN_3Q_PENDIENTE_OC` y la recepcion de producto terminado permanece bloqueada.
+- La vinculacion posterior exige OC activa con PDF, mismo maquilador, mismo producto terminado y cantidad suficiente.
+- Se agrego auditoria de usuario y fecha de vinculacion, idempotencia al crear la remision y la accion Kardex `ENVIO_MAQUILA_3Q`.
+- Dashboard: `Nueva remision`, estado visible de OC pendiente y formulario `Vincular OC`.
+- Validacion local: 171 pruebas aprobadas y build Vite aprobado.
+
 ## Regla de mantenimiento
 
 Al cerrar una entrega:

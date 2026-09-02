@@ -1,18 +1,36 @@
 function normalizeOutsourcingOrderInput(body = {}) {
   const purchaseOrderId = Number(body.orden_compra_id || body.purchase_order_id || 0);
+  const supplierId = Number(body.tercero_id || body.supplier_id || 0);
   const product = String(body.producto_id || body.product_id || body.sku || '').trim();
   const quantity = Number(body.cantidad_objetivo ?? body.quantity ?? body.cantidad);
-  if (!Number.isInteger(purchaseOrderId) || purchaseOrderId <= 0) {
-    throw inputError('orden_compra_id es obligatorio');
+  const idempotencyKey = String(body.clave_idempotencia || body.idempotency_key || '').trim();
+  const hasPurchaseOrder = Number.isInteger(purchaseOrderId) && purchaseOrderId > 0;
+  if (!hasPurchaseOrder && (!Number.isInteger(supplierId) || supplierId <= 0)) {
+    throw inputError('Debes indicar el maquilador cuando la OC esta pendiente');
+  }
+  if (!hasPurchaseOrder && (!idempotencyKey || idempotencyKey.length > 100)) {
+    throw inputError('clave_idempotencia es obligatoria cuando la OC esta pendiente');
   }
   if (!product) throw inputError('Debes indicar el producto terminado tercerizado');
   if (!Number.isFinite(quantity) || quantity <= 0) throw inputError('La cantidad objetivo debe ser positiva');
   return {
-    purchaseOrderId,
+    purchaseOrderId: hasPurchaseOrder ? purchaseOrderId : null,
+    supplierId: Number.isInteger(supplierId) && supplierId > 0 ? supplierId : null,
     product,
     quantity: roundQty(quantity),
+    idempotencyKey: idempotencyKey || null,
     notes: String(body.notas || body.notes || '').trim() || null,
   };
+}
+
+function normalizePurchaseOrderLinkInput(body = {}) {
+  const orderId = String(body.orden_maquila_id || body.order_id || '').trim();
+  const purchaseOrderId = Number(body.orden_compra_id || body.purchase_order_id || 0);
+  if (!orderId) throw inputError('orden_maquila_id es obligatorio');
+  if (!Number.isInteger(purchaseOrderId) || purchaseOrderId <= 0) {
+    throw inputError('orden_compra_id es obligatorio');
+  }
+  return { orderId, purchaseOrderId };
 }
 
 function normalizeAdditionalShipmentInput(body = {}) {
@@ -49,6 +67,7 @@ function inputError(message) {
 
 module.exports = {
   normalizeOutsourcingOrderInput,
+  normalizePurchaseOrderLinkInput,
   normalizeAdditionalShipmentInput,
   outsourcingStateForReceipt,
   roundQty,

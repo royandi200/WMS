@@ -10,6 +10,7 @@ const {
 } = require('../api/_lib/purchase-order-documents');
 const {
   normalizeOutsourcingOrderInput,
+  normalizePurchaseOrderLinkInput,
   normalizeAdditionalShipmentInput,
   outsourcingStateForReceipt,
 } = require('../api/_lib/outsourcing-domain');
@@ -69,13 +70,26 @@ test('download names cannot inject headers or paths', () => {
   assert.equal(safeDownloadName('..\\bad\r\nname".pdf'), '.._bad__name_.pdf');
 });
 
-test('outsourcing order input requires a purchase order and positive target', () => {
+test('outsourcing order input accepts an OC or a controlled pending-OC remision', () => {
   assert.deepEqual(
     normalizeOutsourcingOrderInput({ orden_compra_id: 7, sku: '00105-PTBOS60', cantidad_objetivo: 12 }),
-    { purchaseOrderId: 7, product: '00105-PTBOS60', quantity: 12, notes: null }
+    { purchaseOrderId: 7, supplierId: null, product: '00105-PTBOS60', quantity: 12, idempotencyKey: null, notes: null }
   );
-  assert.throws(() => normalizeOutsourcingOrderInput({ sku: '00105-PTBOS60', cantidad_objetivo: 12 }), /orden_compra_id/u);
+  assert.deepEqual(
+    normalizeOutsourcingOrderInput({ tercero_id: 10, sku: '00105-PTBOS60', cantidad_objetivo: 4, clave_idempotencia: 'demo-remision-1' }),
+    { purchaseOrderId: null, supplierId: 10, product: '00105-PTBOS60', quantity: 4, idempotencyKey: 'demo-remision-1', notes: null }
+  );
+  assert.throws(() => normalizeOutsourcingOrderInput({ sku: '00105-PTBOS60', cantidad_objetivo: 12 }), /maquilador/u);
+  assert.throws(() => normalizeOutsourcingOrderInput({ tercero_id: 10, sku: '00105-PTBOS60', cantidad_objetivo: 12 }), /clave_idempotencia/u);
   assert.throws(() => normalizeOutsourcingOrderInput({ orden_compra_id: 7, sku: '00105-PTBOS60', cantidad_objetivo: 0 }), /positiva/u);
+});
+
+test('linking a later purchase order requires both stable identities', () => {
+  assert.deepEqual(
+    normalizePurchaseOrderLinkInput({ orden_maquila_id: 'MQ-3Q-20260902-000001', orden_compra_id: 7 }),
+    { orderId: 'MQ-3Q-20260902-000001', purchaseOrderId: 7 }
+  );
+  assert.throws(() => normalizePurchaseOrderLinkInput({ orden_compra_id: 7 }), /orden_maquila_id/u);
 });
 
 test('additional material requires reason and idempotency key', () => {
@@ -135,6 +149,21 @@ test('3Q reception can be prepared from an active outsourcing order without Siig
   assert.match(reception, /action === 'PREPARAR_DESDE_MAQUILA'/u);
   assert.match(page, /Producto desde 3Q/u);
   assert.match(page, /orden_maquila_id: item\.outsourcingOrderId/u);
+});
+
+test('3Q remision can precede its OC but reception remains fail-closed', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../api/_lib/outsourcing-workflow.js'), 'utf8');
+  const endpoint = fs.readFileSync(path.join(__dirname, '../api/v1/outsourcing.js'), 'utf8');
+  const migration = fs.readFileSync(path.join(__dirname, '../database/28_outsourcing_before_purchase_order.sql'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/OutsourcingPage.jsx'), 'utf8');
+  assert.match(workflow, /EN_3Q_PENDIENTE_OC/u);
+  assert.match(workflow, /Vincula una orden de compra/u);
+  assert.match(workflow, /linkOutsourcingPurchaseOrder/u);
+  assert.match(endpoint, /LINK_PURCHASE_ORDER/u);
+  assert.match(endpoint, /LEFT JOIN ordenes_compra_proveedor/u);
+  assert.match(migration, /orden_compra_id INT UNSIGNED NULL/u);
+  assert.match(migration, /ENVIO_MAQUILA_3Q/u);
+  assert.match(page, /Pendiente de cargar o vincular/u);
 });
 
 test('purchase orders fail closed to active Siigo suppliers', () => {
