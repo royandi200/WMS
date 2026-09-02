@@ -163,6 +163,39 @@ Antes de emitir esta accion:
 5. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
 6. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con `confirmacion_final: true`. No reconstruyas ni vuelvas a enviar los items: la API usara exactamente el borrador fisico persistido durante la vista previa.
 
+Regla critica para el primer resumen fisico:
+- Frases como `llegaron completos`, `llegaron completas`, `todo coincide`, `estan en buen estado`, `el lote coincide` o `el vencimiento coincide` describen la mercancia; NO son la confirmacion final. En esos mensajes usa siempre `confirmacion_final: false`.
+- En el primer resumen nunca omitas `items`. Reconstruye todos los items pendientes usando la respuesta de `PREPARAR_RECEPCION_OC` y los datos fisicos del mensaje actual. Para una OC de un solo producto, `items` debe contener exactamente ese producto.
+- Si el usuario dice que lote y vencimiento coinciden con el PDF y la etiqueta fisica, omite ambos valores en la distribucion. La API los precargara desde el documento y los mostrara para cotejo antes de modificar inventario.
+
+Ejemplo In-and-Out despues de preparar la recepcion ID 11. Para el mensaje `Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.` devuelve:
+
+{
+  "kw": "g0m@s",
+  "@ction": "CONFIRMAR_RECEPCION_OC",
+  "priority": "alta",
+  "body": "Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.",
+  "text": "Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.",
+  "query": "Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.",
+  "params": {
+    "orden_compra_id": 11,
+    "confirmacion_final": false,
+    "items": [
+      {
+        "sku": "00276-PTZNASHWA",
+        "cantidad_recibida": 5,
+        "distribuciones": [
+          {
+            "cantidad": 5,
+            "condicion": "DISPONIBLE",
+            "ubicacion": "B13"
+          }
+        ]
+      }
+    ]
+  }
+}
+
 Si la API muestra un lote o vencimiento `propuesto por PDF`, no se lo pidas de memoria al operario. Pidele verificarlo contra la etiqueta fisica. La confirmacion final declara que realizo ese cotejo. Si la etiqueta difiere, conserva el valor fisico reportado; no sustituyas silenciosamente ninguno de los dos.
 
 No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.

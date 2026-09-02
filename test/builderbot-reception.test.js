@@ -305,6 +305,10 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /todos los productos pendientes/u);
   assert.match(prompt, /el WMS creara una partida interna/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);
+  assert.match(prompt, /llegaron completos.*NO son la confirmacion final/su);
+  assert.match(prompt, /primer resumen nunca omitas `items`/u);
+  assert.match(prompt, /"confirmacion_final": false/u);
+  assert.match(prompt, /"sku": "00276-PTZNASHWA"/u);
   assert.match(idempotencyMigration, /UNIQUE KEY uk_recepcion_confirmacion_clave/u);
   assert.match(reception, /confirmation_key/u);
 });

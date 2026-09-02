@@ -15,6 +15,13 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Resumen fisico In-and-Out por WhatsApp
+
+- Se corrigieron las instrucciones de BuilderBot para que expresiones descriptivas como `llegaron completas`, `todo coincide` o `estan en buen estado` no se interpreten como confirmacion final de inventario.
+- El primer reporte fisico debe enviar todos los items y distribuciones con `confirmacion_final: false`; el caso de un solo producto In-and-Out quedo documentado con un ejemplo contractual completo.
+- Cuando lote y vencimiento coinciden con el PDF y la etiqueta, el operario puede declararlo sin dictar los codigos; el backend conserva la propuesta documental y la muestra en la vista previa.
+- Entrada y Voz quedaron sincronizados y reiniciados en BuilderBot con hash `7f6deb2c98d12926f97a217b3dabbe75dc6b1e0134b48995c7e1836a8c2d1861`. La prueba focal aprobo `12/12`.
+
 ### 2026-09-02 - Paquetes documentales completos para ensayo y presentacion
 
 - Se generaron dos paquetes independientes de cuatro PDF: OC de insumos, OC in-and-out, OC de producto esperado desde 3Q y salida de materiales hacia 3Q.

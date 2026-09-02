@@ -192,11 +192,11 @@ Camino principal: mostrar la carga documental completa. La OC ID 6 queda como re
 1. En el ensayo, enviar por WhatsApp `output/pdf/demo-ensayo-final/DEMO-ENSAYO-FINAL-OC-IO.pdf` con el texto: `Carga esta orden de compra de producto in-and-out para recepcion.`
 2. Verificar que el agente cree el borrador `DEMO-ENSAYO-FINAL-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
 3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` y vencimiento `2027-11-30`.
-4. Pulsar `Confirmar y crear OC` y anotar el ID corto asignado: `<ID_IO>`.
-5. Datana consulta recepciones y dice: `Prepara la recepcion ID <ID_IO>`.
-6. Reportar: `Para la recepcion ID <ID_IO> llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
+4. Pulsar `Confirmar y crear OC`. En el ensayo final se asigno el ID corto `11` y quedo en estado `CARGADA`, con el PDF asociado y sin modificar inventario.
+5. Datana consulta recepciones y dice: `Prepara la recepcion ID 11`. En el ensayo se obtuvo el borrador `REC-OC-11-001`, con 5 und pendientes, lote proveedor requerido y ubicacion sugerida `B13`.
+6. Reportar: `Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
 7. Revisar el resumen con SKU, cantidad, lote proveedor, vencimiento y ubicacion; aun sin movimiento.
-8. Confirmar: `Confirmo la recepcion ID <ID_IO>`.
+8. Confirmar: `Confirmo la recepcion ID 11`.
 9. Repetir y comprobar idempotencia.
 10. Mostrar ingreso e historico. No debe aparecer BOM, consumo de MP ni OP.
 
@@ -328,24 +328,25 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 
 ### In-and-out
 
-5. Para el arranque se usara OC en PDF. A futuro, ¿quieren adjuntar tambien factura o remision del proveedor como evidencia?
-6. ¿Quien autoriza diferencias de cantidad, lote, vencimiento o condicion contra la OC?
+5. ¿Todos los productos In-and-Out llegan con un lote asignado por el proveedor? Si alguno puede llegar sin lote, ¿debe el WMS crear una partida interna o bloquear la recepcion?
+6. Para el arranque se usara OC en PDF. A futuro, ¿quieren adjuntar tambien factura o remision del proveedor como evidencia?
+7. ¿Quien autoriza diferencias de cantidad, lote, vencimiento o condicion contra la OC?
 
 ### Maquila 3Q
 
-7. ¿Una OC a 3Q puede tener entregas parciales con el mismo lote final?
-8. ¿3Q puede entregar varios lotes del mismo PT en una sola entrega?
-9. Ademas de la OC, ¿que documento reciben al retornar el PT y cual debe conservar el WMS?
-10. ¿La remision de salida debe ser obligatoria antes de descontar, quien la firma y quien figura como receptor?
-11. ¿Quienes reciben notificaciones al crear, enviar, recibir parcialmente, completar o detectar diferencias?
-12. ¿Pueden volver materiales no utilizados desde 3Q? ¿Como se clasifican?
-13. Si 3Q reporta PT danado, ¿Sofi envia el BOM completo de reposicion o elige componentes y cantidades?
-14. Si 3Q entrega mas que el objetivo, ¿se rechaza, queda en cuarentena o se acepta con autorizacion?
-15. ¿Las acciones 3Q deben habilitarse por WhatsApp o mantenerse en dashboard?
+8. ¿Una OC a 3Q puede tener entregas parciales con el mismo lote final?
+9. ¿3Q puede entregar varios lotes del mismo PT en una sola entrega?
+10. Ademas de la OC, ¿que documento reciben al retornar el PT y cual debe conservar el WMS?
+11. ¿La remision de salida debe ser obligatoria antes de descontar, quien la firma y quien figura como receptor?
+12. ¿Quienes reciben notificaciones al crear, enviar, recibir parcialmente, completar o detectar diferencias?
+13. ¿Pueden volver materiales no utilizados desde 3Q? ¿Como se clasifican?
+14. Si 3Q reporta PT danado, ¿Sofi envia el BOM completo de reposicion o elige componentes y cantidades?
+15. Si 3Q entrega mas que el objetivo, ¿se rechaza, queda en cuarentena o se acepta con autorizacion?
+16. ¿Las acciones 3Q deben habilitarse por WhatsApp o mantenerse en dashboard?
 
 ### Fuera de esta demo
 
-16. Confirmar la politica de consumo de cajas y excepciones. Esta capacidad esta pausada y no participa en los recorridos.
+17. Confirmar la politica de consumo de cajas y excepciones. Esta capacidad esta pausada y no participa en los recorridos.
 
 ## Verificacion tecnica previa
 
@@ -372,7 +373,7 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 | Recepcion insumos |  |  |  |
 | OP propia |  |  |  |
 | Lote PT propio |  |  |  |
-| Recepcion IO |  |  |  |
+| Recepcion IO | OC ID `11` / borrador `REC-OC-11-001` | `PREPARADA`, pendiente de resumen y confirmacion | PDF extraido por WhatsApp; consulta de bandeja y preparacion por Datana correctas; 1 item, 5 und, ubicacion sugerida B13 |
 | Lote IO | `DEMO-IO-ZENOVA-001` |  |  |
 | Orden 3Q |  |  |  |
 | Remision 3Q |  |  |  |
