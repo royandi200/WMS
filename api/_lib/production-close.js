@@ -35,13 +35,37 @@ function buildMaterialReconciliation(materials, processWasteRows = []) {
   });
 }
 
-async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, expiryDate, userId }) {
+function deriveProductionExpiry(materialLots = []) {
+  const gramUnits = new Set(['g', 'gr', 'gramo', 'gramos']);
+  const consumedBaseLots = materialLots.filter((row) => {
+    const unit = String(row.unit_label || '').trim().toLowerCase();
+    return gramUnits.has(unit) && Number(row.cantidad_neta || 0) > 0;
+  });
+  if (!consumedBaseLots.length) {
+    throw httpError(409, 'No se pudo calcular el vencimiento: la orden no tiene materia base consumida en gramos');
+  }
+  const missingExpiry = consumedBaseLots.filter((row) => !normalizeExpiryDate(row.fecha_venc));
+  if (missingExpiry.length) {
+    const lots = missingExpiry.map((row) => `${row.sku || 'SKU N/A'} / ${row.lote || 'lote N/A'}`).join(', ');
+    throw httpError(409, `No se pudo calcular el vencimiento: falta el vencimiento del material ${lots}`);
+  }
+  const sourceLots = consumedBaseLots.map((row) => ({
+    sku: row.sku,
+    lote: row.lote,
+    cantidad: Number(row.cantidad_neta),
+    fecha_venc: normalizeExpiryDate(row.fecha_venc),
+  }));
+  return {
+    expiryDate: sourceLots.map((row) => row.fecha_venc).sort()[0],
+    sourceLots,
+  };
+}
+
+async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, userId }) {
   const conforming = Number(qtyReal);
   const waste = Number(qtyWaste);
-  const normalizedExpiry = expiryDate ? normalizeExpiryDate(expiryDate) : null;
   const locationReference = locationId || locationCode || null;
   if (!orderId) throw httpError(400, 'La orden es obligatoria');
-  if (expiryDate && !normalizedExpiry) throw httpError(400, 'La fecha de vencimiento no es valida');
 
   const conn = await createConnection();
   try {
@@ -100,6 +124,24 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
        GROUP BY producto_id`,
       [order.id]
     );
+    const [consumedMaterialLots] = await conn.execute(
+      `SELECT p.siigo_code AS sku, p.unit_label, pml.lote,
+              (pml.cantidad_consumida - pml.cantidad_devuelta) AS cantidad_neta,
+              DATE_FORMAT(COALESCE(l.expiry_date, s.fecha_venc), '%Y-%m-%d') AS fecha_venc
+       FROM produccion_material_lotes pml
+       JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
+       JOIN productos p ON p.id = pm.producto_id
+       LEFT JOIN stock s ON s.id = pml.stock_id
+       LEFT JOIN lots l ON BINARY l.lpn = BINARY pml.lote AND l.product_id = pm.producto_id
+       WHERE pm.orden_produccion_id = ?
+         AND (pml.cantidad_consumida - pml.cantidad_devuelta) > 0
+       ORDER BY pml.id`,
+      [order.id]
+    );
+    const productionExpiry = conforming > 0
+      ? deriveProductionExpiry(consumedMaterialLots)
+      : { expiryDate: null, sourceLots: [] };
+    const normalizedExpiry = productionExpiry.expiryDate;
     let warehouseId = null;
     let location = null;
     let resolvedLocationCode = null;
@@ -183,6 +225,8 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       lpn_terminado: conforming > 0 ? lpn : null,
       ubicacion_id: location,
       ubicacion: resolvedLocationCode,
+      fecha_venc: normalizedExpiry,
+      vencimiento_origen_lotes: productionExpiry.sourceLots,
       material_reconciliation: reconciliation,
     };
     const closedAt = new Date().toLocaleString('es-CO', {
@@ -220,4 +264,4 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
   }
 }
 
-module.exports = { buildMaterialReconciliation, closeProductionOrder };
+module.exports = { buildMaterialReconciliation, closeProductionOrder, deriveProductionExpiry };

@@ -59,6 +59,7 @@ Actualizar esta seccion durante los ensayos. Solo se marca como validado aquello
 | Responder solamente `pedido de cliente` | Validado como control | El agente solicita referencia y cliente final; este recorrido queda excluido del demo porque aun no coteja una OC almacenada. |
 | Confirmar materiales e iniciar la OP del ensayo final | Validado | La frase natural `Ya aliste los materiales de la orden ID 67` inicio la OP, consumio exactamente las reservas FEFO, genero seis registros de Kardex y notifico al administrador. |
 | Ver el consumo de insumos en Inventario > Buscar producto | Validado | La version desplegada muestra en `Movimientos recientes` la fecha y hora local, cantidad negativa, lote, referencia `produccion:OP-20260902-000067` y saldo del lote. Se comprobo con `00017-ETASH60` y `00051-MPASH`. |
+| Registrar merma de proceso con lenguaje natural | Validado | `En la orden 67 se perdieron 10 gramos de goma por derrame` resolvio el alias `goma`, genero `AUTO-MER-20260902-28CDD373` y registro una sola merma de 10 g de `00051-MPASH` en la OP 67. |
 | Cerrar la OP del ensayo final | Pendiente de ensayo final | Debe crear lote PT, registrar merma, conciliar materiales y notificar a administracion. |
 | Recorrido IO del demo | Pendiente de ensayo final | Debe recibir PT directamente y despacharlo sin crear OP. |
 | Recorrido de maquila 3Q del demo | Pendiente de ensayo final | Debe cubrir remision, salida, recepcion parcial y trazabilidad externa. |
@@ -185,8 +186,8 @@ Estado actual que no debe presentarse como funcionalidad terminada: el WMS puede
 ### 3. Ejecucion y cierre
 
 1. Registrar, si se desea, una entrega adicional o devolucion de material.
-2. Registrar una merma de proceso con referencia, insumo, lote, ubicacion, cantidad y motivo.
-3. Nelly cierra la OP con 2 unidades conformes y 1 de merma.
+2. Registrar una merma de proceso indicando la orden, el insumo mediante SKU o alias, la cantidad y el motivo. El WMS genera la referencia; el operario no necesita conocer lote ni ubicacion porque el material ya fue consumido al iniciar la OP.
+3. Nelly cierra la OP con 2 unidades conformes y 1 de merma, indicando la ubicacion. No dicta el lote ni el vencimiento del producto terminado: el WMS genera el lote y hereda el vencimiento mas proximo de las gomas consumidas.
 4. Mostrar la conciliacion entre BOM teorico, material entregado, devoluciones, merma y uso productivo.
 5. Verificar la creacion del lote de producto terminado y su ubicacion.
 
@@ -197,6 +198,12 @@ Mensajeria esperada para el cierre:
 | Merma durante el proceso | Alistador | Alistador | Referencia generada por el WMS, insumo, cantidad, motivo y OP asociada; no debe descontar nuevamente el material ya consumido. |
 | Cierre de produccion | Nelly/recepcion y cierre | Nelly/recepcion y cierre | Codigo OP, conformes, merma de producto terminado, lote PT, vencimiento y ubicacion. |
 | Produccion terminada | Sistema | Sofi/administrador | Plan, conformes, merma y porcentaje, motivo, lote PT, ubicacion, vencimiento, quien cerro y conciliacion de materiales. |
+
+Frase natural del ensayo de cierre:
+
+> Cerramos la orden 67 con 2 tarros conformes y 1 tarro de merma por daño de empaque. Los conformes quedan en C2.
+
+El WMS debe generar el lote terminado con formato `LPN-OP-...`, calcular su vencimiento usando el vencimiento mas proximo entre los lotes de gomas consumidos, mostrar ambos datos en la respuesta y crear el stock una sola vez. Nelly no necesita conocer esos valores antes del cierre.
 
 Pregunta para el cliente durante el demo:
 

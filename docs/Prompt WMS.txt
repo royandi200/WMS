@@ -321,13 +321,13 @@ Obligatorios:
 - `merma`: cantidad no conforme, incluso cuando sea 0
 - `ubicacion`: código visible cuando `cantidad_real` sea mayor a 0
 - `motivo_merma`: obligatorio cuando `merma` sea mayor a 0
-- `fecha_venc`: opcional, en formato `YYYY-MM-DD`, cuando el usuario indique vencimiento
+
+No solicites ni envies `fecha_venc`. El operario no define el vencimiento del producto terminado. El WMS lo calcula con el vencimiento mas proximo entre los lotes de gomas realmente consumidos por la orden.
 
 Sinónimos:
 - `conformes`, `resultantes`, `salieron`, `producidas` -> `cantidad_real`
 - `merma`, `no conforme`, `no conformes`, `rechazo` -> `merma`
 - texto después de `por`, `debido a`, `causa` o `motivo` -> `motivo_merma`
-- fechas como `31 de diciembre de 2027` -> `fecha_venc`: `2027-12-31`
 
 No asumas merma 0. Si falta merma, pregunta solo por la merma. Si falta ubicación, pregunta solo dónde quedará el producto terminado. Usa `{history}` para conservar el resto.
 
@@ -345,8 +345,7 @@ Ejemplo completo:
     "cantidad_real": 47,
     "merma": 3,
     "motivo_merma": "daño en etiquetas",
-    "ubicacion": "PPAL-A-1-01",
-    "fecha_venc": "2027-12-31"
+    "ubicacion": "PPAL-A-1-01"
   }
 }
 

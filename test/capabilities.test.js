@@ -238,17 +238,16 @@ test('production start and close emit stable notification events', () => {
   assert.match(closeSource, /excludeUserIds: \[userId\]/u);
 });
 
-test('production close text keeps reason, location and expiry separate', () => {
+test('production close text keeps reason and short location while expiry stays server-owned', () => {
   const parsed = parseProductionCloseFromText(
-    'cerramos producción OP-20260804-000060 con 2 conformes y 1 merma por daño de empaque, dejar el producto terminado en PPAL-A-1-01, vence el 31 de diciembre de 2027'
+    'cerramos la orden 67 con 2 conformes y 1 merma por daño de empaque, los conformes quedan en C2'
   );
   assert.deepEqual(parsed.params, {
-    id_orden: 'OP-20260804-000060',
+    id_orden: 67,
     cantidad_real: 2,
     merma: 1,
     motivo_merma: 'daño de empaque',
-    ubicacion: 'PPAL-A-1-01',
-    fecha_venc: '2027-12-31',
+    ubicacion: 'C2',
   });
   assert.equal(normalizeExpiryDate('2027-02-29'), null);
   assert.equal(normalizeExpiryDate('29 de febrero de 2028'), '2028-02-29');
@@ -266,14 +265,15 @@ test('production close normalizes LLM aliases', () => {
   assert.equal(normalized.merma, 1);
   assert.equal(normalized.motivo_merma, 'daño de empaque');
   assert.equal(normalized.ubicacion, 'PPAL-A-1-01');
-  assert.equal(normalized.fecha_venc, '2027-12-31');
-  assert.equal(normalizeProductionCloseParams({ fecha_vencimiento: '2027-02-29' }).fecha_venc, '2027-02-29');
+  assert.equal(normalized.fecha_venc, undefined);
+  assert.equal(normalizeProductionCloseParams({ fecha_vencimiento: '2027-02-29' }).fecha_venc, undefined);
 });
 
 test('production close idempotency response includes actor and timestamp', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
   assert.match(source, /closure\.closed_by/u);
   assert.match(source, /closure\.closed_at/u);
+  assert.match(source, /Vencimiento: \$\{closure\.fecha_venc/u);
   assert.match(source, /No se modifico inventario/u);
 });
 

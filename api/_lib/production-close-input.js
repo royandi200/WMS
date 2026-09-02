@@ -38,8 +38,9 @@ function normalizeExpiryDate(value) {
 function parseProductionCloseFromText(text) {
   const raw = String(text || '');
   if (!hasProductionCloseIntent(raw)) return null;
-  const orderMatch = raw.match(/\b(?:OP|ORD|P)-[A-Z0-9-]+\b/i);
-  if (!orderMatch) return null;
+  const orderCodeMatch = raw.match(/\b(?:OP|ORD|P)-[A-Z0-9-]+\b/i);
+  const shortOrderMatch = raw.match(/\borden(?:\s+id)?\s*#?\s*(\d+)\b/i);
+  if (!orderCodeMatch && !shortOrderMatch) return null;
   const normalized = raw.toLowerCase().replace(/,/g, '.');
   const conforming =
     normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)?\s*(?:conforme(?:s)?|resultante(?:s)?|buen(?:a|as|o|os)|producid(?:a|as|o|os))/i)
@@ -48,16 +49,13 @@ function parseProductionCloseFromText(text) {
   const waste =
     normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:und|unidad(?:es)?|uds?|u)?\s*(?:de\s+)?(?:merma|mermas|no conforme(?:s)?|rechazo(?:s)?|desperdicio(?:s)?)/i)
     || normalized.match(/(?:merma|mermas|no conforme(?:s)?|rechazo(?:s)?|desperdicio(?:s)?)\s*(?:de|:)?\s*(\d+(?:\.\d+)?)/i);
-  const params = { id_orden: orderMatch[0].toUpperCase() };
+  const params = { id_orden: orderCodeMatch ? orderCodeMatch[0].toUpperCase() : Number(shortOrderMatch[1]) };
   if (conforming) params.cantidad_real = Number(conforming[1]);
   if (waste) params.merma = Number(waste[1]);
-  const reason = raw.match(/(?:por|porque|motivo|causa)\s+(.+?)(?=,\s*(?:dejar|ubicar|ubicaci[oó]n|vence|vencimiento|fecha)\b|$)/i);
+  const reason = raw.match(/(?:por|porque|motivo|causa)\s+(.+?)(?=,\s*(?:(?:los?\s+)?conformes?\s+quedan?|dejar|ubicar|ubicaci[oó]n|vence|vencimiento|fecha)\b|$)/i);
   if (reason && params.merma > 0) params.motivo_merma = reason[1].trim();
-  const location = raw.match(/(?:dejar(?:\s+el\s+producto\s+terminado)?\s+en|ubicar(?:\s+el\s+producto\s+terminado)?\s+en|ubicaci[oó]n\s*[:\-]?)\s*([A-Z0-9]+(?:-[A-Z0-9]+){2,})/i);
+  const location = raw.match(/(?:quedan?\s+en|dejar(?:\s+el\s+producto\s+terminado)?\s+en|ubicar(?:\s+el\s+producto\s+terminado)?\s+en|ubicaci[oó]n\s*[:\-]?)\s*([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)/i);
   if (location) params.ubicacion = location[1].toUpperCase();
-  const expiry = raw.match(/(?:vence|vencimiento|fecha\s+de\s+vencimiento)\s*(?:el|:)?\s*([^,.;]+)/i);
-  const expiryDate = normalizeExpiryDate(expiry?.[1]);
-  if (expiryDate) params.fecha_venc = expiryDate;
   return { action: 'CERRAR_ORDEN_PRODUCCION', params };
 }
 
@@ -70,8 +68,10 @@ function normalizeProductionCloseParams(params = {}) {
     next.cantidad_no_conforme, next.no_conformes, next.merma_declarada, next.unidades_merma);
   next.motivo_merma = firstDefined(next.motivo_merma, next.motivo, next.razon_merma, next.causa_merma);
   next.ubicacion = firstDefined(next.ubicacion, next.ubicacion_codigo, next.location_code);
-  const expiry = firstDefined(next.fecha_venc, next.fecha_vencimiento, next.expiry_date, next.vencimiento);
-  if (expiry) next.fecha_venc = normalizeExpiryDate(expiry) || String(expiry).trim();
+  delete next.fecha_venc;
+  delete next.fecha_vencimiento;
+  delete next.expiry_date;
+  delete next.vencimiento;
   return next;
 }
 

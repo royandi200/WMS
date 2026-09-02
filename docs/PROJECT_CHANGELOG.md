@@ -551,6 +551,14 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - Se sincronizó el prompt del WMS en BBC.
 - Se creó el clasificador faltante para notas de voz.
 
+### 2026-09-02: cierre de produccion y vencimiento heredado
+
+- El lote terminado se genera automaticamente; el operario no dicta su identificador.
+- El vencimiento del producto terminado se calcula en servidor usando la fecha mas proxima entre los lotes de materia base en gramos realmente consumidos.
+- El cierre falla sin modificar inventario si alguno de esos lotes no tiene un vencimiento valido.
+- Dashboard y agente dejaron de solicitar una fecha manual de vencimiento para la produccion interna.
+- El lenguaje natural admite referencias cortas como `orden 67` y ubicaciones del plano como `C2`.
+
 ## Regla de mantenimiento
 
 Al cerrar una entrega:

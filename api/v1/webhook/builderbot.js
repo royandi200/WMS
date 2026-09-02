@@ -2290,7 +2290,6 @@ module.exports = async (req, res) => {
           wasteReason: params.motivo_merma,
           locationId: params.ubicacion_id,
           locationCode: params.ubicacion,
-          expiryDate: params.fecha_venc,
           userId: user.id,
         });
         const closedWhen = closure.closed_at
@@ -2303,6 +2302,7 @@ module.exports = async (req, res) => {
               `Producto conforme: ${closure.qty_real}`,
               `Merma: ${closure.qty_waste}`,
               `Lote PT: ${closure.lpn_terminado}`,
+              `Vencimiento: ${closure.fecha_venc || 'No aplica'}`,
               `Ubicacion: ${closure.ubicacion || closure.ubicacion_id}`,
             ].join('\n');
         responseContext.production_close = closure;

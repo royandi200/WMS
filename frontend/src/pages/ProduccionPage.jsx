@@ -239,7 +239,7 @@ function AdvanceForm({ loading, onSubmit }) {
 }
 
 function CloseForm({ loading, onSubmit, locations }) {
-  const [form, setForm] = useState({ order_id: '', qty_real: '', qty_waste: '', waste_reason: '', ubicacion_id: '', expiry_date: '' })
+  const [form, setForm] = useState({ order_id: '', qty_real: '', qty_waste: '', waste_reason: '', ubicacion_id: '' })
   const [toast, setToast] = useState(null)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
   const handle = async (e) => {
@@ -269,7 +269,6 @@ function CloseForm({ loading, onSubmit, locations }) {
       qty_waste: qtyWaste,
       waste_reason: form.waste_reason.trim() || undefined,
       ubicacion_id: form.ubicacion_id ? Number(form.ubicacion_id) : undefined,
-      expiry_date: form.expiry_date || undefined,
     })
     if (res.ok) setToast({ msg: 'Orden cerrada exitosamente', ok: true })
     else setToast({ msg: res.message, ok: false })
@@ -287,7 +286,6 @@ function CloseForm({ loading, onSubmit, locations }) {
           {locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}
         </select>
       </Field>
-      <Field label="Fecha de vencimiento"><input type="date" value={form.expiry_date} onChange={set('expiry_date')} className="input-field" /></Field>
       <Field label="Motivo de merma">
         <textarea value={form.waste_reason} onChange={set('waste_reason')} rows={2} placeholder="Obligatorio si la merma es mayor a 0" className="input-field resize-none" />
       </Field>
