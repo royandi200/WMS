@@ -7,6 +7,9 @@ import {
   listProductions,
   getProduction,
   adjustMaterials,
+  prepareReplenishment,
+  confirmReplenishment,
+  cancelReplenishment,
 } from '../api/production.api'
 
 // client.js devuelve el objeto Axios completo; production.api.js extrae .data manualmente.
@@ -102,6 +105,45 @@ export const useProductionStore = create((set) => ({
       return { ok: true, data: payload?.data ?? payload }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al ajustar materiales'
+      set({ error: msg, loading: false })
+      return { ok: false, message: msg }
+    }
+  },
+
+  prepareReplenishment: async (body) => {
+    set({ loading: true, error: null })
+    try {
+      const payload = await prepareReplenishment(body)
+      set({ loading: false })
+      return { ok: true, data: payload?.data ?? payload }
+    } catch (e) {
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al preparar reposicion'
+      set({ error: msg, loading: false })
+      return { ok: false, message: msg }
+    }
+  },
+
+  confirmReplenishment: async (body) => {
+    set({ loading: true, error: null })
+    try {
+      const payload = await confirmReplenishment(body)
+      set({ loading: false })
+      return { ok: true, data: payload?.data ?? payload }
+    } catch (e) {
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al confirmar reposicion'
+      set({ error: msg, loading: false })
+      return { ok: false, message: msg }
+    }
+  },
+
+  cancelReplenishment: async (body) => {
+    set({ loading: true, error: null })
+    try {
+      const payload = await cancelReplenishment(body)
+      set({ loading: false })
+      return { ok: true, data: payload?.data ?? payload }
+    } catch (e) {
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cancelar reposicion'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }

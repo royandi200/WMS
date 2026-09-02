@@ -11,8 +11,8 @@ const STATUS_LABEL = {
   CERRADA: { label: 'Cerrada', css: 'text-green-400 bg-green-400/10' },
   CANCELADA: { label: 'Cancelada', css: 'text-muted bg-white/5' },
 }
-const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Avanzar fase', 'Cerrar orden']
-const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.pick', 'production.pick', 'production.advance', 'production.close']
+const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Preparar reposicion', 'Confirmar reposicion', 'Avanzar fase', 'Cerrar orden']
+const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.pick', 'production.pick', 'production.release', 'production.pick', 'production.advance', 'production.close']
 
 const empty = '-'
 const safeDate = (val) => {
@@ -29,7 +29,10 @@ const safeTime = (val) => {
 export default function ProduccionPage() {
   const [tab, setTab] = useState(0)
   const [locations, setLocations] = useState([])
-  const { list, loading, error, fetchList, start, confirm, adjustMaterials, advance, close, clearError } = useProductionStore()
+  const {
+    list, loading, error, fetchList, start, confirm, adjustMaterials,
+    prepareReplenishment, confirmReplenishment, cancelReplenishment, advance, close, clearError,
+  } = useProductionStore()
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
   const visibleTabs = TABS.map((label, index) => ({ label, index, capability: TAB_CAPABILITIES[index] }))
     .filter((item) => capabilities.includes('*') || capabilities.includes(item.capability))
@@ -40,7 +43,7 @@ export default function ProduccionPage() {
 
   useEffect(() => {
     if (tab === 0) fetchList()
-    if (tab === 3 || tab === 5) listUbicaciones().then((payload) => setLocations(payload?.data?.rows || [])).catch(() => setLocations([]))
+    if (tab === 3 || tab === 7) listUbicaciones().then((payload) => setLocations(payload?.data?.rows || [])).catch(() => setLocations([]))
   }, [tab])
 
   return (
@@ -108,8 +111,10 @@ export default function ProduccionPage() {
       {tab === 1 && <StartForm loading={loading} onSubmit={start} onDone={() => setTab(0)} />}
       {tab === 2 && <ConfirmMaterialsForm loading={loading} onSubmit={confirm} />}
       {tab === 3 && <MaterialAdjustmentForm loading={loading} onSubmit={adjustMaterials} locations={locations} />}
-      {tab === 4 && <AdvanceForm loading={loading} onSubmit={advance} />}
-      {tab === 5 && <CloseForm loading={loading} onSubmit={close} locations={locations} />}
+      {tab === 4 && <PrepareReplenishmentForm loading={loading} onSubmit={prepareReplenishment} onCancel={cancelReplenishment} />}
+      {tab === 5 && <ConfirmReplenishmentForm loading={loading} onSubmit={confirmReplenishment} />}
+      {tab === 6 && <AdvanceForm loading={loading} onSubmit={advance} />}
+      {tab === 7 && <CloseForm loading={loading} onSubmit={close} locations={locations} />}
     </div>
   )
 }
@@ -209,6 +214,82 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
       </div>
       <Field label="Motivo"><input value={form.motivo} onChange={set('motivo')} className="input-field" /></Field>
       <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Registrando...' : 'Registrar movimiento'}</button>
+    </form>
+  )
+}
+
+function PrepareReplenishmentForm({ loading, onSubmit, onCancel }) {
+  const [form, setForm] = useState({ order_id: '', cantidad_unidades: '', motivo: '', confirma_bom_completo: false })
+  const [toast, setToast] = useState(null)
+  const [cancelReference, setCancelReference] = useState('')
+  const set = (key) => (event) => setForm((current) => ({
+    ...current,
+    [key]: event.target.type === 'checkbox' ? event.target.checked : event.target.value,
+  }))
+  const handle = async (event) => {
+    event.preventDefault()
+    const result = await onSubmit({
+      ...form,
+      order_id: form.order_id.trim(),
+      cantidad_unidades: Number(form.cantidad_unidades),
+      motivo: form.motivo.trim(),
+    })
+    const code = result.data?.replenishment_code
+    setToast(result.ok
+      ? { msg: result.data?.already_prepared ? `${code} ya estaba preparada` : `${code} preparada y enviada al alistador`, ok: true }
+      : { msg: result.message, ok: false })
+  }
+  const handleCancel = async (event) => {
+    event.preventDefault()
+    const value = cancelReference.trim()
+    const body = value.toUpperCase().startsWith('REP-')
+      ? { codigo_reposicion: value }
+      : { order_id: value }
+    const result = await onCancel(body)
+    setToast(result.ok
+      ? { msg: result.data?.already_cancelled ? 'La reposicion ya estaba cancelada' : 'Reposicion cancelada; reservas liberadas', ok: true }
+      : { msg: result.message, ok: false })
+  }
+  return (
+    <div className="max-w-xl space-y-4">
+      {toast && <ToastInline toast={toast} />}
+      <form onSubmit={handle} className="bg-surface border border-border rounded-lg p-6 space-y-4">
+        <Field label="Orden en proceso *"><input value={form.order_id} onChange={set('order_id')} placeholder="ID u OP-..." className="input-field" required /></Field>
+        <Field label="Unidades conformes faltantes *"><input type="number" min="1" step="1" value={form.cantidad_unidades} onChange={set('cantidad_unidades')} className="input-field" required /></Field>
+        <Field label="Motivo *"><textarea value={form.motivo} onChange={set('motivo')} rows={2} placeholder="Ej. unidad no conforme por dano de empaque" className="input-field resize-none" required /></Field>
+        <label className="flex items-start gap-3 text-sm text-foreground">
+          <input type="checkbox" checked={form.confirma_bom_completo} onChange={set('confirma_bom_completo')} className="mt-1" required />
+          <span>Confirmo que se debe reponer el BOM completo para estas unidades.</span>
+        </label>
+        <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Preparando...' : 'Reservar materiales FEFO'}</button>
+      </form>
+      <form onSubmit={handleCancel} className="border-t border-border pt-4 flex gap-3">
+        <input value={cancelReference} onChange={(event) => setCancelReference(event.target.value)} placeholder="REP-... o ID/OP-..." className="input-field" required />
+        <button type="submit" disabled={loading} className="btn-secondary whitespace-nowrap">Cancelar reposicion</button>
+      </form>
+    </div>
+  )
+}
+
+function ConfirmReplenishmentForm({ loading, onSubmit }) {
+  const [reference, setReference] = useState('')
+  const [toast, setToast] = useState(null)
+  const handle = async (event) => {
+    event.preventDefault()
+    const value = reference.trim()
+    const body = value.toUpperCase().startsWith('REP-')
+      ? { codigo_reposicion: value }
+      : { order_id: value }
+    const result = await onSubmit(body)
+    setToast(result.ok
+      ? { msg: result.data?.already_confirmed ? 'La reposicion ya estaba confirmada' : 'Reposicion confirmada; materiales entregados a produccion', ok: true }
+      : { msg: result.message, ok: false })
+  }
+  return (
+    <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
+      {toast && <ToastInline toast={toast} />}
+      <Field label="Reposicion u orden *"><input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="REP-... o ID/OP-..." className="input-field" required /></Field>
+      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Confirmar entrega adicional'}</button>
     </form>
   )
 }

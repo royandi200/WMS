@@ -102,6 +102,15 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       };
     }
     if (order.estado !== 'EN_PROCESO') throw httpError(409, `La orden esta ${order.estado} y debe estar EN_PROCESO`);
+    const [pendingReplenishments] = await conn.execute(
+      `SELECT codigo FROM produccion_reposiciones
+       WHERE orden_produccion_id = ? AND estado = 'PENDIENTE_ALISTAMIENTO'
+       ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+      [order.id]
+    );
+    if (pendingReplenishments.length) {
+      throw httpError(409, `La orden tiene la reposicion pendiente ${pendingReplenishments[0].codigo}; confirmala o cancelala antes de cerrar`);
+    }
     if (!Number.isFinite(conforming) || conforming < 0 || !Number.isFinite(waste) || waste < 0) {
       throw httpError(400, 'Cantidad conforme y merma son obligatorias');
     }

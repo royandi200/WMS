@@ -8,3 +8,6 @@ export const confirmMaterials = (body)   => client.post('/production/confirm',  
 export const advancePhase     = (body)   => client.post('/production/advance',           body).then(r => r.data)
 export const closeProduction  = (body)   => client.post('/production/close',             body).then(r => r.data)
 export const adjustMaterials  = (body)   => client.post('/production/material-adjustment', body).then(r => r.data)
+export const prepareReplenishment = (body) => client.post('/production/replenishment-prepare', body).then(r => r.data)
+export const confirmReplenishment = (body) => client.post('/production/replenishment-confirm', body).then(r => r.data)
+export const cancelReplenishment = (body) => client.post('/production/replenishment-cancel', body).then(r => r.data)

@@ -219,6 +219,10 @@ Pregunta para el cliente durante el demo:
 
 > Si una unidad terminada queda no conforme, ¿la OP puede cerrarse con menos unidades conformes que las planeadas o debe mantenerse abierta y autorizar el alistamiento de otro juego de materiales para fabricar un reemplazo? Si se reemplaza, ¿quien lo autoriza y la nueva entrega se registra como consumo adicional de la misma OP?
 
+Pregunta de decision para formular en este punto de la demostracion:
+
+> Cuando el cierre reporta menos unidades conformes que la cantidad planeada, ¿como quieren que actue el WMS: cerrar con el faltante, mantener automaticamente la OP abierta y proponer los materiales de reposicion, o pedirle a Sofi que elija entre ambas opciones en cada caso? ¿La regla debe cambiar cuando la OP corresponde a un pedido de cliente frente a una produccion para stock de seguridad?
+
 Recomendacion provisional basada en practicas de MRP/MES:
 
 1. Tratar la cantidad planeada de la OP como objetivo de unidades conformes, no como numero maximo de intentos.
@@ -230,7 +234,33 @@ Recomendacion provisional basada en practicas de MRP/MES:
 
 Referencias revisadas: Microsoft Dynamics 365 separa cantidad buena y cantidad de error al reportar produccion terminada y permite reportes parciales; Odoo permite registrar scrap de componentes o producto terminado, advierte diferencias de consumo y crea ordenes de continuacion para cantidades pendientes; Oracle separa cantidades completadas, rechazadas y scrap.
 
-Estado para la demo: esta decision **no esta implementada**. La OP 67 demuestra el cierre con resultado inferior al plan y una unidad no conforme. Presentar el comportamiento como un punto de validacion con el cliente, no como politica definitiva.
+Estado para la demo: la politica que decide automaticamente entre cerrar con faltante o reponer **no esta definida** y debe presentarse como punto de validacion con el cliente. La capacidad operativa de reposicion se incorporo de forma explicita y reversible: Sofi prepara una reposicion, el WMS reserva por FEFO y el Alistador confirma antes de descontar. Debe completarse un ensayo vivo antes de presentarla como validada.
+
+#### Flujo de reposicion incorporado
+
+1. La OP debe continuar `EN_PROCESO`; no se cierra al detectar la unidad no conforme.
+2. Sofi indica la OP, la cantidad de unidades conformes faltantes, el motivo y confirma expresamente que se repondra el BOM completo. El WMS no debe asumir esta ultima decision porque algunos componentes podrian recuperarse.
+3. `PREPARAR_REPOSICION_PRODUCCION` calcula las cantidades desde el BOM congelado en la OP, reserva lotes FEFO y notifica al Alistador. Preparar no descuenta inventario.
+4. El Alistador confirma mediante el ID corto de reposicion o de orden. `CONFIRMAR_REPOSICION_PRODUCCION` descuenta exactamente las reservas, registra la entrega como adicional y avisa a Sofi y Nelly. La OP permanece `EN_PROCESO`.
+5. Si Sofi cambia de decision antes del alistamiento, `CANCELAR_REPOSICION_PRODUCCION` libera las reservas. Una reposicion ya confirmada no se puede cancelar.
+6. La OP no puede cerrarse mientras exista una reposicion pendiente. Preparar, confirmar y cancelar son idempotentes frente a reintentos inmediatos.
+
+Mensajeria esperada:
+
+| Momento | Quien envia | Quien recibe | Contenido esperado |
+|---|---|---|---|
+| Autorizacion | Sofi/administrador | Sofi/administrador | Codigo de reposicion, OP, unidades conformes faltantes, motivo y materiales reservados por FEFO. |
+| Aviso de reposicion | Sistema | Alistador | Codigo corto, OP, objetivo adicional y picking con SKU, cantidad, lote y ubicacion. |
+| Confirmacion | Alistador | Alistador | Reposicion confirmada y materiales entregados; la OP sigue en proceso. |
+| Material adicional entregado | Sistema | Sofi y Nelly | Reposicion, OP, quien confirmo y detalle de lotes y cantidades adicionales. |
+
+Frase natural sugerida para Sofi:
+
+> Autoriza reponer todos los materiales para fabricar 1 unidad faltante de la orden ID 67 por daño de empaque.
+
+Frase natural sugerida para el Alistador:
+
+> Ya aliste la reposicion de la orden ID 67.
 
 Frase natural del ensayo de merma de proceso:
 
@@ -249,14 +279,132 @@ El operario no debe conocer ni inventar un codigo. El WMS genera una referencia 
 
 Referencia: `00276-PTZNASHWA` - PRODUCTO TERMINADO ZENOVA ASHWAGANDHA.
 
-1. Mostrar que el producto esta clasificado como `IO` y no tiene BOM propio de produccion.
-2. Cargar o mostrar la OC y el documento de compra demo correspondiente.
-3. Confirmar directamente la recepcion del producto terminado, incluyendo lote del proveedor, vencimiento y ubicacion.
-4. Verificar que no se crea OP, consumo de materia prima ni movimiento a produccion.
-5. Mostrar una venta demo precargada y confirmar el despacho de 2 unidades.
-6. Consultar el lote para mostrar proveedor, recepcion, saldo, factura, despacho y cliente final.
+### Preflight verificado el 2026-09-02
 
-Mensaje para el cliente: el WMS no obliga a pasar por produccion un producto que solo entra, se almacena y se despacha.
+Se revisaron codigo, pruebas locales y MySQL en modo de auditoria `standard`, sin escribir datos ni llamar a Siigo o BuilderBot.
+
+| Precondicion | Estado comprobado |
+|---|---|
+| Producto maestro | Activo, ID interno `104`, SKU principal `00276-PTZNASHWA`, unidad `und` y modalidad `IO`. |
+| Identificacion por nombre | Alias activos `zenova ashwagandha` y `zenova ashwa`. |
+| Control por lote | Obligatorio. La recepcion debe registrar el lote y vencimiento informados por el proveedor. |
+| Produccion interna | Bloqueada para modalidad `IO`; el producto no tiene filas de BOM. |
+| Ubicacion preferida | `B13` en `BG-PPAL`. Es una sugerencia operativa, no una ubicacion exclusiva. |
+| Stock existente | 24 und en `DEMO-MAPA-B13-00276-PTZNASHWA`, vencimiento `2027-12-31`, creadas por ajuste del mapa. No usar este lote como evidencia de recepcion desde un documento de proveedor. |
+| Documento de entrada, recepcion y despacho IO | No existe actualmente ningun registro de esos tres tipos para este SKU. El recorrido punta a punta sigue pendiente de ensayo. |
+| Roles actuales | Juan conserva `admin`; Datana esta en `recepcion_cierre`. No se modificaron roles durante el preflight. |
+| Pruebas locales enfocadas | 37 de 37 aprobadas: modalidad, recepcion desde OC, confirmacion por WhatsApp, ubicaciones, despacho e idempotencia de referencias. No equivalen a un ensayo vivo del SKU IO. |
+
+### Documento real aportado por el cliente
+
+La fotografia recibida corresponde a la **Remision 106** de un proveedor, no a una orden de compra. Contiene cliente, ciudad, fecha, descripcion de producto, cantidad, lote y vencimiento. Los campos `Orden de pedido`, `N. de cajas`, responsable y recibe aparecen vacios, y no se observan SKU.
+
+Los productos visibles son `COLAGENO HIDROLIZADO BIOTINA Y RESVERATROL` y `CHONTADURO BOROJO MACA SABOR ARTIFICIAL MARACUYA`; no corresponden al producto elegido para el demo, `00276-PTZNASHWA`. Ademas, esos textos no resuelven de forma inequivoca un producto `IO` activo del catalogo actual. Por seguridad no se deben mapear por aproximacion ni presentar esta fotografia como OC de Zenova.
+
+Decision confirmada por el cliente durante el preflight: para producto in-and-out, el documento contra el que revisan el ingreso puede ser una **remision del proveedor o una factura del proveedor**. Ambos deben poder originar la recepcion esperada y conservarse como soporte; no se debe obligar al usuario a registrar ese documento como si fuera una OC.
+
+El flujo desplegado actualmente inicia la recepcion directa desde una OC. Por tanto, el soporte `REMISION`/`FACTURA_PROVEEDOR` es un ajuste funcional pendiente y no debe presentarse en el demo como terminado. La remision real sirve para explicar los datos que deben extraerse y cotejarse: proveedor, numero de documento, fecha, producto, cantidad, lote y vencimiento.
+
+Diseño recomendado para evitar dos flujos duplicados: crear un unico concepto de **documento de entrada de proveedor** con tipo `REMISION` o `FACTURA_PROVEEDOR`, identidad unica por proveedor, tipo y numero, archivo original, hash, fecha e items. Ambos tipos deben pasar por la misma revision humana y por el mismo motor transaccional de recepcion; una OC, cuando exista, se vincula como referencia opcional y no cambia la forma de contabilizar el ingreso fisico.
+
+### Preparacion tecnica obligatoria antes de la reunion
+
+Estas tareas no estan ejecutadas ni validadas todavia:
+
+1. Preparar un PDF demo de tipo `REMISION` o `FACTURA_PROVEEDOR`, con numero `DEMO-20260902-DOC-IO-001`, proveedor de prueba, una linea de `00276-PTZNASHWA`, cantidad `5 und`, lote `DEMO-IO-ZENOVA-001` y vencimiento `2027-11-30`.
+2. Si el ajuste para documentos IO queda listo antes del ensayo, cargarlo con su tipo real y dejar una recepcion esperada pendiente. Si no queda listo, usar una OC demo provisional para recorrer el motor existente y declarar expresamente durante la reunion que la pantalla aun sera adaptada para aceptar remision o factura de proveedor sin disfrazarlas de OC.
+3. Usar para la recepcion el lote `DEMO-IO-ZENOVA-001`, vencimiento `2027-11-30` y ubicacion `B13`. Ese vencimiento es anterior al lote del mapa y permite comprobar FEFO en el despacho.
+4. Despues de recibir las 5 und, precargar una factura **sintetica** `FV-DEMO-IO-20260902-001` para el cliente de prueba `WMSQA260721 Cliente`, con 2 und de `00276-PTZNASHWA`.
+5. La precarga debe invocar directamente el importador determinista `importInvoice()` con notificaciones externas desactivadas. No debe consultar, crear ni modificar documentos en Siigo. Debe producir una tarea `picking` con 2 und reservadas del lote recibido.
+6. Guardar los ID cortos devueltos para el documento, recepcion y despacho. No predecir ni dictar los codigos largos durante la reunion.
+
+No habilitar `ALLOW_DIRECT_DISPATCH_REQUEST`: el despacho directo esta desactivado intencionalmente. La demostracion debe confirmar una tarea con forma de factura importada, no abrir una salida manual paralela.
+
+### Pasos exactos del demo
+
+#### 1. Mostrar la modalidad
+
+1. Abrir `Productos` y buscar `zenova ashwa` o `00276-PTZNASHWA`.
+2. Mostrar modalidad `IO`, unidad `und`, control por lote y ausencia de BOM.
+3. Explicar que el WMS no crea OP ni consume insumos para este recorrido.
+
+#### 2. Recibir cinco unidades
+
+1. Con Datana en rol `recepcion_cierre`, enviar por WhatsApp: `Que recepciones pendientes hay?`
+2. Elegir el documento IO demo mediante su ID corto: `Prepara la recepcion ID <ID_DOCUMENTO_IO>`.
+3. El agente debe mostrar 5 und pendientes de Zenova Ashwagandha, lote de proveedor requerido y ubicacion sugerida `B13`. Preparar no modifica inventario.
+4. Enviar: `Para la recepcion ID <ID_DOCUMENTO_IO> llegaron completas 5 unidades de Zenova Ashwagandha, lote DEMO-IO-ZENOVA-001, vencen el 30 de noviembre de 2027 y estan disponibles en B13.`
+5. El agente debe devolver una vista previa canonica con SKU, cantidad, condicion, ubicacion, lote y vencimiento, indicando que aun no modifico inventario.
+6. Confirmar con la frase explicita solicitada: `Confirmo la recepcion ID <ID_DOCUMENTO_IO>`.
+7. Repetir una vez la misma confirmacion para mostrar idempotencia. Debe informar que ya fue recibida y no volver a sumar inventario.
+
+Mensajes esperados:
+
+| Momento | Quien recibe | Contenido minimo esperado |
+|---|---|---|
+| Consulta | Datana | ID corto, tipo y numero de documento, proveedor, `00276-PTZNASHWA`, 5 und y lote requerido. |
+| Preparacion | Datana | Borrador `REC-...`, saldo pendiente, lote requerido y sugerencia `B13`; sin cambio de inventario. |
+| Vista previa | Datana | 5 und `DISPONIBLE`, lote `DEMO-IO-ZENOVA-001`, vencimiento `2027-11-30` y `B13`; solicitud de confirmacion explicita. |
+| Confirmacion | Datana | Recepcion confirmada contra el documento; recibido 5, disponible 5, cuarentena 0 y rechazado 0. |
+| Reintento | Datana | Ya recibida; no se modifico inventario. |
+
+#### 3. Confirmar un despacho sin llamar a Siigo
+
+1. Antes de este paso, comprobar en el dashboard que la factura sintetica creo una tarea de despacho en `picking` y reservo exactamente 2 und del lote `DEMO-IO-ZENOVA-001`.
+2. Cambiar la linea rotativa a rol `despacho` siguiendo el procedimiento general del guion y volver a comprobar el rol efectivo.
+3. Enviar por WhatsApp: `Que despachos pendientes hay?`
+4. El agente debe listar la factura sintetica, cliente, producto, cantidad y el ID corto del despacho, sin modificar inventario.
+5. Confirmar: `Confirma el despacho ID <ID_DESPACHO_IO>`.
+6. El agente debe informar despacho, factura y salida de 2 und del lote `DEMO-IO-ZENOVA-001`.
+7. Repetir la confirmacion. Debe indicar que ya estaba confirmado y no descontar otra vez.
+
+Mensaje para el cliente: la factura mostrada es una simulacion local preparada para el demo; reproduce el contrato que importara Siigo, pero durante la reunion no se hace ninguna llamada al sistema contable.
+
+#### 4. Cerrar con trazabilidad
+
+1. Consultar por WhatsApp: `Muestrame la trazabilidad del lote DEMO-IO-ZENOVA-001`.
+2. Mostrar el mismo lote en `Inventario > Buscar lote` y revisar el historico de recepciones y despachos.
+3. Explicar que el resultado debe contener remision o factura de proveedor, proveedor, recepcion de 5 und, ubicacion `B13`, salida de 2 und, factura sintetica de venta, despacho, cliente final y saldo de 3 und.
+4. Confirmar que no aparece orden de produccion, consumo de materias primas ni BOM.
+
+### Validaciones que deben hacerse durante el ensayo
+
+| Superficie | Antes del despacho | Despues del despacho |
+|---|---|---|
+| `stock` | Cantidad 5, reservada 2, disponible 3 en `B13`. | Cantidad 3, reservada 0, disponible 3. |
+| `lots` | Inicial 5, actual 5, origen `RECEPCION`, estado `DISPONIBLE`. | Inicial 5, actual 3, estado `DISPONIBLE`. |
+| `kardex` | Un `INGRESO_RECEPCION` de +5. | El ingreso anterior y un solo `DESPACHO` de -2. |
+| Recepcion | Documento de proveedor vinculado, tipo, numero, proveedor, lote, vencimiento, ubicacion y 5 und aceptadas. | Sin cambios. |
+| Despacho | Estado `picking`, factura sintetica, cliente y 2 und reservadas. | Estado `despachado`, 2 und despachadas y fecha registrada. |
+| Produccion | Cero OP y cero consumo de materiales para el lote. | Debe continuar en cero. |
+
+Estas cifras solo pueden marcarse como validadas despues del ensayo vivo. El lote `DEMO-MAPA-B13-00276-PTZNASHWA` debe permanecer separado y no debe aparecer como origen del despacho IO.
+
+### Preguntas para el cliente
+
+Pregunta principal para definir en este punto del demo:
+
+> ¿Cual sera el documento que utilizara el equipo para apoyar cada recepcion y comparar lo esperado contra lo que llega fisicamente? Puede ser una remision, una factura del proveedor u otro soporte. Necesitamos definir sus caracteristicas minimas: proveedor, tipo y numero unico de documento, fecha, SKU o nombre aprobado del producto, unidad de medida, cantidad esperada, lote, vencimiento y, cuando aplique, numero de cajas. Tambien debemos confirmar si todos los proveedores usan el mismo formato, si aceptaran PDF y fotografia, y como se representaran entregas parciales, varios lotes o diferencias fisicas.
+
+La respuesta debe permitir decidir si el WMS manejara un formato unico, varios formatos de proveedor con reglas de lectura, o una plantilla estandar que el cliente exigira o completara antes de recibir.
+
+1. Si para una entrega tambien existe una OC, ¿quieren vincularla y comparar `OC vs remision/factura de proveedor vs recibido fisico`, o basta el documento de proveedor contra lo recibido?
+2. La remision 106 no muestra SKU. ¿El proveedor puede incluir el SKU de Infinity o debemos mantener una tabla aprobada de nombres del proveedor por producto?
+3. ¿El numero de remision o factura debe ser obligatorio y unico por proveedor para impedir que el mismo documento se reciba dos veces?
+4. ¿Una remision o factura puede contener varios lotes del mismo producto o entregas parciales?
+5. ¿Las cantidades del documento estan siempre en unidades individuales? Si tambien manejan cajas, ¿el numero de cajas es informativo o participa en la conciliacion?
+6. ¿Quien decide cuarentena o rechazo cuando el lote, vencimiento, cantidad o estado fisico no coincide con el documento?
+7. ¿La evidencia debe conservarse como PDF/fotografia descargable asociada a la recepcion?
+
+### Bloqueadores confirmados
+
+1. No existe todavia un documento de entrada, recepcion ni tarea de despacho para `00276-PTZNASHWA`; el recorrido no esta listo para ejecutarse sin preparacion.
+2. La remision 106 no corresponde al SKU elegido y no contiene SKU visibles. No puede utilizarse como fixture de Zenova ni mapearse automaticamente con seguridad.
+3. El WMS actual inicia la recepcion directa desde una OC. Todavia no admite una remision o factura de proveedor como origen documental de una recepcion IO, aunque esa es la regla operativa confirmada por el cliente.
+4. El despacho directo esta desactivado y los despachos confirmables requieren una factura importada. Para el demo hace falta precargar la factura sintetica indicada; no existe actualmente.
+5. La trazabilidad completa documento de proveedor -> recepcion -> lote -> factura de venta -> despacho -> cliente no puede demostrarse con el lote de ajuste del mapa.
+
+Mensaje central para el cliente: el WMS no obliga a pasar por produccion un producto que solo entra, se almacena y se despacha; mantiene lote y vencimiento del proveedor, ubicacion interna y trazabilidad hasta el cliente final.
 
 ## Escenario 3: maquila tercerizada 3Q
 

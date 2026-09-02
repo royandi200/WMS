@@ -115,6 +115,14 @@ El servicio valida BOM, reserva MP por FEFO y ubicacion, crea la OP en `APROBADA
 
 `AJUSTAR_MATERIALES_PRODUCCION` registra `ENTREGA_ADICIONAL` o `DEVOLUCION`. Requiere OP, SKU, lote, codigo visible de ubicacion y cantidad. Una devolucion no puede superar lo consumido desde ese lote y ubicacion.
 
+### Reposicion para completar unidades conformes
+
+`PREPARAR_REPOSICION_PRODUCCION` es ejecutada por `admin`. Requiere OP, unidades conformes faltantes, motivo y confirmacion explicita de que se repondra el BOM completo. Calcula desde el BOM almacenado en la OP, reserva por FEFO y avisa al Alistador, sin descontar inventario.
+
+`CONFIRMAR_REPOSICION_PRODUCCION` es ejecutada por `alistador`. Consume solo las reservas de esa reposicion, las registra como entrega adicional, conserva la OP `EN_PROCESO` y notifica a `admin` y `recepcion_cierre`. No requiere que el usuario dicte SKU, lote ni ubicacion.
+
+`CANCELAR_REPOSICION_PRODUCCION` permite al `admin` liberar una reposicion aun no confirmada. Una OP con reposicion pendiente no se puede cerrar. Las tres acciones son idempotentes frente a reintentos inmediatos.
+
 ### Cierre
 
 `CERRAR_ORDEN_PRODUCCION` es ejecutada por `recepcion_cierre`.

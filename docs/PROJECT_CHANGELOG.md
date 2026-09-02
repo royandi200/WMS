@@ -15,6 +15,17 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Reposicion controlada de materiales en produccion
+
+- Sofi puede preparar una reposicion para unidades conformes faltantes de una OP `EN_PROCESO`, indicando cantidad, motivo y confirmando expresamente el BOM completo.
+- La preparacion usa el BOM congelado en la OP, reserva inventario por FEFO y notifica al Alistador; no descuenta existencias.
+- El Alistador confirma la entrega adicional con el codigo de reposicion o el ID de la OP. Solo esa confirmacion descuenta los lotes reservados, actualiza la conciliacion y notifica a Sofi y Nelly.
+- Sofi puede cancelar una reposicion pendiente y liberar reservas. Una reposicion confirmada no puede cancelarse y una OP con reposicion pendiente no puede cerrarse.
+- Se incorporaron rutas de dashboard y handlers de WhatsApp separados por capacidad: `production.release` para preparar/cancelar y `production.pick` para confirmar.
+- `produccion_materiales` y `produccion_material_lotes` se convirtieron de MyISAM a InnoDB despues de seis chequeos sin huerfanos, para que los flujos de produccion tengan rollback transaccional real.
+- La politica automatica ante un cierre corto sigue pendiente de decision del cliente. El flujo de reposicion solo se ejecuta mediante autorizacion explicita.
+- Validacion local: 163 pruebas aprobadas, build Vite aprobado y migracion verificada en la base de desarrollo.
+
 ### 2026-09-02 - Referencias automaticas para mermas por WhatsApp
 
 - El operario ya no debe inventar una referencia para reportar una merma de proceso o bodega desde WhatsApp.

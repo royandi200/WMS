@@ -92,6 +92,11 @@ const {
   resolveProductionOrigin,
 } = require('../../_lib/production-origin-evidence');
 const { adjustProductionMaterials } = require('../../_lib/production-materials');
+const {
+  cancelProductionReplenishment,
+  confirmProductionReplenishment,
+  prepareProductionReplenishment,
+} = require('../../_lib/production-replenishment');
 const { closeProductionOrder } = require('../../_lib/production-close');
 const {
   normalizeProductionCloseParams,
@@ -2343,6 +2348,59 @@ module.exports = async (req, res) => {
         });
         mensaje = `${adjustment.tipo} registrada en ${adjustment.order_code}: ${adjustment.cantidad} de ${adjustment.sku}, lote ${adjustment.lote}, ubicacion ${adjustment.ubicacion || adjustment.ubicacion_id}.`;
         responseContext.production_material = adjustment;
+        break;
+      }
+
+      case 'PREPARAR_REPOSICION_PRODUCCION': {
+        const replenishment = await prepareProductionReplenishment({
+          orderId: params.id_orden,
+          quantity: params.cantidad_unidades,
+          reason: params.motivo,
+          fullBomConfirmed: params.confirma_bom_completo,
+          userId: user.id,
+        });
+        mensaje = replenishment.already_prepared
+          ? `La reposicion ${replenishment.replenishment_code} ya estaba preparada. No se duplicaron reservas.`
+          : [
+              `Reposicion ${replenishment.replenishment_code} preparada para ${replenishment.order_code}.`,
+              `Objetivo adicional: ${replenishment.target_quantity} unidad(es) conformes.`,
+              `Motivo: ${replenishment.reason}`,
+              'Materiales reservados por FEFO:',
+              ...replenishment.picking.map(item => `- ${item.sku}: ${item.cantidad} ${item.unidad || ''} | lote ${item.lote} | ubicacion ${item.ubicacion || item.ubicacion_id}`),
+              `El alistador fue notificado. La OP sigue EN_PROCESO.`,
+            ].join('\n');
+        responseContext.production_replenishment = replenishment;
+        break;
+      }
+
+      case 'CONFIRMAR_REPOSICION_PRODUCCION': {
+        const replenishment = await confirmProductionReplenishment({
+          replenishmentId: params.id_reposicion || params.codigo_reposicion,
+          orderId: params.id_orden,
+          userId: user.id,
+        });
+        mensaje = replenishment.already_confirmed
+          ? `La reposicion ${replenishment.replenishment_code} ya estaba confirmada. No se modifico inventario.`
+          : [
+              `Reposicion ${replenishment.replenishment_code} confirmada para ${replenishment.order_code}.`,
+              `Objetivo adicional: ${replenishment.target_quantity} unidad(es) conformes.`,
+              ...replenishment.consumed.map(item => `- ${item.sku}: ${item.cantidad} | lote ${item.lote} | ubicacion ${item.ubicacion || 'N/A'}`),
+              'La OP permanece EN_PROCESO hasta registrar el resultado final.',
+            ].join('\n');
+        responseContext.production_replenishment = replenishment;
+        break;
+      }
+
+      case 'CANCELAR_REPOSICION_PRODUCCION': {
+        const replenishment = await cancelProductionReplenishment({
+          replenishmentId: params.id_reposicion || params.codigo_reposicion,
+          orderId: params.id_orden,
+          userId: user.id,
+        });
+        mensaje = replenishment.already_cancelled
+          ? `La reposicion ${replenishment.replenishment_code} ya estaba cancelada. No se modifico inventario.`
+          : `Reposicion ${replenishment.replenishment_code} cancelada para ${replenishment.order_code}. Se liberaron las reservas y no se desconto inventario.`;
+        responseContext.production_replenishment = replenishment;
         break;
       }
 

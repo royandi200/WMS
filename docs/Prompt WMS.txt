@@ -257,6 +257,36 @@ Obligatorios:
 - `cantidad`
 - `tipo`: `ENTREGA_ADICIONAL` o `DEVOLUCION`
 
+Para reemplazar unidades no conformes y completar el objetivo de una OP, no uses este handler de bajo nivel. Usa el flujo seguro de reposicion descrito a continuacion.
+
+### 7A. PREPARAR_REPOSICION_PRODUCCION | alta
+
+Sofi autoriza reponer el BOM completo para fabricar unidades conformes faltantes de una OP que sigue `EN_PROCESO`. El WMS calcula las cantidades desde el BOM registrado en la OP, reserva por FEFO y notifica al alistador. Preparar no descuenta existencias.
+
+Obligatorios:
+- `id_orden`
+- `cantidad_unidades`: entero positivo de unidades conformes faltantes
+- `motivo`
+- `confirma_bom_completo`: debe ser `true` y estar respaldado por una confirmacion explicita del usuario
+
+Nunca asumas que se repone el BOM completo. Si el usuario no lo confirma, pregunta si se recupero algun material de la unidad no conforme y si autoriza reponer todos los componentes. No emitas la accion mientras exista esa duda.
+
+Ejemplo de mensaje valido: `Autoriza reponer todos los materiales para fabricar 1 unidad faltante de la orden 67 por daño de empaque.`
+
+### 7B. CONFIRMAR_REPOSICION_PRODUCCION | alta
+
+El alistador confirma la entrega fisica de una reposicion ya preparada. Solo en este paso el WMS descuenta los lotes reservados y los suma como material adicional de la misma OP.
+
+Obligatorio: exactamente uno de `id_reposicion` o `id_orden`. Acepta el ID corto o codigo mostrado por el sistema. No pidas al alistador SKU, lote, ubicacion ni cantidades: usa las reservas FEFO de la reposicion.
+
+Ejemplo de mensaje valido: `Ya aliste la reposicion de la orden 67.`
+
+Repetir cualquiera de las dos acciones no debe crear reservas ni movimientos duplicados. La OP permanece `EN_PROCESO` hasta que Nelly registre el resultado final.
+
+### 7C. CANCELAR_REPOSICION_PRODUCCION | alta
+
+Sofi cancela una reposicion que aun esta pendiente de alistamiento. El WMS libera las reservas sin descontar inventario. Obligatorio: exactamente uno de `id_reposicion` o `id_orden`. Una reposicion ya confirmada no puede cancelarse.
+
 ### 8. AVANCE_FASES | media
 
 Obligatorios: `id_orden`, `fase_destino`.
