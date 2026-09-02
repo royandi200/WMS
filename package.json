@@ -40,8 +40,12 @@
     "data:product-locations:apply": "node scripts/apply-product-locations-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:production-replenishments:dry-run": "node scripts/apply-production-replenishments-migration.js",
     "data:production-replenishments:apply": "node scripts/apply-production-replenishments-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:purchase-order-hints:dry-run": "node scripts/apply-purchase-order-document-hints-migration.js",
+    "data:purchase-order-hints:apply": "node scripts/apply-purchase-order-document-hints-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:warehouse-map-demo:dry-run": "node scripts/qa/seed-warehouse-map-demo-stock.js",
     "data:warehouse-map-demo:apply": "node scripts/qa/seed-warehouse-map-demo-stock.js --apply --yes-i-understand-this-changes-qa-inventory",
+    "data:demo-io-hints:dry-run": "node scripts/qa/seed-demo-io-document-hints.js",
+    "data:demo-io-hints:apply": "node scripts/qa/seed-demo-io-document-hints.js --apply --yes-i-understand-this-changes-qa-document-evidence",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {

@@ -291,7 +291,7 @@ Se revisaron codigo, pruebas locales y MySQL en modo de auditoria `standard`, si
 | Produccion interna | Bloqueada para modalidad `IO`; el producto no tiene filas de BOM. |
 | Ubicacion preferida | `B13` en `BG-PPAL`. Es una sugerencia operativa, no una ubicacion exclusiva. |
 | Stock existente | 24 und en `DEMO-MAPA-B13-00276-PTZNASHWA`, vencimiento `2027-12-31`, creadas por ajuste del mapa. No usar este lote como evidencia de recepcion desde un documento de proveedor. |
-| Documento de entrada, recepcion y despacho IO | PDF demo y OC provisional `DEMO-20260902-DOC-IO-001` verificados en base de datos con 5 und. La preparacion por WhatsApp creo el borrador `REC-OC-6-001` en estado `borrador`, sin lote, ubicacion ni cantidad recibida todavia. La confirmacion fisica y el despacho siguen pendientes. |
+| Documento de entrada, recepcion y despacho IO | PDF demo y OC provisional `DEMO-20260902-DOC-IO-001` verificados en base de datos con 5 und. La preparacion por WhatsApp creo el borrador `REC-OC-6-001` en estado `borrador`. La OC conserva lote `DEMO-IO-ZENOVA-001` y vencimiento `2027-11-30` como propuestas documentales; aun no existe inventario por esta recepcion. |
 | Roles actuales | Juan conserva `admin`; Datana esta en `recepcion_cierre`. No se modificaron roles durante el preflight. |
 | Pruebas locales enfocadas | 37 de 37 aprobadas: modalidad, recepcion desde OC, confirmacion por WhatsApp, ubicaciones, despacho e idempotencia de referencias. No equivalen a un ensayo vivo del SKU IO. |
 
@@ -332,9 +332,9 @@ No habilitar `ALLOW_DIRECT_DISPATCH_REQUEST`: el despacho directo esta desactiva
 
 1. Con Datana en rol `recepcion_cierre`, enviar por WhatsApp: `Que recepciones pendientes hay?`
 2. Elegir el documento IO demo mediante su ID corto: `Prepara la recepcion ID <ID_DOCUMENTO_IO>`.
-3. El agente debe mostrar 5 und pendientes de Zenova Ashwagandha, lote de proveedor requerido y ubicacion sugerida `B13`. Preparar no modifica inventario.
-4. Enviar: `Para la recepcion ID <ID_DOCUMENTO_IO> llegaron completas 5 unidades de Zenova Ashwagandha, lote DEMO-IO-ZENOVA-001, vencen el 30 de noviembre de 2027 y estan disponibles en B13.`
-5. El agente debe devolver una vista previa canonica con SKU, cantidad, condicion, ubicacion, lote y vencimiento, indicando que aun no modifico inventario.
+3. El agente debe mostrar 5 und pendientes de Zenova Ashwagandha, lote `DEMO-IO-ZENOVA-001` y vencimiento `2027-11-30` propuestos por el PDF, y ubicacion sugerida `B13`. Preparar no modifica inventario.
+4. Cotejar fisicamente la etiqueta contra el PDF. Si coincide, enviar sin dictar el codigo largo: `Para la recepcion ID <ID_DOCUMENTO_IO> llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13.`
+5. El agente debe devolver una vista previa canonica con SKU, cantidad, condicion y ubicacion; debe precargar lote y vencimiento como `propuestos por PDF`, pedir su verificacion fisica e indicar que aun no modifico inventario.
 6. Confirmar con la frase explicita solicitada: `Confirmo la recepcion ID <ID_DOCUMENTO_IO>`.
 7. Repetir una vez la misma confirmacion para mostrar idempotencia. Debe informar que ya fue recibida y no volver a sumar inventario.
 
@@ -343,8 +343,8 @@ Mensajes esperados:
 | Momento | Quien recibe | Contenido minimo esperado |
 |---|---|---|
 | Consulta | Datana | ID corto, tipo y numero de documento, proveedor, `00276-PTZNASHWA`, 5 und y lote requerido. |
-| Preparacion | Datana | Borrador `REC-...`, saldo pendiente, lote requerido y sugerencia `B13`; sin cambio de inventario. |
-| Vista previa | Datana | 5 und `DISPONIBLE`, lote `DEMO-IO-ZENOVA-001`, vencimiento `2027-11-30` y `B13`; solicitud de confirmacion explicita. |
+| Preparacion | Datana | Borrador `REC-...`, saldo pendiente, lote y vencimiento propuestos por PDF y sugerencia `B13`; sin cambio de inventario. |
+| Vista previa | Datana | 5 und `DISPONIBLE`, lote `DEMO-IO-ZENOVA-001`, vencimiento `2027-11-30` y `B13`; aviso de cotejo fisico y solicitud de confirmacion explicita. |
 | Confirmacion | Datana | Recepcion confirmada contra el documento; recibido 5, disponible 5, cuarentena 0 y rechazado 0. |
 | Reintento | Datana | Ya recibida; no se modifico inventario. |
 

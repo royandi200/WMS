@@ -189,10 +189,12 @@ async function createPurchaseOrderRecord(conn, { input, document, userId }) {
     await conn.execute(
         `INSERT INTO orden_compra_proveedor_items
            (orden_compra_id, producto_id, referencia_origen, descripcion_origen,
-            cantidad_ordenada, unidad, precio_unitario, creado_en)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+            cantidad_ordenada, unidad, precio_unitario, lote_documento,
+            fecha_vencimiento_documento, creado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [created.insertId, item.product.id, item.sku || item.product.siigo_code,
-         item.description, item.quantity, item.unit, item.unitPrice]
+         item.description, item.quantity, item.unit, item.unitPrice,
+         item.documentLot, item.documentExpiry]
     );
   }
   return {
@@ -263,7 +265,9 @@ async function createPurchaseOrderForUser({ body = {}, user }) {
       }
       const [extractedItems] = await conn.execute(
         `SELECT sku_extraido AS sku, descripcion_extraida AS descripcion,
-                cantidad, unidad, precio_unitario
+                cantidad, unidad, precio_unitario,
+                lote AS lote_documento,
+                fecha_vencimiento AS fecha_vencimiento_documento
            FROM documento_bodega_borrador_items
           WHERE documento_id = ? ORDER BY id`,
         [draft.id]

@@ -47,7 +47,7 @@ Datos opcionales:
 
 - NIT del proveedor;
 - moneda;
-- unidad y precio unitario por item;
+- unidad, precio unitario, lote y vencimiento por item;
 - total de unidades;
 - nombre del archivo.
 
@@ -57,6 +57,7 @@ Validaciones:
 - No uses el valor monetario total como total de unidades.
 - Si falta la unidad, usa null y agrega una advertencia.
 - Si falta NIT, usa null. No fabriques uno a partir del nombre.
+- Lote y vencimiento solo se incluyen si aparecen en la misma fila o se pueden asociar inequivocamente al item. En otro caso usa null.
 - No inventes un proveedor sincronizado ni un identificador interno del WMS.
 
 RESPUESTA PARA ORDEN_COMPRA VALIDA
@@ -84,7 +85,9 @@ RESPUESTA PARA ORDEN_COMPRA VALIDA
         "descripcion": "DESCRIPCION EXACTA",
         "cantidad": 0,
         "unidad": "UNIDAD EXACTA O null",
-        "precio_unitario": null
+        "precio_unitario": null,
+        "lote": "LOTE EXACTO O null",
+        "fecha_vencimiento": "YYYY-MM-DD O null"
       }
     ],
     "advertencias": []

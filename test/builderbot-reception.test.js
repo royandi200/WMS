@@ -130,6 +130,40 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
   assert.match(review, /Confirmo la recepcion ID 5/u);
 });
 
+test('WhatsApp reuses document lot as an explicit physical-verification suggestion', async () => {
+  const db = {
+    async execute(sql) {
+      assert.match(sql, /FROM productos p/u);
+      return [[{ id: 104, siigo_code: '00276-PTZNASHWA', nombre: 'ZENOVA ASHWAGANDHA' }]];
+    },
+  };
+  const items = await buildConfirmationItems(db, [{
+    item_id: 87,
+    producto_id: 104,
+    sku: '00276-PTZNASHWA',
+    producto: 'ZENOVA ASHWAGANDHA',
+    unidad: 'und',
+    requiere_lote: true,
+    lote_documento: 'DEMO-IO-ZENOVA-001',
+    fecha_vencimiento_documento: '2027-11-30',
+  }], {
+    items: [{
+      sku: 'zenova ashwagandha',
+      distribuciones: [{ cantidad: 5, condicion: 'DISPONIBLE' }],
+    }],
+  });
+  assert.equal(items[0].distributions[0].lote, 'DEMO-IO-ZENOVA-001');
+  assert.equal(items[0].distributions[0].lote_fuente, 'DOCUMENTO');
+  assert.equal(items[0].distributions[0].fecha_venc, '2027-11-30');
+  const review = buildReceptionReview(
+    { id: 6, numero: 'DEMO-20260902-DOC-IO-001' },
+    { id: 61, numero: 'REC-OC-6-001' },
+    items
+  );
+  assert.match(review, /lote DEMO-IO-ZENOVA-001 \(propuesto por PDF/u);
+  assert.match(review, /Al confirmar declaras que los cotejaste/u);
+});
+
 test('WhatsApp receipt draft is canonical, actor-bound and integrity checked', () => {
   const payload = receptionDraftPayload(
     { id: 5 },

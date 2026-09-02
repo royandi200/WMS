@@ -15,6 +15,15 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Lote documental como ayuda segura de recepcion
+
+- Los PDF de orden de compra pueden conservar lote y vencimiento por item cuando ambos aparecen de forma verificable en el documento.
+- La OC operativa mantiene esos valores separados como evidencia documental; por si solos no crean lotes, stock, movimientos ni kardex.
+- Al preparar y revisar una recepcion, el WMS propone los valores del PDF cuando son unicos y el operario no los repite. El resumen exige cotejarlos contra la etiqueta fisica antes de la confirmacion final.
+- Si el operario informa un lote diferente, la vista previa muestra tanto el lote fisico como el documental en vez de sobrescribir uno silenciosamente.
+- La migracion 27 agrega solo dos columnas opcionales a los items de OC. La OC demo ID 6 conserva `DEMO-IO-ZENOVA-001` y `2027-11-30` como evidencia documental, sin modificar inventario.
+- Validacion local: 165 pruebas aprobadas y migracion aplicada en la base de desarrollo.
+
 ### 2026-09-02 - Reposicion controlada de materiales en produccion
 
 - Sofi puede preparar una reposicion para unidades conformes faltantes de una OP `EN_PROCESO`, indicando cantidad, motivo y confirmando expresamente el BOM completo.

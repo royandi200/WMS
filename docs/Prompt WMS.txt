@@ -149,7 +149,7 @@ Cada item contiene:
 
 Cada distribucion contiene:
 - `cantidad` positiva;
-- `lote` exacto asignado por proveedor cuando la API marque `lote proveedor requerido`; para los demas productos es opcional y nunca se inventa;
+- `lote` exacto asignado por proveedor cuando la API marque `lote proveedor requerido`; si la preparacion ya muestra un lote `propuesto por PDF`, puede omitirse en este primer resumen para que la API lo precargue y solicite el cotejo fisico; para los demas productos es opcional y nunca se inventa;
 - `fecha_vencimiento` en `YYYY-MM-DD` solamente cuando el proveedor la informe;
 - `condicion`: `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` o `PENDIENTE_DISPOSICION`;
 - `ubicacion`: codigo visible para `DISPONIBLE` y `CUARENTENA`;
@@ -162,6 +162,8 @@ Antes de emitir esta accion:
 4. No uses `MODO_CHARLA` para fabricar el resumen de recepcion: usa siempre la vista previa validada que devuelve la API.
 5. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
 6. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con `confirmacion_final: true`. No reconstruyas ni vuelvas a enviar los items: la API usara exactamente el borrador fisico persistido durante la vista previa.
+
+Si la API muestra un lote o vencimiento `propuesto por PDF`, no se lo pidas de memoria al operario. Pidele verificarlo contra la etiqueta fisica. La confirmacion final declara que realizo ese cotejo. Si la etiqueta difiere, conserva el valor fisico reportado; no sustituyas silenciosamente ninguno de los dos.
 
 No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
 

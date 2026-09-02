@@ -52,14 +52,22 @@ async function loadPreparedReception(conn, preparationKey) {
     `SELECT ri.id AS item_id, ri.producto_id, p.siigo_code AS sku,
             p.nombre AS producto, p.modalidad_operativa, p.requiere_lote,
             ri.cantidad_esp AS cantidad_pendiente,
-            COALESCE(NULLIF(oci.unidad, ''), p.unit_label, 'und') AS unidad
+            COALESCE(
+              CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
+                   THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END,
+              p.unit_label, 'und'
+            ) AS unidad,
+            CASE WHEN COUNT(DISTINCT NULLIF(oci.lote_documento, '')) = 1
+                 THEN MIN(NULLIF(oci.lote_documento, '')) ELSE NULL END AS lote_documento,
+            CASE WHEN COUNT(DISTINCT oci.fecha_vencimiento_documento) = 1
+                 THEN DATE_FORMAT(MIN(oci.fecha_vencimiento_documento), '%Y-%m-%d') ELSE NULL END AS fecha_vencimiento_documento
        FROM recepcion_items ri
        JOIN productos p ON p.id = ri.producto_id
        LEFT JOIN orden_compra_proveedor_items oci
          ON oci.orden_compra_id = ? AND oci.producto_id = ri.producto_id
       WHERE ri.recepcion_id = ?
       GROUP BY ri.id, ri.producto_id, p.siigo_code, p.nombre,
-               p.modalidad_operativa, p.requiere_lote, ri.cantidad_esp, oci.unidad, p.unit_label
+               p.modalidad_operativa, p.requiere_lote, ri.cantidad_esp, p.unit_label
       ORDER BY ri.id`,
     [reception.orden_compra_id, reception.id]
   );
@@ -93,7 +101,11 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
             p.modalidad_operativa, p.requiere_lote,
             SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
             CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
-                 THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad
+                 THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad,
+            CASE WHEN COUNT(DISTINCT NULLIF(oci.lote_documento, '')) = 1
+                 THEN MIN(NULLIF(oci.lote_documento, '')) ELSE NULL END AS lote_documento,
+            CASE WHEN COUNT(DISTINCT oci.fecha_vencimiento_documento) = 1
+                 THEN DATE_FORMAT(MIN(oci.fecha_vencimiento_documento), '%Y-%m-%d') ELSE NULL END AS fecha_vencimiento_documento
        FROM orden_compra_proveedor_items oci
        JOIN productos p ON p.id = oci.producto_id
       WHERE oci.orden_compra_id = ?
@@ -168,6 +180,8 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
       cantidad_aceptada: item.cantidad_aceptada,
       cantidad_pendiente: item.cantidad_pendiente,
       unidad: item.unidad,
+      lote_documento: item.lote_documento || null,
+      fecha_vencimiento_documento: item.fecha_vencimiento_documento || null,
     });
   }
   const itemsWithLocations = await addPreferredLocations(conn, preparedItems);

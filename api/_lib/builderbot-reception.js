@@ -137,7 +137,7 @@ async function findPurchaseOrderDocumentDraft(db, params = {}) {
   const draft = { ...rows[0], warnings: parseWarnings(rows[0].advertencias) };
   const [items] = await db.execute(
     `SELECT producto_id, sku_extraido AS sku, descripcion_extraida AS descripcion,
-            cantidad, unidad, precio_unitario
+            cantidad, unidad, precio_unitario, lote, fecha_vencimiento
        FROM documento_bodega_borrador_items WHERE documento_id = ? ORDER BY id`,
     [draft.id]
   );
@@ -215,6 +215,8 @@ async function confirmPurchaseOrderDocumentDraft({ db, params, rawText, user }) 
         cantidad: Number(item.cantidad),
         unidad: item.unidad,
         precio_unitario: item.precio_unitario,
+        lote_documento: item.lote,
+        fecha_vencimiento_documento: item.fecha_vencimiento,
       })),
     },
   });
@@ -407,8 +409,17 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
       );
       distributions.push({
         cantidad: entry.cantidad ?? entry.quantity,
-        lote: entry.lote || entry.lpn || entry.lot_id,
-        fecha_venc: entry.fecha_venc || entry.fecha_vencimiento || entry.expiry_date || null,
+        lote: entry.lote || entry.lpn || entry.lot_id || prepared.lote_documento || null,
+        lote_fuente: entry.lote_fuente
+          || (entry.lote || entry.lpn || entry.lot_id ? 'OPERARIO' : prepared.lote_documento ? 'DOCUMENTO' : null),
+        lote_documento: prepared.lote_documento || null,
+        fecha_venc: entry.fecha_venc || entry.fecha_vencimiento || entry.expiry_date
+          || prepared.fecha_vencimiento_documento || null,
+        fecha_venc_fuente: entry.fecha_venc_fuente
+          || (entry.fecha_venc || entry.fecha_vencimiento || entry.expiry_date
+            ? 'OPERARIO'
+            : prepared.fecha_vencimiento_documento ? 'DOCUMENTO' : null),
+        fecha_vencimiento_documento: prepared.fecha_vencimiento_documento || null,
         condicion: entry.condicion || entry.condition,
         motivo: entry.motivo || entry.reason || null,
         ubicacion_id: location?.id || null,
@@ -448,24 +459,38 @@ function buildReceptionReview(order, reception, items) {
         String(entry.condicion || '').toUpperCase(),
         entry.ubicacion || 'sin ubicacion',
         entry.lote
-          ? `lote ${entry.lote}`
+          ? entry.lote_fuente === 'DOCUMENTO'
+            ? `lote ${entry.lote} (propuesto por PDF; verifica la etiqueta fisica)`
+            : entry.lote_documento && entry.lote !== entry.lote_documento
+              ? `lote fisico ${entry.lote} (PDF: ${entry.lote_documento})`
+              : `lote ${entry.lote}`
           : item.requiere_lote
             ? 'lote proveedor faltante'
             : 'sin lote proveedor; partida interna WMS',
-        entry.fecha_venc ? `vence ${entry.fecha_venc}` : null,
+        entry.fecha_venc
+          ? entry.fecha_venc_fuente === 'DOCUMENTO'
+            ? `vence ${entry.fecha_venc} (propuesto por PDF)`
+            : `vence ${entry.fecha_venc}`
+          : null,
         entry.motivo ? `motivo ${entry.motivo}` : null,
       ].filter(Boolean);
       return `  ${parts.join(' | ')}`;
     });
     return [header, ...details];
   });
+  const usesDocumentSuggestion = items.some(item => item.distributions.some(
+    entry => entry.lote_fuente === 'DOCUMENTO' || entry.fecha_venc_fuente === 'DOCUMENTO'
+  ));
   return [
     `Resumen de recepcion para OC ${order.numero} (ID ${order.id}).`,
     `Borrador interno: ${reception.numero}`,
     ...lines,
     'No se modifico inventario.',
+    usesDocumentSuggestion
+      ? 'Verifica que lote y vencimiento propuestos por el PDF coincidan con la etiqueta fisica. Al confirmar declaras que los cotejaste.'
+      : null,
     `Si todo coincide, escribe: Confirmo la recepcion ID ${order.id}`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function receptionDraftPayload(order, reception, items) {

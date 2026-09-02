@@ -69,6 +69,33 @@ test('purchase order extraction fails closed for invented SKU, quantity or ambig
   );
 });
 
+test('purchase order extraction preserves supplier lot and expiry only when grounded', () => {
+  const body = validInput({
+    items: [{
+      sku: '00051-MPASH',
+      descripcion: 'Gomas Ashwagandha',
+      cantidad: 1500,
+      unidad: 'gr',
+      lote: 'PROV-LOT-77',
+      fecha_vencimiento: '2027-11-30',
+    }],
+  });
+  const grounded = normalizePurchaseOrderDocumentInput(body, {
+    evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1,500 gr PROV-LOT-77 30/11/2027',
+  });
+  assert.equal(grounded.items[0].lot, 'PROV-LOT-77');
+  assert.equal(grounded.items[0].expiryDate, '2027-11-30');
+  assert.deepEqual(grounded.warnings, []);
+
+  const unsupported = normalizePurchaseOrderDocumentInput(body, {
+    evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1,500 gr',
+  });
+  assert.equal(unsupported.items[0].lot, null);
+  assert.equal(unsupported.items[0].expiryDate, null);
+  assert.match(unsupported.warnings.join(' | '), /lote propuesto/u);
+  assert.match(unsupported.warnings.join(' | '), /vencimiento propuesto/u);
+});
+
 test('BuilderBot PDF download rejects SSRF targets and accepts only expected storage hosts', () => {
   assert.equal(
     validateBuilderBotDocumentUrl('https://runtime-sessions.s3.us-east-1.amazonaws.com/path/oc.pdf').protocol,
@@ -145,11 +172,15 @@ test('purchase order document action is reception-scoped and cannot mutate inven
   );
   const domain = fs.readFileSync(path.join(__dirname, '../api/_lib/purchase-order-document-intake.js'), 'utf8');
   const migration = fs.readFileSync(path.join(__dirname, '../database/19_purchase_order_document_intake.sql'), 'utf8');
+  const hintsMigration = fs.readFileSync(path.join(__dirname, '../database/27_purchase_order_document_lot_hints.sql'), 'utf8');
   const route = fs.readFileSync(path.join(__dirname, '../api/v1/purchase-orders.js'), 'utf8');
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS Documentos BBC.txt'), 'utf8');
   const warehouseDomain = fs.readFileSync(path.join(__dirname, '../api/_lib/warehouse-document-intake.js'), 'utf8');
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
   assert.doesNotMatch(`${domain}\n${migration}`, /INSERT INTO (stock|movimientos|kardex)/u);
+  assert.doesNotMatch(hintsMigration, /INSERT INTO (stock|movimientos|kardex)/u);
+  assert.match(hintsMigration, /lote_documento/u);
+  assert.match(hintsMigration, /fecha_vencimiento_documento/u);
   assert.doesNotMatch(`${domain}\n${migration}`, /UPDATE (stock|lots)/u);
   assert.match(route, /El numero revisado no coincide con la referencia del PDF/u);
   assert.match(route, /estado = 'VINCULADO'/u);

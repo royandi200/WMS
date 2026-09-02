@@ -36,6 +36,14 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
     if (evidence && !evidenceIncludesQuantity(evidence, normalized.quantity)) {
       throw inputError(`La cantidad ${normalized.quantity} de ${normalized.sku} no aparece en el documento`);
     }
+    if (evidence && normalized.lot && !evidenceIncludes(evidence, normalized.lot)) {
+      warnings.push(`El lote propuesto para ${normalized.sku} no aparece literalmente en el documento; se dejo pendiente`);
+      normalized.lot = null;
+    }
+    if (evidence && normalized.expiryDate && !evidenceIncludesDate(evidence, normalized.expiryDate)) {
+      warnings.push(`El vencimiento propuesto para ${normalized.sku} no aparece en el documento; se dejo pendiente`);
+      normalized.expiryDate = null;
+    }
     if (!normalized.unit) warnings.push(`El item ${normalized.sku} no tiene unidad de medida`);
     return normalized;
   });
@@ -163,7 +171,7 @@ async function registerPurchaseOrderDocumentDraft({
     if (existing.length) {
       if (existing[0].sha256 !== input.hash) {
         const [storedItems] = await db.execute(
-          `SELECT sku_extraido, cantidad, unidad
+          `SELECT sku_extraido, cantidad, unidad, lote, fecha_vencimiento
              FROM documento_bodega_borrador_items
             WHERE documento_id = ? ORDER BY id`,
           [existing[0].id]
@@ -179,6 +187,8 @@ async function registerPurchaseOrderDocumentDraft({
             sku: item.sku_extraido,
             quantity: Number(item.cantidad),
             unit: item.unidad,
+            lot: item.lote || null,
+            expiryDate: dateOnly(item.fecha_vencimiento),
           })),
         }))).digest('hex');
         if (storedHash !== input.operationalHash) {
@@ -230,10 +240,10 @@ async function registerPurchaseOrderDocumentDraft({
       await db.execute(
         `INSERT INTO documento_bodega_borrador_items
            (documento_id, producto_id, sku_extraido, descripcion_extraida,
-            cantidad, unidad, precio_unitario, creado_en)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+            cantidad, unidad, precio_unitario, fecha_vencimiento, lote, creado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [created.insertId, item.product?.id || null, item.sku, item.description,
-         item.quantity, item.unit, item.unitPrice]
+         item.quantity, item.unit, item.unitPrice, item.expiryDate, item.lot]
       );
     }
     if (document) await storeDraftFile(db, created.insertId, document);
@@ -310,6 +320,8 @@ function normalizeItem(item = {}, index) {
     quantity: roundQty(quantity),
     unit: optionalText(item.unidad || item.unit, 20),
     unitPrice: unitPrice == null ? null : Number(unitPrice.toFixed(6)),
+    expiryDate: normalizeDate(item.fecha_vencimiento || item.expiry_date),
+    lot: optionalText(item.lote || item.lot, 100),
   };
 }
 
@@ -325,6 +337,8 @@ function operationalIdentity(input) {
       sku: String(item.sku || '').toUpperCase(),
       quantity: roundQty(item.quantity),
       unit: normalizedUnit(item.unit),
+      lot: item.lot || null,
+      expiryDate: item.expiryDate || null,
     })).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right))),
   };
 }
@@ -360,6 +374,17 @@ function evidenceIncludesQuantity(evidence, quantity) {
     const escaped = escapeRegExp(form.toUpperCase());
     return new RegExp(`(?<![0-9.,])${escaped}(?![0-9.,])`, 'u').test(evidence);
   });
+}
+
+function evidenceIncludesDate(evidence, isoDate) {
+  const [year, month, day] = String(isoDate || '').split('-');
+  if (!year || !month || !day) return false;
+  return [
+    `${year}-${month}-${day}`,
+    `${day}/${month}/${year}`,
+    `${day}-${month}-${year}`,
+    `${day}.${month}.${year}`,
+  ].some(form => evidence.includes(form.toUpperCase()));
 }
 
 function cleanEvidenceText(value) {
