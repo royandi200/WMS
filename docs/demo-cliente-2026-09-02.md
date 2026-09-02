@@ -207,11 +207,15 @@ El WMS debe generar el lote terminado con formato `LPN-OP-...`, calcular su venc
 
 Observacion del ensayo: la operacion demuestra correctamente el registro separado de 10 g de merma de proceso y 1 unidad no conforme al cierre. Se consumieron exactamente 3 juegos de envase, tapa, etiqueta y liner; la unidad no conforme es una de esas tres y no descuenta un cuarto juego. El balance de gomas no puede determinarse por completo sin conocer cuanto contenido quedo en la unidad no conforme, si fue recuperado y si existieron sobrantes. No presentar `uso productivo estimado` como consumo exacto de las unidades conformes.
 
+Terminologia para la demostracion: al confirmar materiales, el WMS descuenta el material del stock disponible porque fue **entregado a produccion** y ya no puede asignarse a otra orden. El Kardex historico lo denomina `CONSUMO_MATERIAL`, pero esto no prueba por si solo que todo haya sido incorporado fisicamente. Antes del cierre, el material no usado debe devolverse a bodega; el material derramado se registra como merma de proceso; y el contenido de una unidad terminada no conforme debe clasificarse como descartado o recuperado segun lo que realmente ocurra.
+
 Pregunta para el cliente durante el demo:
 
 > ¿Una merma reportada durante la produccion debe avisarse inmediatamente a Sofi o Nelly, o es suficiente incluirla en la conciliacion enviada al cerrar la orden?
 
 > ¿Que tolerancia de peso aceptan por unidad y quien debe resolver una conciliacion donde el material entregado no cubre simultaneamente las unidades terminadas y la merma de proceso reportada?
+
+> Cuando un tarro terminado queda no conforme por daño de empaque, ¿las gomas de su interior se desechan, se recuperan para reproceso o se devuelven como materia prima? ¿Quien confirma esa decision y como se cuantifica?
 
 Frase natural del ensayo de merma de proceso:
 
