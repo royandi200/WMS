@@ -60,7 +60,35 @@ function resolveProductionOrigin(userText, claimedOrigin) {
   return evidence;
 }
 
+function containsPhrase(text, value) {
+  const haystack = ` ${normalizeText(text)} `;
+  const needle = normalizeText(value);
+  return Boolean(needle) && haystack.includes(` ${needle} `);
+}
+
+function assertCustomerOrderEvidence(userText, customerReference, finalCustomer) {
+  const reference = String(customerReference || '').trim();
+  const customer = String(finalCustomer || '').trim();
+  const normalizedReference = normalizeText(reference);
+  const normalizedCustomer = normalizeText(customer);
+  const genericReference = /^(?:pedido|pedido de cliente|orden|orden de compra|oc|cliente)$/u;
+  const genericCustomer = /^(?:cliente|cliente final|pedido de cliente)$/u;
+
+  if (!reference || !customer ||
+      genericReference.test(normalizedReference) ||
+      genericCustomer.test(normalizedCustomer) ||
+      !containsPhrase(userText, reference) ||
+      !containsPhrase(userText, customer)) {
+    throw httpError(
+      400,
+      'Para un pedido de cliente, indica en un solo mensaje la referencia del pedido u OC y el cliente final. Ejemplo: Es para la OC CLIENTE-123 del cliente Tienda Demo. No se creo la orden ni se reservo inventario.'
+    );
+  }
+  return { customerReference: reference, finalCustomer: customer };
+}
+
 module.exports = {
+  assertCustomerOrderEvidence,
   normalizeText,
   productionOriginEvidence,
   resolveProductionOrigin,

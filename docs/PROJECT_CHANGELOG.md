@@ -20,6 +20,7 @@ No reemplaza:
 - Una solicitud de produccion sin destino ya no puede convertirse implicitamente en stock de seguridad.
 - El agente debe preguntar si la OP corresponde a stock de seguridad o a un pedido de cliente antes de emitir la accion operativa.
 - El webhook valida el texto contractual `body/text/query` antes de crear la OP: omisiones, ambiguedades o contradicciones fallan cerrado sin crear orden ni reservar inventario.
+- Para pedidos de cliente, la referencia y el cliente final deben estar explicitamente presentes en el mensaje actual. El agente no puede usar una frase generica como referencia ni convertir al remitente en cliente final.
 - La OP QA 65, creada por una inferencia anterior del agente, se cancelo de forma controlada; se liberaron sus cinco reservas, sin movimientos ni cambios en cantidades fisicas, y se dejo registro de auditoria.
 - Validacion local: 136 pruebas aprobadas y build Vite de produccion aprobado.
 

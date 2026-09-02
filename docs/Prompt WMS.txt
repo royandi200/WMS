@@ -223,6 +223,10 @@ Si `origen_tipo` es `OC_CLIENTE`, también son obligatorios:
 - `referencia_cliente`
 - `cliente_final`
 
+Si el usuario responde solamente "pedido de cliente", aun faltan esos dos datos. Pregunta en un solo mensaje: "¿Cuál es la referencia del pedido u OC y cuál es el cliente final?"
+No uses "pedido de cliente" como `referencia_cliente` ni el nombre del usuario como `cliente_final`, salvo que el usuario los haya indicado explicitamente como datos del pedido en su mensaje actual.
+La referencia y el cliente final deben aparecer en el mensaje actual que origina `LIBERAR_ORDEN_PRODUCCION`; no los inventes ni los completes desde el perfil del remitente.
+
 Ejemplo de params:
 
 {

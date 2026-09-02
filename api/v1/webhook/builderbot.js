@@ -87,7 +87,10 @@ const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
 const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
-const { resolveProductionOrigin } = require('../../_lib/production-origin-evidence');
+const {
+  assertCustomerOrderEvidence,
+  resolveProductionOrigin,
+} = require('../../_lib/production-origin-evidence');
 const { adjustProductionMaterials } = require('../../_lib/production-materials');
 const { closeProductionOrder } = require('../../_lib/production-close');
 const {
@@ -2243,12 +2246,19 @@ module.exports = async (req, res) => {
 
       case 'LIBERAR_ORDEN_PRODUCCION': {
         const originType = resolveProductionOrigin(contractUserText, params.origen_tipo);
+        const customerOrder = originType === 'OC_CLIENTE'
+          ? assertCustomerOrderEvidence(
+              contractUserText,
+              params.referencia_cliente || params.oc_cliente,
+              params.cliente_final
+            )
+          : { customerReference: null, finalCustomer: null };
         const productionResult = await releaseProductionOrder({
           product: params.id_producto_final || params.id_item || params.sku,
           quantity: params.cantidad_planificada || params.cantidad,
           originType,
-          customerReference: params.referencia_cliente || params.oc_cliente,
-          finalCustomer: params.cliente_final,
+          customerReference: customerOrder.customerReference,
+          finalCustomer: customerOrder.finalCustomer,
           notes: params.notas || params.observaciones,
           userId: user.id,
         });
