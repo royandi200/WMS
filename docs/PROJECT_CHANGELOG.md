@@ -15,6 +15,10 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Confirmacion visible de cantidad planeada
+
+- La respuesta al liberar una OP muestra explicitamente la cantidad interpretada y persistida, evitando que el usuario deba inferirla desde el BOM cuando la solicitud proviene de un audio.
+
 ### 2026-09-01 - Atomicidad de distribuciones de recepcion
 
 - `recepcion_distribuciones` se migra de MyISAM a InnoDB para que sus filas obedezcan el mismo commit o rollback que lotes, stock, movimientos y kardex.

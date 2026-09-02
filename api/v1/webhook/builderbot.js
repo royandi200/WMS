@@ -2245,6 +2245,7 @@ module.exports = async (req, res) => {
         mensaje = [
           `Orden ID ${productionResult.order_id} | ${productionResult.order_code} liberada.`,
           `Producto: ${productionResult.product.siigo_code} - ${productionResult.product.nombre}`,
+          `Cantidad planeada interpretada: ${productionResult.planned_quantity} und`,
           `Destino: ${productionResult.origin_type === 'OC_CLIENTE' ? `OC ${productionResult.customer_reference} - ${productionResult.final_customer}` : 'stock de seguridad'}`,
           'Alistamiento FEFO:',
           ...picking,

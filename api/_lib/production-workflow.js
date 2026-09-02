@@ -151,6 +151,7 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
       order_code: code,
       status: 'APROBADA',
       product: finalProduct,
+      planned_quantity: qty,
       origin_type: origin,
       customer_reference: customerReference || null,
       final_customer: finalCustomer || null,

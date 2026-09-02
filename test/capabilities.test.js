@@ -323,3 +323,10 @@ test('BuilderBot prompt keeps the API contract and valid encoding', () => {
   }
   assert.match(prompt, /Sin cantidad, el WMS calcula el maximo fabricable/u);
 });
+
+test('production release confirms the interpreted planned quantity', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'production-workflow.js'), 'utf8');
+  const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
+  assert.match(workflow, /planned_quantity: qty/u);
+  assert.match(webhook, /Cantidad planeada interpretada: \$\{productionResult\.planned_quantity\} und/u);
+});
