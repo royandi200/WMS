@@ -15,6 +15,13 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Lote visible en despachos pendientes por WhatsApp
+
+- La consulta de despachos pendientes muestra cantidad, lote reservado y ubicacion fisica por cada asignacion.
+- Cuando FEFO divide un producto entre varios lotes, cada lote aparece en una linea independiente y no se pierde por la agrupacion del producto.
+- Un dato ausente se muestra como `SIN ASIGNAR` para hacer visible la inconsistencia antes de confirmar el despacho.
+- Validacion: suite completa con `169/169` pruebas aprobadas.
+
 ### 2026-09-02 - Conservacion de lote y vencimiento al crear OC desde PDF
 
 - Se corrigio la conversion de borrador documental a OC operativa: lote y vencimiento extraidos se incorporan a los items cuando la correspondencia por SKU es inequivoca.

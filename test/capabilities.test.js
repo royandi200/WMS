@@ -93,6 +93,9 @@ test('BuilderBot lists only dispatches that can actually be confirmed', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
   assert.match(source, /case 'CONSULTAR_DESPACHOS_PENDIENTES'/u);
   assert.match(source, /WHERE d\.estado = 'picking'/u);
+  assert.match(source, /di\.lote, u\.codigo AS ubicacion, SUM\(di\.cantidad_sol\) AS cantidad/u);
+  assert.match(source, /GROUP BY di\.despacho_id, p\.id, p\.siigo_code, p\.nombre, di\.lote, u\.id, u\.codigo/u);
+  assert.match(source, /\| lote \$\{item\.lote \|\| 'SIN ASIGNAR'\} \| ubicacion \$\{item\.ubicacion \|\| 'SIN ASIGNAR'\}/u);
 });
 
 test('BuilderBot lists recent production orders before historical test data', () => {

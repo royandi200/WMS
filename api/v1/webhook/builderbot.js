@@ -2226,12 +2226,13 @@ module.exports = async (req, res) => {
           const ids = dispatches.map(dispatch => Number(dispatch.id));
           const [items] = await db.execute(
             `SELECT di.despacho_id, p.siigo_code AS sku, p.nombre AS producto,
-                    SUM(di.cantidad_sol) AS cantidad
+                    di.lote, u.codigo AS ubicacion, SUM(di.cantidad_sol) AS cantidad
                FROM despacho_items di
                JOIN productos p ON p.id = di.producto_id
+               LEFT JOIN ubicaciones u ON u.id = di.ubicacion_id
               WHERE di.despacho_id IN (${ids.map(() => '?').join(',')})
-              GROUP BY di.despacho_id, p.id, p.siigo_code, p.nombre
-              ORDER BY di.despacho_id, p.siigo_code`,
+              GROUP BY di.despacho_id, p.id, p.siigo_code, p.nombre, di.lote, u.id, u.codigo
+              ORDER BY di.despacho_id, p.siigo_code, di.lote`,
             ids
           );
           const itemsByDispatch = new Map();
@@ -2245,7 +2246,7 @@ module.exports = async (req, res) => {
             ...dispatches.flatMap(dispatch => [
               `- ID ${dispatch.id} | ${dispatch.numero} | Factura ${dispatch.siigo_invoice_name || 'N/A'} | ${dispatch.cliente_nombre || 'Cliente N/A'} | ${dispatch.estado}`,
               ...(itemsByDispatch.get(Number(dispatch.id)) || []).map(item =>
-                `  ${item.sku} - ${item.producto}: ${Number(item.cantidad)} und`
+                `  ${item.sku} - ${item.producto}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicacion ${item.ubicacion || 'SIN ASIGNAR'}`
               ),
             ]),
             `Para confirmar responde, por ejemplo: confirma el despacho ID ${dispatches[0].id}.`,

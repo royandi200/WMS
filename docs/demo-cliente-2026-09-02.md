@@ -197,8 +197,10 @@ Camino principal: mostrar la carga documental completa. La OC ID 6 queda como re
 6. Reportar: `Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
 7. Revisar el resumen con SKU, cantidad, lote proveedor, vencimiento y ubicacion; aun sin movimiento.
 8. Confirmar: `Confirmo la recepcion ID 11`.
-9. Repetir y comprobar idempotencia.
+9. Esperar la respuesta antes de reenviar. En el ensayo, el primer ciclo tardo cerca de 38 segundos; un segundo envio durante esa espera genero dos respuestas, aunque la idempotencia evito duplicar inventario.
 10. Mostrar ingreso e historico. No debe aparecer BOM, consumo de MP ni OP.
+
+Resultado del ensayo: `REC-OC-11-001` quedo completada y la OC ID `11` cerrada. Se creo una sola existencia de 5 und de `00276-PTZNASHWA` en `B13`, lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001`, vencimiento `2027-11-30`, y un solo movimiento de Kardex. BuilderBot recibio dos confirmaciones iguales con 34 segundos de diferencia y envio dos respuestas aceptadas por el proveedor; la segunda indico que la OC ya estaba recibida y no modifico inventario.
 
 Los dos paquetes completos pueden regenerarse sin precargar OC ni modificar la base:
 
@@ -224,8 +226,10 @@ node scripts\qa\prepare-demo-dispatch.js --scenario=io --apply --yes-i-understan
 2. Confirma el ID de `FV-DEMO-IO-001`.
 3. Debe salir 2 und y quedar 3 und del lote recibido.
 4. Repetir sin segundo descuento.
-5. Consultar: `Muestrame la trazabilidad del lote DEMO-IO-ZENOVA-001`.
+5. Consultar: `Muestrame la trazabilidad del lote DEMO-ENSAYO-FINAL-IO-ZENOVA-001`.
 6. Mostrar OC/PDF, recepcion, lote, ubicacion, factura sintetica, despacho, cliente y saldo; sin produccion.
+
+Estado del ensayo: se creo el despacho ID `49`, `DSP-SIIGO-FV-DEMO-IO-001`, asociado a la factura sintetica `FV-DEMO-IO-001`. Quedaron reservadas 2 und del lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` en `B13`, sin descuento hasta la confirmacion. La notificacion proactiva no se emitio desde el preparador local porque ese proceso no carga las credenciales de BuilderBot; la tarea si aparece al consultar los despachos pendientes por WhatsApp.
 
 ## Escenario 3: maquila 3Q
 
@@ -361,6 +365,7 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 ## Contingencia
 
 - Si WhatsApp demora, continuar desde dashboard y mostrar luego el historial.
+- No reenviar una confirmacion mientras siga procesandose; consultar el dashboard antes de reintentar una operacion que modifica inventario.
 - Si una frase no enruta, consultar la bandeja y usar el ID corto.
 - Si un escenario ya fue confirmado en ensayo, mostrarlo como evidencia o crear una nueva referencia; no reciclarlo.
 - No limpiar datos hasta terminar la presentacion.
