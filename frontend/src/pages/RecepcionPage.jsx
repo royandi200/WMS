@@ -423,6 +423,8 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, onCr
         sku: item.sku_extraido || '',
         cantidad: Number(item.cantidad),
         unidad: item.unidad || '',
+        lote_documento: item.lote || '',
+        fecha_vencimiento_documento: String(item.fecha_vencimiento || '').slice(0, 10),
       })),
     })
     setFormError('')
@@ -533,13 +535,21 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, onCr
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted">Items</p>
             {form.items.map((item, index) => (
-              <div key={index} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_120px_100px_36px] gap-2">
-                <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, numeros, punto, guion, guion bajo o &amp;" className="input-field" required />
-                <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} placeholder="Cantidad" className="input-field" required />
-                <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" />
-                <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar item" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
-                  <Trash2 size={16} />
-                </button>
+              <div key={index} className="space-y-1">
+                <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_120px_100px_36px] gap-2">
+                  <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, numeros, punto, guion, guion bajo o &amp;" className="input-field" required />
+                  <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} placeholder="Cantidad" className="input-field" required />
+                  <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" />
+                  <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar item" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+                {(item.lote_documento || item.fecha_vencimiento_documento) && (
+                  <p className="px-1 text-xs text-muted">
+                    PDF: {item.lote_documento ? `lote ${item.lote_documento}` : 'sin lote'}
+                    {item.fecha_vencimiento_documento ? ` | vence ${item.fecha_vencimiento_documento}` : ''}
+                  </p>
+                )}
               </div>
             ))}
           </div>

@@ -2,10 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 
-const ORDER_NUMBER = 'DEMO-20260902-DOC-IO-001';
-const SKU = '00276-PTZNASHWA';
-const LOT = 'DEMO-IO-ZENOVA-001';
-const EXPIRY = '2027-11-30';
+function argument(name, fallback) {
+  const prefix = `--${name}=`;
+  const value = process.argv.find(entry => entry.startsWith(prefix));
+  return value ? value.slice(prefix.length).trim() : fallback;
+}
+
+const ORDER_NUMBER = argument('order', 'DEMO-20260902-DOC-IO-001');
+const SKU = argument('sku', '00276-PTZNASHWA');
+const LOT = argument('lot', 'DEMO-IO-ZENOVA-001');
+const EXPIRY = argument('expiry', '2027-11-30');
+const FROM_LINKED_DOCUMENT = process.argv.includes('--from-linked-document');
 const APPLY_FLAG = '--apply';
 const CONFIRM_FLAG = '--yes-i-understand-this-changes-qa-document-evidence';
 
@@ -59,6 +66,25 @@ async function loadTarget(conn, lock = false) {
   return rows[0];
 }
 
+async function loadLinkedDocumentHint(conn, orderId) {
+  const [rows] = await conn.execute(
+    `SELECT item.lote,
+            DATE_FORMAT(item.fecha_vencimiento, '%Y-%m-%d') AS fecha_vencimiento
+       FROM documentos_bodega_borrador document
+       JOIN documento_bodega_borrador_items item ON item.documento_id = document.id
+       JOIN productos p ON p.id = item.producto_id
+      WHERE document.orden_compra_id = ? AND p.siigo_code = ?`,
+    [orderId, SKU]
+  );
+  if (rows.length !== 1) {
+    throw new Error(`Se esperaba una sola evidencia documental vinculada para ${ORDER_NUMBER}/${SKU}`);
+  }
+  const lot = String(rows[0].lote || '').trim();
+  const expiry = String(rows[0].fecha_vencimiento || '').trim();
+  if (!lot || !expiry) throw new Error('La evidencia vinculada no contiene lote y vencimiento completos');
+  return { lot, expiry };
+}
+
 async function main() {
   const apply = process.argv.includes(APPLY_FLAG);
   if (apply && !process.argv.includes(CONFIRM_FLAG)) {
@@ -72,8 +98,11 @@ async function main() {
     }
     if (Number(before.cantidad_ordenada) !== 5) throw new Error('La cantidad demo ya no es 5');
     if (Number(before.recepcion_completada)) throw new Error('La recepcion demo ya fue completada');
+    const proposed = FROM_LINKED_DOCUMENT
+      ? await loadLinkedDocumentHint(conn, before.orden_compra_id)
+      : { lot: LOT, expiry: EXPIRY };
     if (!apply) {
-      console.log(JSON.stringify({ ok: true, mode: 'dry-run', before, proposed: { lot: LOT, expiry: EXPIRY } }, null, 2));
+      console.log(JSON.stringify({ ok: true, mode: 'dry-run', before, proposed }, null, 2));
       return;
     }
     await conn.beginTransaction();
@@ -83,7 +112,7 @@ async function main() {
       `UPDATE orden_compra_proveedor_items
           SET lote_documento = ?, fecha_vencimiento_documento = ?
         WHERE id = ?`,
-      [LOT, EXPIRY, locked.id]
+      [proposed.lot, proposed.expiry, locked.id]
     );
     await conn.commit();
     console.log(JSON.stringify({ ok: true, mode: 'applied', after: await loadTarget(conn) }, null, 2));

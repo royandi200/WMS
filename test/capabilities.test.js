@@ -8,7 +8,11 @@ const {
   hasCapability,
 } = require('../api/_lib/capabilities');
 const { envFlag, workflowFlags } = require('../api/_lib/feature-flags');
-const { normalizePurchaseOrderInput } = require('../api/_lib/purchase-orders');
+const {
+  applyExtractedDocumentHints,
+  normalizePurchaseOrderInput,
+  purchaseOrderInputHash,
+} = require('../api/_lib/purchase-orders');
 const { internalReceptionLot, normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
 const { notificationsEnabled, normalizePhone, maskPhone, recipientPhones } = require('../api/_lib/builderbot-notifications');
@@ -140,6 +144,29 @@ test('purchase order normalization is deterministic and validates quantities', (
     () => normalizePurchaseOrderInput({ ...input, items: [{ sku: 'SKU-1', cantidad: 0 }] }),
     /Cantidad invalida/
   );
+});
+
+test('purchase order conversion preserves unambiguous lot and expiry from its PDF draft', () => {
+  const input = normalizePurchaseOrderInput({
+    numero: 'OC-IO-1',
+    tercero_id: 25,
+    items: [{ sku: '00276-PTZNASHWA', cantidad: 5, unidad: 'und' }],
+  });
+  const enriched = applyExtractedDocumentHints(input.items, [{
+    sku: '00276-PTZNASHWA',
+    lote_documento: 'LOT-IO-001',
+    fecha_vencimiento_documento: '2027-11-30',
+  }]);
+  assert.equal(enriched[0].documentLot, 'LOT-IO-001');
+  assert.equal(enriched[0].documentExpiry, '2027-11-30');
+  assert.equal(input.items[0].documentLot, null);
+  assert.notEqual(purchaseOrderInputHash({ ...input, items: enriched }), input.hash);
+
+  const ambiguous = applyExtractedDocumentHints(input.items, [
+    { sku: '00276-PTZNASHWA', lote_documento: 'LOT-A' },
+    { sku: '00276-PTZNASHWA', lote_documento: 'LOT-B' },
+  ]);
+  assert.equal(ambiguous[0].documentLot, null);
 });
 
 test('reception distributions separate available and blocked inventory', () => {

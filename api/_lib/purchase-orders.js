@@ -44,8 +44,17 @@ function normalizePurchaseOrderInput(body = {}) {
     proveedorNombre: null,
     archivoNombre,
     sourceData: body.datos_origen || body.source_data || null,
-    hash: crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex'),
+    hash: purchaseOrderInputHash(canonical),
   };
+}
+
+function purchaseOrderInputHash(input) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    numero: input.numero,
+    terceroId: input.terceroId,
+    fechaOrden: input.fechaOrden,
+    items: input.items,
+  })).digest('hex');
 }
 
 function normalizeDate(value) {
@@ -59,10 +68,49 @@ function normalizeDate(value) {
   return text;
 }
 
+function applyExtractedDocumentHints(items = [], extractedItems = []) {
+  const result = items.map(item => ({ ...item }));
+  const inputIndexes = new Map();
+  const extractedBySku = new Map();
+  const skuKey = value => String(value || '').trim().toUpperCase();
+
+  result.forEach((item, index) => {
+    const key = skuKey(item.sku);
+    if (!key) return;
+    if (!inputIndexes.has(key)) inputIndexes.set(key, []);
+    inputIndexes.get(key).push(index);
+  });
+  extractedItems.forEach(item => {
+    const key = skuKey(item.sku);
+    if (!key) return;
+    if (!extractedBySku.has(key)) extractedBySku.set(key, []);
+    extractedBySku.get(key).push(item);
+  });
+
+  for (const [key, indexes] of inputIndexes) {
+    const sources = extractedBySku.get(key) || [];
+    if (sources.length !== indexes.length) continue;
+    indexes.forEach((index, offset) => {
+      const source = sources[offset];
+      const lot = String(source.lote_documento || source.lote || '').trim() || null;
+      const expiry = normalizeDate(
+        source.fecha_vencimiento_documento || source.fecha_vencimiento || null
+      );
+      if (!result[index].documentLot && lot) result[index].documentLot = lot;
+      if (!result[index].documentExpiry && expiry) result[index].documentExpiry = expiry;
+    });
+  }
+  return result;
+}
+
 function inputError(message) {
   const error = new Error(message);
   error.status = 400;
   return error;
 }
 
-module.exports = { normalizePurchaseOrderInput };
+module.exports = {
+  applyExtractedDocumentHints,
+  normalizePurchaseOrderInput,
+  purchaseOrderInputHash,
+};

@@ -1,7 +1,11 @@
 const { createConnection, query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
-const { normalizePurchaseOrderInput } = require('../_lib/purchase-orders');
+const {
+  applyExtractedDocumentHints,
+  normalizePurchaseOrderInput,
+  purchaseOrderInputHash,
+} = require('../_lib/purchase-orders');
 const { normalizePurchaseOrderPdf, safeDownloadName } = require('../_lib/purchase-order-documents');
 const { groupQuantitiesByUnit } = require('../_lib/purchase-order-reception');
 const {
@@ -267,11 +271,13 @@ async function createPurchaseOrderForUser({ body = {}, user }) {
         `SELECT sku_extraido AS sku, descripcion_extraida AS descripcion,
                 cantidad, unidad, precio_unitario,
                 lote AS lote_documento,
-                fecha_vencimiento AS fecha_vencimiento_documento
+                DATE_FORMAT(fecha_vencimiento, '%Y-%m-%d') AS fecha_vencimiento_documento
            FROM documento_bodega_borrador_items
           WHERE documento_id = ? ORDER BY id`,
         [draft.id]
       );
+      input.items = applyExtractedDocumentHints(input.items, extractedItems);
+      input.hash = purchaseOrderInputHash(input);
       input.sourceData = {
         document_draft_id: draft.id,
         extracted_items: extractedItems,

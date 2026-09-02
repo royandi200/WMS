@@ -15,6 +15,14 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-02 - Conservacion de lote y vencimiento al crear OC desde PDF
+
+- Se corrigio la conversion de borrador documental a OC operativa: lote y vencimiento extraidos se incorporan a los items cuando la correspondencia por SKU es inequivoca.
+- Si hay varias lineas documentales que no pueden emparejarse de forma exacta, los valores no se adivinan y la recepcion sigue fallando cerrado.
+- La revision del dashboard muestra las ayudas documentales debajo de cada item antes de crear la OC.
+- La OC de ensayo ID `11` fue reparada desde su PDF vinculado con lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` y vencimiento `2027-11-30`; no se modificaron recepcion, stock, lotes operativos ni Kardex.
+- Validacion: `169/169` pruebas y build Vite satisfactorio.
+
 ### 2026-09-02 - Resumen fisico In-and-Out por WhatsApp
 
 - Se corrigieron las instrucciones de BuilderBot para que expresiones descriptivas como `llegaron completas`, `todo coincide` o `estan en buen estado` no se interpreten como confirmacion final de inventario.
