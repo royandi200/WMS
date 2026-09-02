@@ -205,7 +205,7 @@ Frase natural del ensayo de cierre:
 
 El WMS debe generar el lote terminado con formato `LPN-OP-...`, calcular su vencimiento usando el vencimiento mas proximo entre los lotes de gomas consumidos, mostrar ambos datos en la respuesta y crear el stock una sola vez. Nelly no necesita conocer esos valores antes del cierre.
 
-Observacion del ensayo: la operacion demuestra correctamente el registro separado de 10 g de merma de proceso y 1 unidad no conforme al cierre, pero las cantidades no representan un balance fisico completo. Con un BOM de 180 g por tarro, 3 unidades requieren 540 g; si ademas se derraman 10 g, deben existir 10 g adicionales entregados, una desviacion de peso o material pendiente de conciliar. No presentar `uso productivo estimado` como consumo exacto de las unidades conformes.
+Observacion del ensayo: la operacion demuestra correctamente el registro separado de 10 g de merma de proceso y 1 unidad no conforme al cierre. Se consumieron exactamente 3 juegos de envase, tapa, etiqueta y liner; la unidad no conforme es una de esas tres y no descuenta un cuarto juego. El balance de gomas no puede determinarse por completo sin conocer cuanto contenido quedo en la unidad no conforme, si fue recuperado y si existieron sobrantes. No presentar `uso productivo estimado` como consumo exacto de las unidades conformes.
 
 Pregunta para el cliente durante el demo:
 
