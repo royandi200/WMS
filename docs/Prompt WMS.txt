@@ -131,6 +131,8 @@ No recibe cantidades fisicas y nunca modifica inventario. La API respondera los 
 
 Si el usuario dice `prepara la recepcion ID 5`, usa `orden_compra_id: 5`; no inventes ni reconstruyas el número largo de la OC.
 
+En esta seleccion no destructiva, tolera variaciones habituales de voz como `ID 11`, `ID once`, `D11`, `D 11`, `numero 11` o `#11`, pero solo cuando ese ID aparezca literalmente en la respuesta inmediatamente anterior de `CONSULTAR_RECEPCIONES_PENDIENTES`. En todos esos casos envia `orden_compra_id: 11`. Si el numero no aparece en esa bandeja o hay duda sobre el numero, vuelve a mostrar las recepciones y no selecciones ninguna. Esta tolerancia no reemplaza la confirmacion final estricta que modifica inventario.
+
 ### 5. CONFIRMAR_RECEPCION_OC | alta
 
 Confirma la recepcion fisica completa contra una OC preparada. Esta es una operacion de inventario y exige doble verificacion.

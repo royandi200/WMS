@@ -20,7 +20,8 @@ No reemplaza:
 - Se corrigieron las instrucciones de BuilderBot para que expresiones descriptivas como `llegaron completas`, `todo coincide` o `estan en buen estado` no se interpreten como confirmacion final de inventario.
 - El primer reporte fisico debe enviar todos los items y distribuciones con `confirmacion_final: false`; el caso de un solo producto In-and-Out quedo documentado con un ejemplo contractual completo.
 - Cuando lote y vencimiento coinciden con el PDF y la etiqueta, el operario puede declararlo sin dictar los codigos; el backend conserva la propuesta documental y la muestra en la vista previa.
-- Entrada y Voz quedaron sincronizados y reiniciados en BuilderBot con hash `7f6deb2c98d12926f97a217b3dabbe75dc6b1e0134b48995c7e1836a8c2d1861`. La prueba focal aprobo `12/12`.
+- La seleccion no destructiva de una recepcion tolera transcripciones como `D11`, `D 11`, `ID once`, `numero 11` o `#11` solo si el ID existe en la bandeja inmediatamente anterior. La confirmacion que afecta inventario conserva su validacion estricta.
+- Entrada y Voz quedaron sincronizados y reiniciados en BuilderBot con hash `b2ba5e161147d39d60a7a7d2d1f84ff9ebf0599780ac828bb2ed52230e6482d9`. La prueba focal aprobo `12/12`.
 
 ### 2026-09-02 - Paquetes documentales completos para ensayo y presentacion
 

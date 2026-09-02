@@ -193,7 +193,7 @@ Camino principal: mostrar la carga documental completa. La OC ID 6 queda como re
 2. Verificar que el agente cree el borrador `DEMO-ENSAYO-FINAL-OC-IO` en `PENDIENTE_REVISION`, sin crear stock ni una recepcion.
 3. Abrir `Recepciones > Ordenes de compra`, revisar el PDF recibido por WhatsApp y validar proveedor, SKU `00276-PTZNASHWA`, 5 und, lote `DEMO-ENSAYO-FINAL-IO-ZENOVA-001` y vencimiento `2027-11-30`.
 4. Pulsar `Confirmar y crear OC`. En el ensayo final se asigno el ID corto `11` y quedo en estado `CARGADA`, con el PDF asociado y sin modificar inventario.
-5. Datana consulta recepciones y dice: `Prepara la recepcion ID 11`. En el ensayo se obtuvo el borrador `REC-OC-11-001`, con 5 und pendientes, lote proveedor requerido y ubicacion sugerida `B13`.
+5. Datana consulta recepciones y dice: `Prepara la recepcion ID 11`. La seleccion tambien acepta errores previsibles de voz como `D11` cuando el ID aparece en la bandeja inmediata. En el ensayo se obtuvo el borrador `REC-OC-11-001`, con 5 und pendientes, lote proveedor requerido y ubicacion sugerida `B13`.
 6. Reportar: `Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha y estan disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.`
 7. Revisar el resumen con SKU, cantidad, lote proveedor, vencimiento y ubicacion; aun sin movimiento.
 8. Confirmar: `Confirmo la recepcion ID 11`.
