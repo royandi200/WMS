@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const manifest = require('../database/warehouse_positions_master.json');
 const { assignmentsByLocation, manifestAssignments } = require('../api/_lib/warehouse-map');
+const { DEMO_STOCK, documentedSkuForLocation, lotCode } = require('../scripts/qa/seed-warehouse-map-demo-stock');
 
 test('warehouse map exposes every documented product assignment', () => {
   const documented = manifestAssignments(manifest);
@@ -31,4 +32,13 @@ test('warehouse map preserves document references and enriches known products', 
 
 test('warehouse manifest is scoped to the main warehouse', () => {
   assert.equal(manifest.warehouse_code, 'BG-PPAL');
+});
+
+test('demo map stock is traceable, deterministic and limited to documented assignments', () => {
+  assert.equal(DEMO_STOCK.length, 12);
+  assert.equal(new Set(DEMO_STOCK.map(item => item.location)).size >= 10, true);
+  for (const item of DEMO_STOCK) {
+    assert.equal(documentedSkuForLocation(item.location, item.sku), true, `${item.sku} no pertenece a ${item.location}`);
+    assert.match(lotCode(item), /^DEMO-MAPA-[A-D]\d+-[A-Z0-9-]+$/u);
+  }
 });

@@ -50,6 +50,7 @@ Actualizar esta seccion durante los ensayos. Solo se marca como validado aquello
 | Preparar una recepcion mediante ID corto | Validado | El agente devuelve el resumen de productos y los datos fisicos requeridos. |
 | Registrar y confirmar la recepcion fisica | Validado | La recepcion se confirma una sola vez, registra todos los items y actualiza inventario de forma atomica. |
 | Cargar posiciones preferidas del cliente | Validado en base de datos | Se crearon 77 posiciones y 83 asignaciones activas para 48 productos, sin mover stock existente. |
+| Mostrar el plano del cliente con stock demostrativo | Validado | El mapa separa las secciones A-D de las ubicaciones anteriores y muestra producto asignado, lote y stock fisico en 12 posiciones demostrativas. |
 | Sugerir ubicacion al preparar una recepcion | Pendiente de despliegue y ensayo final | Dashboard y WhatsApp deben mostrar la primera posicion preferida y permitir seleccionar otra. |
 | Solicitar produccion usando un nombre comun | Validado | `tarros de ashwagandha 60` resuelve `00102-PTASH60`. |
 | Solicitar produccion sin indicar destino | Validado | El agente pregunta si corresponde a stock de seguridad o pedido de cliente y no crea una OP. |
@@ -105,6 +106,10 @@ Reglas de operacion:
 2. Explicar que la demostracion se concentra en el control fisico del WMS. La conexion con el sistema contable del cliente no se utilizara durante la sesion.
 3. Mostrar las modalidades de producto en el catalogo: `PR`, `PT` e `IO`.
 4. Aclarar que WhatsApp y dashboard llaman la misma logica y respetan los mismos permisos.
+5. Abrir `Inventario > Mapa Bodega > Bodega Principal > Plano del cliente`.
+6. Explicar que A, B, C y D son secciones del plano y que cada codigo completo (`A1`, `B13`, `C2`, etc.) identifica una ubicacion fisica.
+7. Entrar a `B16` para mostrar gomas Ashwagandha en gramos y a `C2` para mostrar producto terminado Ashwagandha x 60.
+8. Señalar la diferencia entre `Asignacion prevista` y `Stock fisico`; una asignacion no crea inventario por si sola.
 
 ## Escenario 1: produccion interna
 

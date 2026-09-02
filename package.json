@@ -38,6 +38,8 @@
     "data:product-aliases:apply": "node scripts/apply-product-aliases-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:product-locations:dry-run": "node scripts/apply-product-locations-migration.js",
     "data:product-locations:apply": "node scripts/apply-product-locations-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:warehouse-map-demo:dry-run": "node scripts/qa/seed-warehouse-map-demo-stock.js",
+    "data:warehouse-map-demo:apply": "node scripts/qa/seed-warehouse-map-demo-stock.js --apply --yes-i-understand-this-changes-qa-inventory",
     "buzz:event:dry-run": "node scripts/buzz/generate-wms-status-event.js"
   },
   "dependencies": {

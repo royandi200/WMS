@@ -92,6 +92,10 @@ module.exports = async (req, res) => {
       catalogProducts,
       linkedAssignments,
     })
+    const documentedLocationCodes = new Set([
+      ...assignmentMap.keys(),
+      ...Object.keys(warehouseManifest.reserved_locations || {}),
+    ])
 
     // Ensamblar respuesta
     const result = ubicaciones.map(u => {
@@ -121,6 +125,8 @@ module.exports = async (req, res) => {
         uso_reservado:  u.bodega_codigo === warehouseManifest.warehouse_code
           ? warehouseManifest.reserved_locations?.[u.codigo] || null
           : null,
+        en_plano_documentado: u.bodega_codigo === warehouseManifest.warehouse_code
+          && documentedLocationCodes.has(u.codigo),
       }
     })
 

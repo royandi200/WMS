@@ -40,7 +40,7 @@ const apiFetch = (path, opts={}) =>
 // ══════════════════════════════════════════════════════════════════════════════
 // VISTA 1 — PLANO DE PLANTA (vista pájaro)
 // ══════════════════════════════════════════════════════════════════════════════
-function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
+function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, onRefresh }) {
   const canvasRef   = useRef(null)
   const dragging    = useRef(null)
   const [zones,     setZones]     = useState({})   // { zoneName: {x,y,w,h} }
@@ -130,12 +130,14 @@ function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
     <div className="flex flex-col gap-3">
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => setEditMode(v => !v)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
-            editMode ? 'bg-primary/15 border-primary/40 text-primary' : 'bg-surface border-border text-muted hover:text-foreground'
-          }`}>
-          <Move size={12}/>{editMode ? 'Modo edición activo' : 'Organizar zonas'}
-        </button>
+        {!documentedMode && (
+          <button onClick={() => setEditMode(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+              editMode ? 'bg-primary/15 border-primary/40 text-primary' : 'bg-surface border-border text-muted hover:text-foreground'
+            }`}>
+            <Move size={12}/>{editMode ? 'Modo edición activo' : 'Organizar secciones'}
+          </button>
+        )}
 
         {editMode && (
           <>
@@ -157,7 +159,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] text-muted">Toca una zona para ver sus estantes</span>
+          <span className="text-[10px] text-muted">Selecciona una sección para ver sus ubicaciones</span>
           <button onClick={onRefresh}
             className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground">
             <RefreshCw size={12}/>
@@ -211,7 +213,9 @@ function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
               <div className="flex items-center gap-2 px-3 py-2 border-b"
                 style={{ borderColor: col.border }}>
                 <div className="w-2 h-2 rounded-full shrink-0" style={{ background: col.dot }}/>
-                <span className="text-xs font-bold text-foreground truncate flex-1">{name}</span>
+                <span className="text-xs font-bold text-foreground truncate flex-1">
+                  {documentedMode ? `Sección ${name}` : name}
+                </span>
                 {editMode && <Move size={10} className="text-muted shrink-0"/>}
               </div>
 
@@ -239,7 +243,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
               {/* Footer — hint */}
               {!editMode && (
                 <div className="px-3 py-1.5 text-center">
-                  <span className="text-[9px]" style={{ color: col.dot }}>→ Ver estantes</span>
+                   <span className="text-[9px]" style={{ color: col.dot }}>Ver ubicaciones</span>
                 </div>
               )}
             </div>
@@ -250,7 +254,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
         {Object.keys(zones).length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
             <Layers size={32} className="text-muted opacity-30"/>
-            <p className="text-sm text-muted">Activa "Organizar zonas" y añade zonas al plano</p>
+            <p className="text-sm text-muted">No hay ubicaciones para mostrar</p>
           </div>
         )}
       </div>
@@ -272,7 +276,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, onZoneClick, onRefresh }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // VISTA 2 — ESTANTES (vista frontal de rack)
 // ══════════════════════════════════════════════════════════════════════════════
-function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
+function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh }) {
   const col          = zoneColor(zona)
   const [selected,   setSelected]   = useState(null)
   const [editModal,  setEditModal]  = useState(null)
@@ -394,7 +398,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
         </button>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full" style={{background:col.dot}}/>
-          <span className="text-sm font-bold text-foreground">{zona}</span>
+          <span className="text-sm font-bold text-foreground">{documentedMode ? `Sección ${zona}` : zona}</span>
         </div>
         <span className="text-muted text-xs">— {ubicaciones.length} ubicaciones</span>
         <button onClick={onRefresh} className="ml-auto w-7 h-7 flex items-center justify-center rounded-lg bg-surface border border-border text-muted hover:text-foreground">
@@ -408,7 +412,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
         <div className="flex-1 min-w-0">
 
           {/* Selector pasillo */}
-          {pasilloNames.length > 1 && (
+          {!documentedMode && pasilloNames.length > 1 && (
             <div className="flex gap-1 mb-3 overflow-x-auto pb-1">
               {pasilloNames.map(p => (
                 <button key={p} onClick={()=>setActivePasillo(p)}
@@ -436,15 +440,17 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
             {/* Etiqueta pasillo */}
             <div className="px-4 py-2 border-b border-border/50 flex items-center justify-between">
               <span className="text-xs font-bold text-muted uppercase tracking-widest">
-                Pasillo {activePasillo}
+                {documentedMode ? `Ubicaciones de la sección ${zona}` : `Pasillo ${activePasillo}`}
               </span>
-              <button onClick={()=>{
-                const niv = String(niveles.length > 0 ? Math.max(...niveles.map(Number))+1 : 1)
-                createUbicacion(`${zona.replace('Zona ','Z')}-${activePasillo}-${niv}a`, activePasillo, niv, 'a')
-              }}
-                className="flex items-center gap-1 text-[10px] text-muted hover:text-primary transition-colors">
-                <Plus size={10}/>Nivel
-              </button>
+              {!documentedMode && (
+                <button onClick={()=>{
+                  const niv = String(niveles.length > 0 ? Math.max(...niveles.map(Number))+1 : 1)
+                  createUbicacion(`${zona.replace('Zona ','Z')}-${activePasillo}-${niv}a`, activePasillo, niv, 'a')
+                }}
+                  className="flex items-center gap-1 text-[10px] text-muted hover:text-primary transition-colors">
+                  <Plus size={10}/>Nivel
+                </button>
+              )}
             </div>
 
             {niveles.length === 0 ? (
@@ -459,9 +465,11 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
                   return (
                     <div key={niv} className="flex items-center gap-2">
                       {/* Etiqueta nivel */}
-                      <div className="w-10 shrink-0 text-center">
-                        <span className="text-[10px] text-muted font-mono font-bold">N{niv}</span>
-                      </div>
+                      {!documentedMode && (
+                        <div className="w-10 shrink-0 text-center">
+                          <span className="text-[10px] text-muted font-mono font-bold">N{niv}</span>
+                        </div>
+                      )}
 
                       {/* Celdas */}
                       <div className="flex gap-1.5 flex-wrap flex-1">
@@ -472,14 +480,14 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
                               onClick={() => setSelected(sel=>sel?.id===u.id?null:u)}
                               className="relative rounded-lg border-2 flex flex-col items-center justify-center transition-all duration-150 active:scale-95"
                               style={{
-                                width:'56px', height:'56px',
+                                width: documentedMode ? '68px' : '56px', height:'56px',
                                 background: selected?.id===u.id ? e.dot+'30' : e.bg,
                                 borderColor: selected?.id===u.id ? e.dot : e.border,
                                 boxShadow: selected?.id===u.id ? `0 0 0 2px ${e.dot}50` : 'none',
                               }}>
                               <div className="w-2 h-2 rounded-full mb-0.5" style={{background:e.dot}}/>
                               <span className="text-[9px] font-mono font-bold text-foreground/80">
-                                {u.posicion||u.codigo.slice(-2)}
+                                {documentedMode ? u.codigo : (u.posicion||u.codigo.slice(-2))}
                               </span>
                               {u.estado!=='vacio' && (
                                 <span className="text-[8px] tabular-nums" style={{color:e.dot}}>
@@ -494,7 +502,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
                         })}
 
                         {/* Drop zone — añadir posición */}
-                        <button
+                        {!documentedMode && <button
                           onClick={() => {
                             const nextPos = String.fromCharCode(97 + cells.length)
                             createUbicacion(
@@ -504,7 +512,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
                           }}
                           className="w-14 h-14 rounded-lg border-2 border-dashed border-border flex items-center justify-center text-muted hover:border-primary/50 hover:text-primary transition-colors">
                           <Plus size={14}/>
-                        </button>
+                        </button>}
                       </div>
                     </div>
                   )
@@ -529,7 +537,10 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
 
             {/* Meta info */}
             <div className="px-4 py-3 space-y-1.5 border-b border-border/50">
-              {[['Zona',selected.zona],['Pasillo',selected.pasillo],['Nivel',selected.nivel],['Posición',selected.posicion]].map(([k,v])=>(
+              {(documentedMode
+                ? [['Sección', selected.zona], ['Ubicación', selected.codigo]]
+                : [['Zona',selected.zona],['Pasillo',selected.pasillo],['Nivel',selected.nivel],['Posición',selected.posicion]]
+              ).map(([k,v])=>(
                 <div key={k} className="flex justify-between">
                   <span className="text-[10px] text-muted uppercase tracking-wide">{k}</span>
                   <span className="text-xs font-medium text-subtle">{v||'—'}</span>
@@ -578,7 +589,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
             </div>
 
             {/* Acciones */}
-            <div className="px-4 py-3 border-t border-border flex gap-2">
+            {!documentedMode && <div className="px-4 py-3 border-t border-border flex gap-2">
               <button onClick={()=>setEditModal({...selected})}
                 className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-muted hover:text-foreground text-xs transition-colors">
                 <Edit2 size={11}/>Editar
@@ -587,7 +598,7 @@ function VistaEstantes({ zona, ubicaciones, onBack, onRefresh }) {
                 className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs transition-colors">
                 <Trash2 size={11}/>
               </button>
-            </div>
+            </div>}
           </div>
         )}
       </div>
@@ -605,6 +616,7 @@ export default function MapaBodega() {
   const [view,       setView]      = useState('plano')   // 'plano' | 'estantes'
   const [activeZona, setActiveZona] = useState(null)
   const [activeWarehouseId, setActiveWarehouseId] = useState(null)
+  const [locationScope, setLocationScope] = useState('documented')
 
   useEffect(() => { fetchMapa() }, [])
 
@@ -621,13 +633,19 @@ export default function MapaBodega() {
 
   const activeWarehouse = bodegas.find(bodega => Number(bodega.id) === Number(activeWarehouseId))
   const warehouseLocations = ubicaciones.filter(u => Number(u.bodega_id) === Number(activeWarehouseId))
+  const documentedLocations = warehouseLocations.filter(u => u.en_plano_documentado)
+  const otherLocations = warehouseLocations.filter(u => !u.en_plano_documentado)
+  const hasDocumentedPlan = activeWarehouse?.codigo === 'BG-PPAL' && documentedLocations.length > 0
+  const visibleLocations = hasDocumentedPlan
+    ? (locationScope === 'documented' ? documentedLocations : otherLocations)
+    : warehouseLocations
 
   const handleZoneClick = (zona) => {
     setActiveZona(zona)
     setView('estantes')
   }
 
-  const zonaUbicaciones = warehouseLocations.filter(u => u.zona === activeZona)
+  const zonaUbicaciones = visibleLocations.filter(u => u.zona === activeZona)
 
   return (
     <div className="space-y-4">
@@ -635,6 +653,7 @@ export default function MapaBodega() {
         {bodegas.map(bodega => (
           <button key={bodega.id} type="button" onClick={() => {
             setActiveWarehouseId(bodega.id)
+            setLocationScope('documented')
             setActiveZona(null)
             setView('plano')
           }} className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
@@ -644,10 +663,33 @@ export default function MapaBodega() {
           }`}>{bodega.nombre}</button>
         ))}
       </div>
+      {hasDocumentedPlan && (
+        <div className="flex gap-1">
+          <button type="button" onClick={() => {
+            setLocationScope('documented')
+            setActiveZona(null)
+            setView('plano')
+          }} className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+            locationScope === 'documented'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border text-muted hover:text-foreground'
+          }`}>Plano del cliente ({documentedLocations.length})</button>
+          <button type="button" onClick={() => {
+            setLocationScope('other')
+            setActiveZona(null)
+            setView('plano')
+          }} className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+            locationScope === 'other'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border text-muted hover:text-foreground'
+          }`}>Otras ubicaciones ({otherLocations.length})</button>
+        </div>
+      )}
       {view === 'plano' ? (
         <PlanoPajaro
-          ubicaciones={warehouseLocations}
+          ubicaciones={visibleLocations}
           warehouseCode={activeWarehouse?.codigo}
+          documentedMode={hasDocumentedPlan && locationScope === 'documented'}
           onZoneClick={handleZoneClick}
           onRefresh={fetchMapa}
         />
@@ -655,6 +697,7 @@ export default function MapaBodega() {
         <VistaEstantes
           zona={activeZona}
           ubicaciones={zonaUbicaciones}
+          documentedMode={hasDocumentedPlan && locationScope === 'documented'}
           onBack={() => setView('plano')}
           onRefresh={fetchMapa}
         />
