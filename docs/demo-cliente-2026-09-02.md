@@ -19,7 +19,8 @@ El WMS controla lo que ocurre fisicamente en la bodega. La OC define lo esperado
 | Elemento | Estado preparado |
 |---|---|
 | Administrador | Juan, linea `3174442659`, rol `admin`. |
-| Linea operativa | Datana, linea `3125031367`; su rol rota durante la demo. |
+| Recepcion y cierre | Datana, linea `3125031367`, rol `recepcion_cierre`. |
+| Alistamiento | Jobana, linea `3158269583`, rol `alistador`. |
 | Linea del agente | `573173292904`. |
 | OC de insumos del ensayo | ID `4`, `DEMO-20260902-OC-INSUMOS`, abierta y con PDF. |
 | OC In-and-out del ensayo | ID `6`, `DEMO-20260902-DOC-IO-001`, abierta y con PDF. |
@@ -69,18 +70,18 @@ El primer comando es un dry-run. El segundo genera tres PDF y tres OC. Repetir e
 
 ## Orden y roles
 
-| Bloque | Rol de Datana | Acciones |
-|---|---|---|
-| 1. Entradas | `recepcion_cierre` | Recibir OC de insumos ID 4 e IO ID 6. |
-| 2. Alistamiento | `alistador` | Confirmar materiales e inicio de la OP propia. |
-| 3. Cierres y 3Q | `recepcion_cierre` | Cerrar la OP y recibir dos entregas de 3Q. |
-| 4. Salidas | `despacho` | Confirmar los despachos PR, IO y PT. |
-| 5. Restauracion | `recepcion_cierre` | Dejar la linea en su rol base. |
+| Bloque | Responsable | Rol | Acciones |
+|---|---|---|---|
+| 1. Entradas | Datana | `recepcion_cierre` | Recibir OC de insumos ID 4 e IO ID 6. |
+| 2. Alistamiento | Jobana | `alistador` | Recibir el aviso, confirmar materiales e iniciar la OP propia. |
+| 3. Cierres y 3Q | Datana | `recepcion_cierre` | Cerrar la OP y recibir dos entregas de 3Q. |
+| 4. Salidas | Jobana | `despacho` | Confirmar los despachos PR, IO y PT. |
+| 5. Restauracion | Jobana | `alistador` | Dejar la linea en su rol base. |
 
 Comando de apoyo, fuera de la vista del cliente:
 
 ```powershell
-node scripts\qa\set-demo-user-role.js --phone=3125031367 --role=<ROL> --actor-phone=3174442659
+node scripts\qa\set-demo-user-role.js --phone=3158269583 --role=<ROL> --actor-phone=3174442659
 ```
 
 Comprobar el rol efectivo despues de cada cambio antes de una accion de inventario.
@@ -117,16 +118,16 @@ Resultado del ensayo: recepcion `REC-OC-4-001` completada sin diferencias y con 
 
 ### 2. Liberar e iniciar produccion
 
-Antes de liberar la OP, cambiar Datana de `recepcion_cierre` a `alistador` y verificar que exista exactamente un usuario activo con ese rol. Si no hay alistador, el sistema usa `admin` como respaldo y el administrador que libera puede recibir tanto su respuesta directa como el aviso operativo.
+Antes de liberar la OP, verificar que Jobana sea la unica operadora activa con rol `alistador`. Datana permanece en `recepcion_cierre`.
 
 1. Juan dice: `Vamos a producir tres tarros de ashwagandha 60`.
 2. El agente debe preguntar el destino antes de crear la orden.
 3. Responder: `Para stock de seguridad`.
 4. Verificar SKU y nombre, cantidad interpretada 3 und, destino, BOM, FEFO, ubicaciones, ID corto y codigo OP.
-5. Confirmar que Datana recibe el mensaje de alistamiento.
+5. Confirmar que Jobana recibe el mensaje de alistamiento.
 
-Resultado del ensayo: la OP `OP-20260902-000068` se creo una sola vez y quedo `APROBADA`, con materiales reservados. Juan recibio dos mensajes porque Datana aun tenia rol `recepcion_cierre`: uno fue la respuesta directa y otro la notificacion del alistador enviada al `admin` de respaldo. Datana se cambio a `alistador` antes de continuar. No hubo doble ejecucion de la orden.
-6. Datana dice: `Ya aliste los materiales de la orden ID <ID_OP>`.
+Resultado del ensayo: la OP `OP-20260902-000068` se creo una sola vez y quedo `APROBADA`, con materiales reservados. Juan recibio dos mensajes porque no habia un alistador activo: uno fue la respuesta directa y otro la notificacion enviada al `admin` de respaldo. Se creo a Jobana como `alistador` y Datana se conservo en `recepcion_cierre`. No hubo doble ejecucion de la orden.
+6. Jobana dice: `Ya aliste los materiales de la orden ID <ID_OP>`.
 7. Verificar `EN_PROCESO` y un solo descuento de cada material.
 
 | Evento | Destinatario | Contenido esperado |
@@ -139,13 +140,12 @@ Resultado del ensayo: la OP `OP-20260902-000068` se creo una sola vez y quedo `A
 
 El recorrido principal usa 3 conformes y 0 merma. La OP 67 cerrada queda como evidencia de merma si el cliente desea verla.
 
-1. Cambiar Datana a `recepcion_cierre`.
-2. Decir: `Cerramos la orden ID <ID_OP> con 3 unidades conformes y cero merma. Dejarlas en C2.`
-3. El WMS genera el lote; el usuario no lo dicta.
-4. El vencimiento esperado es `2026-09-15`, heredado de las gomas.
-5. Juan debe recibir plan, conformes, merma, lote PT, ubicacion, vencimiento, actor y conciliacion.
-6. Repetir el cierre: debe informar que ya estaba cerrada y no modificar inventario.
-7. Consultar la trazabilidad del lote PT.
+1. Datana, que permanece en `recepcion_cierre`, dice: `Cerramos la orden ID <ID_OP> con 3 unidades conformes y cero merma. Dejarlas en C2.`
+2. El WMS genera el lote; el usuario no lo dicta.
+3. El vencimiento esperado es `2026-09-15`, heredado de las gomas.
+4. Juan debe recibir plan, conformes, merma, lote PT, ubicacion, vencimiento, actor y conciliacion.
+5. Repetir el cierre: debe informar que ya estaba cerrada y no modificar inventario.
+6. Consultar la trazabilidad del lote PT.
 
 `Neto entregado` es lo que salio del disponible hacia produccion; `merma de proceso` es la perdida documentada; `uso productivo estimado` es neto menos merma. Un sobrante fisico debe devolverse antes del cierre para volver a estar disponible.
 
@@ -158,7 +158,7 @@ node scripts\qa\prepare-demo-dispatch.js --scenario=own
 node scripts\qa\prepare-demo-dispatch.js --scenario=own --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
 ```
 
-La tarea debe reservar 1 und por FEFO, idealmente del lote producido en vivo. Datana, ya en `despacho`, confirma por ID corto y repite para demostrar idempotencia.
+La tarea debe reservar 1 und por FEFO, idealmente del lote producido en vivo. Jobana, ya en `despacho`, confirma por ID corto y repite para demostrar idempotencia.
 
 ## Escenario 2: In-and-out
 
@@ -188,7 +188,7 @@ node scripts\qa\prepare-demo-dispatch.js --scenario=io
 node scripts\qa\prepare-demo-dispatch.js --scenario=io --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
 ```
 
-1. Datana en `despacho` pregunta: `Que despachos pendientes hay?`
+1. Jobana en `despacho` pregunta: `Que despachos pendientes hay?`
 2. Confirma el ID de `FV-DEMO-IO-001`.
 3. Debe salir 2 und y quedar 3 und del lote recibido.
 4. Repetir sin segundo descuento.
@@ -247,7 +247,7 @@ node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing
 node scripts\qa\prepare-demo-dispatch.js --scenario=outsourcing --apply --yes-i-understand-this-creates-a-demo-dispatch --notify
 ```
 
-1. Datana en `despacho` consulta pendientes.
+1. Jobana en `despacho` consulta pendientes.
 2. Confirma el ID de `FV-DEMO-3Q-001`.
 3. Deben salir 2 und con lote y cliente final, conservando el enlace a materiales enviados a 3Q.
 4. Repetir sin segundo movimiento.
@@ -260,11 +260,11 @@ El flujo operativo 3Q se demuestra en dashboard. BuilderBot puede leer un PDF de
 ## Bloque final de despachos
 
 1. Completar primero los lotes PR, IO y PT.
-2. Cambiar Datana una sola vez a `despacho`.
+2. Cambiar Jobana una sola vez de `alistador` a `despacho`.
 3. Ejecutar dry-run y luego aplicar cada factura sintetica, una por una.
 4. Consultar y confirmar cada tarea antes de preparar la siguiente para no confundir IDs.
 5. Verificar Kardex, saldo, reserva cero, cliente y trazabilidad.
-6. Restaurar Datana a `recepcion_cierre`.
+6. Restaurar Jobana a `alistador`. Datana permanece en `recepcion_cierre`.
 
 ## Controles a demostrar
 
