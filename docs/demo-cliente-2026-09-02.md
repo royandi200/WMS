@@ -58,7 +58,7 @@ Actualizar esta seccion durante los ensayos. Solo se marca como validado aquello
 | Liberar reservas de OP de ensayo anteriores | Validado | Las OP 63 y 64 quedaron canceladas antes de iniciar, sin movimientos ni kardex, y sus 12 asignaciones fueron liberadas. |
 | Responder solamente `pedido de cliente` | Validado como control | El agente solicita referencia y cliente final; este recorrido queda excluido del demo porque aun no coteja una OC almacenada. |
 | Confirmar materiales e iniciar la OP del ensayo final | Validado | La frase natural `Ya aliste los materiales de la orden ID 67` inicio la OP, consumio exactamente las reservas FEFO, genero seis registros de Kardex y notifico al administrador. |
-| Ver el consumo de insumos en Inventario > Buscar producto | Validado en base; pendiente de comprobacion visual tras desplegar | La pantalla debe mostrar en `Movimientos recientes` la fecha y hora, cantidad negativa, lote, referencia `produccion:OP-20260902-000067` y saldo posterior. |
+| Ver el consumo de insumos en Inventario > Buscar producto | Validado | La version desplegada muestra en `Movimientos recientes` la fecha y hora local, cantidad negativa, lote, referencia `produccion:OP-20260902-000067` y saldo posterior. Se comprobo con `00017-ETASH60` y `00051-MPASH`. |
 | Cerrar la OP del ensayo final | Pendiente de ensayo final | Debe crear lote PT, registrar merma, conciliar materiales y notificar a administracion. |
 | Recorrido IO del demo | Pendiente de ensayo final | Debe recibir PT directamente y despacharlo sin crear OP. |
 | Recorrido de maquila 3Q del demo | Pendiente de ensayo final | Debe cubrir remision, salida, recepcion parcial y trazabilidad externa. |
