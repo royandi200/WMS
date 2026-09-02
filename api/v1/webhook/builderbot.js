@@ -111,6 +111,7 @@ const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-documen
 const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
 const {
   listAvailablePurchaseOrderReceptions,
+  listAvailableOutsourcingReceptions,
   reviewPurchaseOrderDocumentDraft,
   confirmPurchaseOrderDocumentDraft,
   prepareReceptionFromPurchaseOrder,
@@ -1335,27 +1336,59 @@ module.exports = async (req, res) => {
     switch (action) {
 
       case 'CONSULTAR_RECEPCIONES_PENDIENTES': {
-        const available = await listAvailablePurchaseOrderReceptions({ db, limit: 10 });
-        if (!available.length) {
-          mensaje = 'No hay ordenes de compra con saldo pendiente aptas para recepcion directa.';
-        } else {
-          const lines = available.flatMap(order => [
-            `- ID ${order.id} | ${order.numero} | ${order.proveedor_nombre || 'Proveedor N/A'} | ${formatDateOnly(order.fecha_orden)}`,
-            ...order.items.map(item =>
-              `  ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad}${item.requiere_lote ? ' | lote proveedor requerido' : ''}`
-            ),
-          ]);
+        const [available, outsourcing] = await Promise.all([
+          listAvailablePurchaseOrderReceptions({ db, limit: 10 }),
+          listAvailableOutsourcingReceptions({ db, limit: 10 }),
+        ]);
+        if (!available.length && !outsourcing.length) {
           mensaje = [
-            `Recepciones disponibles (${available.length}):`,
-            ...lines,
-            `Para continuar responde, por ejemplo: prepara la recepcion ID ${available[0].id}.`,
+            'No hay recepciones pendientes disponibles.',
+            'Produccion propia: el producto terminado ingresa al cerrar la orden de produccion, no mediante una recepcion.',
+          ].join('\n');
+        } else {
+          const directGroups = [
+            ['Materia prima e insumos', available.filter(order => order.tipo_recepcion === 'INSUMOS_MP')],
+            ['Producto terminado In & Out', available.filter(order => order.tipo_recepcion === 'IN_OUT')],
+            ['Recepciones mixtas', available.filter(order => order.tipo_recepcion === 'MIXTA')],
+          ].filter(([, orders]) => orders.length);
+          const directLines = directGroups.flatMap(([label, orders]) => [
+            `${label} (${orders.length}):`,
+            ...orders.flatMap(order => [
+              `- ID ${order.id} | ${order.numero} | ${order.proveedor_nombre || 'Proveedor N/A'} | ${formatDateOnly(order.fecha_orden)}`,
+              ...order.items.map(item =>
+                `  ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad}${item.requiere_lote ? ' | lote proveedor requerido' : ''}`
+              ),
+            ]),
+          ]);
+          const outsourcingLines = outsourcing.length ? [
+            `Producto terminado desde maquila 3Q (${outsourcing.length}):`,
+            ...outsourcing.flatMap(order => [
+              `- MQ ID ${order.id} | ${order.codigo} | OC ${order.orden_compra_numero} | ${order.proveedor_nombre || '3Q'}`,
+              `  ${order.sku} - ${order.producto}: ${order.cantidad_pendiente} ${order.unidad}${order.requiere_lote ? ' | lote de 3Q requerido al recibir' : ''}`,
+            ]),
+            '  Para preparar una entrega 3Q usa Recepciones > Confirmar recepcion > Producto desde 3Q.',
+          ] : [];
+          mensaje = [
+            `Recepciones pendientes (${available.length + outsourcing.length}):`,
+            ...directLines,
+            ...outsourcingLines,
+            ...(available.length ? [`Para una OC directa responde, por ejemplo: prepara la recepcion ID ${available[0].id}.`] : []),
+            'Produccion propia: el producto terminado ingresa al cerrar la orden de produccion, no mediante una recepcion.',
             'Esta consulta no modifica inventario.',
           ].join('\n');
         }
         responseContext.available_receptions = available.map(order => ({
           purchase_order_id: Number(order.id),
           purchase_order_number: order.numero,
+          reception_type: order.tipo_recepcion,
           pending_items: order.items.length,
+        }));
+        responseContext.available_outsourcing_receptions = outsourcing.map(order => ({
+          outsourcing_order_id: Number(order.id),
+          outsourcing_order_code: order.codigo,
+          purchase_order_id: Number(order.orden_compra_id),
+          reception_type: 'MAQUILA_3Q',
+          pending_quantity: order.cantidad_pendiente,
         }));
         responseContext.inventory_changed = false;
         break;

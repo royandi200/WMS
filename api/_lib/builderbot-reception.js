@@ -39,14 +39,15 @@ async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
   const placeholders = orderIds.map(() => '?').join(',');
   const [orderedItems] = await db.execute(
     `SELECT oci.orden_compra_id, oci.producto_id, p.siigo_code AS sku,
-            p.nombre AS producto, p.requiere_lote,
+            p.nombre AS producto, p.requiere_lote, p.modalidad_operativa,
             SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
             CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
                  THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad
        FROM orden_compra_proveedor_items oci
        JOIN productos p ON p.id = oci.producto_id
       WHERE oci.orden_compra_id IN (${placeholders})
-      GROUP BY oci.orden_compra_id, oci.producto_id, p.siigo_code, p.nombre, p.requiere_lote
+      GROUP BY oci.orden_compra_id, oci.producto_id, p.siigo_code, p.nombre,
+               p.requiere_lote, p.modalidad_operativa
       ORDER BY MIN(oci.id)`,
     orderIds
   );
@@ -89,6 +90,7 @@ async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
       producto_id: Number(item.producto_id),
       sku: item.sku,
       producto: item.producto,
+      modalidad_operativa: item.modalidad_operativa,
       requiere_lote: Boolean(item.requiere_lote),
       cantidad_pendiente: pending,
       unidad: item.unidad || 'und',
@@ -96,9 +98,42 @@ async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
   }
 
   return orders
-    .map(order => ({ ...order, items: itemsByOrder.get(Number(order.id)) || [] }))
+    .map(order => {
+      const items = itemsByOrder.get(Number(order.id)) || [];
+      const modes = new Set(items.map(item => item.modalidad_operativa));
+      const receptionType = modes.size === 1 && modes.has('IO')
+        ? 'IN_OUT'
+        : modes.has('IO')
+          ? 'MIXTA'
+          : 'INSUMOS_MP';
+      return { ...order, tipo_recepcion: receptionType, items };
+    })
     .filter(order => !incompatibleUnitOrders.has(Number(order.id)) && order.items.length)
     .slice(0, safeLimit);
+}
+
+async function listAvailableOutsourcingReceptions({ db, limit = 10 }) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const [rows] = await db.execute(
+    `SELECT om.id, om.codigo, om.estado, om.orden_compra_id,
+            oc.numero AS orden_compra_numero, om.proveedor_nombre,
+            om.cantidad_objetivo, om.cantidad_recibida,
+            p.siigo_code AS sku, p.nombre AS producto,
+            p.requiere_lote, COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad
+       FROM ordenes_maquila om
+       JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
+       JOIN productos p ON p.id = om.producto_id
+      WHERE om.estado IN ('EN_3Q', 'RECIBIDA_PARCIAL')
+        AND om.cantidad_recibida + 0.0001 < om.cantidad_objetivo
+      ORDER BY COALESCE(om.enviado_en, om.creado_en), om.id
+      LIMIT ?`,
+    [safeLimit]
+  );
+  return rows.map(row => ({
+    ...row,
+    cantidad_pendiente: Number((Number(row.cantidad_objetivo) - Number(row.cantidad_recibida)).toFixed(4)),
+    tipo_recepcion: 'MAQUILA_3Q',
+  }));
 }
 
 function parseWarnings(value) {
@@ -696,6 +731,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
 
 module.exports = {
   listAvailablePurchaseOrderReceptions,
+  listAvailableOutsourcingReceptions,
   findPurchaseOrderDocumentDraft,
   reviewPurchaseOrderDocumentDraft,
   explicitPurchaseOrderConfirmation,

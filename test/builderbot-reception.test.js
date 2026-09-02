@@ -14,6 +14,7 @@ const {
   parseReceptionDraft,
   findPreparedReception,
   listAvailablePurchaseOrderReceptions,
+  listAvailableOutsourcingReceptions,
 } = require('../api/_lib/builderbot-reception');
 const { capabilityForAction } = require('../api/_lib/capabilities');
 const { newKardexEntryIds } = require('../api/_lib/reception-distributions');
@@ -348,4 +349,31 @@ test('available receptions expose stable IDs and only real pending balances', as
     ['SKU-A', 10],
     ['SKU-B', 2000],
   ]);
+});
+
+test('available outsourcing receptions expose only product still pending from 3Q', async () => {
+  const db = {
+    async execute(sql, params) {
+      assert.match(sql, /om\.estado IN \('EN_3Q', 'RECIBIDA_PARCIAL'\)/u);
+      assert.deepEqual(params, [10]);
+      return [[{
+        id: 4,
+        codigo: 'MQ-3Q-20260902-000004',
+        estado: 'EN_3Q',
+        orden_compra_id: 7,
+        orden_compra_numero: 'DEMO-20260902-OC-3Q-001',
+        proveedor_nombre: '3Q',
+        cantidad_objetivo: '4.0000',
+        cantidad_recibida: '1.0000',
+        sku: '00105-PTBOS60',
+        producto: 'PRODUCTO TERMINADO BOOSTER X 60',
+        requiere_lote: 1,
+        unidad: 'und',
+      }]];
+    },
+  };
+  const available = await listAvailableOutsourcingReceptions({ db });
+  assert.equal(available.length, 1);
+  assert.equal(available[0].cantidad_pendiente, 3);
+  assert.equal(available[0].tipo_recepcion, 'MAQUILA_3Q');
 });

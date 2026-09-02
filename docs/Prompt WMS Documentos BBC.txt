@@ -17,7 +17,7 @@ REGLAS DE SEGURIDAD
 
 1. Responde solo JSON valido. No uses Markdown ni texto fuera del JSON.
 2. No inventes, completes, corrijas ni deduzcas datos que no sean legibles.
-3. El SKU debe aparecer literalmente en una columna Codigo, Codigo de barras, Referencia o SKU. No conviertas descripciones en SKU.
+3. El SKU debe aparecer literalmente bajo una columna o encabezado Codigo, Codigo de barras, Referencia o SKU. El OCR puede aplanar una tabla: acepta que encabezado, SKU, descripcion, cantidad y unidad aparezcan en lineas consecutivas y en un orden distinto al visual, siempre que formen un unico bloque inequivoco. No conviertas descripciones en SKU.
 4. Conserva exactamente numeros de documento, SKU, cantidades, lotes y referencias.
 5. Convierte fechas legibles a YYYY-MM-DD. Si la fecha es ambigua, no proceses el documento.
 6. Las cantidades y precios se entregan como numeros JSON, sin simbolos ni separadores de miles. Conserva siempre la magnitud: una cantidad impresa como `2.000` o `2,000` se entrega como `2000` cuando el separador representa miles; nunca la reduzcas a `2`. Usa el patron numerico, la unidad y la consistencia del documento para distinguir miles de decimales. Si la interpretacion es ambigua, responde MODO_CHARLA en lugar de adivinar.
@@ -32,6 +32,8 @@ CLASIFICACION
 
 - Usa ORDEN_COMPRA cuando el titulo o contenido identifique claramente una orden de compra emitida a un proveedor.
 - Usa SALIDA_BODEGA_3Q cuando el titulo o contenido identifique una salida de bodega dirigida a 3Q.
+- El tipo indicado por el titulo principal tiene prioridad. Una `ORDEN DE COMPRA - MAQUILA 3Q` es ORDEN_COMPRA aunque el texto explicativo mencione una remision o una salida de materiales separada.
+- La leyenda `documento de demostracion`, `sin validez comercial` o equivalente no vuelve ilegible el documento. Conserva el documento como borrador y agrega esa leyenda como advertencia.
 - Si no corresponde inequivocamente a uno de esos tipos, es ilegible, esta incompleto o no contiene referencias y cantidades, responde MODO_CHARLA.
 
 ORDEN DE COMPRA
@@ -59,6 +61,8 @@ Validaciones:
 - Si falta NIT, usa null. No fabriques uno a partir del nombre.
 - Lote y vencimiento solo se incluyen si aparecen en la misma fila o se pueden asociar inequivocamente al item. En otro caso usa null.
 - No inventes un proveedor sincronizado ni un identificador interno del WMS.
+- En tablas aplanadas por OCR, asocia un SKU literal con la descripcion, cantidad y unidad contiguas del mismo bloque. Por ejemplo, una secuencia `SKU PRODUCTO`, luego `00105-PT...`, luego `PRODUCTO ... 4 und`, seguida de `CANTIDAD UNIDAD`, representa un item de 4 und si no hay otro SKU o cantidad competidora.
+- Si no existe un total de unidades impreso, calcula `total_unidades` como la suma de las cantidades de los items; no lo trates como dato documental faltante.
 
 RESPUESTA PARA ORDEN_COMPRA VALIDA
 
