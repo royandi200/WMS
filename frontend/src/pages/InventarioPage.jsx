@@ -153,6 +153,7 @@ function ProductResult({ data }) {
   const product = data.product || {}
   const totals = data.totals || {}
   const rows = Array.isArray(data.rows) ? data.rows : []
+  const movements = Array.isArray(data.movements) ? data.movements : []
   const blockedRows = rows.filter((r) => Number(r.bloqueada || 0) > 0)
   const displayRows = [...rows].sort((a, b) => Number(b.disponible || 0) - Number(a.disponible || 0))
 
@@ -204,6 +205,42 @@ function ProductResult({ data }) {
           </tbody>
         </table>
       </div>
+
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="border-b border-border bg-surface px-4 py-3">
+          <h3 className="text-sm font-semibold text-foreground">Movimientos recientes</h3>
+          <p className="mt-0.5 text-xs text-muted">Ultimos registros auditables del Kardex para este producto.</p>
+        </div>
+        {movements.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-muted">No hay movimientos registrados.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-background/30">
+                  {['Fecha y hora', 'Movimiento', 'Cantidad', 'Lote', 'Referencia', 'Saldo posterior'].map((column) => (
+                    <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movements.map((movement) => (
+                  <tr key={movement.id} className="border-b border-border/50 last:border-0 hover:bg-white/[0.02]">
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted">{formatDateTime(movement.created_at)}</td>
+                    <td className="px-4 py-3 font-medium text-foreground">{formatMovement(movement.action)}</td>
+                    <td className={`px-4 py-3 font-semibold tabular-nums ${Number(movement.qty) < 0 ? 'text-danger' : 'text-green-400'}`}>
+                      {formatSignedQuantity(movement.qty, product.unit)}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">{movement.lote || '-'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted">{movement.reference || '-'}</td>
+                    <td className="px-4 py-3 tabular-nums">{formatQuantity(movement.balance_after, product.unit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -246,6 +283,41 @@ function StatusBadge({ value }) {
 function formatDate(value) {
   if (!value) return '-'
   return String(value).slice(0, 10)
+}
+
+function formatDateTime(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString('es-CO', {
+    timeZone: 'America/Bogota',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function formatMovement(action) {
+  const labels = {
+    CONSUMO_MATERIAL: 'Consumo de produccion',
+    CIERRE_PRODUCCION: 'Cierre de produccion',
+    INGRESO_RECEPCION: 'Ingreso por recepcion',
+    DESPACHO: 'Despacho',
+    MERMA_BODEGA: 'Merma de bodega',
+    MERMA_PROCESO: 'Merma de proceso',
+    AJUSTE_DEMO_MAPA: 'Ajuste de inventario demo',
+  }
+  return labels[action] || String(action || 'Movimiento').replace(/_/g, ' ')
+}
+
+function formatQuantity(value, unit) {
+  if (value == null || Number.isNaN(Number(value))) return '-'
+  return `${Number(value).toLocaleString('es-CO', { maximumFractionDigits: 3 })} ${unit || 'und'}`
+}
+
+function formatSignedQuantity(value, unit) {
+  const quantity = Number(value || 0)
+  const sign = quantity > 0 ? '+' : ''
+  return `${sign}${formatQuantity(quantity, unit)}`
 }
 
 function Table({ cols, rows }) {

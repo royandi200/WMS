@@ -54,10 +54,11 @@ Actualizar esta seccion durante los ensayos. Solo se marca como validado aquello
 | Sugerir ubicacion al preparar una recepcion | Pendiente de despliegue y ensayo final | Dashboard y WhatsApp deben mostrar la primera posicion preferida y permitir seleccionar otra. |
 | Solicitar produccion usando un nombre comun | Validado | `tarros de ashwagandha 60` resuelve `00102-PTASH60`. |
 | Solicitar produccion sin indicar destino | Validado | El agente pregunta si corresponde a stock de seguridad o pedido de cliente y no crea una OP. |
-| Liberar una OP para stock de seguridad | Validado | La respuesta muestra producto, cantidad planeada interpretada, BOM y alistamiento FEFO por lote y ubicacion. |
+| Liberar una OP para stock de seguridad | Validado | La OP oficial del ensayo es ID 67 / `OP-20260902-000067`: 3 unidades, cinco componentes BOM y reservas FEFO verificadas en base. |
 | Liberar reservas de OP de ensayo anteriores | Validado | Las OP 63 y 64 quedaron canceladas antes de iniciar, sin movimientos ni kardex, y sus 12 asignaciones fueron liberadas. |
 | Responder solamente `pedido de cliente` | Validado como control | El agente solicita referencia y cliente final; este recorrido queda excluido del demo porque aun no coteja una OC almacenada. |
-| Confirmar materiales e iniciar la OP del ensayo final | Pendiente de ensayo final | Debe consumir las reservas una sola vez y notificar a administracion. |
+| Confirmar materiales e iniciar la OP del ensayo final | Validado | La frase natural `Ya aliste los materiales de la orden ID 67` inicio la OP, consumio exactamente las reservas FEFO, genero seis registros de Kardex y notifico al administrador. |
+| Ver el consumo de insumos en Inventario > Buscar producto | Validado en base; pendiente de comprobacion visual tras desplegar | La pantalla debe mostrar en `Movimientos recientes` la fecha y hora, cantidad negativa, lote, referencia `produccion:OP-20260902-000067` y saldo posterior. |
 | Cerrar la OP del ensayo final | Pendiente de ensayo final | Debe crear lote PT, registrar merma, conciliar materiales y notificar a administracion. |
 | Recorrido IO del demo | Pendiente de ensayo final | Debe recibir PT directamente y despacharlo sin crear OP. |
 | Recorrido de maquila 3Q del demo | Pendiente de ensayo final | Debe cubrir remision, salida, recepcion parcial y trazabilidad externa. |
@@ -134,6 +135,23 @@ Mensaje para el cliente: el sistema conserva por separado lo ordenado, lo factur
 4. Verificar que la respuesta confirme `3` unidades de `00102-PTASH60`, muestre el BOM calculado y la reserva FEFO por lote y ubicacion.
 5. El Alistador confirma materiales e inicio de produccion mediante el ID corto devuelto por el agente.
 6. Mostrar el cambio de stock de bodega a material en proceso y la notificacion a administracion.
+7. Abrir `Inventario > Buscar producto` y buscar `00017-ETASH60`: el Kardex debe mostrar un consumo de 3 unidades asociado a `produccion:OP-20260902-000067`.
+8. Buscar `00051-MPASH`: el Kardex debe mostrar el consumo FEFO dividido en 284.25 g y 255.75 g entre los dos lotes utilizados.
+
+Mensajeria que debe mostrarse durante este paso:
+
+| Momento | Quien envia | Quien recibe | Contenido esperado |
+|---|---|---|---|
+| Liberacion de la OP | Sofi/administrador | Sofi/administrador | ID corto, codigo OP, producto, cantidad interpretada, origen y alistamiento FEFO por lote y ubicacion. |
+| Aviso de alistamiento | Sistema | Alistador | Codigo OP, producto, cantidad y lista de materiales que debe preparar. |
+| Confirmacion de materiales | Alistador | Alistador | Confirmacion de la OP en proceso y detalle de los materiales alistados. |
+| Inicio de produccion | Sistema | Sofi/administrador | Codigo OP, SKU, nombre del producto, cantidad planeada, origen, quien confirmo, fecha, hora, materiales consumidos y estado `EN_PROCESO`. |
+
+Frase natural validada para el alistador:
+
+> Ya aliste los materiales de la orden ID 67
+
+No es necesario dictar el codigo largo `OP-20260902-000067` ni usar una frase rigida. El ID corto debe resolver una sola orden activa.
 
 Resultado esperado del alistamiento para este ensayo:
 
@@ -171,6 +189,18 @@ Estado actual que no debe presentarse como funcionalidad terminada: el WMS puede
 3. Nelly cierra la OP con 2 unidades conformes y 1 de merma.
 4. Mostrar la conciliacion entre BOM teorico, material entregado, devoluciones, merma y uso productivo.
 5. Verificar la creacion del lote de producto terminado y su ubicacion.
+
+Mensajeria esperada para el cierre:
+
+| Momento | Quien envia | Quien recibe | Contenido esperado |
+|---|---|---|---|
+| Merma durante el proceso | Alistador | Alistador | Referencia de merma, insumo, cantidad, motivo y OP asociada; no debe descontar nuevamente el material ya consumido. |
+| Cierre de produccion | Nelly/recepcion y cierre | Nelly/recepcion y cierre | Codigo OP, conformes, merma de producto terminado, lote PT, vencimiento y ubicacion. |
+| Produccion terminada | Sistema | Sofi/administrador | Plan, conformes, merma y porcentaje, motivo, lote PT, ubicacion, vencimiento, quien cerro y conciliacion de materiales. |
+
+Pregunta para el cliente durante el demo:
+
+> ¿Una merma reportada durante la produccion debe avisarse inmediatamente a Sofi o Nelly, o es suficiente incluirla en la conciliacion enviada al cerrar la orden?
 
 ### 4. Despacho
 
@@ -256,13 +286,14 @@ Estado verificado el 2026-09-01:
 - Prompt operativo sincronizado en los flujos de texto y voz de BuilderBot.
 - Ruta desplegada de maquila 3Q disponible.
 - Dashboard de maquila incluido en el build.
-- Suite local: 137 de 137 pruebas aprobadas.
+- Suite local: 147 de 147 pruebas aprobadas.
 - Build de produccion aprobado.
 - La OC demo `DEMO-WA-20260902-OC-001` fue creada y recibida; sus cinco items ingresaron de forma atomica.
 - Las OP 63, 64, 65 y 66 estan `CANCELADA`, con reservas liberadas y sin movimientos de inventario.
 - Juan (`3174442659`) tiene rol `admin`; la linea rotativa (`3125031367`) tiene actualmente rol `alistador`.
+- La OP oficial del ensayo es ID 67 / `OP-20260902-000067`, esta `EN_PROCESO`; consumio una sola vez las reservas de sus cinco componentes y dejo seis movimientos de Kardex.
 - Los escenarios `IO` y 3Q todavia requieren un ensayo final con los datos concretos que se mostraran.
-- El plano `POSICIONES_bodega.pdf` se cargo como preferencias: 77 posiciones, 83 asignaciones, 48 productos y cero cambios de inventario.
+- El plano `POSICIONES_bodega.pdf` se cargo como preferencias: 77 posiciones y 83 asignaciones activas para 48 productos. Adicionalmente, 12 posiciones contienen stock demostrativo auditable con lotes `DEMO-MAPA-*`.
 
 Excepciones del plano que no bloquean el demo:
 

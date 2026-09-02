@@ -70,6 +70,22 @@ module.exports = async (req, res) => {
 
     const lotes = rows.map((row) => classifyInventoryRow(row));
 
+    const movementRows = await query(
+      `SELECT k.id, k.action, k.qty, k.balance_after, k.reference, k.created_at,
+              l.lpn AS lote
+         FROM kardex k
+         LEFT JOIN lots l ON l.id = k.lot_id
+        WHERE k.product_id = ?
+        ORDER BY k.created_at DESC, k.id DESC
+        LIMIT 20`,
+      [product.id]
+    );
+    const movements = movementRows.map((movement) => ({
+      ...movement,
+      qty: Number(movement.qty || 0),
+      balance_after: movement.balance_after == null ? null : Number(movement.balance_after),
+    }));
+
     const totals = lotes.reduce((acc, row) => {
       acc.cantidad += row.cantidad;
       acc.reservada += row.reservada;
@@ -85,6 +101,7 @@ module.exports = async (req, res) => {
         totals,
         rows: lotes,
         total: lotes.length,
+        movements,
       },
     });
   } catch (err) {

@@ -26,6 +26,10 @@ function normalizePhone(value) {
   return null;
 }
 
+function argument(name) {
+  return String(process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3) || '').trim();
+}
+
 function maskPhone(value) {
   const phone = normalizePhone(value);
   return phone ? `${phone.slice(0, 4)}******${phone.slice(-2)}` : 'invalido';
@@ -37,11 +41,11 @@ function asNumber(value) {
 
 async function main() {
   loadEnv();
-  const adminPhone = normalizePhone(process.env.E2E_ADMIN_PHONE);
-  const rotatingPhone = normalizePhone(process.env.E2E_ROTATING_PHONE);
-  const agentPhone = normalizePhone(process.env.E2E_AGENT_PHONE);
+  const adminPhone = normalizePhone(argument('admin-phone') || process.env.E2E_ADMIN_PHONE);
+  const rotatingPhone = normalizePhone(argument('rotating-phone') || process.env.E2E_ROTATING_PHONE);
+  const agentPhone = normalizePhone(argument('agent-phone') || process.env.E2E_AGENT_PHONE);
   if (!adminPhone || !rotatingPhone || !agentPhone) {
-    throw new Error('Define E2E_ADMIN_PHONE, E2E_ROTATING_PHONE y E2E_AGENT_PHONE');
+    throw new Error('Define las lineas en el entorno o usa --admin-phone, --rotating-phone y --agent-phone');
   }
   if (new Set([adminPhone, rotatingPhone, agentPhone]).size !== 3) {
     throw new Error('Las lineas de administrador, rotativa y agente deben ser diferentes');
@@ -145,6 +149,29 @@ async function main() {
     );
     add('dispatch-stock', dispatchStock.length === 1,
       dispatchStock.length ? `Lote PT disponible: ${dispatchStock[0].lote}; saldo ${dispatchStock[0].disponible}` : 'Sin PT disponible para despacho');
+
+    const [activeProductionOrders] = await conn.execute(
+      `SELECT op.id, op.codigo_orden, op.estado, op.cantidad_planeada,
+              p.siigo_code, op.origen_tipo, op.creado_en,
+              COALESCE(SUM(pm.cantidad_reservada), 0) AS material_reservado
+         FROM ordenes_produccion op
+         JOIN productos p ON p.id = op.producto_id
+         LEFT JOIN produccion_materiales pm ON pm.orden_produccion_id = op.id
+        WHERE op.estado IN ('PLANEADA', 'APROBADA', 'EN_PROCESO')
+        GROUP BY op.id, op.codigo_orden, op.estado, op.cantidad_planeada,
+                 p.siigo_code, op.origen_tipo, op.creado_en
+        ORDER BY op.creado_en DESC`
+    );
+    add('production-orders-clean', activeProductionOrders.length === 0,
+      activeProductionOrders.length ? activeProductionOrders : 'Sin ordenes de produccion abiertas');
+
+    const [pendingApprovals] = await conn.execute(
+      `SELECT codigo_solicitud, accion, creado_en
+         FROM aprobaciones WHERE estado = 'PENDIENTE'
+        ORDER BY creado_en DESC`
+    );
+    add('pending-approvals-clean', pendingApprovals.length === 0,
+      pendingApprovals.length ? pendingApprovals : 'Sin aprobaciones pendientes');
 
     const [invariants] = await conn.execute(
       `SELECT SUM(cantidad < 0) AS stock_negativo,
