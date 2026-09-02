@@ -126,8 +126,7 @@ async function listAvailableOutsourcingReceptions({ db, limit = 10 }) {
       WHERE om.estado IN ('EN_3Q', 'RECIBIDA_PARCIAL')
         AND om.cantidad_recibida + 0.0001 < om.cantidad_objetivo
       ORDER BY COALESCE(om.enviado_en, om.creado_en), om.id
-      LIMIT ?`,
-    [safeLimit]
+      LIMIT ${safeLimit}`
   );
   return rows.map(row => ({
     ...row,

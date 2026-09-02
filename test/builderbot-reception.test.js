@@ -355,7 +355,8 @@ test('available outsourcing receptions expose only product still pending from 3Q
   const db = {
     async execute(sql, params) {
       assert.match(sql, /om\.estado IN \('EN_3Q', 'RECIBIDA_PARCIAL'\)/u);
-      assert.deepEqual(params, [10]);
+      assert.match(sql, /LIMIT 10/u);
+      assert.equal(params, undefined);
       return [[{
         id: 4,
         codigo: 'MQ-3Q-20260902-000004',
