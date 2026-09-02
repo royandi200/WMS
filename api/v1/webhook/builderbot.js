@@ -1352,28 +1352,41 @@ module.exports = async (req, res) => {
             ['Recepciones mixtas', available.filter(order => order.tipo_recepcion === 'MIXTA')],
           ].filter(([, orders]) => orders.length);
           const directLines = directGroups.flatMap(([label, orders]) => [
-            `${label} (${orders.length}):`,
+            `*${label} (${orders.length})*`,
             ...orders.flatMap(order => [
-              `- ID ${order.id} | ${order.numero} | ${order.proveedor_nombre || 'Proveedor N/A'} | ${formatDateOnly(order.fecha_orden)}`,
+              `ID ${order.id} | ${order.numero}`,
+              `Proveedor: ${order.proveedor_nombre || 'N/A'}`,
+              `Fecha: ${formatDateOnly(order.fecha_orden)}`,
               ...order.items.map(item =>
-                `  ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad}${item.requiere_lote ? ' | lote proveedor requerido' : ''}`
+                `- ${item.sku} - ${item.producto}\n  Pendiente: ${Number(item.cantidad_pendiente)} ${item.unidad}${item.requiere_lote ? '\n  Lote del proveedor requerido' : ''}`
               ),
+              '',
             ]),
           ]);
           const outsourcingLines = outsourcing.length ? [
-            `Producto terminado desde maquila 3Q (${outsourcing.length}):`,
+            `*Producto terminado desde maquila 3Q (${outsourcing.length})*`,
             ...outsourcing.flatMap(order => [
-              `- MQ ID ${order.id} | ${order.codigo} | OC ${order.orden_compra_numero} | ${order.proveedor_nombre || '3Q'}`,
-              `  ${order.sku} - ${order.producto}: ${order.cantidad_pendiente} ${order.unidad}${order.requiere_lote ? ' | lote de 3Q requerido al recibir' : ''}`,
+              `MQ ID ${order.id} | ${order.codigo}`,
+              `OC: ${order.orden_compra_numero}`,
+              `Proveedor: ${order.proveedor_nombre || '3Q'}`,
+              `- ${order.sku} - ${order.producto}`,
+              `  Pendiente: ${order.cantidad_pendiente} ${order.unidad}`,
+              ...(order.requiere_lote ? ['  Lote de 3Q requerido al recibir'] : []),
+              '',
             ]),
-            '  Para preparar una entrega 3Q usa Recepciones > Confirmar recepcion > Producto desde 3Q.',
+            'Para preparar una entrega 3Q:',
+            'Recepciones > Confirmar recepcion > Producto desde 3Q.',
           ] : [];
           mensaje = [
-            `Recepciones pendientes (${available.length + outsourcing.length}):`,
+            `*Recepciones pendientes (${available.length + outsourcing.length})*`,
+            '',
             ...directLines,
             ...outsourcingLines,
+            '',
             ...(available.length ? [`Para una OC directa responde, por ejemplo: prepara la recepcion ID ${available[0].id}.`] : []),
+            '',
             'Produccion propia: el producto terminado ingresa al cerrar la orden de produccion, no mediante una recepcion.',
+            '',
             'Esta consulta no modifica inventario.',
           ].join('\n');
         }
@@ -2308,16 +2321,25 @@ module.exports = async (req, res) => {
           notes: params.notas || params.observaciones,
           userId: user.id,
         });
-        const picking = productionResult.picking.map(item =>
-          `- ${item.sku} - ${item.producto}: ${item.cantidad} ${item.unidad || ''} | lote ${item.lote} | ubicacion ${item.ubicacion || item.ubicacion_id}`
-        );
+        const picking = productionResult.picking.flatMap((item, index) => [
+          `${index + 1}. *${item.sku}* - ${item.producto}`,
+          `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
+          `   Lote: ${item.lote}`,
+          `   Ubicacion: ${item.ubicacion || item.ubicacion_id}`,
+          '',
+        ]);
         mensaje = [
-          `Orden ID ${productionResult.order_id} | ${productionResult.order_code} liberada.`,
-          `Producto: ${productionResult.product.siigo_code} - ${productionResult.product.nombre}`,
+          '*Orden de produccion liberada*',
+          '',
+          `Orden: ID ${productionResult.order_id} | ${productionResult.order_code}`,
+          `Producto: ${productionResult.product.nombre}`,
+          `SKU: ${productionResult.product.siigo_code}`,
           `Cantidad planeada interpretada: ${productionResult.planned_quantity} und`,
           `Destino: ${productionResult.origin_type === 'OC_CLIENTE' ? `OC ${productionResult.customer_reference} - ${productionResult.final_customer}` : 'stock de seguridad'}`,
-          'Alistamiento FEFO:',
+          '',
+          '*Alistamiento FEFO*',
           ...picking,
+          '*Siguiente paso*',
           `Cuando esten listos, confirma materiales de la orden ID ${productionResult.order_id}.`,
         ].join('\n');
         responseContext.production = productionResult;
@@ -2383,7 +2405,18 @@ module.exports = async (req, res) => {
           reason: params.motivo,
           userId: user.id,
         });
-        mensaje = `${adjustment.tipo} registrada en ${adjustment.order_code}: ${adjustment.cantidad} de ${adjustment.sku}, lote ${adjustment.lote}, ubicacion ${adjustment.ubicacion || adjustment.ubicacion_id}.`;
+        const adjustmentLabel = adjustment.tipo === 'DEVOLUCION'
+          ? 'Devolucion de material registrada'
+          : 'Entrega adicional registrada';
+        mensaje = [
+          `*${adjustmentLabel}*`,
+          '',
+          `Orden: ${adjustment.order_code}`,
+          `Producto: ${adjustment.sku}`,
+          `Cantidad: ${adjustment.cantidad}`,
+          `Lote: ${adjustment.lote}`,
+          `Ubicacion: ${adjustment.ubicacion || adjustment.ubicacion_id}`,
+        ].join('\n');
         responseContext.production_material = adjustment;
         break;
       }
@@ -2399,12 +2432,23 @@ module.exports = async (req, res) => {
         mensaje = replenishment.already_prepared
           ? `La reposicion ${replenishment.replenishment_code} ya estaba preparada. No se duplicaron reservas.`
           : [
-              `Reposicion ${replenishment.replenishment_code} preparada para ${replenishment.order_code}.`,
+              '*Reposicion de materiales preparada*',
+              '',
+              `Reposicion: ${replenishment.replenishment_code}`,
+              `Orden: ${replenishment.order_code}`,
               `Objetivo adicional: ${replenishment.target_quantity} unidad(es) conformes.`,
               `Motivo: ${replenishment.reason}`,
-              'Materiales reservados por FEFO:',
-              ...replenishment.picking.map(item => `- ${item.sku}: ${item.cantidad} ${item.unidad || ''} | lote ${item.lote} | ubicacion ${item.ubicacion || item.ubicacion_id}`),
-              `El alistador fue notificado. La OP sigue EN_PROCESO.`,
+              '',
+              '*Materiales reservados por FEFO*',
+              ...replenishment.picking.flatMap((item, index) => [
+                `${index + 1}. *${item.sku}*`,
+                `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
+                `   Lote: ${item.lote}`,
+                `   Ubicacion: ${item.ubicacion || item.ubicacion_id}`,
+                '',
+              ]),
+              '*Estado*',
+              'El alistador fue notificado. La OP sigue EN_PROCESO.',
             ].join('\n');
         responseContext.production_replenishment = replenishment;
         break;
@@ -2419,9 +2463,21 @@ module.exports = async (req, res) => {
         mensaje = replenishment.already_confirmed
           ? `La reposicion ${replenishment.replenishment_code} ya estaba confirmada. No se modifico inventario.`
           : [
-              `Reposicion ${replenishment.replenishment_code} confirmada para ${replenishment.order_code}.`,
+              '*Reposicion de materiales confirmada*',
+              '',
+              `Reposicion: ${replenishment.replenishment_code}`,
+              `Orden: ${replenishment.order_code}`,
               `Objetivo adicional: ${replenishment.target_quantity} unidad(es) conformes.`,
-              ...replenishment.consumed.map(item => `- ${item.sku}: ${item.cantidad} | lote ${item.lote} | ubicacion ${item.ubicacion || 'N/A'}`),
+              '',
+              '*Materiales entregados*',
+              ...replenishment.consumed.flatMap((item, index) => [
+                `${index + 1}. *${item.sku}*`,
+                `   Cantidad: ${item.cantidad}`,
+                `   Lote: ${item.lote}`,
+                `   Ubicacion: ${item.ubicacion || 'N/A'}`,
+                '',
+              ]),
+              '*Estado*',
               'La OP permanece EN_PROCESO hasta registrar el resultado final.',
             ].join('\n');
         responseContext.production_replenishment = replenishment;
