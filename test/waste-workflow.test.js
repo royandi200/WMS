@@ -105,4 +105,7 @@ test('dashboard and BuilderBot use the shared transactional waste workflow', () 
   assert.match(webhook, /parseWasteReferences\(rawText\)/u);
   assert.match(webhook, /allowGeneratedReference: true/u);
   assert.match(webhook, /Referencia generada por WMS/u);
+  const workflow = fs.readFileSync(path.join(__dirname, '../api/_lib/waste-workflow.js'), 'utf8');
+  assert.match(workflow, /allowContextualPartial: true/u);
+  assert.match(workflow, /SELECT producto_id FROM produccion_materiales/u);
 });

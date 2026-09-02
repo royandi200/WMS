@@ -273,6 +273,8 @@ Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicaci
 
 En una merma de proceso, `id_item` puede ser una materia prima ya entregada a la OP o el producto en proceso. Este reporte documenta la pérdida para conciliación; si fue necesario retirar material adicional de bodega, usa además `AJUSTAR_MATERIALES_PRODUCCION` con `ENTREGA_ADICIONAL`.
 
+Cuando el usuario indique una OP y use un nombre corto como `goma`, `tapa`, `tarro`, `liner` o `etiqueta`, conserva ese nombre en `id_item`: la API lo resolverá solamente entre el producto y los materiales de esa orden. No pidas el SKU si el nombre identifica un único material dentro de la OP; si hay más de una coincidencia, muestra las opciones devueltas por la API.
+
 Ejemplo de proceso sin referencia aportada por el operario:
 
 {

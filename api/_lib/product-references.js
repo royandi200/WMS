@@ -55,6 +55,37 @@ function ambiguousProductError(term, products) {
   );
 }
 
+const CONTEXT_STOP_WORDS = new Set([
+  'de', 'del', 'el', 'la', 'las', 'los', 'material', 'producto', 'insumo', 'para', 'un', 'una', 'y', 'x',
+]);
+
+function contextualTokens(value) {
+  return normalizeProductReference(value)
+    .split(' ')
+    .filter(token => token.length >= 3 && !CONTEXT_STOP_WORDS.has(token));
+}
+
+function equivalentToken(left, right) {
+  if (left === right) return true;
+  if (left.length < 4 || right.length < 4) return false;
+  return `${left}s` === right || `${right}s` === left;
+}
+
+function contextualProductMatches(term, rows) {
+  const expected = contextualTokens(term);
+  if (!expected.length) return [];
+  const products = new Map();
+  for (const row of rows) {
+    const id = Number(row.id);
+    if (!products.has(id)) products.set(id, { product: row, tokens: [] });
+    const entry = products.get(id);
+    entry.tokens.push(...contextualTokens(row.nombre), ...contextualTokens(row.alias));
+  }
+  return [...products.values()]
+    .filter(entry => expected.every(token => entry.tokens.some(candidate => equivalentToken(token, candidate))))
+    .map(entry => entry.product);
+}
+
 async function resolveProductReference(conn, value, options = {}) {
   const term = String(value || '').trim();
   if (!term) throw httpError(400, 'Indica el producto', 'PRODUCT_REFERENCE_REQUIRED');
@@ -104,6 +135,24 @@ async function resolveProductReference(conn, value, options = {}) {
     return { ...aliases[0], matched_by: 'alias', matched_term: term };
   }
   if (aliases.length > 1) throw ambiguousProductError(term, aliases);
+
+  if (options.allowContextualPartial && (options.productIds || []).length) {
+    const [contextRows] = await conn.execute(
+      `SELECT p.id, p.siigo_code, p.nombre, p.tipo_producto, p.modalidad_operativa,
+              p.unit_label, pa.alias
+         FROM productos p
+         LEFT JOIN producto_aliases pa ON pa.producto_id = p.id AND pa.activo = 1
+        WHERE p.activo = 1${filters.sql}
+        ORDER BY p.siigo_code, pa.alias
+        LIMIT 100`,
+      filters.params
+    );
+    const contextual = contextualProductMatches(term, contextRows);
+    if (contextual.length === 1) {
+      return { ...contextual[0], matched_by: 'contextual_alias', matched_term: term };
+    }
+    if (contextual.length > 1) throw ambiguousProductError(term, contextual);
+  }
   throw httpError(404, `Producto "${term}" no encontrado`, 'PRODUCT_REFERENCE_NOT_FOUND');
 }
 
@@ -111,4 +160,5 @@ module.exports = {
   normalizeProductReference,
   resolveProductReference,
   ambiguousProductError,
+  contextualProductMatches,
 };

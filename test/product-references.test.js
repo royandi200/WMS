@@ -5,6 +5,7 @@ const path = require('node:path');
 const {
   normalizeProductReference,
   resolveProductReference,
+  contextualProductMatches,
 } = require('../api/_lib/product-references');
 
 test('product references normalize speech, accents and punctuation deterministically', () => {
@@ -61,6 +62,47 @@ test('product alias resolution can be scoped to products in the active operation
   const product = await resolveProductReference(db, 'tapa blanca sesenta', { productIds: [1, 2] });
   assert.equal(product.id, 1);
   assert.equal(product.matched_by, 'alias');
+});
+
+test('contextual aliases tolerate singular speech only inside an active operation', async () => {
+  const rows = [
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa blanca' },
+    { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
+  ];
+  assert.deepEqual(
+    contextualProductMatches('goma', rows).map(product => product.siigo_code),
+    ['00051-MPASH']
+  );
+});
+
+test('contextual alias resolution fails closed when several operation materials match', async () => {
+  const matches = contextualProductMatches('etiqueta', [
+    { id: 27, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA', alias: null },
+    { id: 28, siigo_code: '00018-ETBOS60', nombre: 'ETIQUETA BOOSTER', alias: null },
+  ]);
+  assert.equal(matches.length, 2);
+});
+
+test('resolver uses partial aliases only when explicitly scoped', async () => {
+  let calls = 0;
+  const db = {
+    async execute(sql) {
+      calls += 1;
+      assert.match(sql, /p\.id IN \(\?,\?\)/u);
+      if (calls <= 2) return [[]];
+      return [[
+        { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa blanca' },
+        { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
+      ]];
+    },
+  };
+  const product = await resolveProductReference(db, 'goma', {
+    productIds: [19, 60],
+    allowContextualPartial: true,
+  });
+  assert.equal(product.siigo_code, '00051-MPASH');
+  assert.equal(product.matched_by, 'contextual_alias');
+  assert.equal(calls, 3);
 });
 
 test('human product references share one resolver across operational workflows', () => {

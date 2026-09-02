@@ -142,7 +142,34 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
   let dedupeLock = null;
   try {
     await conn.beginTransaction();
-    const product = await resolveProductReference(conn, data.sku);
+    let order = null;
+    let lotRow = null;
+    let stockRow = null;
+    let productIds = [];
+
+    if (data.order) {
+      const numericOrderId = /^\d+$/.test(data.order) ? Number(data.order) : 0;
+      const [rows] = await conn.execute(
+        `SELECT id, codigo_orden, estado, producto_id
+         FROM ordenes_produccion
+         WHERE id = ? OR codigo_orden = ? LIMIT 2 FOR UPDATE`,
+        [numericOrderId, data.order]
+      );
+      if (!rows.length) throw httpError(404, `Orden ${data.order} no encontrada`);
+      if (rows.length > 1) throw httpError(409, 'La referencia identifica mas de una orden');
+      order = rows[0];
+      const [materials] = await conn.execute(
+        `SELECT producto_id FROM produccion_materiales
+         WHERE orden_produccion_id = ?`,
+        [order.id]
+      );
+      productIds = [order.producto_id, ...materials.map(material => material.producto_id)];
+    }
+
+    const product = await resolveProductReference(conn, data.sku, data.order ? {
+      productIds,
+      allowContextualPartial: true,
+    } : {});
     const existing = data.externalReference
       ? await findExisting(conn, data.externalReference)
       : null;
@@ -165,21 +192,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
       return { ...existing, already_completed: true };
     }
 
-    let order = null;
-    let lotRow = null;
-    let stockRow = null;
-
     if (data.order) {
-      const numericOrderId = /^\d+$/.test(data.order) ? Number(data.order) : 0;
-      const [rows] = await conn.execute(
-        `SELECT id, codigo_orden, estado, producto_id
-         FROM ordenes_produccion
-         WHERE id = ? OR codigo_orden = ? LIMIT 2 FOR UPDATE`,
-        [numericOrderId, data.order]
-      );
-      if (!rows.length) throw httpError(404, `Orden ${data.order} no encontrada`);
-      if (rows.length > 1) throw httpError(409, 'La referencia identifica mas de una orden');
-      order = rows[0];
       if (order.estado !== 'EN_PROCESO') {
         throw httpError(409, `La orden ${order.codigo_orden} esta en estado ${order.estado}; debe estar EN_PROCESO`);
       }

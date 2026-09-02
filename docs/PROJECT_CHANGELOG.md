@@ -21,6 +21,7 @@ No reemplaza:
 - BuilderBot envia producto, cantidad, motivo y contexto de orden o lote; el WMS genera una referencia `AUTO-MER-...` con fecha operativa de Bogota.
 - Reintentos operativamente identicos se serializan y deduplican durante una ventana corta antes de cualquier descuento de inventario.
 - Las referencias aportadas desde formatos o documentos reales siguen siendo aceptadas y conservadas exactamente.
+- En mermas de proceso, nombres cortos como `goma` se resuelven solo contra los materiales y el producto de la OP; coincidencias multiples fallan cerrado y piden precision.
 - El endpoint del dashboard mantiene obligatoria la referencia externa para no debilitar integraciones existentes.
 
 ### 2026-09-01 - Destino explicito al liberar produccion
