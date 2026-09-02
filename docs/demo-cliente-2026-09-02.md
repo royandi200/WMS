@@ -205,9 +205,13 @@ Frase natural del ensayo de cierre:
 
 El WMS debe generar el lote terminado con formato `LPN-OP-...`, calcular su vencimiento usando el vencimiento mas proximo entre los lotes de gomas consumidos, mostrar ambos datos en la respuesta y crear el stock una sola vez. Nelly no necesita conocer esos valores antes del cierre.
 
+Observacion del ensayo: la operacion demuestra correctamente el registro separado de 10 g de merma de proceso y 1 unidad no conforme al cierre, pero las cantidades no representan un balance fisico completo. Con un BOM de 180 g por tarro, 3 unidades requieren 540 g; si ademas se derraman 10 g, deben existir 10 g adicionales entregados, una desviacion de peso o material pendiente de conciliar. No presentar `uso productivo estimado` como consumo exacto de las unidades conformes.
+
 Pregunta para el cliente durante el demo:
 
 > ¿Una merma reportada durante la produccion debe avisarse inmediatamente a Sofi o Nelly, o es suficiente incluirla en la conciliacion enviada al cerrar la orden?
+
+> ¿Que tolerancia de peso aceptan por unidad y quien debe resolver una conciliacion donde el material entregado no cubre simultaneamente las unidades terminadas y la merma de proceso reportada?
 
 Frase natural del ensayo de merma de proceso:
 
