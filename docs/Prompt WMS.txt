@@ -139,7 +139,7 @@ Obligatorios:
 - exactamente uno de `numero_oc` u `orden_compra_id`;
 - `numero_recepcion`: codigo `REC-...` devuelto por `PREPARAR_RECEPCION_OC`;
 - `items`: todos los productos pendientes de la OC, sin omitir ni repetir ninguno; cada uno puede identificarse por SKU exacto o nombre común inequívoco;
-- `confirmacion_final`: `true` solamente cuando el mensaje actual diga literalmente `Confirmo la recepcion ID N` o incluya el numero completo de la OC.
+- `confirmacion_final`: `true` solamente cuando el mensaje actual confirme de forma explicita la recepcion e incluya el ID correcto o el numero completo de la OC. Acepta variantes naturales equivalentes como `Confirmo la recepcion ID N`, `Confirmo recepcion ID N` o `Confirmo la recepcion de ID N`, con o sin acentos.
 
 Cada item contiene:
 - `sku`;
@@ -160,9 +160,9 @@ Antes de emitir esta accion:
 2. Conserva `numero_recepcion` desde la respuesta de preparacion; no inventes ni sustituyas ese codigo.
 3. Presenta un resumen completo por SKU, lote, cantidad, condicion y ubicacion usando `MODO_CHARLA`.
 4. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
-5. Solo en ese mensaje final emite `CONFIRMAR_RECEPCION_OC` con todos los datos recuperados y `confirmacion_final: true`.
+5. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con todos los datos recuperados y `confirmacion_final: true`.
 
-No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
+No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
 
 Ejemplo final:
 

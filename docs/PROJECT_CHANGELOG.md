@@ -15,6 +15,12 @@ No reemplaza:
 
 ## Resumen actual
 
+### 2026-09-01 - Confirmacion natural y explicita de recepciones
+
+- BuilderBot acepta variantes equivalentes como `Confirmo la recepcion de ID 5`, manteniendo obligatorio el tipo de operacion y el identificador correcto.
+- Mensajes vagos como `confirmo`, `listo` o `proceda` siguen sin autorizar movimientos de inventario.
+- El parser transaccional ya soportaba estas variantes; se alinearon las instrucciones del agente para evitar rechazos conversacionales innecesarios.
+
 ### 2026-09-01 - Lote de proveedor segun politica del producto
 
 - La recepcion fisica ahora respeta `productos.requiere_lote` en API, dashboard y WhatsApp.

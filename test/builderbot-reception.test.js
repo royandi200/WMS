@@ -45,6 +45,10 @@ test('WhatsApp purchase order and reception require an exact explicit confirmati
     { confirmacion_final: true, orden_compra_id: 5 }
   ), true);
   assert.equal(explicitConfirmation(
+    'Confirmo la recepción de ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' },
+    { confirmacion_final: true, orden_compra_id: 5 }
+  ), true);
+  assert.equal(explicitConfirmation(
     'Confirmo la recepcion ID 50', { id: 5, numero: 'OC-MUY-LARGA-456' },
     { confirmacion_final: true, orden_compra_id: 5 }
   ), false);
@@ -147,6 +151,8 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(purchaseOrders, /createPurchaseOrderForUser/u);
   assert.match(prompt, /Confirmo la orden de compra ID N/u);
   assert.match(prompt, /Confirmo la recepcion ID N/u);
+  assert.match(prompt, /Confirmo la recepcion de ID N/u);
+  assert.match(prompt, /No aceptes confirmaciones vagas/u);
   assert.match(prompt, /todos los productos pendientes/u);
   assert.match(prompt, /el WMS creara una partida interna/u);
   assert.match(prompt, /prepara la recepcion ID 5/u);
