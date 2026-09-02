@@ -152,6 +152,8 @@ test('WhatsApp receipt draft is canonical, actor-bound and integrity checked', (
     }),
     /no es valido/u
   );
+  const optionalFields = canonicalJson({ lote: undefined, fecha_venc: null, cantidad: 12 });
+  assert.deepEqual(JSON.parse(optionalFields), { cantidad: 12, fecha_venc: null });
 });
 
 test('WhatsApp reception maps visible locations and requires every pending SKU once', async () => {
