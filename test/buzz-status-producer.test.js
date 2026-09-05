@@ -25,7 +25,8 @@ function manifest() {
 
 test('produces a Buzz 1.0 event from the pinned canonical contract', () => {
   const contractBytes = fs.readFileSync(path.join(ROOT, 'contracts', 'buzz-event-1.0.schema.json'));
-  assert.equal(crypto.createHash('sha256').update(contractBytes).digest('hex'), CONTRACT_SHA256);
+  const canonicalContractBytes = contractBytes.toString('utf8').replace(/\r\n/g, '\n');
+  assert.equal(crypto.createHash('sha256').update(canonicalContractBytes).digest('hex'), CONTRACT_SHA256);
 
   const contract = JSON.parse(contractBytes);
   const event = buildWmsStatusEvent(manifest(), GIT);
