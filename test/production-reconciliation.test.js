@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildMaterialReconciliation, deriveProductionExpiry } = require('../api/_lib/production-close');
+const {
+  buildMaterialReconciliation,
+  deriveProductionExpiry,
+  validateProductionCloseQuantities,
+} = require('../api/_lib/production-close');
 
 test('separates issued material, process waste and estimated productive use', () => {
   const [result] = buildMaterialReconciliation([{
@@ -49,5 +53,16 @@ test('fails closed when a consumed gram lot has no expiry', () => {
       { sku: '00051-MPASH', unit_label: 'g', lote: 'GOMA-SIN-FECHA', cantidad_neta: 10, fecha_venc: null },
     ]),
     /falta el vencimiento del material 00051-MPASH \/ GOMA-SIN-FECHA/u
+  );
+});
+
+test('finished output cannot exceed the production plan without an exception flow', () => {
+  assert.deepEqual(
+    validateProductionCloseQuantities({ conforming: 3, waste: 1, planned: 3 }),
+    { conforming: 3, waste: 1, planned: 3 }
+  );
+  assert.throws(
+    () => validateProductionCloseQuantities({ conforming: 4, waste: 0, planned: 3 }),
+    error => error.status === 409 && /supera el plan/u.test(error.message)
   );
 });

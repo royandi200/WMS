@@ -85,6 +85,8 @@ const { requireWebhookSecret } = require('../../_lib/auth');
 const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
+const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document-message-policy');
+const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
 const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const {
@@ -414,6 +416,15 @@ function formatDateOnly(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
   return date.toLocaleDateString('es-CO', { timeZone: 'UTC' });
+}
+
+function formatBogotaDateTime(value) {
+  if (!value) return 'sin fecha';
+  return new Date(value).toLocaleString('es-CO', {
+    timeZone: 'America/Bogota',
+    dateStyle: 'short',
+    timeStyle: 'short',
+  });
 }
 
 function normalizeOperationalParams(action, params) {
@@ -868,7 +879,7 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
   try {
     if (sku) {
       const [rows] = await db.execute(
-        `SELECT lote, disponible, vence, estado_lote
+        `SELECT lote, disponible, vence, estado_lote, ubicacion
          FROM v_stock_disponible
          WHERE sku = ? AND bodega = ?
          ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC`,
@@ -893,10 +904,12 @@ async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
                 (s.cantidad - s.reservada) AS disponible,
                 l.expiry_date AS vence,
                 COALESCE(l.status, 'DISPONIBLE') AS estado_lote,
-                b.codigo AS bodega_codigo
+                b.codigo AS bodega_codigo,
+                u.codigo AS ubicacion
          FROM stock s
          JOIN productos p  ON p.id  = s.producto_id
          JOIN bodegas   b  ON b.id  = s.bodega_id
+         LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id
          LEFT JOIN lots l  ON l.lpn = s.lote
          WHERE p.siigo_code = ?
          ORDER BY b.id ASC,
@@ -1327,7 +1340,7 @@ module.exports = async (req, res) => {
     const requiredCapability = capabilityForAction(action);
     if (requiredCapability && !hasCapability(rolRaw, requiredCapability)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
-      await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'DENIED' });
+      await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
       return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
     }
 
@@ -1527,6 +1540,7 @@ module.exports = async (req, res) => {
       // A purchase-order PDF creates a reviewable draft. Conversion remains a
       // separate, explicit action in dashboard or WhatsApp.
       case 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO': {
+        assertDocumentHasSameMessageInstruction(action, contractUserText);
         const draft = await registerPurchaseOrderDocumentDraft({
           db,
           body: params,
@@ -1557,12 +1571,15 @@ module.exports = async (req, res) => {
       // Document extraction only creates a reviewable draft. It never reserves,
       // confirms a shipment or changes inventory.
       case 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO': {
+        assertDocumentHasSameMessageInstruction(action, contractUserText);
         const draft = await registerWarehouseDocumentDraft({
           db,
           body: params,
           userId: user.id,
           origin: 'BUILDERBOT',
           evidenceText: builderBotDocumentValue(rawBody.document_text) || rawText,
+          documentUrl: builderBotDocumentValue(rawBody.document_url),
+          documentName: builderBotDocumentValue(rawBody.document_name) || params.nombre_archivo || '',
         });
         const warningLines = (draft.warnings || []).slice(0, 5).map((warning) => `- ${warning}`);
         mensaje = [
@@ -1809,7 +1826,12 @@ module.exports = async (req, res) => {
           user.id,
           { allowGeneratedReference: true }
         );
-        mensaje = result.already_completed
+        mensaje = result.requires_confirmation
+          ? [
+              `Ya existe una merma igual registrada como ${result.numero}. No se modifico inventario.`,
+              'Si es una perdida nueva, responde: confirma una nueva merma con los mismos datos.',
+            ].join('\n')
+          : result.already_completed
           ? `La merma ${result.numero} ya estaba registrada. No se modifico inventario.`
           : [
               `Merma ${result.numero} registrada.`,
@@ -2014,11 +2036,18 @@ module.exports = async (req, res) => {
           ...parseCustomerReturnReferences(rawText),
           ...params,
         }, user.id);
-        mensaje = returned.already_completed
+        mensaje = returned.requires_confirmation
+          ? [
+              `Ya existe una devolucion igual registrada como ${returned.numero}. No se modifico inventario.`,
+              'Si corresponde a un incidente nuevo, responde: confirma una nueva devolucion con los mismos datos.',
+            ].join('\n')
+          : returned.already_completed
           ? `La devolucion ${returned.numero} ya estaba registrada. No se modifico inventario.`
           : [
               `Devolucion ${returned.numero} registrada.`,
-              `Referencia: ${returned.referencia_externa}`,
+              returned.generated_reference
+                ? `Referencia generada por WMS: ${returned.referencia_externa}`
+                : `Referencia: ${returned.referencia_externa}`,
               `Factura: ${returned.siigo_invoice_name}`,
               `Despacho: ${returned.despacho_numero}`,
               `Cliente: ${returned.cliente_origen}`,
@@ -2057,7 +2086,7 @@ module.exports = async (req, res) => {
             const p      = proc[0];
             const quien  = p.procesado_nombre || 'otro supervisor';
             const cuando = p.procesado_en
-              ? new Date(p.procesado_en).toLocaleString('es-CO', { dateStyle:'short', timeStyle:'short' })
+              ? formatBogotaDateTime(p.procesado_en)
               : '';
             const label  = p.estado === 'APROBADO' ? '✅ aprobada' : p.estado === 'RECHAZADO' ? '❌ rechazada' : p.estado;
             const motivo = p.motivo_rechazo ? `\nMotivo: ${p.motivo_rechazo}` : '';
@@ -2066,6 +2095,7 @@ module.exports = async (req, res) => {
           throw { status: 404, message: `Solicitud ${params.id_solicitud} no encontrada` };
         }
         solicitud = rows[0];
+        assertApprovalActionSupported(solicitud.accion);
         const payload   = typeof solicitud.payload === 'string'
           ? JSON.parse(solicitud.payload) : solicitud.payload;
         console.log(`[APROBAR_SOLICITUD] Procesando solicitud="${params.id_solicitud}" accion="${solicitud.accion}"`);
@@ -2124,7 +2154,7 @@ module.exports = async (req, res) => {
             const p      = proc[0];
             const quien  = p.procesado_nombre || 'otro supervisor';
             const cuando = p.procesado_en
-              ? new Date(p.procesado_en).toLocaleString('es-CO', { dateStyle:'short', timeStyle:'short' })
+              ? formatBogotaDateTime(p.procesado_en)
               : '';
             const label  = p.estado === 'APROBADO' ? '✅ aprobada' : p.estado === 'RECHAZADO' ? '❌ rechazada' : p.estado;
             const motivo = p.motivo_rechazo ? `\nMotivo: ${p.motivo_rechazo}` : '';
@@ -2281,21 +2311,57 @@ module.exports = async (req, res) => {
               ORDER BY di.despacho_id, p.siigo_code, di.lote`,
             ids
           );
+          const [demand] = await db.execute(
+            `SELECT ddi.despacho_id, p.siigo_code AS sku, p.nombre AS producto,
+                    ddi.cantidad_facturada AS solicitada,
+                    ddi.cantidad_reservada AS reservada,
+                    GREATEST(ddi.cantidad_facturada - ddi.cantidad_reservada, 0) AS faltante,
+                    ddi.estado
+               FROM despacho_demanda_items ddi
+               JOIN productos p ON p.id = ddi.producto_id
+              WHERE ddi.despacho_id IN (${ids.map(() => '?').join(',')})
+              ORDER BY ddi.despacho_id, p.siigo_code`,
+            ids
+          );
           const itemsByDispatch = new Map();
           for (const item of items) {
             const list = itemsByDispatch.get(Number(item.despacho_id)) || [];
             list.push(item);
             itemsByDispatch.set(Number(item.despacho_id), list);
           }
+          const demandByDispatch = new Map();
+          for (const item of demand) {
+            const list = demandByDispatch.get(Number(item.despacho_id)) || [];
+            list.push(item);
+            demandByDispatch.set(Number(item.despacho_id), list);
+          }
+          const readiness = new Map(dispatches.map(dispatch => {
+            const requested = demandByDispatch.get(Number(dispatch.id)) || [];
+            const allocations = itemsByDispatch.get(Number(dispatch.id)) || [];
+            const ready = requested.length > 0
+              && allocations.length > 0
+              && requested.every(item => Number(item.faltante || 0) <= 0.000001);
+            return [Number(dispatch.id), ready];
+          }));
+          const firstReady = dispatches.find(dispatch => readiness.get(Number(dispatch.id)));
           mensaje = [
             `Despachos pendientes (${dispatches.length}):`,
             ...dispatches.flatMap(dispatch => [
-              `- ID ${dispatch.id} | ${dispatch.numero} | Factura ${dispatch.siigo_invoice_name || 'N/A'} | ${dispatch.cliente_nombre || 'Cliente N/A'} | ${dispatch.estado}`,
+              '',
+              `- ID ${dispatch.id} | ${dispatch.numero}`,
+              `  Factura: ${dispatch.siigo_invoice_name || 'N/A'} | Cliente: ${dispatch.cliente_nombre || 'Cliente N/A'}`,
+              `  Estado: ${readiness.get(Number(dispatch.id)) ? 'LISTO PARA CONFIRMAR' : 'PENDIENTE_STOCK'}`,
+              ...(demandByDispatch.get(Number(dispatch.id)) || []).map(item =>
+                `  ${item.sku} - ${item.producto}: solicitado ${Number(item.solicitada)} und | reservado ${Number(item.reservada)} | faltante ${Number(item.faltante)}`
+              ),
+              (itemsByDispatch.get(Number(dispatch.id)) || []).length ? '  Lotes asignados:' : '  Sin lotes asignados.',
               ...(itemsByDispatch.get(Number(dispatch.id)) || []).map(item =>
-                `  ${item.sku} - ${item.producto}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicacion ${item.ubicacion || 'SIN ASIGNAR'}`
+                `  - ${item.sku}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicacion ${item.ubicacion || 'SIN ASIGNAR'}`
               ),
             ]),
-            `Para confirmar responde, por ejemplo: confirma el despacho ID ${dispatches[0].id}.`,
+            firstReady
+              ? `Para confirmar responde, por ejemplo: confirma el despacho ID ${firstReady.id}.`
+              : 'Ningun despacho tiene cobertura completa; no debe confirmarse hasta reservar todo el stock.',
             'Esta consulta no modifica inventario.',
           ].join('\n');
         }
@@ -2319,8 +2385,17 @@ module.exports = async (req, res) => {
           customerReference: customerOrder.customerReference,
           finalCustomer: customerOrder.finalCustomer,
           notes: params.notas || params.observaciones,
+          confirmNew: params.confirmar_nueva_orden === true,
           userId: user.id,
         });
+        if (productionResult.requires_confirmation) {
+          mensaje = [
+            `Ya existe la orden ${productionResult.order_code} con el mismo producto, cantidad y destino. No se modifico inventario.`,
+            'Si necesitas una orden adicional identica, confirma que es una nueva produccion.',
+          ].join('\n');
+          responseContext.production = productionResult;
+          break;
+        }
         const picking = productionResult.picking.flatMap((item, index) => [
           `${index + 1}. *${item.sku}* - ${item.producto}`,
           `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
@@ -2340,7 +2415,7 @@ module.exports = async (req, res) => {
           '*Alistamiento FEFO*',
           ...picking,
           '*Siguiente paso*',
-          `Cuando esten listos, confirma materiales de la orden ID ${productionResult.order_id}.`,
+          `El alistador fue notificado. La orden ID ${productionResult.order_id} quedara EN_PROCESO cuando confirme los materiales.`,
         ].join('\n');
         responseContext.production = productionResult;
         break;
@@ -2365,9 +2440,9 @@ module.exports = async (req, res) => {
               `Orden ${closure.order_code} cerrada.`,
               `Producto conforme: ${closure.qty_real}`,
               `Merma: ${closure.qty_waste}`,
-              `Lote PT: ${closure.lpn_terminado}`,
+              `Lote PT: ${closure.lpn_terminado || 'Sin lote conforme'}`,
               `Vencimiento: ${closure.fecha_venc || 'No aplica'}`,
-              `Ubicacion: ${closure.ubicacion || closure.ubicacion_id}`,
+              `Ubicacion: ${closure.ubicacion || closure.ubicacion_id || 'No aplica'}`,
             ].join('\n');
         responseContext.production_close = closure;
         break;
@@ -2403,8 +2478,17 @@ module.exports = async (req, res) => {
           type: params.tipo,
           quantity: params.cantidad,
           reason: params.motivo,
+          confirmNew: params.confirmar_nuevo_ajuste === true,
           userId: user.id,
         });
+        if (adjustment.requires_confirmation) {
+          mensaje = [
+            `Ese movimiento ya fue registrado para ${adjustment.order_code}. No se modifico inventario.`,
+            'Si se trata de otro movimiento identico, confirma que es un ajuste nuevo.',
+          ].join('\n');
+          responseContext.production_material = adjustment;
+          break;
+        }
         const adjustmentLabel = adjustment.tipo === 'DEVOLUCION'
           ? 'Devolucion de material registrada'
           : 'Entrega adicional registrada';
@@ -2412,8 +2496,8 @@ module.exports = async (req, res) => {
           `*${adjustmentLabel}*`,
           '',
           `Orden: ${adjustment.order_code}`,
-          `Producto: ${adjustment.sku}`,
-          `Cantidad: ${adjustment.cantidad}`,
+          `Producto: ${adjustment.producto} (${adjustment.sku})`,
+          `Cantidad: ${adjustment.cantidad} ${adjustment.unidad || ''}`,
           `Lote: ${adjustment.lote}`,
           `Ubicacion: ${adjustment.ubicacion || adjustment.ubicacion_id}`,
         ].join('\n');
@@ -2458,6 +2542,7 @@ module.exports = async (req, res) => {
         const replenishment = await confirmProductionReplenishment({
           replenishmentId: params.id_reposicion || params.codigo_reposicion,
           orderId: params.id_orden,
+          reason: params.motivo,
           userId: user.id,
         });
         mensaje = replenishment.already_confirmed
@@ -2471,8 +2556,8 @@ module.exports = async (req, res) => {
               '',
               '*Materiales entregados*',
               ...replenishment.consumed.flatMap((item, index) => [
-                `${index + 1}. *${item.sku}*`,
-                `   Cantidad: ${item.cantidad}`,
+                `${index + 1}. *${item.sku}* - ${item.producto}`,
+                `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
                 `   Lote: ${item.lote}`,
                 `   Ubicacion: ${item.ubicacion || 'N/A'}`,
                 '',
@@ -2511,11 +2596,30 @@ module.exports = async (req, res) => {
         const requestedProduct = params.id_item
           ? await findProductBySku(db, params.id_item)
           : null;
+        const operationalType = requestedProduct?.modalidad_operativa === 'PR'
+          ? 'Producto terminado - produccion propia'
+          : requestedProduct?.modalidad_operativa === 'PT'
+            ? 'Producto terminado - maquila 3Q'
+            : requestedProduct?.modalidad_operativa === 'IO'
+              ? 'Producto terminado - in and out'
+              : 'Insumo';
         const canonicalSku = requestedProduct?.siigo_code || null;
         const productLabel = requestedProduct
           ? `${requestedProduct.nombre} (${requestedProduct.siigo_code})`
           : null;
         const stockUnit = requestedProduct?.unit_label || 'und';
+        let preferredLocations = [];
+        if (requestedProduct) {
+          const [locationRows] = await db.execute(
+            `SELECT u.codigo, pu.tipo_asignacion
+               FROM producto_ubicaciones pu
+               JOIN ubicaciones u ON u.id = pu.ubicacion_id
+              WHERE pu.producto_id = ? AND pu.activa = 1 AND u.activa = 1
+              ORDER BY pu.prioridad, u.codigo LIMIT 5`,
+            [requestedProduct.id]
+          ).catch(() => [[]]);
+          preferredLocations = locationRows;
+        }
         const result = await queryStockDisponible(db, {
           sku: canonicalSku,
           bodega: bodegaCodigo,
@@ -2525,7 +2629,14 @@ module.exports = async (req, res) => {
         if (params.id_item) {
           const totalDisp = result.rows.reduce((s, r) => s + parseFloat(r.disponible || 0), 0);
           if (!result.rows.length) {
-            mensaje = `📊 *Stock: ${productLabel}*\n  Sin stock disponible`;
+            mensaje = [
+              `📊 *Stock: ${productLabel}*`,
+              `Tipo operativo: ${operationalType}`,
+              'Sin stock disponible.',
+              preferredLocations.length
+                ? `Ubicaciones asignadas: ${preferredLocations.map(item => `${item.codigo} (${item.tipo_asignacion.toLowerCase()})`).join(', ')}`
+                : 'Ubicaciones asignadas: sin configuracion',
+            ].join('\n');
           } else {
             // [FIX 22] Separar lotes por estado: vencidos, cuarentena, disponibles
             const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
@@ -2553,7 +2664,7 @@ module.exports = async (req, res) => {
               }
               // 3) Disponible real
               const venceStr = r.vence ? ` (vence ${new Date(r.vence).toLocaleDateString('es-CO')})` : '';
-              lotesDispLines.push(`  • ${lpnCorto}: *${disp} ${stockUnit}*${venceStr}`);
+              lotesDispLines.push(`  • ${lpnCorto}: *${disp} ${stockUnit}* | ubicacion ${r.ubicacion || 'sin ubicacion'}${venceStr}`);
               totalNeto += disp;
             }
 
@@ -2574,8 +2685,12 @@ module.exports = async (req, res) => {
               : '';
 
             mensaje = [
-              `📊 *Stock ${label}: ${productLabel}*`,
+              `📊 *Stock: ${productLabel}*`,
+              `Tipo operativo: ${operationalType}`,
               `Total disponible: *${totalNeto} ${stockUnit}*`,
+              preferredLocations.length
+                ? `Ubicaciones asignadas: ${preferredLocations.map(item => `${item.codigo} (${item.tipo_asignacion.toLowerCase()})`).join(', ')}`
+                : 'Ubicaciones asignadas: sin configuracion',
               ``,
               secDisp,
               secCuarentena,
@@ -2642,7 +2757,8 @@ module.exports = async (req, res) => {
       // ── Trazabilidad de lote ──────────────────────────────────
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
   const [lotRows] = await db.execute(
-    `SELECT l.*, p.nombre, p.siigo_code
+    `SELECT l.*, p.nombre, p.siigo_code,
+            COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad
      FROM lots l
      JOIN productos p ON p.id = l.product_id
      WHERE l.lpn = ?
@@ -2678,11 +2794,12 @@ module.exports = async (req, res) => {
 
     const history = kRows.length
       ? kRows.map(k => {
-          const fecha = new Date(k.created_at).toLocaleString('es-CO');
-          if (k.action === 'DEVOLUCION'
-              && Number(k.qty) === 0
-              && Number(k.cantidad_fisica_devolucion) > 0) {
-            return `  ${fecha} | DEVOLUCION_${k.estado_devolucion}: ${k.cantidad_fisica_devolucion} und fisicas (sin cambio en disponible; saldo: ${k.balance_after})${k.notes ? ` | ${k.notes}` : ''}`;
+          const fecha = formatBogotaDateTime(k.created_at);
+          if (k.action === 'DEVOLUCION' && Number(k.cantidad_fisica_devolucion) > 0) {
+            const availableDelta = k.estado_devolucion === 'RECUPERABLE'
+              ? Number(k.cantidad_fisica_devolucion)
+              : 0;
+            return `  ${fecha} | DEVOLUCION_${k.estado_devolucion}: +${k.cantidad_fisica_devolucion} ${l.unidad} fisicas (disponible +${availableDelta}; saldo lote: ${k.balance_after})${k.notes ? ` | ${k.notes}` : ''}`;
           }
           let extra = '';
 
@@ -2706,7 +2823,7 @@ module.exports = async (req, res) => {
       [params.id_lote]
     ).catch(() => [[]]);
     const dispatchHistory = dispatchRows.length
-      ? dispatchRows.map(d => `  - ${d.numero} / ${d.siigo_invoice_name || 'sin factura'}: ${d.cantidad} und -> ${d.cliente_nombre || 'Cliente N/A'} (${d.despachado_en ? new Date(d.despachado_en).toLocaleString('es-CO') : 'sin fecha'})`).join('\n')
+      ? dispatchRows.map(d => `  - ${d.numero} / ${d.siigo_invoice_name || 'sin factura'}: ${d.cantidad} ${l.unidad} -> ${d.cliente_nombre || 'Cliente N/A'} (${formatBogotaDateTime(d.despachado_en)})`).join('\n')
       : l.origin === 'DEVOLUCION'
         ? '  (Este lote devuelto no registra despachos posteriores)'
         : '  (Sin despachos registrados)';
@@ -2726,7 +2843,7 @@ module.exports = async (req, res) => {
     ).catch(() => [[]]);
     const returnHistory = returnRows.length
       ? returnRows.map(d => [
-          `  - ${d.numero} / ${d.referencia_externa || 'sin referencia'}: ${d.cantidad} und | ${d.estado}`,
+          `  - ${d.numero} / ${d.referencia_externa || 'sin referencia'}: ${d.cantidad} ${l.unidad} | ${d.estado}`,
           `    ${d.lote_origen || 'lote origen N/A'} -> ${d.lote || 'lote devuelto N/A'} | ${d.ubicacion || 'sin ubicacion'}`,
           `    ${d.despacho_numero || 'sin despacho'} / ${d.siigo_invoice_name || 'sin factura'} -> ${d.cliente_origen || 'Cliente N/A'}`,
         ].join('\n')).join('\n')
@@ -2770,11 +2887,12 @@ module.exports = async (req, res) => {
       [params.id_lote, params.id_lote]
     ).catch(() => [[]]);
     const receptionHistory = receptionRows.length
-      ? receptionRows.map(r => `  - ${r.numero} | OC ${r.orden_compra || 'N/A'} | Siigo ${r.siigo_purchase_name || 'N/A'} | ${r.proveedor_nombre || 'Proveedor N/A'} | ${r.condicion} ${r.cantidad} | ${r.ubicacion || 'sin ubicacion'}`).join('\n')
+      ? receptionRows.map(r => `  - ${r.numero} | OC ${r.orden_compra || 'N/A'} | Siigo ${r.siigo_purchase_name || 'N/A'} | ${r.proveedor_nombre || 'Proveedor N/A'} | ${r.condicion} ${r.cantidad} ${l.unidad} | ${r.ubicacion || 'sin ubicacion'}`).join('\n')
       : '  (Sin recepcion vinculada)';
 
     const [materialRows] = l.production_order_id ? await db.execute(
-      `SELECT p.siigo_code, p.nombre, pml.lote, u.codigo AS ubicacion,
+      `SELECT p.siigo_code, p.nombre, COALESCE(NULLIF(pm.unidad, ''), p.unit_label, 'und') AS unidad,
+              pml.lote, u.codigo AS ubicacion,
               pml.cantidad_consumida, pml.cantidad_devuelta,
               (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
                WHERE m.orden_produccion_id = pm.orden_produccion_id
@@ -2795,7 +2913,7 @@ module.exports = async (req, res) => {
       ? materialRows.map(m => {
           const net = Number(m.cantidad_consumida || 0) - Number(m.cantidad_devuelta || 0);
           const processWaste = Number(m.merma_proceso || 0);
-          return `  - ${m.siigo_code}: lote ${m.lote}, ubicacion ${m.ubicacion || 'N/A'}, neto entregado ${net}, merma proceso ${processWaste}, uso productivo estimado ${Number((net - processWaste).toFixed(4))} | OC ${m.orden_compra || 'N/A'} | Siigo ${m.siigo_purchase_name || 'N/A'} | ${m.supplier || 'proveedor N/A'}`;
+          return `  - ${m.siigo_code} - ${m.nombre}: lote ${m.lote}, ubicacion ${m.ubicacion || 'N/A'}, neto entregado ${net} ${m.unidad}, merma proceso ${processWaste} ${m.unidad}, uso productivo estimado ${Number((net - processWaste).toFixed(4))} ${m.unidad} | OC ${m.orden_compra || 'N/A'} | Siigo ${m.siigo_purchase_name || 'N/A'} | ${m.supplier || 'proveedor N/A'}`;
         }).join('\n')
       : '  (Sin consumo real de materiales registrado)';
 
@@ -2808,22 +2926,24 @@ module.exports = async (req, res) => {
       [l.production_order_id]
     ).catch(() => [[]]) : [[]];
     const productionHistory = productionRows.length
-      ? productionRows.map(op => `  - ${op.codigo_orden} | ${op.estado} | plan ${op.cantidad_planeada} | conformes ${op.cantidad_real} | cerro ${op.cerrado_por || 'N/A'} | ${op.cerrado_en ? new Date(op.cerrado_en).toLocaleString('es-CO') : 'sin cierre'}`).join('\n')
+      ? productionRows.map(op => `  - ${op.codigo_orden} | ${op.estado} | plan ${op.cantidad_planeada} | conformes ${op.cantidad_real} | cerro ${op.cerrado_por || 'N/A'} | ${formatBogotaDateTime(op.cerrado_en)}`).join('\n')
       : '  (Sin orden de produccion vinculada)';
 
     const [wasteRows] = l.production_order_id ? await db.execute(
-      `SELECT m.numero, p.siigo_code, m.cantidad, m.motivo,
+      `SELECT m.numero, p.siigo_code, COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad,
+              m.cantidad, m.motivo,
               m.referencia_externa, m.creado_en
        FROM mermas m JOIN productos p ON p.id = m.producto_id
        WHERE m.orden_produccion_id = ? ORDER BY m.creado_en, m.id`,
       [l.production_order_id]
     ).catch(() => [[]]) : [[]];
     const wasteHistory = wasteRows.length
-      ? wasteRows.map(m => `  - ${m.numero}: ${m.siigo_code} | ${m.cantidad} und | ${m.motivo || 'sin motivo'} | ${m.referencia_externa ? `proceso ${m.referencia_externa}` : 'cierre de produccion'}`).join('\n')
+      ? wasteRows.map(m => `  - ${m.numero}: ${m.siigo_code} | ${m.cantidad} ${m.unidad} | ${m.motivo || 'sin motivo'} | ${m.referencia_externa ? `proceso ${m.referencia_externa}` : 'cierre de produccion'}`).join('\n')
       : '  (Sin mermas asociadas)';
 
     const [productionUseRows] = await db.execute(
       `SELECT op.codigo_orden, pt.siigo_code AS producto_final,
+              COALESCE(NULLIF(pm.unidad, ''), mat.unit_label, 'und') AS unidad,
               pml.cantidad_consumida, pml.cantidad_devuelta,
               (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
                WHERE m.orden_produccion_id = op.id
@@ -2832,6 +2952,7 @@ module.exports = async (req, res) => {
        JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
        JOIN ordenes_produccion op ON op.id = pm.orden_produccion_id
        JOIN productos pt ON pt.id = op.producto_id
+       JOIN productos mat ON mat.id = pm.producto_id
        WHERE pml.lote = ? ORDER BY op.creado_en ASC`,
       [params.id_lote]
     ).catch(() => [[]]);
@@ -2839,46 +2960,68 @@ module.exports = async (req, res) => {
       ? productionUseRows.map(p => {
           const net = Number(p.cantidad_consumida || 0) - Number(p.cantidad_devuelta || 0);
           const processWaste = Number(p.merma_proceso || 0);
-          return `  - ${p.codigo_orden} -> ${p.producto_final}: neto entregado ${net}, merma proceso ${processWaste}, uso productivo estimado ${Number((net - processWaste).toFixed(4))}`;
+          return `  - ${p.codigo_orden} -> ${p.producto_final}: neto entregado ${net} ${p.unidad}, merma proceso ${processWaste} ${p.unidad}, uso productivo estimado ${Number((net - processWaste).toFixed(4))} ${p.unidad}`;
         }).join('\n')
       : '  (No consumido en produccion)';
+
+    const [outsourcingRows] = await db.execute(
+      `SELECT om.codigo AS orden_maquila, om.estado AS estado_maquila,
+              om.cantidad_objetivo, mr.creado_en AS recibido_en,
+              r.numero AS recepcion_numero, me.numero AS remision_numero,
+              me.tipo AS remision_tipo, me.confirmado_en AS enviado_en,
+              mp.siigo_code AS material_sku, mp.nombre AS material_nombre,
+              COALESCE(mm.unidad, mp.unit_label) AS unidad,
+              mei.cantidad, mml.lote AS material_lote,
+              u.codigo AS ubicacion_origen
+         FROM recepcion_distribuciones rd
+         JOIN maquila_recepciones mr
+           ON mr.recepcion_id = rd.recepcion_id AND mr.producto_id = ?
+         JOIN ordenes_maquila om ON om.id = mr.orden_maquila_id
+         JOIN recepciones r ON r.id = mr.recepcion_id
+         LEFT JOIN maquila_envios me
+           ON me.orden_maquila_id = om.id AND me.estado = 'CONFIRMADO'
+         LEFT JOIN maquila_envio_items mei ON mei.maquila_envio_id = me.id
+         LEFT JOIN maquila_material_lotes mml ON mml.id = mei.maquila_material_lote_id
+         LEFT JOIN maquila_materiales mm ON mm.id = mml.maquila_material_id
+         LEFT JOIN productos mp ON mp.id = mm.producto_id
+         LEFT JOIN ubicaciones u ON u.id = mml.ubicacion_origen_id
+        WHERE rd.lote = ?
+        ORDER BY me.confirmado_en, me.id, mei.id`,
+      [l.product_id, params.id_lote]
+    ).catch(() => [[]]);
+    const outsourcingHistory = outsourcingRows.length
+      ? [
+          `  - Orden 3Q ${outsourcingRows[0].orden_maquila} | ${outsourcingRows[0].estado_maquila} | objetivo ${outsourcingRows[0].cantidad_objetivo} und`,
+          `    Recepcion: ${outsourcingRows[0].recepcion_numero} | ${formatBogotaDateTime(outsourcingRows[0].recibido_en)}`,
+          ...outsourcingRows.filter(row => row.material_sku).map(row =>
+            `    ${row.remision_numero || 'Sin remision'} (${row.remision_tipo || 'N/A'}): ${row.material_sku} - ${row.material_nombre} | ${Number(row.cantidad)} ${row.unidad || ''} | lote ${row.material_lote || 'N/A'} | origen ${row.ubicacion_origen || 'N/A'}`
+          ),
+        ].join('\n')
+      : '';
+
+    const traceSections = [
+      ['📋 *Historial:*', history],
+      dispatchRows.length ? ['*Despachos / clientes:*', dispatchHistory] : null,
+      returnRows.length ? ['*Devoluciones:*', returnHistory] : null,
+      receptionRows.length ? ['*Recepcion / origen documental:*', receptionHistory] : null,
+      outsourcingRows.length ? ['*Maquila externa 3Q:*', outsourcingHistory] : null,
+      materialRows.length ? ['*Consumo real de materias primas:*', materialHistory] : null,
+      productionRows.length ? ['*Produccion / resultado:*', productionHistory] : null,
+      wasteRows.length ? ['*Mermas asociadas:*', wasteHistory] : null,
+      productionUseRows.length ? ['*Ordenes que consumieron este lote:*', productionUses] : null,
+      bomRows.length ? ['*Materias primas esperadas segun BOM:*', bomHistory] : null,
+    ].filter(Boolean).flatMap(([title, content]) => ['', title, content]);
 
     mensaje = [
       `🔎 *Lote: ${params.id_lote}*`,
       `Producto: ${l.nombre} (${l.siigo_code})`,
       l.notes ? `Referencia: ${l.notes}` : '',
-      `Inicial: ${l.qty_initial} und`,
-      `Actual: ${l.qty_current} und`,
+      `Inicial: ${l.qty_initial} ${l.unidad}`,
+      `Actual: ${l.qty_current} ${l.unidad}`,
       `Estado: ${l.status}  |  Origen: ${l.origin}`,
-      `Creado: ${new Date(l.created_at).toLocaleString('es-CO')}`,
+      `Creado: ${formatBogotaDateTime(l.created_at)}`,
       `Vence: ${formatDateOnly(l.expiry_date)}`,
-      ``,
-      `📋 *Historial:*`,
-      history,
-      ``,
-      `*Despachos / clientes:*`,
-      dispatchHistory,
-      ``,
-      `*Devoluciones:*`,
-      returnHistory,
-      ``,
-      `*Recepcion / origen documental:*`,
-      receptionHistory,
-      ``,
-      `*Consumo real de materias primas:*`,
-      materialHistory,
-      ``,
-      `*Produccion / resultado:*`,
-      productionHistory,
-      ``,
-      `*Mermas asociadas:*`,
-      wasteHistory,
-      ``,
-      `*Ordenes que consumieron este lote:*`,
-      productionUses,
-      ``,
-      `*Materias primas esperadas segun BOM:*`,
-      bomHistory
+      ...traceSections,
     ].filter(Boolean).join('\n');
 
   } else {
@@ -2921,7 +3064,7 @@ module.exports = async (req, res) => {
         const p = await findProductBySku(db, productReference);
         assertInternalProductionProduct(p);
         const [bom] = await db.execute(
-          `SELECT b.*, pr.siigo_code, pr.id AS insumo_id FROM bom b
+          `SELECT b.*, pr.siigo_code, pr.nombre, pr.id AS insumo_id FROM bom b
            JOIN productos pr ON pr.id = b.insumo_id
            WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION'`, [p.id]
         ).catch(() => [[]]);
@@ -2931,6 +3074,7 @@ module.exports = async (req, res) => {
         let puedeProd = true;
         let capacidadMaxima = Infinity;
         const checks  = [];
+        const capacities = [];
         for (const item of bom) {
           const perUnit = Number(item.cantidad_por_unidad);
           if (!Number.isFinite(perUnit) || perUnit <= 0) {
@@ -2939,18 +3083,24 @@ module.exports = async (req, res) => {
           const disp = await getEligibleStock(db, item.insumo_id, bodegaId);
           const componentCapacity = Math.max(Math.floor(disp / perUnit), 0);
           capacidadMaxima = Math.min(capacidadMaxima, componentCapacity);
+          capacities.push({ sku: item.siigo_code, nombre: item.nombre, capacity: componentCapacity });
           if (desired == null) {
-            checks.push(`  ${item.siigo_code}: disponible ${disp}, consumo ${perUnit}/ud, capacidad ${componentCapacity} uds`);
+            checks.push(`  ${item.nombre} (${item.siigo_code}): disponible ${disp} ${item.unidad}, consumo ${perUnit} ${item.unidad}/ud, capacidad ${componentCapacity} uds`);
           } else {
             const needed = roundQty(perUnit * desired);
-            const check = formatCapacityCheck(item.siigo_code, needed, disp);
+            const check = formatCapacityCheck({ sku: item.siigo_code, name: item.nombre, unit: item.unidad }, needed, disp);
             if (!check.ok) puedeProd = false;
             checks.push(check.line);
           }
         }
+        const limiting = capacities
+          .filter(item => item.capacity === capacidadMaxima)
+          .map(item => `${item.nombre} (${item.sku})`)
+          .join(', ');
         mensaje = desired == null
           ? [
               `*Capacidad actual de ${p.nombre} (${p.siigo_code}): ${Number.isFinite(capacidadMaxima) ? capacidadMaxima : 0} uds*`,
+              `Limitante: ${limiting || 'sin determinar'}.`,
               ...checks,
             ].join('\n')
           : [
@@ -2968,7 +3118,7 @@ module.exports = async (req, res) => {
           : [
               `Materiales confirmados para ${confirmation.order_code}.`,
               'Orden en proceso.',
-              ...confirmation.consumed.map(item => `- Lote ${item.lpn}: ${item.qty_taken}`),
+              ...confirmation.consumed.map(item => `- ${item.product} (${item.sku}): ${item.qty_taken} ${item.unit || ''} | lote ${item.lpn} | ubicacion ${item.location || 'N/A'}`),
             ].join('\n');
         responseContext.production_confirmation = confirmation;
         break;

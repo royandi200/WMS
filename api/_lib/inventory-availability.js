@@ -1,4 +1,5 @@
 function classifyInventoryRow(row, today = new Date()) {
+  const physicalQuantity = Number(row.cantidad || 0);
   const physicalAvailable = Number(row.disponible || 0);
   const expiry = row.expiry_date || row.fecha_venc;
   const expiryDate = expiry ? new Date(expiry) : null;
@@ -16,9 +17,9 @@ function classifyInventoryRow(row, today = new Date()) {
     ...row,
     cantidad: Number(row.cantidad || 0),
     reservada: Number(row.reservada || 0),
-    saldo_fisico: physicalAvailable,
+    saldo_fisico: physicalQuantity,
     disponible: operationalAvailable,
-    bloqueada: Math.max(physicalAvailable - operationalAvailable, 0),
+    bloqueada: status === 'DISPONIBLE' ? 0 : Math.max(physicalQuantity, 0),
     qty_initial: row.qty_initial == null ? null : Number(row.qty_initial),
     qty_current: row.qty_current == null ? null : Number(row.qty_current),
     estado_calculado: status,

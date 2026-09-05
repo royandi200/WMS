@@ -16,9 +16,10 @@ module.exports = async (req, res) => {
       customerReference: body.referencia_cliente || body.customer_reference,
       finalCustomer: body.cliente_final || body.final_customer,
       notes: body.notas || body.notes,
+      confirmNew: body.confirmar_nueva_orden === true || body.confirm_new_order === true,
       userId: user.id,
     });
-    return res.status(201).json({ ok: true, data });
+    return res.status(data.already_released ? 200 : 201).json({ ok: true, data });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ ok: false, error: error.message, data: error.data });
     console.error('[production/start]', error.message);

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ArrowRight, CheckCircle2, Factory, FileText, Plus, Send, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, Factory, FileText, Plus, Send, X } from 'lucide-react'
 import {
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
   createOutsourcingOrder,
+  downloadWarehouseDocument,
   linkOutsourcingPurchaseOrder,
   listOutsourcingOrders,
   listWarehouseDocumentDrafts,
@@ -12,6 +13,7 @@ import {
 import { listPurchaseOrders } from '../api/purchaseOrders.api'
 import { listSuppliers } from '../api/suppliers.api'
 import { useAuthStore } from '../store/authStore'
+import { formatBogotaDateTime, formatDateOnly as formatCalendarDate } from '../utils/dateTime'
 
 const STATUS = {
   MATERIALES_RESERVADOS: ['Materiales reservados', 'text-yellow-400 bg-yellow-400/10'],
@@ -147,6 +149,16 @@ export default function OutsourcingPage() {
 }
 
 function DocumentDraftsPanel({ rows, loading }) {
+  const download = async (row) => {
+    if (!row.archivo_id) return
+    const response = await downloadWarehouseDocument(row.archivo_id)
+    const url = URL.createObjectURL(response.data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = row.archivo_nombre || `${row.referencia_documento}.pdf`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
   return <div className="space-y-4">
     <div className="border-y border-border py-4">
       <div className="flex items-start gap-3">
@@ -159,10 +171,11 @@ function DocumentDraftsPanel({ rows, loading }) {
     {rows.map((row) => {
       const needsCorrection = row.estado === 'REQUIERE_CORRECCION'
       return <article key={row.id} className="border border-border bg-surface/40">
-        <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px] lg:items-center">
+        <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px_44px] lg:items-center">
           <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere correccion' : 'Pendiente de revision'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {row.origen} | Leido por {row.creado_por_nombre}</p></div>
           <div><p className="text-xs uppercase text-muted">Fecha documento</p><p className="mt-1 text-sm text-foreground">{formatDateOnly(row.fecha_documento)}</p></div>
           <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} bultos` : ''}</p></div>
+          <button type="button" disabled={!row.archivo_id} onClick={() => download(row)} title={row.archivo_id ? 'Descargar PDF original' : 'PDF no conservado'} className="inline-flex h-10 w-10 items-center justify-center border border-border text-primary disabled:cursor-not-allowed disabled:text-muted"><Download size={16} /></button>
         </header>
         <div className="grid gap-4 border-b border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-4">
           <DocumentField label="Destinatario" value={row.destinatario_nombre} />
@@ -199,7 +212,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
                 <div><p className="font-mono text-xs text-foreground">{shipment.numero}</p><p className="text-xs text-muted">{shipment.tipo}</p></div>
                 <div><p className="font-mono text-xs text-foreground">{shipment.orden_codigo}</p><p className="text-xs text-muted">Destino externo: 3Q</p></div>
                 <div className="space-y-1">
-                  {shipment.items.map((item, index) => <p key={`${item.sku}-${item.lote}-${index}`} className="text-xs text-muted"><span className="font-mono text-foreground">{item.sku}</span> {item.cantidad} | lote {item.lote} | sale de {item.ubicacion_origen}</p>)}
+                  {shipment.items.map((item, index) => <p key={`${item.sku}-${item.lote}-${index}`} className="text-xs text-muted"><span className="font-mono text-foreground">{item.sku}</span> - {item.producto}: {item.cantidad} {item.unidad || ''} | lote {item.lote} | sale de {item.ubicacion_origen}</p>)}
                   {shipment.motivo && <p className="text-xs text-yellow-400">Motivo: {shipment.motivo}</p>}
                 </div>
                 {canManage && <div className="flex gap-2"><button type="button" disabled={loading} onClick={() => onConfirm(shipment)} className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Confirmar salida</button><button type="button" title="Cancelar remision" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
@@ -214,7 +227,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
         <div className="overflow-x-auto border border-border">
           <table className="w-full min-w-[1040px] text-sm">
             <thead><tr className="border-b border-border bg-surface">
-              {['Orden 3Q', 'OC', 'Producto', 'Objetivo', 'Recibido disponible', 'Custodia 3Q por material', 'Merma material', 'Estado', 'Creada'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}
+              {['Orden 3Q', 'OC', 'Producto', 'Objetivo', 'Recibido disponible', 'Material enviado pendiente de conciliacion', 'Merma material', 'Estado', 'Creada'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}
             </tr></thead>
             <tbody>
               {loading && !rows.length && <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Cargando...</td></tr>}
@@ -310,9 +323,9 @@ function Field({ label, children }) {
 }
 
 function formatDate(value) {
-  return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  return formatBogotaDateTime(value)
 }
 
 function formatDateOnly(value) {
-  return value ? String(value).slice(0, 10) : '-'
+  return formatCalendarDate(value)
 }

@@ -25,9 +25,9 @@ test('available inventory keeps its operational balance', () => {
 test('inventory without a physical location is blocked, not available', () => {
   const row = classifyInventoryRow({ ...base, ubicacion_id: null, ubicacion_codigo: null }, new Date('2026-08-05'));
   assert.equal(row.estado_calculado, 'SIN_UBICACION');
-  assert.equal(row.saldo_fisico, 8);
+  assert.equal(row.saldo_fisico, 10);
   assert.equal(row.disponible, 0);
-  assert.equal(row.bloqueada, 8);
+  assert.equal(row.bloqueada, 10);
 });
 
 test('expired inventory is blocked', () => {

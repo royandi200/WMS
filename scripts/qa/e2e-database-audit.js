@@ -85,10 +85,14 @@ async function main() {
     );
     add('return-lot-statuses', invalidReturnLots.length === 0, invalidReturnLots);
 
+    const productionReference = String(process.env.QA_PRODUCTION_ORDER || '').trim();
     const productions = await rows(
       `SELECT op.id, op.codigo_orden, op.estado, op.fase, op.cantidad_planeada,
               op.cantidad_real,
               (SELECT l.lpn FROM lots l WHERE l.production_order_id = op.id ORDER BY l.created_at LIMIT 1) AS lpn_terminado,
+              (SELECT COUNT(*) FROM lots l WHERE l.production_order_id = op.id) AS lotes_terminados,
+              (SELECT COALESCE(SUM(l.qty_initial), 0) FROM lots l WHERE l.production_order_id = op.id) AS cantidad_inicial_pt,
+              (SELECT COALESCE(SUM(l.qty_current), 0) FROM lots l WHERE l.production_order_id = op.id) AS cantidad_actual_pt,
               (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
                WHERE m.orden_produccion_id = op.id AND m.producto_id = op.producto_id
                  AND m.referencia_externa IS NULL) AS merma_cierre,
@@ -102,26 +106,43 @@ async function main() {
                WHERE m.orden_produccion_id = op.id
                  AND (m.producto_id <> op.producto_id OR m.referencia_externa IS NOT NULL)) AS eventos_merma_proceso
        FROM ordenes_produccion op
-       WHERE op.codigo_orden LIKE 'OP-%'
-         AND EXISTS (SELECT 1 FROM lots l WHERE l.production_order_id = op.id AND l.lpn LIKE 'LPN-OP-%')
-       ORDER BY op.id DESC LIMIT 2`
+       WHERE op.estado = 'CERRADA'
+         AND (? = '' OR op.codigo_orden = ? OR op.id = ?)
+       ORDER BY op.id DESC LIMIT 1`,
+      [productionReference, productionReference, Number(productionReference) || 0]
     );
     const latestProduction = productions[0];
-    add('qa-production-closed', latestProduction?.estado === 'CERRADA'
-      && Number(latestProduction?.cantidad_planeada) === 3
-      && Number(latestProduction?.cantidad_real) === 2
-      && Number(latestProduction?.merma_cierre) === 1
-      && Number(latestProduction?.mermas_cierre) === 1, latestProduction || null);
+    const plannedQuantity = Number(latestProduction?.cantidad_planeada);
+    const actualQuantity = Number(latestProduction?.cantidad_real);
+    const expectedOutputLots = actualQuantity > 0 ? 1 : 0;
+    add('qa-production-closed', Boolean(latestProduction)
+      && latestProduction.estado === 'CERRADA'
+      && latestProduction.fase === 'F5'
+      && Number.isFinite(plannedQuantity) && plannedQuantity > 0
+      && Number.isFinite(actualQuantity) && actualQuantity >= 0 && actualQuantity <= plannedQuantity
+      && Number(latestProduction.lotes_terminados) === expectedOutputLots
+      && Math.abs(Number(latestProduction.cantidad_inicial_pt) - actualQuantity) < 0.0001
+      && Number(latestProduction.mermas_cierre) <= 1,
+    {
+      selection: productionReference ? `QA_PRODUCTION_ORDER=${productionReference}` : 'ultima OP cerrada',
+      order: latestProduction || null,
+    });
 
     const productionLots = latestProduction ? await rows(
-      `SELECT l.lpn, l.qty_current, l.status, s.cantidad, s.reservada
-       FROM lots l LEFT JOIN stock s ON s.lote = l.lpn
-       WHERE l.lpn = ?`, [latestProduction.lpn_terminado]
+      `SELECT l.lpn, l.qty_initial, l.qty_current, l.status,
+              COALESCE(SUM(s.cantidad), 0) AS stock_total,
+              COALESCE(SUM(s.reservada), 0) AS reservado_total
+       FROM lots l LEFT JOIN stock s ON s.lote = l.lpn AND s.producto_id = l.product_id
+       WHERE l.production_order_id = ?
+       GROUP BY l.id, l.lpn, l.qty_initial, l.qty_current, l.status`,
+      [latestProduction.id]
     ) : [];
-    add('qa-production-output-stock', productionLots.length === 1
-      && Number(productionLots[0].qty_current) === 2
-      && Number(productionLots[0].cantidad) === 2
-      && Number(productionLots[0].reservada) === 0, productionLots);
+    add('qa-production-output-stock', productionLots.length === expectedOutputLots
+      && productionLots.every((lot) => Number(lot.qty_initial) >= Number(lot.qty_current)
+        && Number(lot.qty_current) >= 0
+        && Math.abs(Number(lot.qty_current) - Number(lot.stock_total)) < 0.0001
+        && Number(lot.reservado_total) >= 0
+        && Number(lot.reservado_total) <= Number(lot.stock_total)), productionLots);
 
     const dispatches = await rows(
       `SELECT d.id, d.numero, d.estado, d.siigo_invoice_id,

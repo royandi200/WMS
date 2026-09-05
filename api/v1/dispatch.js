@@ -159,6 +159,11 @@ async function handleGet(req, res) {
        d.usuario_id,
        COALESCE((SELECT SUM(ddi.cantidad_facturada) FROM despacho_demanda_items ddi WHERE ddi.despacho_id = d.id), 0) AS cantidad_facturada,
        COALESCE((SELECT SUM(ddi.cantidad_reservada) FROM despacho_demanda_items ddi WHERE ddi.despacho_id = d.id), 0) AS cantidad_reservada,
+       COALESCE((SELECT SUM(ddi.cantidad_reservada) FROM despacho_demanda_items ddi WHERE ddi.despacho_id = d.id), 0) AS cantidad_asignada,
+       CASE WHEN d.estado = 'picking'
+            THEN COALESCE((SELECT SUM(ddi.cantidad_reservada) FROM despacho_demanda_items ddi WHERE ddi.despacho_id = d.id), 0)
+            ELSE 0 END AS reserva_activa,
+       COALESCE((SELECT SUM(di2.cantidad_des) FROM despacho_items di2 WHERE di2.despacho_id = d.id), 0) AS cantidad_despachada_total,
        COALESCE((SELECT SUM(ddi.cantidad_facturada - ddi.cantidad_reservada) FROM despacho_demanda_items ddi WHERE ddi.despacho_id = d.id), 0) AS cantidad_pendiente,
        (SELECT GROUP_CONCAT(DISTINCT ddi.estado ORDER BY ddi.estado SEPARATOR ',') FROM despacho_demanda_items ddi WHERE ddi.despacho_id = d.id) AS estados_demanda,
        u.nombre AS usuario_nombre,

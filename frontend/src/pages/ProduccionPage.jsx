@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProductionStore } from '../store/productionStore'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
+import { formatBogotaDateTime } from '../utils/dateTime'
 
 const PHASES = ['F1', 'F2', 'F3', 'F4', 'F5']
 const STATUS_LABEL = {
@@ -17,13 +18,11 @@ const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.p
 const empty = '-'
 const safeDate = (val) => {
   if (!val) return empty
-  if (val instanceof Date) return val.toISOString().slice(0, 10)
-  return String(val).slice(0, 10)
+  return formatBogotaDateTime(val).split(',')[0]
 }
 const safeTime = (val) => {
   if (!val) return empty
-  const text = val instanceof Date ? val.toISOString() : String(val)
-  return text.includes('T') ? text.split('T')[1].slice(0, 5) : text.slice(11, 16)
+  return formatBogotaDateTime(val).split(',')[1]?.trim() || empty
 }
 
 export default function ProduccionPage() {
@@ -129,7 +128,11 @@ function StartForm({ loading, onSubmit, onDone }) {
     notes: '',
   })
   const [toast, setToast] = useState(null)
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
+  const set = (k) => (e) => {
+    setConfirmDuplicate(false)
+    setForm((f) => ({ ...f, [k]: e.target.value }))
+  }
   const handle = async (e) => {
     e.preventDefault()
     const res = await onSubmit({
@@ -139,8 +142,14 @@ function StartForm({ loading, onSubmit, onDone }) {
       customer_reference: form.customer_reference.trim() || undefined,
       final_customer: form.final_customer.trim() || undefined,
       notes: form.notes || undefined,
+      confirmar_nueva_orden: confirmDuplicate,
     })
     if (res.ok) {
+      if (res.data?.requires_confirmation) {
+        setConfirmDuplicate(true)
+        setToast({ msg: `Ya existe ${res.data.order_code} con los mismos datos. Vuelve a enviar solo si necesitas otra orden igual.`, ok: false })
+        return
+      }
       setToast({ msg: 'Orden iniciada', ok: true })
       setTimeout(() => { setToast(null); onDone() }, 1500)
     } else {
@@ -166,7 +175,7 @@ function StartForm({ loading, onSubmit, onDone }) {
         </>
       )}
       <Field label="Notas"><textarea value={form.notes} onChange={set('notes')} rows={2} className="input-field resize-none" /></Field>
-      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Liberando...' : 'Liberar orden'}</button>
+      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Liberando...' : confirmDuplicate ? 'Liberar una orden adicional' : 'Liberar orden'}</button>
     </form>
   )
 }
@@ -195,10 +204,24 @@ function ConfirmMaterialsForm({ loading, onSubmit }) {
 function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
   const [form, setForm] = useState({ order_id: '', sku: '', lote: '', ubicacion_id: '', cantidad: '', tipo: 'ENTREGA_ADICIONAL', motivo: '' })
   const [toast, setToast] = useState(null)
-  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
+  const set = (key) => (event) => {
+    setConfirmDuplicate(false)
+    setForm((current) => ({ ...current, [key]: event.target.value }))
+  }
   const handle = async (event) => {
     event.preventDefault()
-    const result = await onSubmit({ ...form, ubicacion_id: Number(form.ubicacion_id), cantidad: Number(form.cantidad) })
+    const result = await onSubmit({
+      ...form,
+      ubicacion_id: Number(form.ubicacion_id),
+      cantidad: Number(form.cantidad),
+      confirmar_nuevo_ajuste: confirmDuplicate,
+    })
+    if (result.ok && result.data?.requires_confirmation) {
+      setConfirmDuplicate(true)
+      setToast({ msg: 'Ya existe un movimiento igual reciente. Vuelve a enviar solo si es un ajuste nuevo.', ok: false })
+      return
+    }
     setToast(result.ok ? { msg: `${form.tipo} registrada`, ok: true } : { msg: result.message, ok: false })
   }
   return (
@@ -213,7 +236,7 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
         <Field label="Cantidad *"><input type="number" min="0.0001" step="any" value={form.cantidad} onChange={set('cantidad')} className="input-field" required /></Field>
       </div>
       <Field label="Motivo"><input value={form.motivo} onChange={set('motivo')} className="input-field" /></Field>
-      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Registrando...' : 'Registrar movimiento'}</button>
+      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Registrando...' : confirmDuplicate ? 'Registrar como movimiento nuevo' : 'Registrar movimiento'}</button>
     </form>
   )
 }

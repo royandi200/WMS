@@ -5,6 +5,7 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { pushCompraToSiigo } = require('../_lib/siigo.purchases');
 const {
+  assertAvailableQuantityWithinExpected,
   internalReceptionLot,
   newKardexEntryIds,
   normalizeReceptionDistributions,
@@ -162,6 +163,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
   const expected = Number(item.cantidad_esp);
   const shortage = Math.max(expected - totals.received, 0);
   const overage = Math.max(totals.received - expected, 0);
+  assertAvailableQuantityWithinExpected(totals, expected, item.siigo_code);
   const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
   if ((shortage > 0.0001 || overage > 0.0001) && !reason) {
     throw httpError(400, `Debes indicar el motivo de la diferencia para ${item.siigo_code}`);

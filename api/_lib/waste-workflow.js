@@ -24,6 +24,7 @@ function normalizeWasteInput(input = {}, { allowGeneratedReference = false } = {
     lot,
     location: String(input.ubicacion ?? input.location ?? input.location_code ?? '').trim(),
     requestedType: String(input.tipo ?? input.type ?? '').trim().toUpperCase(),
+    confirmNew: input.confirmar_nueva_merma === true || input.confirm_new_waste === true,
   };
 
   if (!data.externalReference && !allowGeneratedReference) {
@@ -127,7 +128,7 @@ async function findRecentGenerated(conn, data, userId, productId, orderId, locat
        AND m.ubicacion_id <=> ?
        AND ABS(m.cantidad - ?) < 0.000001
        AND m.motivo = ?
-       AND m.creado_en >= DATE_SUB(NOW(), INTERVAL 2 MINUTE)
+       AND m.creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
      ORDER BY m.creado_en DESC, m.id DESC
      LIMIT 1 FOR UPDATE`,
     [userId, productId, orderId, data.lot || null, locationId,
@@ -249,9 +250,14 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
         order?.id || null,
         stockRow?.ubicacion_id || null
       );
-      if (recent) {
+      if (recent && !data.confirmNew) {
         await conn.commit();
-        return { ...recent, already_completed: true, generated_reference: true };
+        return {
+          ...recent,
+          already_completed: true,
+          requires_confirmation: true,
+          generated_reference: true,
+        };
       }
       data.externalReference = generateWasteReference();
     }

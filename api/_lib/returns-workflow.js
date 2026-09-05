@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
+const { workflowFlags } = require('./feature-flags');
 const { resolveProductReference } = require('./product-references');
 
 function httpError(status, message) {
@@ -19,7 +20,7 @@ function normalizeReturnStatus(value) {
   return statuses[raw] || null;
 }
 
-function normalizeReturnInput(input = {}) {
+function normalizeReturnInput(input = {}, { allowGeneratedReference = true } = {}) {
   const quantity = Number(input.cantidad ?? input.qty);
   const status = normalizeReturnStatus(input.estado ?? input.status);
   const normalized = {
@@ -35,12 +36,15 @@ function normalizeReturnInput(input = {}) {
     customer: String(input.cliente_origen ?? input.customer ?? input.cliente ?? '').trim(),
     destinationLocation: String(input.ubicacion ?? input.ubicacion_destino ?? input.location ?? '').trim(),
     notes: String(input.observaciones ?? input.notes ?? input.motivo ?? '').trim(),
+    confirmNew: input.confirmar_nueva_devolucion === true || input.confirm_new_return === true,
     quantity,
     status,
   };
 
   if (!normalized.dispatchReference) throw httpError(400, 'Factura o despacho origen es obligatorio');
-  if (!normalized.externalReference) throw httpError(400, 'Referencia de devolucion es obligatoria');
+  if (!normalized.externalReference && !allowGeneratedReference) {
+    throw httpError(400, 'Referencia de devolucion es obligatoria');
+  }
   if (!normalized.sku) throw httpError(400, 'Producto devuelto es obligatorio');
   if (!normalized.sourceLot) throw httpError(400, 'Lote original despachado es obligatorio');
   if (!Number.isFinite(quantity) || quantity <= 0) throw httpError(400, 'Cantidad de devolucion invalida');
@@ -62,6 +66,18 @@ function normalizeReturnInput(input = {}) {
   return normalized;
 }
 
+function bogotaDateStamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}${values.month}${values.day}`;
+}
+
+function generateReturnReference(date = new Date()) {
+  return `AUTO-DEV-${bogotaDateStamp(date)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
 function lotStatusForReturn(status) {
   if (status === 'RECUPERABLE') return 'DISPONIBLE';
   if (status === 'CUARENTENA') return 'CUARENTENA';
@@ -74,10 +90,12 @@ function parseCustomerReturnReferences(text) {
   const dispatch = source.match(/\b(DSP-[A-Z0-9-]+)\b/i)?.[1];
   const sourceLot = source.match(/\blote(?:\s+original)?\s+([A-Z0-9._-]+)/i)?.[1];
   const reference = source.match(/\breferencia(?:\s+de\s+devolucion)?\s+([A-Z0-9._-]+)/i)?.[1];
+  const reason = source.match(/\b(?:por|motivo)\s+([^.;\n]{3,180})/i)?.[1]?.trim();
   return {
     ...(dispatch ? { id_despacho: dispatch } : invoice ? { id_factura: invoice } : {}),
     ...(sourceLot ? { lote_origen: sourceLot } : {}),
     ...(reference ? { referencia_devolucion: reference } : {}),
+    ...(reason ? { motivo: reason } : {}),
   };
 }
 
@@ -95,8 +113,10 @@ async function findLocation(conn, warehouseId, status, requestedCode) {
 async function existingReturn(conn, externalReference) {
   const [rows] = await conn.execute(
     `SELECT dv.id, dv.numero, dv.cantidad, dv.estado, dv.lote, dv.lote_origen,
-            dv.referencia_externa, d.numero AS despacho_numero,
-            d.siigo_invoice_name, p.siigo_code AS sku, u.codigo AS ubicacion
+            dv.referencia_externa, dv.despacho_id, dv.despacho_item_id,
+            dv.producto_id, dv.ubicacion_id, dv.cliente_origen, dv.observaciones,
+            d.numero AS despacho_numero, d.siigo_invoice_id, d.siigo_invoice_name,
+            p.siigo_code AS sku, u.codigo AS ubicacion
      FROM devoluciones dv
      LEFT JOIN despachos d ON d.id = dv.despacho_id
      JOIN productos p ON p.id = dv.producto_id
@@ -107,14 +127,69 @@ async function existingReturn(conn, externalReference) {
   return rows[0] || null;
 }
 
+function assertReturnDispositionEnabled(status, flags = workflowFlags()) {
+  if (status === 'DESTRUCCION' && !flags.allowReturnDisposal) {
+    throw httpError(409, 'La disposicion final de devoluciones esta deshabilitada');
+  }
+}
+
+function returnMatches(existing, data) {
+  const dispatchMatches = [
+    existing.despacho_id,
+    existing.despacho_numero,
+    existing.siigo_invoice_id,
+    existing.siigo_invoice_name,
+  ].some(value => String(value || '').toUpperCase() === data.dispatchReference.toUpperCase());
+  return dispatchMatches
+    && String(existing.sku || '').toUpperCase() === data.sku.toUpperCase()
+    && String(existing.lote_origen || '').toUpperCase() === data.sourceLot.toUpperCase()
+    && Math.abs(Number(existing.cantidad) - data.quantity) < 0.000001
+    && String(existing.estado || '').toUpperCase() === data.status
+    && (!data.destinationLocation
+      || String(existing.ubicacion || '').toUpperCase() === data.destinationLocation.toUpperCase())
+    && (!data.customer
+      || String(existing.cliente_origen || '').localeCompare(data.customer, 'es', { sensitivity: 'base' }) === 0)
+    && (!data.notes || String(existing.observaciones || '') === data.notes);
+}
+
+async function findRecentGeneratedReturn(conn, { data, userId, dispatchId, dispatchItemId, productId, locationId }) {
+  const [rows] = await conn.execute(
+    `SELECT dv.id, dv.numero, dv.cantidad, dv.estado, dv.lote, dv.lote_origen,
+            dv.referencia_externa, dv.observaciones, d.numero AS despacho_numero,
+            d.siigo_invoice_id, d.siigo_invoice_name, p.siigo_code AS sku,
+            u.codigo AS ubicacion, dv.cliente_origen
+       FROM devoluciones dv
+       JOIN despachos d ON d.id = dv.despacho_id
+       JOIN productos p ON p.id = dv.producto_id
+       LEFT JOIN ubicaciones u ON u.id = dv.ubicacion_id
+      WHERE dv.referencia_externa LIKE 'AUTO-DEV-%'
+        AND dv.usuario_id = ? AND dv.despacho_id = ? AND dv.despacho_item_id = ?
+        AND dv.producto_id = ? AND dv.ubicacion_id <=> ?
+        AND dv.lote_origen = ? AND dv.estado = ?
+        AND ABS(dv.cantidad - ?) < 0.000001
+        AND COALESCE(dv.observaciones, '') = ?
+        AND dv.creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      ORDER BY dv.creado_en DESC, dv.id DESC LIMIT 1 FOR UPDATE`,
+    [userId, dispatchId, dispatchItemId, productId, locationId, data.sourceLot,
+     data.status, data.quantity, data.notes]
+  );
+  return rows[0] || null;
+}
+
 async function createCustomerReturn(input, userId) {
-  const data = normalizeReturnInput(input);
+  const data = normalizeReturnInput(input, { allowGeneratedReference: true });
+  assertReturnDispositionEnabled(data.status);
+  const generatedReference = !data.externalReference;
   const conn = await createConnection();
+  let dedupeLock = null;
   try {
     await conn.beginTransaction();
 
     const existing = await existingReturn(conn, data.externalReference);
     if (existing) {
+      if (!returnMatches(existing, data)) {
+        throw httpError(409, 'La referencia de devolucion ya fue utilizada con datos diferentes');
+      }
       await conn.commit();
       return { ...existing, already_completed: true };
     }
@@ -162,6 +237,30 @@ async function createCustomerReturn(input, userId) {
     if (items.length > 1) throw httpError(409, 'El lote aparece en mas de una partida del despacho');
     const item = items[0];
 
+    const location = await findLocation(
+      conn, dispatch.bodega_id, data.status, data.destinationLocation
+    );
+
+    if (!data.externalReference) {
+      const canonical = JSON.stringify({
+        userId: Number(userId), dispatchId: Number(dispatch.id), dispatchItemId: Number(item.id),
+        productId: Number(product.id), locationId: Number(location.id), sourceLot: data.sourceLot,
+        status: data.status, quantity: data.quantity, notes: data.notes,
+      });
+      dedupeLock = `wms_return_${crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 47)}`;
+      const [locks] = await conn.execute('SELECT GET_LOCK(?, 5) AS acquired', [dedupeLock]);
+      if (Number(locks[0]?.acquired) !== 1) throw httpError(409, 'No fue posible confirmar la devolucion; intenta nuevamente');
+      const recent = await findRecentGeneratedReturn(conn, {
+        data, userId, dispatchId: dispatch.id, dispatchItemId: item.id,
+        productId: product.id, locationId: location.id,
+      });
+      if (recent && !data.confirmNew) {
+        await conn.commit();
+        return { ...recent, already_completed: true, requires_confirmation: true, generated_reference: true };
+      }
+      data.externalReference = generateReturnReference();
+    }
+
     const [returnedRows] = await conn.execute(
       `SELECT COALESCE(SUM(cantidad), 0) AS total
        FROM devoluciones WHERE despacho_item_id = ?`,
@@ -170,12 +269,14 @@ async function createCustomerReturn(input, userId) {
     const alreadyReturned = Number(returnedRows[0]?.total || 0);
     const remaining = Number(item.cantidad_des || 0) - alreadyReturned;
     if (data.quantity > remaining + 0.000001) {
-      throw httpError(409, `Solo quedan ${remaining} unidades retornables de ese lote y despacho`);
+      const unitWord = Math.abs(remaining - 1) < 0.000001 ? 'unidad retornable' : 'unidades retornables';
+      throw httpError(
+        409,
+        `La devolucion supera lo despachado. Despachadas: ${Number(item.cantidad_des || 0)}. `
+          + `Ya devueltas: ${alreadyReturned}. Puedes devolver como maximo: ${remaining} ${unitWord}.`
+      );
     }
 
-    const location = await findLocation(
-      conn, dispatch.bodega_id, data.status, data.destinationLocation
-    );
     const suffix = crypto.randomUUID().slice(0, 8).toUpperCase();
     const returnNumber = `DEV-${suffix}`;
     const receptionNumber = `REC-DEV-${suffix}`;
@@ -254,8 +355,7 @@ async function createCustomerReturn(input, userId) {
           reference, notes, approved_by, created_at)
        VALUES (?, ?, ?, ?, ?, 'DEVOLUCION', ?, ?, ?, ?, ?, NOW())`,
       [crypto.randomUUID(), crypto.randomUUID(), lotId, product.id, userId,
-       data.status === 'RECUPERABLE' ? data.quantity : 0,
-       Number(balances[0]?.balance || 0), `devolucion:${returnNumber}`, notes, userId]
+       data.quantity, data.quantity, `devolucion:${returnNumber}`, notes, userId]
     );
 
     await conn.commit();
@@ -274,13 +374,21 @@ async function createCustomerReturn(input, userId) {
       ubicacion: location.codigo,
       cantidad: data.quantity,
       estado: data.status,
-      destino: data.status === 'RECUPERABLE' ? 'Stock disponible' : `${data.status} (no disponible)`,
+      destino: data.status === 'RECUPERABLE'
+        ? 'Stock disponible'
+        : data.status === 'DESTRUCCION'
+          ? 'PENDIENTE DE DISPOSICION (no disponible)'
+          : 'CUARENTENA (no disponible)',
       already_completed: false,
+      generated_reference: generatedReference,
     };
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;
   } finally {
+    if (dedupeLock) {
+      await conn.execute('SELECT RELEASE_LOCK(?) AS released', [dedupeLock]).catch(() => {});
+    }
     await conn.end().catch(() => {});
   }
 }
@@ -291,4 +399,7 @@ module.exports = {
   normalizeReturnInput,
   normalizeReturnStatus,
   parseCustomerReturnReferences,
+  generateReturnReference,
+  returnMatches,
+  assertReturnDispositionEnabled,
 };

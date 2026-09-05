@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { formatBogotaDateTime } from '../utils/dateTime'
 import { useInventoryStore } from '../store/inventoryStore'
 
 const MOV_COLOR = {
@@ -112,7 +113,7 @@ export default function KardexPage() {
                   return (
                     <tr key={i} className="border-b border-border/50 hover:bg-white/[0.02]">
                       <td className="px-4 py-3 text-muted text-xs whitespace-nowrap">
-                        {String(r.fecha).slice(0, 16).replace('T', ' ')}
+                        {formatBogotaDateTime(r.fecha)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs font-semibold ${MOV_COLOR[r.tipo] || 'text-muted'}`}>{r.tipo || '—'}</span>

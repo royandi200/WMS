@@ -13,9 +13,9 @@ test('groups pending approvals by operational type with details', () => {
       payload: { id_item: 'SKU-1', cantidad: 3, cliente_destino: 'Cliente QA' }, operario: 'Juan',
     },
   ]);
-  assert.match(result, /Cierre de produccion \(1\):/u);
+  assert.match(result, /Cierre de produccion \(1\) - flujo anterior, no ejecutable:/u);
   assert.match(result, /REQ-1 \| Cantidad: 2 \| Orden: OP-1/u);
-  assert.match(result, /Despachos \(1\):/u);
+  assert.match(result, /Despachos \(1\) - flujo anterior, no ejecutable:/u);
   assert.match(result, /REQ-2 \| Producto: SKU-1 \| Cantidad: 3 \| Cliente: Cliente QA/u);
 });
 

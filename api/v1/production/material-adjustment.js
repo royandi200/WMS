@@ -18,6 +18,7 @@ module.exports = async (req, res) => {
       type: body.tipo || body.type,
       quantity: body.cantidad ?? body.quantity,
       reason: body.motivo || body.reason,
+      confirmNew: body.confirmar_nuevo_ajuste === true || body.confirm_new_adjustment === true,
       userId: user.id,
     });
     return res.status(200).json({ ok: true, data });

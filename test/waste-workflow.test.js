@@ -101,7 +101,7 @@ test('dashboard and BuilderBot use the shared transactional waste workflow', () 
   const path = require('node:path');
   const dashboard = fs.readFileSync(path.join(__dirname, '../api/v1/waste.js'), 'utf8');
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
-  assert.match(dashboard, /reportWaste\(req\.body \|\| \{\}, user\.id\)/u);
+  assert.match(dashboard, /reportWaste\(req\.body \|\| \{\}, user\.id, \{ allowGeneratedReference: true \}\)/u);
   assert.match(webhook, /parseWasteReferences\(rawText\)/u);
   assert.match(webhook, /allowGeneratedReference: true/u);
   assert.match(webhook, /Referencia generada por WMS/u);

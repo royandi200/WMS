@@ -2,6 +2,7 @@ const { query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const { normalizeApprovalPayload } = require('../_lib/approval-view');
+const { isLegacyMutatingApprovalAction } = require('../_lib/approval-policy');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -76,6 +77,8 @@ module.exports = async (req, res) => {
         bodega_dest_nombre: payload.bodega_destino ?? payload.bodega_dest_nombre ?? null,
         usuario_nombre: row.usuario_nombre ?? null,
         procesado_por_nombre: row.procesado_por_nombre ?? null,
+        ejecutable: !isLegacyMutatingApprovalAction(row.accion),
+        estado_operativo: isLegacyMutatingApprovalAction(row.accion) ? 'FLUJO_ANTERIOR' : 'VIGENTE',
         payload,
       };
     });

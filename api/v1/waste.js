@@ -41,7 +41,7 @@ async function handleGet(req, res) {
 
 async function handlePost(req, res) {
   const user = await requireCapability(req, CAPABILITIES.WASTE_REPORT);
-  const result = await reportWaste(req.body || {}, user.id);
+  const result = await reportWaste(req.body || {}, user.id, { allowGeneratedReference: true });
   return res.status(200).json({ ok: true, data: result });
 }
 

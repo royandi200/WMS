@@ -89,10 +89,31 @@ function normalizeReceptionDistributions(input = {}, options = {}) {
   return { distributions, totals };
 }
 
+function assertAvailableQuantityWithinExpected(totals, expected, sku = 'el producto') {
+  const available = Number(totals?.DISPONIBLE || 0);
+  const planned = Number(expected);
+  if (!Number.isFinite(planned) || planned < 0) {
+    throw inputError(`Cantidad esperada invalida para ${sku}`);
+  }
+  if (available > planned + 0.0001) {
+    const error = inputError(
+      `El sobrante de ${sku} no puede ingresar como disponible. `
+      + 'Registra como DISPONIBLE hasta la cantidad esperada y deja el excedente en CUARENTENA o PENDIENTE_DISPOSICION'
+    );
+    error.status = 409;
+    throw error;
+  }
+}
+
 function inputError(message) {
   const error = new Error(message);
   error.status = 400;
   return error;
 }
 
-module.exports = { internalReceptionLot, newKardexEntryIds, normalizeReceptionDistributions };
+module.exports = {
+  assertAvailableQuantityWithinExpected,
+  internalReceptionLot,
+  newKardexEntryIds,
+  normalizeReceptionDistributions,
+};

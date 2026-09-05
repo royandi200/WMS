@@ -2,9 +2,20 @@ const { createConnection } = require('./db');
 const { workflowFlags } = require('./feature-flags');
 const { notifyRoles } = require('./builderbot-notifications');
 const { resolvePrimaryWarehouse } = require('./warehouses');
+const { createHash } = require('crypto');
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
+}
+
+function buildSiigoDispatchNumber(invoice = {}) {
+  const identity = String(invoice.id || invoice.name || '').trim();
+  if (!identity) throw httpError(400, 'La factura Siigo no tiene identificador');
+  const readable = String(invoice.name || invoice.id)
+    .replace(/[^A-Za-z0-9-]/g, '')
+    .slice(0, 10) || 'FACTURA';
+  const suffix = createHash('sha256').update(identity).digest('hex').slice(0, 8).toUpperCase();
+  return `DSP-SIIGO-${readable}-${suffix}`.slice(0, 30);
 }
 
 function normalizeInvoice(invoice) {
@@ -382,8 +393,7 @@ async function importInvoice(invoice, userId) {
     }
 
     const bodegaId = [...warehouseIds][0];
-    const safeName = data.name.replace(/[^A-Za-z0-9-]/g, '').slice(0, 18) || data.id.slice(0, 8);
-    const numero = `DSP-SIIGO-${safeName}`.slice(0, 30);
+    const numero = buildSiigoDispatchNumber(data);
     const customer = customerRows[0] || null;
     const customerName = data.customerName || customer?.nombre_comercial || customer?.nombre || null;
     if (!customer) {
@@ -633,6 +643,7 @@ async function cancelImportedInvoice(siigoInvoiceId, reason) {
 }
 
 module.exports = {
+  buildSiigoDispatchNumber,
   importInvoice,
   cancelImportedInvoice,
   invoiceSignature,

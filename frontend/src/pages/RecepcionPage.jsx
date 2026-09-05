@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Ban, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 import { useReceptionStore } from '../store/receptionStore'
+import { formatBogotaDateTime } from '../utils/dateTime'
 import {
   cancelPurchaseOrder,
   createPurchaseOrder,
@@ -613,7 +614,7 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
   const [confirmed, setConfirmed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cancelError, setCancelError] = useState('')
-  const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  const formatDate = formatBogotaDateTime
   const closeCancel = () => {
     setCancelTarget(null)
     setCancelReason('')
@@ -741,13 +742,13 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
 }
 
 function ReceptionTable({ rows, loading }) {
-  const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  const formatDate = formatBogotaDateTime
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[860px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Recepcion', 'OC / Maquila', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Fact. acum. / Aceptado', 'Conciliacion', 'Usuario'].map((c) => (
+            {['Recepcion', 'OC / Maquila', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Documento / Aceptado', 'Conciliacion', 'Usuario'].map((c) => (
               <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
             ))}
           </tr>
@@ -755,7 +756,15 @@ function ReceptionTable({ rows, loading }) {
         <tbody>
           {loading && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Cargando recepciones...</td></tr>}
           {!loading && rows.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Sin recepciones registradas</td></tr>}
-          {!loading && rows.map((r) => (
+          {!loading && rows.map((r) => {
+            const usesSiigoInvoice = r.origen_recepcion === 'SIIGO' && Boolean(r.siigo_purchase_id || r.siigo_purchase_name)
+            const documentQuantity = usesSiigoInvoice
+              ? (r.cantidad_factura_acumulada ?? r.cantidad_factura)
+              : r.cantidad_esp
+            const documentDifference = usesSiigoInvoice
+              ? r.diferencia_factura_fisica
+              : Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0)
+            return (
             <tr key={`${r.id}-${r.lote || ''}`} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs">{r.numero}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.orden_compra_numero || '-'}{r.ordenes_maquila && <span className="block text-primary">{r.ordenes_maquila}</span>}</td>
@@ -765,11 +774,12 @@ function ReceptionTable({ rows, loading }) {
               <td className="px-4 py-3 font-mono text-xs">{r.sku || '-'}</td>
               <td className="px-4 py-3">{r.producto_nombre || '-'}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.lote || '-'}</td>
-              <td className="px-4 py-3 tabular-nums text-xs">{r.cantidad_oc ?? '-'} / {r.cantidad_factura_acumulada ?? r.cantidad_factura ?? r.cantidad_esp ?? '-'} / {r.cantidad_aceptada_acumulada ?? r.cantidad_fisica ?? r.cantidad_rec ?? '-'}</td>
-              <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.saldo_oc) > 0 ? 'text-yellow-400' : 'text-green-400'}>Saldo OC: {r.saldo_oc ?? '-'}</span><span className={`block ${Number(r.diferencia_factura_fisica) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>Factura-Fisico: {r.diferencia_factura_fisica ?? '-'}</span></td>
+              <td className="px-4 py-3 tabular-nums text-xs">{r.cantidad_oc ?? '-'} / {documentQuantity ?? '-'} / {r.cantidad_aceptada_acumulada ?? r.cantidad_fisica ?? r.cantidad_rec ?? '-'}</td>
+              <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.saldo_oc) > 0 ? 'text-yellow-400' : 'text-green-400'}>Saldo OC: {r.saldo_oc ?? '-'}</span><span className={`block ${Number(documentDifference) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>{usesSiigoInvoice ? 'Factura-Fisico' : 'Documento-Fisico'}: {documentDifference ?? '-'}</span></td>
               <td className="px-4 py-3">{r.usuario_nombre || '-'}</td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

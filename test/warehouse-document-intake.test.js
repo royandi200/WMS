@@ -261,15 +261,15 @@ test('document intake fails closed without exact SKU or with an invalid date', (
   assert.throws(() => normalizeWarehouseDocumentInput(validInput({ tipo_documento: 'ORDEN_COMPRA' })), /SALIDA_BODEGA_3Q/u);
 });
 
-test('document intake flags total, lot and expiry mismatches for human review', () => {
+test('3Q document intake flags total mismatch without requiring FEFO data in the source PDF', () => {
   const input = normalizeWarehouseDocumentInput(validInput({
     total_unidades: 1,
     items: [{ sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7 }],
   }));
-  assert.equal(input.warnings.length, 3);
+  assert.equal(input.warnings.length, 1);
   assert.match(input.warnings.join(' | '), /no coincide/u);
-  assert.match(input.warnings.join(' | '), /no tiene lote/u);
-  assert.match(input.warnings.join(' | '), /no tiene fecha de vencimiento/u);
+  assert.equal(input.items[0].lot, null);
+  assert.equal(input.items[0].expiryDate, null);
 });
 
 test('document action is restricted to outsourcing management', () => {

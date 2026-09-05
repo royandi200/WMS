@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createReturn, listReturns } from '../api/returns.api'
+import { formatBogotaDateTime } from '../utils/dateTime'
 
 const EMPTY = {
   despacho_id: '',
@@ -16,7 +17,6 @@ const EMPTY = {
 const ESTADOS = [
   { value: 'RECUPERABLE', label: 'Recuperable', help: 'Suma al stock disponible' },
   { value: 'CUARENTENA', label: 'Cuarentena', help: 'Crea lote no disponible' },
-  { value: 'DESTRUCCION', label: 'Destruccion', help: 'No suma stock disponible' },
 ]
 
 export default function DevolucionesPage() {
@@ -27,6 +27,7 @@ export default function DevolucionesPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
 
   const fetchRows = async () => {
     setLoading(true)
@@ -43,7 +44,10 @@ export default function DevolucionesPage() {
 
   useEffect(() => { fetchRows() }, [])
 
-  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const set = (key) => (event) => {
+    setConfirmDuplicate(false)
+    setForm((current) => ({ ...current, [key]: event.target.value }))
+  }
 
   const showToast = (msg, ok) => {
     setToast({ msg, ok })
@@ -65,11 +69,18 @@ export default function DevolucionesPage() {
         lote_origen: form.lote_origen.trim(),
         ubicacion: form.ubicacion.trim() || undefined,
         observaciones: form.observaciones.trim() || undefined,
+        confirmar_nueva_devolucion: confirmDuplicate,
       }
       const res = await createReturn(payload)
       const data = res?.data || res
+      if (data.requires_confirmation) {
+        setConfirmDuplicate(true)
+        showToast('Ya existe una devolucion igual reciente. Revisa los datos y vuelve a enviar solo si es un retorno nuevo.', false)
+        return
+      }
       showToast(`Devolucion ${data.numero || ''} registrada. ${data.destino || ''}`, true)
       setForm(EMPTY)
+      setConfirmDuplicate(false)
       await fetchRows()
       setTab('historial')
     } catch (e) {
@@ -135,13 +146,12 @@ export default function DevolucionesPage() {
               />
             </Field>
 
-            <Field label="Referencia de devolucion *">
+            <Field label="Referencia externa (opcional)">
               <input
                 value={form.referencia_devolucion}
                 onChange={set('referencia_devolucion')}
                 placeholder="Ej: RMA-CLIENTE-0001"
                 className="input-field"
-                required
               />
             </Field>
 
@@ -217,7 +227,7 @@ export default function DevolucionesPage() {
             </Field>
 
             <button type="submit" disabled={saving} className="btn-primary flex items-center justify-center gap-2">
-              {saving ? <><Spin /> Registrando...</> : 'Registrar devolucion'}
+              {saving ? <><Spin /> Registrando...</> : confirmDuplicate ? 'Registrar como devolucion nueva' : 'Registrar devolucion'}
             </button>
           </form>
 
@@ -305,5 +315,5 @@ function Spin() {
 }
 
 function formatDate(value) {
-  return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  return formatBogotaDateTime(value)
 }

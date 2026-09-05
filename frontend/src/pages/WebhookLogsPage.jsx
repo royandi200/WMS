@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { formatBogotaDateTime } from '../utils/dateTime'
 import { useWebhookStore } from '../store/webhookStore'
 
 const STATUS_COLOR = {
@@ -123,7 +124,7 @@ export default function WebhookLogsPage() {
                   <span className="text-xs text-muted hidden sm:block">{log.from_phone || '—'}</span>
                   {/* campo real del backend es creado_en */}
                   <span className="text-xs text-muted whitespace-nowrap">
-                    {String(log.creado_en ?? log.created_at ?? '').slice(0, 16).replace('T', ' ')}
+                    {formatBogotaDateTime(log.creado_en ?? log.created_at)}
                   </span>
                   <span className="text-muted text-xs ml-1">{expanded === log.id ? '▲' : '▼'}</span>
                 </button>

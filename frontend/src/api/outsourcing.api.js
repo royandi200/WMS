@@ -7,3 +7,7 @@ export const prepareAdditionalOutsourcingShipment = (body) => client.post('/outs
 export const confirmOutsourcingShipment = (shipmentId) => client.post('/outsourcing', { action: 'CONFIRM_SHIPMENT', envio_id: shipmentId }).then((r) => r.data)
 export const cancelOutsourcingShipment = (shipmentId) => client.post('/outsourcing', { action: 'CANCEL_SHIPMENT', envio_id: shipmentId }).then((r) => r.data)
 export const listWarehouseDocumentDrafts = (params) => client.get('/warehouse-documents', { params }).then((r) => r.data)
+export const downloadWarehouseDocument = (fileId) => client.get('/warehouse-documents', {
+  params: { file_id: fileId },
+  responseType: 'blob',
+})

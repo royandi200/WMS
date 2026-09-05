@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApprovalsStore } from '../store/approvalsStore'
+import { formatBogotaDateTime } from '../utils/dateTime'
 
 const TIPO_LABEL = {
   ajuste: 'Ajuste',
@@ -43,6 +44,8 @@ const norm = (item) => ({
   usuario: item.usuario_nombre ?? item.from_phone ?? '',
   procesadoPor: item.procesado_por_nombre ?? '',
   motivoRechazo: item.motivo_rechazo ?? '',
+  ejecutable: item.ejecutable !== false,
+  estadoOperativo: item.estado_operativo ?? 'VIGENTE',
 })
 
 export default function AprobacionesPage() {
@@ -164,8 +167,13 @@ export default function AprobacionesPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_CLASS[item.estado] || 'bg-surface border border-border text-muted'}`}>
                       {ESTADO_LABEL[item.estado] || item.estado}
                     </span>
+                    {item.estadoOperativo === 'FLUJO_ANTERIOR' && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-300">
+                        Flujo anterior
+                      </span>
+                    )}
                     <span className="text-xs text-muted">
-                      {String(item.fecha).slice(0,16).replace('T',' ')}
+                      {formatBogotaDateTime(item.fecha)}
                     </span>
                   </div>
 
@@ -181,7 +189,7 @@ export default function AprobacionesPage() {
                     {item.bodegaDest && <span>→ {item.bodegaDest}</span>}
                     {item.usuario && <span>👤 {item.usuario}</span>}
                     {item.procesadoPor && tab === 'history' && <span>Procesó: <strong className="text-foreground">{item.procesadoPor}</strong></span>}
-                    {item.fechaProcesado && tab === 'history' && <span>Procesado: {String(item.fechaProcesado).slice(0,16).replace('T',' ')}</span>}
+                    {item.fechaProcesado && tab === 'history' && <span>Procesado: {formatBogotaDateTime(item.fechaProcesado)}</span>}
                   </div>
 
                   {item.motivoRechazo && tab === 'history' && (
@@ -191,7 +199,7 @@ export default function AprobacionesPage() {
                   )}
                 </div>
 
-                {tab === 'pending' ? (
+                {tab === 'pending' && item.ejecutable ? (
                   selected?.codigoSolicitud === item.codigoSolicitud ? (
                     <div className="flex flex-col gap-2 min-w-[220px]">
                       <textarea
@@ -221,6 +229,10 @@ export default function AprobacionesPage() {
                       Gestionar
                     </button>
                   )
+                ) : tab === 'pending' ? (
+                  <span className="max-w-[220px] text-right text-xs text-muted">
+                    Conservada para auditoria. Usa el flujo operativo actual.
+                  </span>
                 ) : null}
               </div>
             </div>

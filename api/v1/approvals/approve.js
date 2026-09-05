@@ -5,6 +5,7 @@ const { createConnection, query } = require('../../_lib/db');
 const { cors, requireCapability } = require('../../_lib/auth');
 const { CAPABILITIES } = require('../../_lib/capabilities');
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
+const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
 
 const BB_TOKEN = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
@@ -614,6 +615,8 @@ module.exports = async (req, res) => {
         }
       );
     }
+
+    assertApprovalActionSupported(solicitud.accion);
 
     const execResult = await executeApprovedPayload(conn, {
       accion: solicitud.accion,

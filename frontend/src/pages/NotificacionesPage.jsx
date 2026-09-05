@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw, RotateCw } from 'lucide-react'
 import { listNotifications, retryNotification } from '../api/notifications.api'
+import { formatBogotaDateTime } from '../utils/dateTime'
 
 export default function NotificacionesPage() {
   const [rows, setRows] = useState([])
@@ -31,7 +32,7 @@ export default function NotificacionesPage() {
       setWorking(null)
     }
   }
-  const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  const formatDate = formatBogotaDateTime
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-5">

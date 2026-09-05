@@ -42,6 +42,8 @@ Entrada y Voz usan `docs/Prompt WMS.txt`. Voz redirige a Salida. Entrada conserv
 
 Documentos de Bodega usa `docs/Prompt WMS Documentos BBC.txt`, tiene analisis documental y contenido sensible habilitados. Usa la regla interna `body includes g0m@s` para cambiar a Salida; no debe usar `gotoFlow` directo porque BuilderBot mostraria el JSON interno antes de llamar a la API. Admite `ORDEN_COMPRA` y `SALIDA_BODEGA_3Q`; produce respectivamente `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO` y `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`. Ambas acciones crean borradores, omiten datos sensibles y lineas del documento en logs y no modifican inventario.
 
+Politica documental: el usuario debe adjuntar en el mismo mensaje del PDF una instruccion, por ejemplo `Orden de compra` o `Remision de salida a 3Q`. Un PDF sin texto no se registra ni se vincula; BuilderBot pide reenviarlo. Un texto posterior no recupera el archivo anterior. La API valida esta condicion usando exclusivamente `body`, `text` o `query` del evento original, nunca el OCR ni el historial.
+
 Para conservar la evidencia literal y el PDF de una OC, el body HTTP de Salida agrega `document_text: {aiDocument}` y `document_url: {urlTempFile}`. La API nunca registra esos valores en logs. La URL temporal se acepta solo por HTTPS desde dominios permitidos de BuilderBot, sin redirecciones, con descarga limitada a 2.5 MB y firma PDF verificada. No ampliar la lista de dominios sin evidencia del proveedor.
 
 El validador Manager reporta `Entrada` como dead end porque su `rules` legacy contiene objetos que la herramienta moderna no puede interpretar. La lectura directa confirma que Entrada conserva su answer operativo. No reemplazarlo automaticamente para corregir ese falso positivo.

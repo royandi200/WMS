@@ -54,6 +54,7 @@ async function handleGet(req, res) {
     `SELECT me.id, me.numero, me.orden_maquila_id, om.codigo AS orden_codigo,
             me.tipo, me.estado, me.motivo, me.creado_en,
             mei.cantidad, p.siigo_code AS sku, p.nombre AS producto,
+            COALESCE(mm.unidad, p.unit_label) AS unidad,
             mml.lote, u.codigo AS ubicacion_origen
        FROM maquila_envios me
        JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
@@ -84,6 +85,7 @@ async function handleGet(req, res) {
       sku: row.sku,
       producto: row.producto,
       cantidad: Number(row.cantidad),
+      unidad: row.unidad,
       lote: row.lote,
       ubicacion_origen: row.ubicacion_origen,
     });

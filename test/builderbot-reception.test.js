@@ -17,7 +17,10 @@ const {
   listAvailableOutsourcingReceptions,
 } = require('../api/_lib/builderbot-reception');
 const { capabilityForAction } = require('../api/_lib/capabilities');
-const { newKardexEntryIds } = require('../api/_lib/reception-distributions');
+const {
+  assertAvailableQuantityWithinExpected,
+  newKardexEntryIds,
+} = require('../api/_lib/reception-distributions');
 
 test('WhatsApp purchase order and reception require an exact explicit confirmation', () => {
   assert.equal(explicitPurchaseOrderConfirmation(
@@ -211,6 +214,17 @@ test('multi-item reception assigns a unique tx id to every kardex row', () => {
   const source = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
   assert.equal((source.match(/const kardexIds = newKardexEntryIds\(\);/gu) || []).length, 2);
   assert.doesNotMatch(source, /\[crypto\.randomUUID\(\), receptionTxId,/u);
+});
+
+test('reception surplus cannot inflate available inventory', () => {
+  assert.doesNotThrow(() => assertAvailableQuantityWithinExpected({
+    DISPONIBLE: 10,
+    CUARENTENA: 2,
+  }, 10, 'SKU-A'));
+  assert.throws(
+    () => assertAvailableQuantityWithinExpected({ DISPONIBLE: 11 }, 10, 'SKU-A'),
+    error => error.status === 409 && /sobrante de SKU-A no puede ingresar como disponible/u.test(error.message)
+  );
 });
 
 test('receipt distributions use a transactional engine with foreign keys', () => {

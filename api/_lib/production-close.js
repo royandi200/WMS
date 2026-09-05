@@ -9,6 +9,29 @@ function httpError(status, message) {
   return error;
 }
 
+function validateProductionCloseQuantities({ conforming, waste, planned }) {
+  const good = Number(conforming);
+  const rejected = Number(waste);
+  const target = Number(planned);
+  if (!Number.isFinite(good) || good < 0 || !Number.isFinite(rejected) || rejected < 0) {
+    throw httpError(400, 'Cantidad conforme y merma son obligatorias');
+  }
+  if (good === 0 && rejected === 0) {
+    throw httpError(400, 'Debes confirmar unidades conformes o merma');
+  }
+  if (!Number.isFinite(target) || target < 0) {
+    throw httpError(409, 'La orden no tiene una cantidad planeada valida');
+  }
+  if (good > target + 0.0001) {
+    throw httpError(
+      409,
+      `La cantidad conforme (${good}) supera el plan (${target}). `
+      + 'El excedente no puede ingresar a disponible sin una decision explicita'
+    );
+  }
+  return { conforming: good, waste: rejected, planned: target };
+}
+
 function buildMaterialReconciliation(materials, processWasteRows = []) {
   const processWasteByProduct = new Map(
     processWasteRows.map((row) => [Number(row.producto_id), Number(row.merma_proceso || 0)])
@@ -23,6 +46,7 @@ function buildMaterialReconciliation(materials, processWasteRows = []) {
       product_id: material.producto_id,
       sku: material.sku,
       producto: material.nombre,
+      unidad: material.unidad || material.unit_label || '',
       teorico: theoretical,
       consumido: consumed,
       devuelto: returned,
@@ -111,14 +135,16 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     if (pendingReplenishments.length) {
       throw httpError(409, `La orden tiene la reposicion pendiente ${pendingReplenishments[0].codigo}; confirmala o cancelala antes de cerrar`);
     }
-    if (!Number.isFinite(conforming) || conforming < 0 || !Number.isFinite(waste) || waste < 0) {
-      throw httpError(400, 'Cantidad conforme y merma son obligatorias');
-    }
-    if (conforming === 0 && waste === 0) throw httpError(400, 'Debes confirmar unidades conformes o merma');
+    validateProductionCloseQuantities({
+      conforming,
+      waste,
+      planned: order.cantidad_planeada,
+    });
     if (waste > 0 && !String(wasteReason || '').trim()) throw httpError(400, 'El motivo de merma es obligatorio');
     if (conforming > 0 && !locationReference) throw httpError(400, 'La ubicacion del producto terminado es obligatoria');
     const [materials] = await conn.execute(
       `SELECT pm.producto_id, p.siigo_code AS sku, p.nombre,
+              COALESCE(NULLIF(pm.unidad, ''), p.unit_label) AS unidad,
               pm.cantidad_teorica, pm.cantidad_consumida,
               pm.cantidad_devuelta, pm.cantidad_adicional
        FROM produccion_materiales pm JOIN productos p ON p.id = pm.producto_id
@@ -241,8 +267,12 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     const closedAt = new Date().toLocaleString('es-CO', {
       timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short',
     });
-    const wastePercent = Number(order.cantidad_planeada) > 0
-      ? Number(((waste / Number(order.cantidad_planeada)) * 100).toFixed(2))
+    const planCompliance = Number(order.cantidad_planeada) > 0
+      ? Number(((conforming / Number(order.cantidad_planeada)) * 100).toFixed(2))
+      : 0;
+    const physicalResult = conforming + waste;
+    const nonconformityRate = physicalResult > 0
+      ? Number(((waste / physicalResult) * 100).toFixed(2))
       : 0;
     result.notification = await notifyRoles({
       event: `production_closed:${order.id}`,
@@ -252,15 +282,17 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       text: [
         `Produccion cerrada: ${order.codigo_orden}`,
         `${order.producto_sku} - ${order.producto_nombre}`,
-        `Plan: ${Number(order.cantidad_planeada)} | Conformes: ${conforming} | Merma: ${waste} (${wastePercent}%)`,
+        `Plan: ${Number(order.cantidad_planeada)} | Conformes: ${conforming} | Merma: ${waste}`,
+        `Cumplimiento del plan: ${planCompliance}% | Tasa no conforme: ${nonconformityRate}%`,
         `Motivo de merma: ${waste > 0 ? wasteReason : 'Sin merma'}`,
         `Lote PT: ${conforming > 0 ? lpn : 'Sin lote conforme'} | ubicacion ${resolvedLocationCode || 'N/A'} | vence ${normalizedExpiry || 'N/A'}`,
         `Cerro: ${actors[0]?.nombre || 'Usuario WMS'} | ${closedAt}`,
         'Conciliacion de materiales:',
         ...reconciliation.map(item => [
-          `- ${item.sku}: teorico ${item.teorico}, neto entregado ${item.consumo_neto}`,
-          `merma proceso ${item.merma_proceso}, uso productivo estimado ${item.uso_productivo_estimado}`,
-          `variacion de entrega ${item.variacion}`,
+          `- ${item.producto} (${item.sku})`,
+          `teorico ${item.teorico} ${item.unidad}, neto entregado ${item.consumo_neto} ${item.unidad}`,
+          `merma proceso ${item.merma_proceso} ${item.unidad}, uso productivo estimado ${item.uso_productivo_estimado} ${item.unidad}`,
+          `variacion de entrega ${item.variacion} ${item.unidad}`,
         ].join(' | ')),
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
@@ -273,4 +305,9 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
   }
 }
 
-module.exports = { buildMaterialReconciliation, closeProductionOrder, deriveProductionExpiry };
+module.exports = {
+  buildMaterialReconciliation,
+  closeProductionOrder,
+  deriveProductionExpiry,
+  validateProductionCloseQuantities,
+};

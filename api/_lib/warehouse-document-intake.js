@@ -1,4 +1,5 @@
 const { createHash } = require('crypto');
+const { downloadBuilderBotPdf } = require('./purchase-order-document-intake');
 
 const MAX_DOCUMENT_ITEMS = 100;
 
@@ -44,11 +45,6 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) 
   if (suppliedTotal != null && Math.abs(suppliedTotal - calculatedTotal) > 0.0001) {
     warnings.push(`El total declarado (${suppliedTotal}) no coincide con la suma de items (${calculatedTotal})`);
   }
-  for (const item of normalizedItems) {
-    if (!item.lot) warnings.push(`El item ${item.sku} no tiene lote`);
-    if (!item.expiryDate) warnings.push(`El item ${item.sku} no tiene fecha de vencimiento`);
-  }
-
   const normalized = {
     documentType,
     reference,
@@ -75,16 +71,32 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) 
   return normalized;
 }
 
-async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUILDERBOT', evidenceText = '' }) {
+async function registerWarehouseDocumentDraft({
+  db,
+  body,
+  userId,
+  origin = 'BUILDERBOT',
+  evidenceText = '',
+  documentUrl = '',
+  documentName = '',
+}) {
   const input = normalizeWarehouseDocumentInput(body, { evidenceText });
   const normalizedOrigin = String(origin || 'BUILDERBOT').trim().toUpperCase();
   if (!['BUILDERBOT', 'DASHBOARD'].includes(normalizedOrigin)) throw inputError('Origen documental no soportado');
+  const document = normalizedOrigin === 'BUILDERBOT'
+    ? await downloadBuilderBotPdf(documentUrl, documentName || input.sourceFileName)
+    : null;
+  if (normalizedOrigin === 'BUILDERBOT' && !document) {
+    input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
+  }
 
   await db.beginTransaction();
   try {
     const [existing] = await db.execute(
       `SELECT id, tipo_documento, referencia_documento, fecha_documento,
-              total_bultos, total_unidades, sha256, estado, advertencias
+              total_bultos, total_unidades, sha256, estado, advertencias,
+              (SELECT COUNT(*) FROM documento_bodega_borrador_archivos a
+                WHERE a.documento_id = documentos_bodega_borrador.id) AS file_count
          FROM documentos_bodega_borrador
         WHERE tipo_documento = ? AND origen = ? AND referencia_documento = ?
         LIMIT 1 FOR UPDATE`,
@@ -125,6 +137,17 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
           );
         }
       }
+      if (document) {
+        const [files] = await db.execute(
+          `SELECT sha256 FROM documento_bodega_borrador_archivos
+            WHERE documento_id = ? LIMIT 1 FOR UPDATE`,
+          [existing[0].id]
+        );
+        if (files.length && files[0].sha256 !== document.hash) {
+          throw conflictError(`El documento ${input.reference} ya existe con un PDF diferente`);
+        }
+        if (!files.length) await storeDraftFile(db, existing[0].id, document);
+      }
       await db.commit();
       return {
         ...existing[0],
@@ -132,6 +155,7 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
         warnings: parseStoredWarnings(existing[0].advertencias),
         itemCount: input.items.length,
         totalUnits: Number(existing[0].total_unidades || 0),
+        pdfStored: Boolean(document) || Number(existing[0].file_count || 0) > 0,
       };
     }
 
@@ -173,6 +197,7 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
          item.quantity, item.expiryDate, item.lot]
       );
     }
+    if (document) await storeDraftFile(db, created.insertId, document);
     await db.commit();
     return {
       id: created.insertId,
@@ -182,11 +207,21 @@ async function registerWarehouseDocumentDraft({ db, body, userId, origin = 'BUIL
       warnings: input.warnings,
       itemCount: input.items.length,
       totalUnits: input.totalUnits,
+      pdfStored: Boolean(document),
     };
   } catch (error) {
     await db.rollback().catch(() => {});
     throw error;
   }
+}
+
+async function storeDraftFile(db, documentId, document) {
+  await db.execute(
+    `INSERT INTO documento_bodega_borrador_archivos
+       (documento_id, nombre_original, mime_type, tamano_bytes, sha256, contenido, creado_en)
+     VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+    [documentId, document.name, document.mimeType, document.size, document.hash, document.content]
+  );
 }
 
 function normalizeItem(item = {}, index) {

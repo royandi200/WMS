@@ -2,6 +2,18 @@
 
 Última actualización: 2026-09-05
 
+## 2026-09-05 - Integridad operativa y bateria de regresion
+
+- Se cerraron rutas heredadas de aprobacion que podian repetir mutaciones fuera de los servicios modernos compartidos por dashboard y WhatsApp.
+- Se reforzo idempotencia para liberacion de OP, ajustes de materiales, mermas y devoluciones; las referencias operativas pueden ser generadas por el WMS y los eventos equivalentes tardios requieren aclaracion.
+- Se corrigio la representacion fisica de devoluciones, inventario bloqueado, reservas/despachos, identificadores SIIGO largos y mensajes de produccion, capacidad, reposicion y cierre.
+- Se amplio la trazabilidad 3Q, se protegieron sus PDF y se centralizaron fechas de dashboard en `America/Bogota`.
+- El `health` publico se redujo a informacion no sensible y las aprobaciones heredadas quedaron solo para consulta historica.
+- Validacion local: `195/195` pruebas, build Vite y auditor MySQL sin fallos. La aceptacion visual/manual y el despliegue permanecen pendientes.
+- Se creo `bateria-regresion-integral-post-mejoras.md` como protocolo repetible de certificacion.
+- Se definio una politica documental determinista: PDF sin texto adjunto en el mismo mensaje no se procesa ni se recupera mediante mensajes posteriores. BuilderBot pide reenviarlo y la API aplica el mismo bloqueo.
+- Se generaron dos PDF QA multireferencia para validar OCR y registro de OC y salida 3Q, con cantidades diferenciadas, unidades, tercero y datos documentales verificables.
+
 ## Propósito
 
 Este documento es la referencia ejecutiva y técnica del estado global del WMS. Se actualiza cuando cambia una capacidad, flujo operativo, integración, despliegue, migración, riesgo o decisión de producto.

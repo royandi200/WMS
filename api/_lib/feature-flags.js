@@ -14,6 +14,7 @@ function workflowFlags() {
     allowSplitProductionLine: envFlag('ALLOW_SPLIT_PRODUCTION_LINE', false),
     allowDirectDispatchRequest: envFlag('ALLOW_DIRECT_DISPATCH_REQUEST', false),
     allowManualReception: envFlag('ALLOW_MANUAL_RECEPTION', false),
+    allowReturnDisposal: envFlag('ALLOW_RETURN_DISPOSAL', false),
   });
 }
 

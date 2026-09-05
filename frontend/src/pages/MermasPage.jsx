@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { formatBogotaDate } from '../utils/dateTime'
 import { useWasteStore } from '../store/wasteStore'
 
 const EMPTY = {
@@ -18,11 +19,15 @@ export default function MermasPage() {
   const [tab, setTab] = useState(0)
   const [form, setForm] = useState(EMPTY)
   const [toast, setToast] = useState(null)
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
   const { list, loading, error, submit, fetchList, clearError } = useWasteStore()
 
   useEffect(() => { if (tab === 1) fetchList() }, [tab])
 
-  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const set = (key) => (event) => {
+    setConfirmDuplicate(false)
+    setForm((current) => ({ ...current, [key]: event.target.value }))
+  }
   const showToast = (msg, ok) => {
     setToast({ msg, ok })
     setTimeout(() => setToast(null), 4000)
@@ -39,13 +44,21 @@ export default function MermasPage() {
       location: form.type === 'BODEGA' ? form.location.trim() : undefined,
       production_order_id: form.type === 'PROCESO' ? form.production_order_id.trim() : undefined,
       reason: form.reason.trim(),
+      confirmar_nueva_merma: confirmDuplicate,
     }
     const response = await submit(body)
     if (response.ok) {
-      showToast(response.data?.data?.already_completed
+      const result = response.data?.data || response.data
+      if (result?.requires_confirmation) {
+        setConfirmDuplicate(true)
+        showToast('Ya existe una merma igual reciente. Revisa los datos y vuelve a enviar solo si es una perdida nueva.', false)
+        return
+      }
+      showToast(result?.already_completed
         ? 'La referencia ya estaba registrada; no se modificó inventario'
         : 'Merma registrada correctamente', true)
       setForm(EMPTY)
+      setConfirmDuplicate(false)
     } else {
       showToast(response.message, false)
     }
@@ -81,9 +94,9 @@ export default function MermasPage() {
             </select>
           </Field>
 
-          <Field label="Referencia de merma *">
+          <Field label="Referencia externa (opcional)">
             <input value={form.external_reference} onChange={set('external_reference')}
-              placeholder="Ej. MER-BOD-20260804-001" maxLength={80} className="input-field" required />
+              placeholder="Ej. formato o acta del cliente" maxLength={80} className="input-field" />
           </Field>
 
           <Field label="SKU del producto *">
@@ -120,7 +133,7 @@ export default function MermasPage() {
           </Field>
 
           <button type="submit" disabled={loading} className="btn-primary flex items-center justify-center gap-2">
-            {loading ? <><Spin /> Registrando...</> : 'Registrar merma'}
+            {loading ? <><Spin /> Registrando...</> : confirmDuplicate ? 'Registrar como merma nueva' : 'Registrar merma'}
           </button>
         </form>
       )}
@@ -157,7 +170,7 @@ export default function MermasPage() {
                       <td className="px-4 py-3 text-muted text-xs">{row.lot_id || row.production_order_code || '-'}</td>
                       <td className="px-4 py-3 text-muted text-xs">{row.location_code || '-'}</td>
                       <td className="px-4 py-3 text-muted max-w-xs truncate">{row.reason || '-'}</td>
-                      <td className="px-4 py-3 text-muted text-xs">{row.created_at?.slice(0, 10)}</td>
+                      <td className="px-4 py-3 text-muted text-xs">{formatBogotaDate(row.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

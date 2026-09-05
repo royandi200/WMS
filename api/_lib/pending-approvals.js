@@ -37,10 +37,11 @@ function formatPendingApprovals(rows = []) {
     groups.get(action).push(row);
   }
   const sections = [...groups.entries()].map(([action, items]) => [
-    `*${GROUP_LABELS[action] || action.replace(/_/g, ' ')} (${items.length}):*`,
+    `*${GROUP_LABELS[action] || action.replace(/_/g, ' ')} (${items.length})${isLegacyMutatingApprovalAction(action) ? ' - flujo anterior, no ejecutable' : ''}:*`,
     ...items.map(detailLine),
   ].join('\n'));
   return [`Solicitudes pendientes (${rows.length}):`, ...sections].join('\n\n');
 }
 
 module.exports = { formatPendingApprovals, parsePayload };
+const { isLegacyMutatingApprovalAction } = require('./approval-policy');

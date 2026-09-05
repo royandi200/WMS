@@ -1,78 +1,13 @@
-/**
- * api/v1/health.js  — Vercel Serverless Function
- * GET /api/v1/health  — Público, sin auth
- */
+/** Public liveness/readiness probe. Never expose schema or record identifiers. */
 const { query } = require('../_lib/db');
 
-// Nombres REALES de tablas en MySQL (según tableName en cada modelo)
-const TABLAS_CRITICAS = [
-  'lots',             // Lot.js
-  'kardex',           // Kardex.js
-  'stock',            // Stock.js
-  'productos',        // Product.js
-  'recepciones',      // Recepcion.js
-  'despachos',        // Despacho.js
-  'mermas',           // WasteRecord.js  (≠ waste_records)
-  'aprobaciones',     // ApprovalQueue.js (≠ approval_queue)
-  'ordenes_produccion', // ProductionOrder.js
-  'bom'               // BOM.js
-];
-
 module.exports = async (req, res) => {
-  const start = Date.now();
-  const resultado = {
-    ok: true, status: 'ok',
-    timestamp: new Date().toISOString(),
-    db: 'connected', latency_ms: 0,
-    tablas: {}, ultima_lot: null, ultimo_kardex: null,
-    errores: []
-  };
-
-  // 1. Ping
+  const timestamp = new Date().toISOString();
   try {
     await query('SELECT 1');
-    resultado.latency_ms = Date.now() - start;
+    return res.status(200).json({ ok: true, status: 'ok', timestamp });
   } catch (e) {
-    return res.status(503).json({
-      ok: false, status: 'error',
-      db: 'FALLO: ' + e.message,
-      timestamp: new Date().toISOString()
-    });
+    console.error('[health] database unavailable');
+    return res.status(503).json({ ok: false, status: 'unavailable', timestamp });
   }
-
-  // 2. Verificar tablas
-  for (const tabla of TABLAS_CRITICAS) {
-    try {
-      const rows = await query(
-        `SELECT COUNT(*) as total FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
-        [tabla]
-      );
-      const cols = rows[0]?.total ?? 0;
-      resultado.tablas[tabla] = cols > 0 ? `✅ ${cols} columnas` : '❌ NO EXISTE';
-      if (cols === 0) {
-        resultado.ok = false;
-        resultado.status = 'degraded';
-        resultado.errores.push('TABLA_FALTANTE: ' + tabla);
-      }
-    } catch (e) {
-      resultado.tablas[tabla] = '❌ ERROR: ' + e.message;
-      resultado.ok = false;
-      resultado.status = 'degraded';
-      resultado.errores.push('TABLA_ERROR: ' + tabla);
-    }
-  }
-
-  // 3. Smoke test
-  try {
-    const lots   = await query('SELECT id FROM lots   ORDER BY created_at DESC LIMIT 1');
-    const kardex = await query('SELECT id FROM kardex ORDER BY created_at DESC LIMIT 1');
-    resultado.ultima_lot    = lots[0]?.id   || 'vacía';
-    resultado.ultimo_kardex = kardex[0]?.id || 'vacío';
-  } catch (e) {
-    resultado.errores.push('SMOKE_TEST: ' + e.message);
-  }
-
-  const code = resultado.status === 'ok' ? 200 : resultado.status === 'degraded' ? 207 : 503;
-  return res.status(code).json(resultado);
 };

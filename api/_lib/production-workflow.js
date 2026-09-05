@@ -22,11 +22,25 @@ function orderCodeForId(id) {
   return `OP-${date}-${suffix}`;
 }
 
+function productionReleaseLockName({ userId, productId, quantity, originType, customerReference, finalCustomer }) {
+  const canonical = JSON.stringify({
+    userId: Number(userId),
+    productId: Number(productId),
+    quantity: roundQty(quantity),
+    originType: String(originType || '').trim().toUpperCase(),
+    customerReference: String(customerReference || '').trim().toUpperCase() || null,
+    finalCustomer: String(finalCustomer || '').trim().toLocaleLowerCase('es') || null,
+  });
+  return `wms_prod_${crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 49)}`;
+}
+
 async function defaultWarehouse(conn) {
   return resolvePrimaryWarehouse(conn);
 }
 
-async function releaseProductionOrder({ product, quantity, originType, customerReference, finalCustomer, notes, userId }) {
+async function releaseProductionOrder({
+  product, quantity, originType, customerReference, finalCustomer, notes, userId, confirmNew = false,
+}) {
   const qty = Number(quantity);
   const origin = String(originType || '').trim().toUpperCase();
   if (!Number.isFinite(qty) || qty <= 0) throw httpError(400, 'La cantidad planeada debe ser positiva');
@@ -41,10 +55,52 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
   }
 
   const conn = await createConnection();
+  let dedupeLock = null;
   try {
     await conn.beginTransaction();
     const finalProduct = await resolveProductReference(conn, product, { modes: ['PR'] });
     assertInternalProductionProduct(finalProduct);
+    dedupeLock = productionReleaseLockName({
+      userId,
+      productId: finalProduct.id,
+      quantity: qty,
+      originType: origin,
+      customerReference,
+      finalCustomer,
+    });
+    const [locks] = await conn.execute('SELECT GET_LOCK(?, 5) AS acquired', [dedupeLock]);
+    if (Number(locks[0]?.acquired) !== 1) {
+      throw httpError(409, 'No fue posible liberar la orden; intenta nuevamente');
+    }
+    const [recentOrders] = await conn.execute(
+      `SELECT id, codigo_orden, estado, cantidad_planeada, origen_tipo,
+              referencia_cliente, cliente_final, creado_en
+         FROM ordenes_produccion
+        WHERE producto_id = ? AND creado_por = ? AND estado <> 'CANCELADA'
+          AND ABS(cantidad_planeada - ?) < 0.000001
+          AND origen_tipo = ?
+          AND COALESCE(referencia_cliente, '') = ?
+          AND COALESCE(cliente_final, '') = ?
+          AND creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        ORDER BY creado_en DESC, id DESC LIMIT 1 FOR UPDATE`,
+      [finalProduct.id, userId, qty, origin, String(customerReference || '').trim(), String(finalCustomer || '').trim()]
+    );
+    if (recentOrders.length && !confirmNew) {
+      await conn.commit();
+      return {
+        order_id: recentOrders[0].id,
+        order_code: recentOrders[0].codigo_orden,
+        status: recentOrders[0].estado,
+        product: finalProduct,
+        planned_quantity: Number(recentOrders[0].cantidad_planeada),
+        origin_type: recentOrders[0].origen_tipo,
+        customer_reference: recentOrders[0].referencia_cliente,
+        final_customer: recentOrders[0].cliente_final,
+        already_released: true,
+        requires_confirmation: true,
+        picking: [],
+      };
+    }
     const warehouseId = await defaultWarehouse(conn);
     const [bom] = await conn.execute(
       `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
@@ -156,6 +212,7 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
       customer_reference: customerReference || null,
       final_customer: finalCustomer || null,
       picking,
+      already_released: false,
     };
     result.notification = await notifyRoles({
       event: `production_released:${created.insertId}`,
@@ -186,6 +243,9 @@ async function releaseProductionOrder({ product, quantity, originType, customerR
     await conn.rollback().catch(() => {});
     throw error;
   } finally {
+    if (dedupeLock) {
+      await conn.execute('SELECT RELEASE_LOCK(?) AS released', [dedupeLock]).catch(() => {});
+    }
     await conn.end().catch(() => {});
   }
 }
@@ -211,7 +271,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
     }
     const [allocations] = await conn.execute(
       `SELECT pml.id, pml.stock_id, pml.lote, pml.ubicacion_id, pml.cantidad_reservada,
-              pm.id AS material_id, pm.producto_id, s.bodega_id,
+              pm.id AS material_id, pm.producto_id, pm.unidad, s.bodega_id,
               p.siigo_code AS sku, p.nombre AS producto_nombre, u.codigo AS ubicacion
        FROM produccion_material_lotes pml
        JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
@@ -275,6 +335,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
         product_id: allocation.producto_id,
         sku: allocation.sku,
         product: allocation.producto_nombre,
+        unit: allocation.unidad,
         lpn: allocation.lote,
         location: allocation.ubicacion,
         qty_taken: qty,
@@ -324,7 +385,8 @@ async function confirmProductionMaterials({ orderId, userId }) {
         '*Materiales consumidos*',
         ...consumed.flatMap((item, index) => [
           `${index + 1}. *${item.sku}*`,
-          `   Cantidad: ${item.qty_taken}`,
+          `   Producto: ${item.product}`,
+          `   Cantidad: ${item.qty_taken} ${item.unit || ''}`,
           `   Lote: ${item.lpn}`,
           `   Ubicacion: ${item.location || 'N/A'}`,
           '',
@@ -341,4 +403,9 @@ async function confirmProductionMaterials({ orderId, userId }) {
   }
 }
 
-module.exports = { releaseProductionOrder, confirmProductionMaterials, roundQty };
+module.exports = {
+  releaseProductionOrder,
+  confirmProductionMaterials,
+  productionReleaseLockName,
+  roundQty,
+};

@@ -253,7 +253,7 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
         '',
         '*Alistamiento adicional FEFO*',
         ...picking.flatMap((item, index) => [
-          `${index + 1}. *${item.sku}*`,
+          `${index + 1}. *${item.sku}* - ${item.producto}`,
           `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
           `   Lote: ${item.lote}`,
           `   Ubicacion: ${item.ubicacion || item.ubicacion_id}`,
@@ -307,7 +307,7 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
 
     const [allocations] = await conn.execute(
       `SELECT pml.id, pml.stock_id, pml.lote, pml.ubicacion_id, pml.cantidad_reservada,
-              pm.id AS material_id, pm.producto_id, s.bodega_id,
+              pm.id AS material_id, pm.producto_id, pm.unidad, s.bodega_id,
               p.siigo_code AS sku, p.nombre AS producto_nombre, u.codigo AS ubicacion
        FROM produccion_material_lotes pml
        JOIN produccion_materiales pm ON pm.id = pml.produccion_material_id
@@ -368,6 +368,7 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
       consumed.push({
         sku: allocation.sku,
         producto: allocation.producto_nombre,
+        unidad: allocation.unidad,
         cantidad: qty,
         lote: allocation.lote,
         ubicacion: allocation.ubicacion,
@@ -404,8 +405,8 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
         '',
         '*Material adicional entregado*',
         ...consumed.flatMap((item, index) => [
-          `${index + 1}. *${item.sku}*`,
-          `   Cantidad: ${item.cantidad}`,
+          `${index + 1}. *${item.sku}* - ${item.producto}`,
+          `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
           `   Lote: ${item.lote}`,
           `   Ubicacion: ${item.ubicacion || 'N/A'}`,
           '',
@@ -422,7 +423,7 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
   }
 }
 
-async function cancelProductionReplenishment({ replenishmentId, orderId, userId }) {
+async function cancelProductionReplenishment({ replenishmentId, orderId, reason, userId }) {
   if (!replenishmentId && !orderId) throw httpError(400, 'La reposicion o la orden son obligatorias');
   const conn = await createConnection();
   try {
@@ -470,13 +471,31 @@ async function cancelProductionReplenishment({ replenishmentId, orderId, userId 
        WHERE id = ? AND estado = 'PENDIENTE_ALISTAMIENTO'`,
       [userId, replenishment.id]
     );
+    const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
-    return {
+    const result = {
       already_cancelled: false,
       replenishment_code: replenishment.codigo,
       order_code: replenishment.codigo_orden,
       released_allocations: allocations.length,
+      reason: String(reason || '').trim() || 'Cancelada por el responsable de produccion',
     };
+    result.notification = await notifyRoles({
+      event: `production_replenishment_cancelled:${replenishment.id}`,
+      roles: ['alistador'],
+      fallbackRoles: [],
+      excludeUserIds: [userId],
+      text: [
+        '*Reposicion cancelada*',
+        '',
+        `Reposicion: ${replenishment.codigo}`,
+        `Orden: ${replenishment.codigo_orden}`,
+        `Motivo: ${result.reason}`,
+        `Cancelo: ${actors[0]?.nombre || 'Usuario WMS'}`,
+        'La instruccion anterior ya no esta vigente. No alistes ni confirmes estos materiales.',
+      ].join('\n'),
+    }).catch(error => [{ status: 'error', error: error.message }]);
+    return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;

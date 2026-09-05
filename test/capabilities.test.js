@@ -62,6 +62,7 @@ test('risky workflow features are disabled by default', () => {
     'ALLOW_SPLIT_PRODUCTION_LINE',
     'ALLOW_DIRECT_DISPATCH_REQUEST',
     'ALLOW_MANUAL_RECEPTION',
+    'ALLOW_RETURN_DISPOSAL',
   ];
   const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   for (const name of names) delete process.env[name];
@@ -74,6 +75,7 @@ test('risky workflow features are disabled by default', () => {
   assert.equal(flags.allowSplitProductionLine, false);
   assert.equal(flags.allowDirectDispatchRequest, false);
   assert.equal(flags.allowManualReception, false);
+  assert.equal(flags.allowReturnDisposal, false);
   for (const name of names) {
     if (saved[name] == null) delete process.env[name];
     else process.env[name] = saved[name];
@@ -342,7 +344,7 @@ test('lot traceability follows returns from original lot to returned lot', () =>
   assert.match(source, /CONCAT\('DEVOLUCION_', dv\.estado\) AS condicion/u);
   assert.match(source, /JOIN recepciones r ON r\.id = dv\.recepcion_id/u);
   assert.match(source, /DEVOLUCION_\$\{k\.estado_devolucion\}/u);
-  assert.match(source, /sin cambio en disponible/u);
+  assert.match(source, /\$\{l\.unidad\} fisicas \(disponible \+\$\{availableDelta\}; saldo lote:/u);
 });
 
 test('BuilderBot prompt keeps the API contract and valid encoding', () => {

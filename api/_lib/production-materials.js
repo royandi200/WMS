@@ -8,7 +8,22 @@ function httpError(status, message) {
   return error;
 }
 
-async function adjustProductionMaterials({ orderId, productTerm, lot, locationId, locationCode, type, quantity, reason, userId }) {
+function materialAdjustmentLockName({ userId, orderId, productId, lot, locationId, type, quantity }) {
+  const canonical = JSON.stringify({
+    userId: Number(userId),
+    orderId: Number(orderId),
+    productId: Number(productId),
+    lot: String(lot || '').trim().toUpperCase(),
+    locationId: Number(locationId),
+    type: String(type || '').trim().toUpperCase(),
+    quantity: Number(Number(quantity).toFixed(4)),
+  });
+  return `wms_mat_${crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 50)}`;
+}
+
+async function adjustProductionMaterials({
+  orderId, productTerm, lot, locationId, locationCode, type, quantity, reason, userId, confirmNew = false,
+}) {
   const adjustmentType = String(type || '').trim().toUpperCase();
   const qty = Number(quantity);
   const locationReference = locationId || locationCode || null;
@@ -19,6 +34,7 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
   if (!Number.isFinite(qty) || qty <= 0) throw httpError(400, 'La cantidad debe ser positiva');
 
   const conn = await createConnection();
+  let dedupeLock = null;
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
@@ -53,6 +69,47 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
     if (!stocks.length) throw httpError(404, 'No existe stock para ese lote y ubicacion');
     const stock = stocks[0];
     const location = stock.ubicacion_id;
+    dedupeLock = materialAdjustmentLockName({
+      userId,
+      orderId: order.id,
+      productId: product.id,
+      lot: lpn,
+      locationId: location,
+      type: adjustmentType,
+      quantity: qty,
+    });
+    const [locks] = await conn.execute('SELECT GET_LOCK(?, 5) AS acquired', [dedupeLock]);
+    if (Number(locks[0]?.acquired) !== 1) {
+      throw httpError(409, 'No fue posible registrar el movimiento; intenta nuevamente');
+    }
+    const movementType = adjustmentType === 'ENTREGA_ADICIONAL' ? 'salida' : 'entrada';
+    const referenceType = adjustmentType === 'ENTREGA_ADICIONAL' ? 'consumo_produccion' : 'retorno_produccion';
+    const locationColumn = adjustmentType === 'ENTREGA_ADICIONAL' ? 'ubicacion_orig' : 'ubicacion_dest';
+    const [recent] = await conn.execute(
+      `SELECT id FROM movimientos
+        WHERE referencia_id = ? AND referencia_tipo = ? AND producto_id = ?
+          AND lote = ? AND ${locationColumn} = ? AND usuario_id = ?
+          AND tipo = ? AND ABS(cantidad - ?) < 0.000001
+          AND creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        ORDER BY creado_en DESC, id DESC LIMIT 1 FOR UPDATE`,
+      [order.id, referenceType, product.id, lpn, location, userId, movementType, qty]
+    );
+    if (recent.length && !confirmNew) {
+      await conn.commit();
+      return {
+        order_code: order.codigo_orden,
+        tipo: adjustmentType,
+        sku: product.siigo_code,
+        producto: product.nombre,
+        unidad: material.unidad,
+        lote: lpn,
+        ubicacion_id: location,
+        ubicacion: stock.ubicacion_codigo,
+        cantidad: qty,
+        already_recorded: true,
+        requires_confirmation: true,
+      };
+    }
 
     if (adjustmentType === 'ENTREGA_ADICIONAL') {
       const [updated] = await conn.execute(
@@ -97,8 +154,6 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
       await conn.execute(`UPDATE produccion_materiales SET cantidad_devuelta = cantidad_devuelta + ?, actualizado_en = NOW() WHERE id = ?`, [qty, material.id]);
     }
 
-    const movementType = adjustmentType === 'ENTREGA_ADICIONAL' ? 'salida' : 'entrada';
-    const referenceType = adjustmentType === 'ENTREGA_ADICIONAL' ? 'consumo_produccion' : 'retorno_produccion';
     await conn.execute(
       `INSERT INTO movimientos
          (tipo, producto_id, bodega_orig, bodega_dest, ubicacion_orig, ubicacion_dest,
@@ -124,13 +179,27 @@ async function adjustProductionMaterials({ orderId, productTerm, lot, locationId
        reason || adjustmentType, userId]
     );
     await conn.commit();
-    return { order_code: order.codigo_orden, tipo: adjustmentType, sku: product.siigo_code, lote: lpn, ubicacion_id: location, ubicacion: stock.ubicacion_codigo, cantidad: qty };
+    return {
+      order_code: order.codigo_orden,
+      tipo: adjustmentType,
+      sku: product.siigo_code,
+      producto: product.nombre,
+      unidad: material.unidad,
+      lote: lpn,
+      ubicacion_id: location,
+      ubicacion: stock.ubicacion_codigo,
+      cantidad: qty,
+      already_recorded: false,
+    };
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;
   } finally {
+    if (dedupeLock) {
+      await conn.execute('SELECT RELEASE_LOCK(?) AS released', [dedupeLock]).catch(() => {});
+    }
     await conn.end().catch(() => {});
   }
 }
 
-module.exports = { adjustProductionMaterials };
+module.exports = { adjustProductionMaterials, materialAdjustmentLockName };

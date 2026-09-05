@@ -4,6 +4,7 @@ import { useDispatchStore } from '../store/dispatchStore'
 import { confirmDispatch, syncSiigoInvoices } from '../api/dispatch.api'
 import { useAuthStore } from '../store/authStore'
 import { openDispatchSheet } from '../utils/dispatchSheet'
+import { formatBogotaDateTime } from '../utils/dateTime'
 
 export default function DespachoPage() {
   const [tab, setTab] = useState(0)
@@ -75,18 +76,18 @@ export default function DespachoPage() {
 }
 
 function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfirm }) {
-  const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+  const formatDate = formatBogotaDateTime
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[1100px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Factura', 'Despacho', 'Cliente', 'SKU', 'Lote / ubicacion', 'Facturado', 'Reservado', 'Pendiente', 'Estado', 'Fecha', 'Accion'].map((label) => (
+          {['Factura', 'Despacho', 'Cliente', 'SKU', 'Lote / ubicacion', 'Facturado', 'Asignado', 'Reserva activa', 'Despachado', 'Pendiente', 'Estado', 'Fecha', 'Accion'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
         <tbody>
-          {loading && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Cargando despachos...</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">{pending ? 'Sin despachos pendientes' : 'Sin despachos historicos'}</td></tr>}
+          {loading && <tr><td colSpan={13} className="px-4 py-10 text-center text-muted">Cargando despachos...</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={13} className="px-4 py-10 text-center text-muted">{pending ? 'Sin despachos pendientes' : 'Sin despachos historicos'}</td></tr>}
           {!loading && rows.map((row, index) => {
             const ready = row.estado === 'picking' && Number(row.cantidad_pendiente || 0) <= 0 && row.siigo_invoice_id
             const items = row.items?.length ? row.items : [row]
@@ -108,7 +109,9 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
                   </div>
                 ))}</td>
                 <td className="px-4 py-3 tabular-nums">{row.cantidad_facturada ?? '-'}</td>
-                <td className="px-4 py-3 tabular-nums">{row.cantidad_reservada ?? '-'}</td>
+                <td className="px-4 py-3 tabular-nums">{row.cantidad_asignada ?? row.cantidad_reservada ?? '-'}</td>
+                <td className="px-4 py-3 tabular-nums">{row.reserva_activa ?? '-'}</td>
+                <td className="px-4 py-3 tabular-nums">{row.cantidad_despachada_total ?? '-'}</td>
                 <td className={`px-4 py-3 tabular-nums ${Number(row.cantidad_pendiente) > 0 ? 'text-yellow-400' : 'text-green-400'}`}>{row.cantidad_pendiente ?? '-'}</td>
                 <td className="px-4 py-3"><span className="text-xs font-semibold">{row.estados_demanda || row.estado}</span></td>
                 <td className="px-4 py-3 text-muted text-xs">{formatDate(row.despachado_en || row.creado_en)}</td>

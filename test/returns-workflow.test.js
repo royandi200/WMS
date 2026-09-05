@@ -6,6 +6,7 @@ const {
   normalizeReturnInput,
   normalizeReturnStatus,
   parseCustomerReturnReferences,
+  assertReturnDispositionEnabled,
 } = require('../api/_lib/returns-workflow');
 
 test('normalizes a traceable quarantined customer return', () => {
@@ -24,6 +25,7 @@ test('normalizes a traceable quarantined customer return', () => {
     customer: '',
     destinationLocation: '',
     notes: '',
+    confirmNew: false,
     quantity: 1,
     status: 'CUARENTENA',
   });
@@ -48,6 +50,19 @@ test('maps return disposition to a supported physical lot status', () => {
   assert.equal(lotStatusForReturn('RECUPERABLE'), 'DISPONIBLE');
   assert.equal(lotStatusForReturn('CUARENTENA'), 'CUARENTENA');
   assert.equal(lotStatusForReturn('DESTRUCCION'), 'PENDIENTE_DISPOSICION');
+});
+
+test('final return disposal stays disabled unless explicitly enabled', () => {
+  assert.throws(
+    () => assertReturnDispositionEnabled('DESTRUCCION', { allowReturnDisposal: false }),
+    /disposicion final de devoluciones esta deshabilitada/u
+  );
+  assert.doesNotThrow(
+    () => assertReturnDispositionEnabled('DESTRUCCION', { allowReturnDisposal: true })
+  );
+  assert.doesNotThrow(
+    () => assertReturnDispositionEnabled('CUARENTENA', { allowReturnDisposal: false })
+  );
 });
 
 test('recovers trace references from the immutable user message', () => {

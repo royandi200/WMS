@@ -12,6 +12,7 @@ module.exports = async (req, res) => {
     const data = await cancelProductionReplenishment({
       replenishmentId: body.replenishment_id || body.codigo_reposicion,
       orderId: body.order_id || body.codigo_orden,
+      reason: body.motivo || body.reason,
       userId: user.id,
     });
     return res.status(200).json({ ok: true, data });
