@@ -13,7 +13,7 @@ const {
   normalizePurchaseOrderInput,
   purchaseOrderInputHash,
 } = require('../api/_lib/purchase-orders');
-const { internalReceptionLot, normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
+const { normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
 const { notificationsEnabled, normalizePhone, maskPhone, recipientPhones } = require('../api/_lib/builderbot-notifications');
 const {
@@ -176,9 +176,9 @@ test('reception distributions separate available and blocked inventory', () => {
   const result = normalizeReceptionDistributions({
     qty_received: 10,
     distributions: [
-      { condicion: 'buena', cantidad: 7, lote: 'LOT-A', ubicacion_id: 1 },
-      { condicion: 'cuarentena', cantidad: 2, lote: 'LOT-Q', ubicacion_id: 2, motivo: 'Revision de calidad' },
-      { condicion: 'desechada', cantidad: 1, lote: 'LOT-R', motivo: 'Empaque roto' },
+      { condicion: 'buena', cantidad: 7, lote: 'LOT-A', ubicacion_id: 1, fecha_venc: '2027-12-31' },
+      { condicion: 'cuarentena', cantidad: 2, lote: 'LOT-Q', ubicacion_id: 2, fecha_venc: '2027-12-31', motivo: 'Revision de calidad' },
+      { condicion: 'desechada', cantidad: 1, lote: 'LOT-R', ubicacion_id: 3, fecha_venc: '2027-12-31', motivo: 'Empaque roto' },
     ],
   });
   assert.equal(result.totals.received, 10);
@@ -188,30 +188,39 @@ test('reception distributions separate available and blocked inventory', () => {
   assert.throws(
     () => normalizeReceptionDistributions({
       qty_received: 9,
-      distributions: [{ condicion: 'buena', cantidad: 10, lote: 'LOT-A', ubicacion_id: 1 }],
+      distributions: [{ condicion: 'buena', cantidad: 10, lote: 'LOT-A', ubicacion_id: 1, fecha_venc: '2027-12-31' }],
     }),
     /no coincide/
   );
 });
 
-test('reception requires supplier lots only for lot-controlled products', () => {
+test('reception always requires supplier lot, expiry and physical location', () => {
   assert.throws(
     () => normalizeReceptionDistributions({
       distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1 }],
     }),
-    /Lote requerido/u
+    /Lote del proveedor requerido/u
   );
 
-  const internal = normalizeReceptionDistributions({
-    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1 }],
-  }, { requiresLot: false, receptionId: 60, itemId: 82 });
-  assert.equal(internal.distributions[0].lot, 'RECINT-60-82-01');
-  assert.equal(internal.distributions[0].internalLot, true);
-  assert.equal(internalReceptionLot(60, 82, 1), 'RECINT-60-82-02');
+  assert.throws(() => normalizeReceptionDistributions({
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1, lote: 'PROV-123' }],
+  }), /Vencimiento requerido/u);
+  assert.throws(() => normalizeReceptionDistributions({
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1, lote: 'PROV-123', fecha_venc: '2027-02-31' }],
+  }), /Vencimiento requerido/u);
+  assert.throws(() => normalizeReceptionDistributions({
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1.5, lote: 'PROV-123', fecha_venc: '2027-12-31' }],
+  }), /Ubicacion requerida/u);
+  assert.throws(() => normalizeReceptionDistributions({
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1, lote: 'X'.repeat(51), fecha_venc: '2027-12-31' }],
+  }), /Lote demasiado largo/u);
+  assert.throws(() => normalizeReceptionDistributions({
+    distributions: [{ condicion: 'RECHAZADO', cantidad: 2, lote: 'PROV-123', fecha_venc: '2027-12-31', motivo: 'roto' }],
+  }), /Ubicacion requerida/u);
 
   const supplied = normalizeReceptionDistributions({
-    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1, lote: 'PROV-123' }],
-  }, { requiresLot: false, receptionId: 60, itemId: 82 });
+    distributions: [{ condicion: 'DISPONIBLE', cantidad: 2, ubicacion_id: 1, lote: 'PROV-123', fecha_venc: '2027-12-31' }],
+  });
   assert.equal(supplied.distributions[0].lot, 'PROV-123');
   assert.equal(supplied.distributions[0].internalLot, false);
 });

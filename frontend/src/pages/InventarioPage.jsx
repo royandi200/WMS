@@ -2,7 +2,7 @@ import MapaBodega from '../components/MapaBodega'
 import { useEffect, useState } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
 
-const TABS = ['Resumen', 'Stock Bajo', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
+const TABS = ['Resumen', 'Stock Bajo', 'Permanencia', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
 
 export default function InventarioPage() {
   const [tab, setTab] = useState(0)
@@ -11,19 +11,20 @@ export default function InventarioPage() {
   const [searched, setSearched] = useState(false)
 
   const {
-    summary, lowStock, loading, error,
-    fetchSummary, fetchLowStock, fetchProductStock, fetchLotDetail, clearError,
+    summary, lowStock, aging, loading, loadingAging, error,
+    fetchSummary, fetchLowStock, fetchAging, fetchProductStock, fetchLotDetail, clearError,
   } = useInventoryStore()
 
   useEffect(() => { fetchSummary() }, [])
   useEffect(() => { if (tab === 1) fetchLowStock() }, [tab])
+  useEffect(() => { if (tab === 2) fetchAging() }, [tab])
   useEffect(() => { setQuery(''); setResult(null); setSearched(false); clearError() }, [tab])
 
   const handleSearch = async (e) => {
     e.preventDefault()
     if (!query.trim()) return
     setSearched(false)
-    const data = tab === 2
+    const data = tab === 3
       ? await fetchProductStock(query.trim())
       : await fetchLotDetail(query.trim())
     setResult(data)
@@ -61,7 +62,7 @@ export default function InventarioPage() {
           {loading && !summary && <Spinner />}
           {summary && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {Object.entries(summary).map(([k, v]) => (
+              {Object.entries(summary).filter(([key]) => key !== 'permanencia_dias').map(([k, v]) => (
                 <div key={k} className="bg-surface border border-border rounded-lg p-4">
                   <p className="text-xs text-muted mb-1 capitalize">{k.replace(/_/g, ' ')}</p>
                   <p className="text-2xl font-bold text-primary tabular-nums">{v ?? '—'}</p>
@@ -94,6 +95,28 @@ export default function InventarioPage() {
       )}
 
       {tab === 2 && (
+        <div className="space-y-4">
+          <div>
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Lotes con permanencia prolongada</h2>
+              <p className="text-xs text-muted mt-1">Cada lote se compara con el umbral configurado para su SKU. El valor predeterminado es {aging.default_days || 90} dias.</p>
+            </div>
+          </div>
+          {loadingAging && <Spinner />}
+          {!loadingAging && aging.rows.length === 0 && <EmptyState icon="◷" text="No hay lotes que superen su permanencia configurada" />}
+          {!loadingAging && aging.rows.length > 0 && <Table
+            cols={['SKU', 'Producto', 'Lote', 'Estado', 'Ubicacion', 'Ingreso', 'Permanencia', 'Umbral', 'Exceso', 'Saldo fisico', 'Disponible', 'Vence']}
+            rows={aging.rows.map((row) => [
+              row.sku, row.producto, row.lpn, <StatusBadge value={row.estado} />, `${row.bodega} / ${row.ubicacion || 'Sin ubicacion'}`,
+              formatDate(row.fecha_ingreso), <span className="font-semibold text-yellow-400">{row.dias_permanencia} dias</span>,
+              `${row.dias_limite} dias`, <span className="text-danger font-semibold">+{row.dias_exceso} dias</span>,
+              formatQuantity(row.cantidad, row.unidad), formatQuantity(row.disponible, row.unidad), formatDate(row.fecha_vencimiento),
+            ])}
+          />}
+        </div>
+      )}
+
+      {tab === 3 && (
         <SearchPane
           label="SKU o ID del producto"
           placeholder="Ej: RM-TAP-MED"
@@ -107,7 +130,7 @@ export default function InventarioPage() {
         </SearchPane>
       )}
 
-      {tab === 3 && (
+      {tab === 4 && (
         <SearchPane
           label="LPN del lote"
           placeholder="Ej: L-2024-001"
@@ -120,7 +143,7 @@ export default function InventarioPage() {
           {searched && !result && !loading && <EmptyState icon="▦" text="Lote no encontrado" />}
         </SearchPane>
       )}
-      {tab === 4 && (
+      {tab === 5 && (
         <MapaBodega />
       )}
     </div>

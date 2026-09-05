@@ -1,6 +1,7 @@
 // GET /api/v1/inventory/summary
 const { query } = require('../../_lib/db');
 const { cors, requireAuth } = require('../../_lib/auth');
+const { DEFAULT_DWELL_DAYS } = require('../../_lib/inventory-aging');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -24,18 +25,36 @@ module.exports = async (req, res) => {
     const bajoRows = await query(
       `SELECT COUNT(*) AS cnt
        FROM (
-         SELECT s.producto_id
-         FROM stock s
-         JOIN productos p ON p.id = s.producto_id
-         WHERE p.activo = 1
-         GROUP BY s.producto_id
-         HAVING SUM(s.cantidad) <= MAX(p.stock_minimo)
+         SELECT p.id
+         FROM productos p
+         LEFT JOIN stock s ON s.producto_id = p.id
+         LEFT JOIN lots l ON l.product_id = s.producto_id AND BINARY l.lpn = BINARY s.lote
+         LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.bodega_id = s.bodega_id
+         LEFT JOIN bodegas b ON b.id = s.bodega_id
+         WHERE p.activo = 1 AND p.control_stock = 1 AND p.stock_minimo > 0
+         GROUP BY p.id, p.stock_minimo
+         HAVING COALESCE(SUM(CASE
+           WHEN l.status = 'DISPONIBLE'
+            AND (l.expiry_date IS NULL OR l.expiry_date >= CURDATE())
+            AND u.id IS NOT NULL AND u.activa = 1 AND b.activa = 1
+           THEN GREATEST(s.cantidad - COALESCE(s.reservada, 0), 0)
+           ELSE 0 END), 0) <= p.stock_minimo
        ) sub`
     );
     const bajo_stock = bajoRows[0]?.cnt ?? 0;
 
     const alertasRows = await query(`SELECT COUNT(*) AS cnt FROM v_alertas_stock`);
     const vencRows    = await query(`SELECT COUNT(*) AS cnt FROM v_vencimientos_proximos`);
+    const dwellRows = await query(
+      `SELECT COUNT(DISTINCT l.id) AS cnt
+        FROM lots l
+        JOIN productos p ON p.id = l.product_id
+        WHERE l.status NOT IN ('DESPACHADO', 'AGOTADO')
+          AND l.qty_current > 0
+          AND DATEDIFF(CURDATE(), DATE(l.created_at)) >= p.permanencia_max_dias
+          `,
+      []
+    );
 
     return res.status(200).json({
       ok: true,
@@ -48,6 +67,8 @@ module.exports = async (req, res) => {
         bajo_stock:           Number(bajo_stock),
         alertas_stock:        Number(alertasRows[0]?.cnt)      || 0,
         vencimientos_proximos:Number(vencRows[0]?.cnt)         || 0,
+        permanencia_alertas:  Number(dwellRows[0]?.cnt)        || 0,
+        permanencia_dias:     DEFAULT_DWELL_DAYS,
       }
     });
   } catch (err) {

@@ -25,6 +25,7 @@ const CAPABILITIES = Object.freeze({
   APPROVALS_DECIDE: 'approvals.decide',
   CATALOG_READ: 'catalog.read',
   CATALOG_MANAGE: 'catalog.manage',
+  ALERT_SETTINGS_MANAGE: 'alert_settings.manage',
   SIIGO_READ: 'siigo.read',
   SIIGO_POLL: 'siigo.poll',
   SIIGO_SYNC: 'siigo.sync',
@@ -49,7 +50,6 @@ const READ_ONLY = [
 // workflow-specific roles. New roles are intentionally least-privileged.
 const ROLE_CAPABILITIES = Object.freeze({
   admin: ['*'],
-  administrador: ['*'],
   supervisor: ['*'],
   validador: [
     ...READ_ONLY,

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Bell, Boxes, ClipboardCheck, ClipboardList, Factory, FileClock, LayoutDashboard,
-  PackageCheck, PackageOpen, PackageSearch, RefreshCcw, RotateCcw, Trash2,
+  PackageCheck, PackageOpen, PackageSearch, RefreshCcw, RotateCcw, Settings2, Trash2,
   Truck, Users, X,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
@@ -24,6 +24,7 @@ const NAV = [
   { group: 'Catalogos', items: [{ to: '/productos', icon: PackageSearch, label: 'Productos', capability: 'catalog.read' }] },
   { group: 'Sistema', items: [
     { to: '/usuarios', icon: Users, label: 'Usuarios', capability: 'users.manage' },
+    { to: '/configuracion-alertas', icon: Settings2, label: 'Configurar alertas', capability: 'alert_settings.manage', adminOnly: true },
     { to: '/notificaciones', icon: Bell, label: 'Notificaciones', capability: 'webhook.logs.read' },
     { to: '/webhook-logs', icon: RefreshCcw, label: 'Webhook Logs', capability: 'webhook.logs.read' },
   ] },
@@ -33,7 +34,10 @@ export default function Sidebar({ open, mobile = false, onClose }) {
   const user = useAuthStore((state) => state.user)
   const capabilities = user?.capabilities || []
   const legacyAdmin = ['admin', 'supervisor'].includes(String(user?.rol || '').toLowerCase())
-  const allowed = (capability) => legacyAdmin || capabilities.includes('*') || capabilities.includes(capability)
+  const allowed = (item) => {
+    if (item.adminOnly && String(user?.rol || '').toLowerCase() !== 'admin') return false
+    return legacyAdmin || capabilities.includes('*') || capabilities.includes(item.capability)
+  }
   return (
     <aside className={`flex flex-col bg-surface border-r border-border transition-all duration-200 ${mobile ? 'w-64' : open ? 'w-56' : 'w-14'} flex-shrink-0 h-full`}>
       <div className="flex items-center gap-2 h-14 px-4 border-b border-border flex-shrink-0">
@@ -43,7 +47,7 @@ export default function Sidebar({ open, mobile = false, onClose }) {
       </div>
       <nav className="flex-1 overflow-y-auto py-3">
         {NAV.map(({ group, items }) => {
-          const visible = items.filter((item) => allowed(item.capability))
+          const visible = items.filter(allowed)
           if (!visible.length) return null
           return <div key={group} className="mb-2">
             {(open || mobile) && <p className="px-4 py-1 text-[10px] font-semibold uppercase text-muted select-none">{group}</p>}

@@ -406,7 +406,9 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
         </button>
       </div>
 
-      <div className="flex gap-4 items-start">
+      <div className={`grid items-start gap-4 ${selected
+        ? 'grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(400px,0.85fr)] 2xl:grid-cols-[minmax(0,1.5fr)_minmax(480px,1fr)]'
+        : 'grid-cols-1'}`}>
 
         {/* Panel izquierdo — pasillos + estante */}
         <div className="flex-1 min-w-0">
@@ -524,7 +526,7 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
 
         {/* Panel derecho — detalle */}
         {selected && (
-          <div className="shrink-0 w-64 bg-surface border border-border rounded-xl overflow-hidden"
+          <div className="w-full bg-surface border border-border rounded-xl overflow-hidden xl:sticky xl:top-4"
             style={{animation:'slideIn .15s ease'}}>
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -555,11 +557,11 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
                   <p className="text-[10px] font-semibold uppercase text-muted">Asignacion prevista</p>
                 </div>
                 {selected.uso_reservado && <p className="mb-2 text-xs font-medium text-primary">{selected.uso_reservado}</p>}
-                <div className="max-h-40 space-y-2 overflow-y-auto">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                   {(selected.asignaciones || []).map((item, index) => (
                     <div key={`${item.sku}-${index}`} className="min-w-0">
-                      <p className="truncate font-mono text-xs text-foreground">{item.sku}</p>
-                      <p className="truncate text-[10px] text-muted">{item.nombre}</p>
+                      <p className="break-all font-mono text-xs text-foreground">{item.sku}</p>
+                      <p className="text-[11px] leading-relaxed text-muted">{item.nombre}</p>
                     </div>
                   ))}
                 </div>
@@ -567,7 +569,7 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
             )}
 
             {/* Items de stock */}
-            <div className="max-h-48 overflow-y-auto">
+            <div className="max-h-[58vh] overflow-y-auto">
               <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock fisico</p>
               {selected.items.length === 0 ? (
                 <div className="flex flex-col items-center py-6 gap-1">
@@ -575,11 +577,11 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
                   <span className="text-xs text-muted">Vacía</span>
                 </div>
               ) : selected.items.map((item,i) => (
-                <div key={i} className="flex items-center justify-between gap-2 px-4 py-2 border-b border-border/20 last:border-0 hover:bg-white/3">
+                <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 px-4 py-3 border-b border-border/20 last:border-0 hover:bg-white/3">
                   <div className="min-w-0">
-                    <p className="text-xs font-mono text-primary truncate">{item.sku}</p>
-                    <p className="text-[10px] text-muted truncate">{item.nombre}</p>
-                    {item.lote!=='—'&&<p className="text-[9px] text-muted/60">Lote: {item.lote}</p>}
+                    <p className="text-xs font-mono text-primary break-all">{item.sku}</p>
+                    <p className="text-[11px] leading-relaxed text-muted">{item.nombre}</p>
+                    {item.lote!=='—'&&<p className="mt-1 break-all text-[10px] text-muted/70">Lote: {item.lote}</p>}
                   </div>
                   <span className="text-sm font-bold tabular-nums text-foreground shrink-0">
                     {Number(item.cantidad).toLocaleString('es-CO',{maximumFractionDigits:1})}

@@ -28,24 +28,31 @@ function internalReceptionLot(receptionId, itemId, distributionIndex = 0) {
   return `RECINT-${reception}-${item}-${String(index + 1).padStart(2, '0')}`;
 }
 
+function isValidIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 function normalizeReceptionDistributions(input = {}, options = {}) {
   if (!Array.isArray(input.distributions) || !input.distributions.length) return null;
-  const requiresLot = options.requiresLot !== false;
   const distributions = input.distributions.map((entry, index) => {
     const condition = CONDITION_ALIASES[String(entry.condicion || entry.condition || '').trim().toUpperCase()];
     const quantity = Number(entry.cantidad ?? entry.quantity);
     const supplierLot = String(entry.lote || entry.lpn || entry.lot_id || '').trim();
-    const lot = supplierLot || (!requiresLot
-      ? internalReceptionLot(options.receptionId, options.itemId, index)
-      : '');
-    const locationId = Number(entry.ubicacion_id || entry.location_id || 0) || null;
+    const lot = supplierLot;
+    const rawLocationId = Number(entry.ubicacion_id || entry.location_id || 0);
+    const locationId = Number.isSafeInteger(rawLocationId) && rawLocationId > 0 ? rawLocationId : null;
     const reason = String(entry.motivo || entry.reason || '').trim() || null;
+    const expiryDate = String(entry.fecha_venc || entry.expiry_date || '').trim();
     if (!condition) throw inputError(`Condicion invalida en distribucion ${index + 1}`);
     if (!Number.isFinite(quantity) || quantity <= 0) throw inputError(`Cantidad invalida en distribucion ${index + 1}`);
-    if (!lot) throw inputError(`Lote requerido en distribucion ${index + 1}`);
-    if (['DISPONIBLE', 'CUARENTENA'].includes(condition) && !locationId) {
-      throw inputError(`Ubicacion requerida en distribucion ${index + 1}`);
+    if (!lot) throw inputError(`Lote del proveedor requerido en distribucion ${index + 1}`);
+    if (lot.length > 50) throw inputError(`Lote demasiado largo en distribucion ${index + 1}`);
+    if (!isValidIsoDate(expiryDate)) {
+      throw inputError(`Vencimiento requerido en formato YYYY-MM-DD en distribucion ${index + 1}`);
     }
+    if (!locationId) throw inputError(`Ubicacion requerida en distribucion ${index + 1}`);
     if (condition !== 'DISPONIBLE' && !reason) {
       throw inputError(`Motivo requerido en distribucion ${index + 1}`);
     }
@@ -53,10 +60,10 @@ function normalizeReceptionDistributions(input = {}, options = {}) {
       condition,
       quantity,
       lot,
-      supplierLot: supplierLot || null,
-      internalLot: !supplierLot,
+      supplierLot,
+      internalLot: false,
       locationId,
-      expiryDate: entry.fecha_venc || entry.expiry_date || null,
+      expiryDate,
       reason,
     };
   });

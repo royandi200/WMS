@@ -1,6 +1,6 @@
 # Estado y bitácora del proyecto WMS
 
-Última actualización: 2026-09-02
+Última actualización: 2026-09-05
 
 ## Propósito
 
@@ -14,6 +14,14 @@ No reemplaza:
 - `docs/validacion-flujos-bodega-2026-08-04.md`, que documenta los smokes integrados.
 
 ## Resumen actual
+
+### 2026-09-04 - Bitacora de pruebas manuales y pendientes
+
+- Se agrega [la bitacora de septiembre](bitacora-pruebas-manuales-2026-09.md) y se enlaza desde la guia funcional.
+- Consolida la evidencia de consultas/permisos, recepcion IO, despacho sintetico e idempotencia secuencial, y lectura completa de trazabilidad mediante `Read more`.
+- Separa problemas confirmados, observaciones por investigar y mejoras propuestas; no implica autorizacion para implementarlas.
+- Cada nueva prueba requiere anuncio previo de archivos necesarios, registro del resultado, informe corto y aprobacion de Juan antes de continuar.
+- Esta actualizacion es documental. No ejecuta nuevas pruebas, cambios en base, correcciones de runtime ni despliegues.
 
 ### 2026-09-02 - Guia funcional y validacion integral para socios
 
@@ -650,6 +658,20 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - Se agrego auditoria de usuario y fecha de vinculacion, idempotencia al crear la remision y la accion Kardex `ENVIO_MAQUILA_3Q`.
 - Dashboard: `Nueva remision`, estado visible de OC pendiente y formulario `Vincular OC`.
 - Validacion local: 171 pruebas aprobadas y build Vite aprobado.
+
+### 2026-09-05: controles de recepcion y visibilidad operativa
+
+- Toda recepcion fisica exige cantidad, condicion, lote del proveedor, vencimiento y ubicacion para cada distribucion, tanto en dashboard como por WhatsApp.
+- El PDF y la ubicacion preferida por SKU se muestran como referencias; no completan ni confirman datos fisicos de forma automatica. Se permite escoger otra ubicacion activa de la misma bodega.
+- Las entregas parciales pueden reutilizar un lote de proveedor existente solo si coinciden SKU, bodega, condicion y vencimiento; la actualizacion queda transaccional y conserva Kardex por recepcion.
+- Se agrego la alerta de permanencia por lote con saldo fisico, incluido inventario bloqueado. Cada SKU usa su propio umbral persistente y el valor predeterminado es 90 dias.
+- El mapa de bodega amplía el panel de detalle al seleccionar una ubicacion y deja visibles nombres, lotes y cantidades sin truncado horizontal.
+- Despachos permite abrir una hoja imprimible y guardarla como PDF con factura, cliente, SKU, lote, ubicacion y cantidad. La exportacion CSV permanece implementada, pero no se expone en la interfaz.
+- Se agrego `Sistema > Configurar alertas`, visible y operable solo para administradores, para modificar stock minimo y permanencia maxima por SKU. Cada cambio queda auditado en `system_logs` y no altera inventario.
+- Se confirmo `admin` como el unico identificador tecnico del perfil Administrador; `administrador` no se mantiene como un segundo rol ni como alias de autorizacion.
+- La alerta de stock minimo ahora usa disponibilidad operativa: excluye lotes vencidos, bloqueados o sin ubicacion activa e incluye productos activos con saldo cero.
+- Se revalido el flujo 3Q existente: remision, reserva FEFO, salida transaccional, vinculacion a OC y recepcion parcial o total.
+- La migracion 29 se aplico en la base configurada y asigno 90 dias como valor inicial. Validacion local: 183 pruebas aprobadas y build Vite aprobado. Cambios de aplicacion aun no desplegados.
 
 ## Regla de mantenimiento
 

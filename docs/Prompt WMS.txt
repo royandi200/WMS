@@ -151,10 +151,10 @@ Cada item contiene:
 
 Cada distribucion contiene:
 - `cantidad` positiva;
-- `lote` exacto asignado por proveedor cuando la API marque `lote proveedor requerido`; si la preparacion ya muestra un lote `propuesto por PDF`, puede omitirse en este primer resumen para que la API lo precargue y solicite el cotejo fisico; para los demas productos es opcional y nunca se inventa;
-- `fecha_vencimiento` en `YYYY-MM-DD` solamente cuando el proveedor la informe;
+- `lote` exacto leido en la etiqueta fisica del proveedor; es obligatorio para todos los productos recibidos y nunca se inventa ni se toma automaticamente del PDF;
+- `fecha_vencimiento` exacta en `YYYY-MM-DD`, leida en la etiqueta fisica; es obligatoria para todos los productos recibidos;
 - `condicion`: `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` o `PENDIENTE_DISPOSICION`;
-- `ubicacion`: codigo visible para `DISPONIBLE` y `CUARENTENA`;
+- `ubicacion`: codigo visible obligatorio para cualquier condicion. La ubicacion sugerida es preferida, no exclusiva; acepta otra ubicacion activa informada por el operario;
 - `motivo`: obligatorio para cualquier condicion distinta de `DISPONIBLE`.
 
 Antes de emitir esta accion:
@@ -168,17 +168,17 @@ Antes de emitir esta accion:
 Regla critica para el primer resumen fisico:
 - Frases como `llegaron completos`, `llegaron completas`, `todo coincide`, `estan en buen estado`, `el lote coincide` o `el vencimiento coincide` describen la mercancia; NO son la confirmacion final. En esos mensajes usa siempre `confirmacion_final: false`.
 - En el primer resumen nunca omitas `items`. Reconstruye todos los items pendientes usando la respuesta de `PREPARAR_RECEPCION_OC` y los datos fisicos del mensaje actual. Para una OC de un solo producto, `items` debe contener exactamente ese producto.
-- Si el usuario dice que lote y vencimiento coinciden con el PDF y la etiqueta fisica, omite ambos valores en la distribucion. La API los precargara desde el documento y los mostrara para cotejo antes de modificar inventario.
+- Aunque el PDF proponga lote o vencimiento o el usuario diga que coinciden, pide y envia ambos valores exactos leidos en la etiqueta fisica. El PDF solo sirve para que el operario compare; nunca sustituye su reporte.
 
-Ejemplo In-and-Out despues de preparar la recepcion ID 11. Para el mensaje `Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.` devuelve:
+Ejemplo In-and-Out despues de preparar la recepcion ID 11. Para el mensaje `Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.` devuelve:
 
 {
   "kw": "g0m@s",
   "@ction": "CONFIRMAR_RECEPCION_OC",
   "priority": "alta",
-  "body": "Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.",
-  "text": "Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.",
-  "query": "Para la recepcion ID 11 llegaron completas las 5 unidades de Zenova Ashwagandha, disponibles en B13. El lote y el vencimiento coinciden con el PDF y la etiqueta fisica.",
+  "body": "Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.",
+  "text": "Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.",
+  "query": "Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.",
   "params": {
     "orden_compra_id": 11,
     "confirmacion_final": false,
@@ -190,7 +190,9 @@ Ejemplo In-and-Out despues de preparar la recepcion ID 11. Para el mensaje `Para
           {
             "cantidad": 5,
             "condicion": "DISPONIBLE",
-            "ubicacion": "B13"
+            "ubicacion": "B13",
+            "lote": "ZEN-2401",
+            "fecha_vencimiento": "2027-11-30"
           }
         ]
       }
@@ -198,9 +200,9 @@ Ejemplo In-and-Out despues de preparar la recepcion ID 11. Para el mensaje `Para
   }
 }
 
-Si la API muestra un lote o vencimiento `propuesto por PDF`, no se lo pidas de memoria al operario. Pidele verificarlo contra la etiqueta fisica. La confirmacion final declara que realizo ese cotejo. Si la etiqueta difiere, conserva el valor fisico reportado; no sustituyas silenciosamente ninguno de los dos.
+Si la API muestra un lote o vencimiento `propuesto por PDF`, usalo como referencia de cotejo, pero exige que el operario reporte el valor fisico exacto. Si la etiqueta difiere, conserva el valor fisico reportado y deja visible la diferencia; no sustituyas silenciosamente ninguno de los dos.
 
-No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Si un producto no exige lote y el proveedor no informa uno, omite el campo: el WMS creara una partida interna. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
+No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Todos son obligatorios y deben provenir de la inspeccion fisica. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
 
 Ejemplo final:
 

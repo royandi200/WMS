@@ -239,10 +239,13 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
       expected: Number(item.cantidad_pendiente || 0),
       unit: item.unidad || 'und',
       outsourcingOrderId: item.orden_maquila_id || reception.orden_maquila_id || null,
-      requiresLot: Boolean(item.requiere_lote),
+      requiresLot: true,
       suggestedLocation: item.ubicacion_sugerida || '',
+      suggestedLocations: Array.isArray(item.ubicaciones_sugeridas) ? item.ubicaciones_sugeridas : [],
+      documentLot: item.lote_documento || '',
+      documentExpiry: String(item.fecha_vencimiento_documento || '').slice(0, 10),
       reason: '',
-      distributions: [{ condicion: 'DISPONIBLE', cantidad: item.cantidad_pendiente || '', lote: '', ubicacion_id: item.ubicacion_sugerida_id || '', fecha_venc: '', motivo: '' }],
+      distributions: [{ condicion: '', cantidad: '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
     })))
   }
   const setDistribution = (itemIndex, distributionIndex, key, value) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
@@ -251,7 +254,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
   }))
   const addDistribution = (itemIndex) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
     ...item,
-    distributions: [...item.distributions, { condicion: 'CUARENTENA', cantidad: '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
+    distributions: [...item.distributions, { condicion: '', cantidad: '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
   }))
   const removeDistribution = (itemIndex, distributionIndex) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
     ...item,
@@ -342,21 +345,21 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
           <div>
             <p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p>
             <p className="text-xs text-muted">{item.outsourcingOrderId ? 'Cantidad de esta entrega 3Q' : 'Pendiente de la OC'}: {formatQuantity(item.expected)} {item.unit}</p>
-            {item.suggestedLocation && <p className="text-xs text-primary">Ubicacion sugerida: {item.suggestedLocation}. Puedes cambiarla si la operacion lo requiere.</p>}
-            <p className="text-xs text-muted">{item.requiresLot ? 'Registra el lote informado por el proveedor.' : 'El lote del proveedor es opcional; si no existe, el WMS crea una partida interna.'}</p>
+            {item.suggestedLocation && <p className="text-xs text-primary">Ubicacion preferida: {item.suggestedLocation}. Puedes seleccionar otra ubicacion activa si la operacion lo requiere.</p>}
+            {(item.documentLot || item.documentExpiry) && <p className="text-xs text-muted">Referencia del PDF: lote {item.documentLot || 'no informado'} | vence {item.documentExpiry || 'no informado'}. Coteja ambos contra la etiqueta fisica.</p>}
+            <p className="text-xs text-muted">Registra los datos fisicos completos. El PDF y la ubicacion preferida no se confirman automaticamente.</p>
           </div>
           {item.distributions.map((distribution, distributionIndex) => (
             <div key={distributionIndex} className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-[150px_110px_minmax(150px,1fr)_minmax(170px,1fr)_140px_36px] gap-2 items-end">
-                <Field label="Condicion"><select value={distribution.condicion} onChange={(event) => {
+                <Field label="Condicion *"><select value={distribution.condicion} onChange={(event) => {
                   const condition = event.target.value
                   setDistribution(itemIndex, distributionIndex, 'condicion', condition)
-                  if (condition !== 'DISPONIBLE') setDistribution(itemIndex, distributionIndex, 'ubicacion_id', '')
-                }} className="input-field"><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
-                <Field label="Cantidad"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
-                <Field label={item.requiresLot ? 'Lote proveedor *' : 'Lote proveedor (opcional)'}><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" required={item.requiresLot} /></Field>
-                <Field label="Ubicacion"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required={['DISPONIBLE', 'CUARENTENA'].includes(distribution.condicion)}><option value="">Sin ubicacion</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
-                <Field label="Vencimiento"><input type="date" value={distribution.fecha_venc} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'fecha_venc', event.target.value)} className="input-field" /></Field>
+                }} className="input-field" required><option value="">Selecciona condicion</option><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
+                <Field label="Cantidad fisica *"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
+                <Field label="Lote proveedor *"><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" required /></Field>
+                <Field label="Ubicacion *"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required><option value="">Selecciona ubicacion</option>{locations.map((location) => <option key={location.id} value={location.id}>{item.suggestedLocations.some((suggested) => Number(suggested.id) === Number(location.id)) ? 'Preferida - ' : ''}{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
+                <Field label="Vencimiento *"><input type="date" value={distribution.fecha_venc} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'fecha_venc', event.target.value)} className="input-field" required /></Field>
                 <button type="button" title="Eliminar distribucion" onClick={() => removeDistribution(itemIndex, distributionIndex)} disabled={item.distributions.length === 1} className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
               </div>
               {distribution.condicion !== 'DISPONIBLE' && <Field label="Motivo *"><input value={distribution.motivo} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'motivo', event.target.value)} className="input-field max-w-2xl" required /></Field>}

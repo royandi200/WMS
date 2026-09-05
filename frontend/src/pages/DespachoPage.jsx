@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, RefreshCw } from 'lucide-react'
+import { Check, FileText, RefreshCw } from 'lucide-react'
 import { useDispatchStore } from '../store/dispatchStore'
 import { confirmDispatch, syncSiigoInvoices } from '../api/dispatch.api'
 import { useAuthStore } from '../store/authStore'
+import { openDispatchSheet } from '../utils/dispatchSheet'
 
 export default function DespachoPage() {
   const [tab, setTab] = useState(0)
@@ -112,11 +113,16 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
                 <td className="px-4 py-3"><span className="text-xs font-semibold">{row.estados_demanda || row.estado}</span></td>
                 <td className="px-4 py-3 text-muted text-xs">{formatDate(row.despachado_en || row.creado_en)}</td>
                 <td className="px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button type="button" onClick={() => openDispatchSheet(row)} title="Abrir hoja imprimible del despacho" className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80">
+                      <FileText size={15} /> Hoja
+                    </button>
                   {ready && canConfirm ? (
                     <button type="button" onClick={() => onConfirm(row)} disabled={workingId === row.id} title="Confirmar despacho fisico" className="inline-flex items-center gap-2 text-sm text-green-400 hover:text-green-300 disabled:opacity-50">
                       <Check size={16} /> Confirmar
                     </button>
-                  ) : <span className="text-xs text-muted">{pending ? 'No disponible' : '-'}</span>}
+                  ) : pending ? <span className="text-xs text-muted">No disponible</span> : null}
+                  </div>
                 </td>
               </tr>
             )
