@@ -150,6 +150,47 @@ test('purchase order extraction preserves supplier lot and expiry only when grou
   assert.match(unsupported.warnings.join(' | '), /vencimiento propuesto/u);
 });
 
+test('purchase order recovers omitted row fields only from an exact line-delimited SKU block', () => {
+  const body = validInput({
+    total_unidades: 37,
+    items: [{
+      sku: '00001-TPBI',
+      descripcion: 'Tapa tarro cuadrado blanco',
+      cantidad: 37,
+      unidad: 'und',
+    }],
+  });
+  const evidence = [
+    'ORDEN DE COMPRA',
+    'OC-DEMO-20260902-001',
+    '2026-09-02',
+    '00001-TPBI',
+    'TAPA TARRO CUADRADO BLANCO',
+    '37',
+    'und',
+    'QA-TPBI-260905',
+    '2028-01-31',
+  ].join('\n');
+  const normalized = normalizePurchaseOrderDocumentInput(body, { evidenceText: evidence });
+  assert.equal(normalized.items[0].lot, 'QA-TPBI-260905');
+  assert.equal(normalized.items[0].expiryDate, '2028-01-31');
+});
+
+test('purchase order does not recover hints when a SKU block is ambiguous', () => {
+  const body = validInput({
+    total_unidades: 37,
+    items: [{ sku: '00001-TPBI', descripcion: 'Tapa', cantidad: 37, unidad: 'und' }],
+  });
+  const evidence = [
+    'ORDEN DE COMPRA OC-DEMO-20260902-001 2026-09-02',
+    '00001-TPBI', 'TAPA', '37', 'und', 'QA-LOTE-UNO', '2028-01-31',
+    '00001-TPBI', 'TAPA REPETIDA', '37', 'und', 'QA-LOTE-DOS', '2028-02-29',
+  ].join('\n');
+  const normalized = normalizePurchaseOrderDocumentInput(body, { evidenceText: evidence });
+  assert.equal(normalized.items[0].lot, null);
+  assert.equal(normalized.items[0].expiryDate, null);
+});
+
 test('BuilderBot PDF download rejects SSRF targets and accepts only expected storage hosts', () => {
   assert.equal(
     validateBuilderBotDocumentUrl('https://runtime-sessions.s3.us-east-1.amazonaws.com/path/oc.pdf').protocol,

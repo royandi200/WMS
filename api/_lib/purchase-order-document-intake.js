@@ -1,6 +1,7 @@
 const { createHash } = require('crypto');
 const { MAX_PDF_BYTES } = require('./purchase-order-documents');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
+const { enrichItemsFromLineEvidence } = require('./document-evidence-items');
 
 const MAX_DOCUMENT_ITEMS = 100;
 const DOCUMENT_TYPE = 'ORDEN_COMPRA';
@@ -30,8 +31,8 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
     throw inputError('El numero de la orden no aparece literalmente en el documento');
   }
   const warnings = normalizeWarnings(source.advertencias || source.warnings);
-  const items = rawItems.map((item, index) => {
-    const normalized = normalizeItem(item, index);
+  const normalizedItems = rawItems.map((item, index) => normalizeItem(item, index));
+  const items = enrichItemsFromLineEvidence(normalizedItems, evidenceText).map((normalized) => {
     if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
       throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
     }

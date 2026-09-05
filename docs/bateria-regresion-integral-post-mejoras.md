@@ -707,3 +707,58 @@ Estado: APROBADA | FALLIDA | BLOQUEADA
 - Pruebas: encabezados correctos, marcador ausente, marcador alternativo de remision y conflicto entre tipos. Suite local: `200` pruebas, `0` fallas.
 - Despliegue: prompt de BuilderBot sincronizado y bot verificado `En linea`. Backend local, sin push ni despliegue.
 - Estado: APROBADA LOCALMENTE.
+
+### M69 - OC documental R02 multireferencia en entorno desplegado
+
+- Hora Bogota: 17:09.
+- Canal y rol: WhatsApp, Datana (`recepcion_cierre`), con verificacion en base de datos y dashboard.
+- Documento: `QA-DOC-20260905-R02-01-OC-VALIDA.pdf`.
+- Enrutamiento: se clasifico como `ORDEN_COMPRA` y creo exactamente un borrador BuilderBot, ID 8, con referencia `QA-DOC-20260905-R02-OC-MULTI-001`, una copia documental y estado `REQUIERE_CORRECCION`.
+- Extraccion: registro los 11 SKU y todas sus cantidades/unidades. El total quedo correctamente separado como `8.750 g + 376 und`; en base, `total_unidades` y el subtotal comparable son `376`, sin sumar gramos y unidades.
+- Seguridad operativa: no creo una OC operativa, no genero movimientos Kardex y no modifico inventario.
+- Dashboard: muestra la referencia nueva en `PDF recibidos por WhatsApp`, 11 items, los totales separados, fecha y PDF descargable.
+- Hallazgo OCR: `00018-ETBOS60` perdio el vencimiento; `00042-CMCG` perdio lote y vencimiento. Los otros nueve items conservaron lote y vencimiento. El estado de correccion y la revision humana impiden confirmar silenciosamente datos incompletos.
+- Hallazgo de catalogo: el proveedor extraido no coincide de forma inequivoca con un proveedor sincronizado, por lo que requiere seleccion humana.
+- Estado: APROBADA CON HALLAZGOS; enrutamiento, unidades, persistencia e invariantes de inventario correctos, precision OCR pendiente en tres campos.
+
+### M70 - Remision documental R02 hacia 3Q
+
+- Hora Bogota: 17:16.
+- Canal y rol: WhatsApp, Juan (`admin`), con verificacion en base de datos y dashboard.
+- Documento: `QA-DOC-20260905-R02-02-REMISION-3Q-VALIDA.pdf`.
+- Enrutamiento: se clasifico como `SALIDA_BODEGA_3Q` y creo exactamente un borrador BuilderBot, ID 9, con referencia `QA-DOC-20260905-R02-SALIDA-3Q-001`, una copia documental y estado `REQUIERE_CORRECCION`.
+- Extraccion: registro correctamente los 9 SKU y sus cantidades; total declarado y calculado `221`.
+- Dashboard: el documento aparece en `Maquila 3Q > Documentos leidos`, con destinatario 3Q, fecha, 9 lineas vinculadas al catalogo WMS y PDF original descargable. Permanece sin remision operativa vinculada.
+- Seguridad operativa: no creo una remision, no genero movimientos Kardex y no modifico inventario.
+- Hallazgo de persistencia: la columna `unidad` de las nueve lineas quedo nula, aunque el PDF declara `und`, el total se presenta como unidades y las cantidades son correctas. Debe preservarse la unidad explicita antes de automatizar la conversion del borrador.
+- Observacion esperada: el estado de correccion se debe unicamente a la leyenda de documento de demostracion sin validez comercial.
+- Estado: APROBADA CON HALLAZGO; clasificacion, extraccion de referencias, aislamiento y ubicacion en dashboard correctos, unidad de linea pendiente.
+
+### M71 - Documento sin marcador operativo
+
+- Hora Bogota: 17:21.
+- Canal y rol: WhatsApp, Juan (`admin`), con verificacion en base de datos.
+- Documento: `QA-DOC-20260905-R02-03-SIN-MARCADOR.pdf`.
+- Resultado: rechazo explicito porque el PDF no contiene `ORDEN DE COMPRA` ni `SALIDA DE BODEGA HACIA 3Q`; la respuesta indica los encabezados admitidos y exige referencias, SKU y cantidades legibles.
+- Fallo cerrado: no se creo ningun borrador para `QA-DOC-20260905-R02-SIN-MARCADOR-001`, no se persistieron items y no hubo movimientos Kardex.
+- Estado: APROBADA.
+
+### M72 - Documento con marcadores contradictorios
+
+- Hora Bogota: 17:24.
+- Canal y rol: WhatsApp, Juan (`admin`), con verificacion en base de datos.
+- Documento: `QA-DOC-20260905-R02-04-MARCADORES-CONTRADICTORIOS.pdf`.
+- Resultado: rechazo controlado; el documento no fue clasificado como OC ni como salida hacia 3Q.
+- Fallo cerrado: no se creo ningun borrador para `QA-DOC-20260905-R02-CONFLICTO-001`, no se persistieron items y no hubo movimientos Kardex.
+- Hallazgo menor de experiencia: la respuesta utiliza el mismo texto que el caso sin marcador y no explica que encontro ambos encabezados. La seguridad es correcta, pero un mensaje especifico reduciria reprocesos del usuario.
+- Estado: APROBADA CON HALLAZGO MENOR.
+
+### M73 - Correccion de hallazgos documentales R02
+
+- Hora Bogota: 17:35.
+- Recuperacion OCR: se agrego una lectura determinista de bloques delimitados por SKU exacto. Solo completa unidad, lote o vencimiento cuando existe una unica ocurrencia del SKU, una cantidad coincidente y un valor inequivoco dentro de la misma fila aplanada.
+- Maquila 3Q: la unidad ahora forma parte del modelo normalizado, el `INSERT`, la comparacion idempotente y la presentacion del dashboard.
+- Mensajeria: BuilderBot diferencia marcadores contradictorios de marcador ausente y solicita corregir el PDF sin afirmar que creo un borrador.
+- Compatibilidad: los borradores 3Q historicos sin unidad mantienen reintentos equivalentes como `und`; un cambio real de unidad forma una identidad operativa distinta.
+- Verificacion: pruebas documentales `30/30`, suite completa `203/203`, build Vite aprobado, prompt sincronizado por lectura posterior, topologia preservada y bot `ONLINE`.
+- Estado: IMPLEMENTADA; repeticion manual R03 pendiente tras despliegue del backend.

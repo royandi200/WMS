@@ -20,8 +20,8 @@ function validInput(overrides = {}) {
     total_bultos: 125,
     total_unidades: 8200,
     items: [
-      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
-      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
     ],
     ...overrides,
   };
@@ -44,9 +44,27 @@ test('document intake normalizes an exact, complete 3Q warehouse exit', () => {
   const input = normalizeWarehouseDocumentInput(validInput());
   assert.equal(input.documentType, 'SALIDA_BODEGA_3Q');
   assert.equal(input.items[0].sku, '00007-TRG');
+  assert.equal(input.items[0].unit, 'und');
   assert.equal(input.calculatedTotal, 8200);
   assert.deepEqual(input.warnings, []);
   assert.match(input.hash, /^[a-f0-9]{64}$/u);
+});
+
+test('3Q intake recovers an omitted unit from the exact SKU quantity block', () => {
+  const input = normalizeWarehouseDocumentInput(validInput({
+    total_unidades: 23,
+    items: [{ sku: '00001-TPBI', descripcion: 'Tapa tarro cuadrado', cantidad: 23 }],
+  }), {
+    evidenceText: [
+      'SALIDA DE BODEGA HACIA 3Q',
+      'SB-TEST-20260831-001',
+      '00001-TPBI',
+      'TAPA TARRO CUADRADO',
+      '23',
+      'und',
+    ].join('\n'),
+  });
+  assert.equal(input.items[0].unit, 'und');
 });
 
 test('3Q evidence requires an explicit outsourcing marker', () => {
@@ -99,21 +117,21 @@ test('operational document identity ignores OCR metadata but protects inventory 
     nombre_cliente: '3Q',
     entrega: null,
     items: [
-      { sku: '00006-TRP', descripcion: 'Envase pequeño', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
-      { sku: '00007-TRG', descripcion: 'Envase grande', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+      { sku: '00006-TRP', descripcion: 'Envase pequeño', cantidad: 1200, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+      { sku: '00007-TRG', descripcion: 'Envase grande', cantidad: 7000, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
     ],
   }));
   const changedLot = normalizeWarehouseDocumentInput(validInput({
     items: [
-      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'OTRO-LOTE' },
-      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'OTRO-LOTE' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
     ],
   }));
   const changedQuantity = normalizeWarehouseDocumentInput(validInput({
     total_unidades: 8201,
     items: [
-      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7001, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
-      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7001, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
     ],
   }));
   assert.notEqual(first.hash, retry.hash);
@@ -121,6 +139,13 @@ test('operational document identity ignores OCR metadata but protects inventory 
   assert.equal(first.operationalHash, changedLot.operationalHash);
   assert.notEqual(first.operationalHash, changedQuantity.operationalHash);
   assert.deepEqual(operationalDocumentIdentity(first), operationalDocumentIdentity(retry));
+  const changedUnit = normalizeWarehouseDocumentInput(validInput({
+    items: [
+      { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, unidad: 'kg', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+      { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-60' },
+    ],
+  }));
+  assert.notEqual(first.operationalHash, changedUnit.operationalHash);
 });
 
 test('duplicate document returns persisted total and warnings without inserting', async () => {
@@ -194,8 +219,8 @@ test('duplicate accepts equivalent operational data when OCR metadata changes', 
       nombre_archivo: null,
       entrega: null,
       items: [
-        { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
-        { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, fecha_vencimiento: '2027-12-31', lote: 'L-TEST-LNTP60' },
+        { sku: '00007-TRG', descripcion: 'Envases x 120', cantidad: 7000, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-120' },
+        { sku: '00006-TRP', descripcion: 'Envases x 60', cantidad: 1200, unidad: 'und', fecha_vencimiento: '2027-12-31', lote: 'L-TEST-LNTP60' },
       ],
     }),
     userId: 5,
@@ -300,4 +325,5 @@ test('document schema and handler do not mutate inventory', () => {
   assert.doesNotMatch(source, /UPDATE (stock|lots)/u);
   assert.match(migration, /PENDIENTE_REVISION/u);
   assert.match(domain, /FOR UPDATE/u);
+  assert.match(domain, /cantidad, unidad, fecha_vencimiento/u);
 });

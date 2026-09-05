@@ -1,6 +1,7 @@
 const { createHash } = require('crypto');
 const { downloadBuilderBotPdf } = require('./purchase-order-document-intake');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
+const { enrichItemsFromLineEvidence, normalizedUnit } = require('./document-evidence-items');
 
 const MAX_DOCUMENT_ITEMS = 100;
 
@@ -27,8 +28,8 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) 
   if (evidence && !evidenceIncludes(evidence, reference)) {
     throw inputError('La referencia_documento no aparece literalmente en el documento');
   }
-  const normalizedItems = items.map((item, index) => {
-    const normalized = normalizeItem(item, index);
+  const parsedItems = items.map((item, index) => normalizeItem(item, index));
+  const normalizedItems = enrichItemsFromLineEvidence(parsedItems, evidenceText).map((normalized) => {
     if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
       throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
     }
@@ -107,7 +108,7 @@ async function registerWarehouseDocumentDraft({
     if (existing.length) {
       if (existing[0].sha256 !== input.hash) {
         const [storedItems] = await db.execute(
-          `SELECT sku_extraido, cantidad, fecha_vencimiento, lote
+          `SELECT sku_extraido, cantidad, unidad, fecha_vencimiento, lote
              FROM documento_bodega_borrador_items
             WHERE documento_id = ?
             ORDER BY id`,
@@ -122,6 +123,7 @@ async function registerWarehouseDocumentDraft({
           items: storedItems.map(item => ({
             sku: item.sku_extraido,
             quantity: Number(item.cantidad),
+            unit: item.unidad || 'und',
             expiryDate: dateOnly(item.fecha_vencimiento),
             lot: item.lote || null,
           })),
@@ -193,10 +195,10 @@ async function registerWarehouseDocumentDraft({
       await db.execute(
         `INSERT INTO documento_bodega_borrador_items
            (documento_id, producto_id, sku_extraido, descripcion_extraida,
-            cantidad, fecha_vencimiento, lote, creado_en)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+            cantidad, unidad, fecha_vencimiento, lote, creado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [created.insertId, item.product?.id || null, item.sku, item.description,
-         item.quantity, item.expiryDate, item.lot]
+         item.quantity, item.unit, item.expiryDate, item.lot]
       );
     }
     if (document) await storeDraftFile(db, created.insertId, document);
@@ -237,6 +239,7 @@ function normalizeItem(item = {}, index) {
     sku,
     description,
     quantity: roundQty(quantity),
+    unit: optionalText(normalizedUnit(item.unidad || item.unit), 20),
     expiryDate: normalizeDate(item.fecha_vencimiento || item.expiry_date, `fecha_vencimiento de ${sku}`, true),
     lot: optionalText(item.lote || item.lot, 100),
   };
@@ -298,6 +301,7 @@ function operationalDocumentIdentity(normalized) {
   const items = (normalized.items || []).map(item => ({
     sku: String(item.sku || '').toUpperCase(),
     quantity: roundQty(item.quantity),
+    unit: normalizedUnit(item.unit) || null,
   })).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
   return {
     documentType: normalized.documentType,

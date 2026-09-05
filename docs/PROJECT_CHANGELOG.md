@@ -13,6 +13,9 @@
 - Se creo `bateria-regresion-integral-post-mejoras.md` como protocolo repetible de certificacion.
 - Se definio una politica documental determinista: PDF sin texto adjunto en el mismo mensaje no se procesa ni se recupera mediante mensajes posteriores. BuilderBot pide reenviarlo y la API aplica el mismo bloqueo.
 - Se generaron dos PDF QA multireferencia para validar OCR y registro de OC y salida 3Q, con cantidades diferenciadas, unidades, tercero y datos documentales verificables.
+- La regresion documental R02 confirmo el enrutamiento por encabezado y el fallo cerrado. Se agrego recuperacion determinista de unidad, lote y vencimiento solo dentro de bloques de SKU exactos y no ambiguos; las salidas 3Q ahora persisten la unidad de cada linea.
+- BuilderBot distingue documentos con marcadores contradictorios y exige `unidad` por item en salidas 3Q. El prompt quedo sincronizado y el bot verificado en linea.
+- Validacion posterior: `203/203` pruebas y build Vite aprobados.
 
 ## Propósito
 
@@ -692,7 +695,14 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - Los PDF de WhatsApp se clasifican por un encabezado visible: `ORDEN DE COMPRA` para Recepciones y `SALIDA DE BODEGA HACIA 3Q` o `REMISION A 3Q` para Maquila 3Q.
 - La API valida el marcador contra el OCR y rechaza documentos sin marcador o con marcadores contradictorios; no confia solo en la decision del modelo, el nombre del archivo o el caption.
 - La lectura conserva el comportamiento no operativo: solo crea un borrador revisable y nunca modifica inventario.
-- Validacion local: 200 pruebas aprobadas. Prompt de BuilderBot sincronizado y bot verificado en linea; backend pendiente de despliegue.
+- Validacion inicial: 200 pruebas aprobadas. Prompt de BuilderBot sincronizado y bot verificado en linea; backend publicado mediante `main`.
+
+### 2026-09-05: precision documental posterior a regresion R02
+
+- La API completa unidad, lote y vencimiento omitidos por el modelo solamente cuando aparecen en un bloque de lineas delimitado por un SKU exacto, con una unica cantidad coincidente. SKU repetidos, cantidades ambiguas o campos fuera del bloque permanecen pendientes de revision.
+- Las lecturas de salida 3Q conservan `unidad` en el borrador, su identidad operativa y el dashboard; borradores historicos sin unidad se interpretan como `und` solo durante la comparacion idempotente.
+- El asistente documental incluye la unidad en cada item 3Q y responde de forma especifica cuando encuentra encabezados de OC y salida 3Q en un mismo PDF.
+- Validacion local: 203 pruebas aprobadas, build Vite aprobado, prompt BuilderBot sincronizado, topologia preservada y bot `ONLINE`.
 
 ## Regla de mantenimiento
 

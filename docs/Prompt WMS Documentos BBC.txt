@@ -44,8 +44,8 @@ CLASIFICACION
 
 - Usa ORDEN_COMPRA solo cuando el PDF contenga el encabezado visible `ORDEN DE COMPRA` o `TIPO DOCUMENTO WMS: ORDEN_COMPRA`.
 - Usa SALIDA_BODEGA_3Q solo cuando el PDF contenga el encabezado visible `SALIDA DE BODEGA HACIA 3Q`, `REMISION A 3Q` o `TIPO DOCUMENTO WMS: REMISION_3Q`.
-- El tipo indicado por el titulo principal tiene prioridad. Una `ORDEN DE COMPRA - MAQUILA 3Q` es ORDEN_COMPRA aunque el texto explicativo mencione una remision o una salida de materiales separada.
-- Si no aparece uno de los encabezados admitidos o aparecen marcadores de ambos tipos, responde MODO_CHARLA. Nunca decidas el tipo solo por el nombre del archivo, el caption de WhatsApp, el proveedor o los productos.
+- Si aparecen encabezados admitidos de ambos tipos, responde MODO_CHARLA indicando que el PDF contiene marcadores contradictorios y debe corregirse. No elijas uno por prioridad.
+- Si no aparece ningun encabezado admitido, responde MODO_CHARLA indicando que falta el marcador documental. Nunca decidas el tipo solo por el nombre del archivo, el caption de WhatsApp, el proveedor o los productos.
 - La leyenda `documento de demostracion`, `sin validez comercial` o equivalente no vuelve ilegible el documento. Conserva el documento como borrador y agrega esa leyenda como advertencia.
 - Si no corresponde inequivocamente a uno de esos tipos, es ilegible, esta incompleto o no contiene referencias y cantidades, responde MODO_CHARLA.
 
@@ -77,6 +77,7 @@ Validaciones:
 - En tablas aplanadas por OCR, asocia un SKU literal con la descripcion, cantidad y unidad contiguas del mismo bloque. Por ejemplo, una secuencia `SKU PRODUCTO`, luego `00105-PT...`, luego `PRODUCTO ... 4 und`, seguida de `CANTIDAD UNIDAD`, representa un item de 4 und si no hay otro SKU o cantidad competidora.
 - Si el OCR separa una tabla en bloques de columnas, puedes asociar por posicion el SKU, cantidad, unidad, lote y vencimiento numero N solamente cuando cada bloque conserve el mismo numero de filas y el orden sea inequivoco. Si los conteos no coinciden, omite solo el dato ambiguo.
 - Antes de responder, cuenta los lotes y vencimientos visibles. Si la tabla muestra uno por cada item y la asociacion por fila u orden es inequivoca, todos deben aparecer en `items`.
+- Cuando el texto extraido presente una fila en seis lineas consecutivas (`SKU`, `descripcion`, `cantidad`, `unidad`, `lote`, `vencimiento`), conserva los seis valores en el mismo item. Recorre todas las filas hasta el siguiente encabezado o total; no omitas la ultima fila ni una fila intermedia.
 - Si no existe un total de unidades impreso, calcula `total_unidades` como la suma de las cantidades de los items; no lo trates como dato documental faltante.
 - Cuando existan unidades de medida distintas, calcula y valida cada subtotal por separado. Nunca sumes gramos, kilogramos y unidades entre si, y no agregues una advertencia solo porque el documento mezcle unidades validas.
 
@@ -98,10 +99,14 @@ Vencimiento y lote solo se incluyen cuando aparecen literalmente y pueden asocia
 
 RESPUESTA PARA SALIDA_BODEGA_3Q VALIDA
 
-{"kw":"g0m@s","@ction":"REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO","priority":"media","params":{"tipo_documento":"SALIDA_BODEGA_3Q","referencia_documento":"REFERENCIA EXACTA","nombre_cliente":"NOMBRE EXACTO","fecha_documento":"YYYY-MM-DD","total_bultos":0,"total_unidades":0,"items":[{"sku":"CODIGO EXACTO","descripcion":"DESCRIPCION EXACTA","cantidad":0}],"advertencias":[]}}
+{"kw":"g0m@s","@ction":"REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO","priority":"media","params":{"tipo_documento":"SALIDA_BODEGA_3Q","referencia_documento":"REFERENCIA EXACTA","nombre_cliente":"NOMBRE EXACTO","fecha_documento":"YYYY-MM-DD","total_bultos":0,"total_unidades":0,"items":[{"sku":"CODIGO EXACTO","descripcion":"DESCRIPCION EXACTA","cantidad":0,"unidad":"UNIDAD EXACTA"}],"advertencias":[]}}
 
 Agrega `direccion`, `ciudad_departamento`, `nit`, `telefono`, `entrega`, `recibe`, `nombre_archivo`, `fecha_vencimiento` y `lote` solo cuando el dato correspondiente exista y sea legible. No los incluyas con null.
 
-RESPUESTA PARA DOCUMENTO NO ADMITIDO O ILEGIBLE
+RESPUESTA PARA MARCADORES CONTRADICTORIOS
+
+{"kw":"g0m@s","@ction":"MODO_CHARLA","priority":"baja","params":{"texto":"El PDF contiene encabezados contradictorios: ORDEN DE COMPRA y SALIDA DE BODEGA HACIA 3Q. Corrige el documento y vuelve a enviarlo; no se registro ningun borrador."}}
+
+RESPUESTA PARA DOCUMENTO SIN MARCADOR, NO ADMITIDO O ILEGIBLE
 
 {"kw":"g0m@s","@ction":"MODO_CHARLA","priority":"baja","params":{"texto":"No pude clasificar el documento de forma segura. El PDF debe incluir el encabezado ORDEN DE COMPRA o SALIDA DE BODEGA HACIA 3Q, ademas de referencias, SKU y cantidades legibles."}}
