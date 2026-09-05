@@ -205,6 +205,28 @@ test('purchase order recovers omitted fields from flattened multi-row PDF eviden
   assert.deepEqual(normalized.warnings, []);
 });
 
+test('purchase order reports exact SKU fields that remain missing after evidence recovery', () => {
+  const body = validInput({
+    total_unidades: 68,
+    advertencias: ['Faltan lote y vencimiento legibles para algunos items.'],
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapa', cantidad: 37, unidad: 'und' },
+      { sku: '00018-ETBOS60', descripcion: 'Etiqueta', cantidad: 31, unidad: 'und' },
+    ],
+  });
+  const evidence = [
+    'ORDEN DE COMPRA OC-DEMO-20260902-001',
+    '00001-TPBI TAPA 37 und QA-TPBI-260905 2028-01-31',
+    '00018-ETBOS60 ETIQUETA 31 und QA-ETBOS60-260905',
+  ].join(' ');
+
+  const normalized = normalizePurchaseOrderDocumentInput(body, { evidenceText: evidence });
+  assert.equal(normalized.items[1].lot, 'QA-ETBOS60-260905');
+  assert.equal(normalized.items[1].expiryDate, null);
+  assert.match(normalized.warnings.join(' | '), /Vencimiento.*00018-ETBOS60/u);
+  assert.doesNotMatch(normalized.warnings.join(' | '), /00001-TPBI/u);
+});
+
 test('purchase order does not recover hints when a SKU block is ambiguous', () => {
   const body = validInput({
     total_unidades: 37,

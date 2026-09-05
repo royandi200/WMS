@@ -774,3 +774,15 @@ Estado: APROBADA | FALLIDA | BLOQUEADA
 - Correccion: el respaldo determinista ahora admite evidencia PDF aplanada, delimita cada bloque entre SKU exactos y solo acepta una cantidad seguida por una unidad compatible. Las advertencias de total se recalculan en el servidor y no se conservan cuando contradicen los subtotales validados.
 - Verificacion local posterior: `205/205` pruebas y build Vite aprobados.
 - Estado: CORREGIDA LOCALMENTE; requiere nueva referencia documental despues del despliegue para validar el recorrido real de BuilderBot.
+
+### M75 - OC documental R04 sin texto adjunto
+
+- Hora Bogota: 17:56.
+- Canal y rol: WhatsApp, Datana (`recepcion_cierre`), con verificacion directa en base de datos.
+- Documento: `QA-DOC-20260905-R04-01-OC-VALIDA.pdf`, enviado sin texto adjunto. La ausencia de caption no bloquea la lectura porque la clasificacion usa el encabezado visible del PDF.
+- Resultado: se creo exactamente un borrador BuilderBot, ID 11, con 11 items, una copia documental, `total_unidades = 376`, `total_calculado = 376` y cero movimientos Kardex.
+- Correccion confirmada: desaparecio la alerta falsa que sumaba gramos y unidades.
+- Hallazgo persistente: BuilderBot no entrego el vencimiento de `00001-TPBI` ni `00018-ETBOS60`, y no entrego lote ni vencimiento de `00042-CMCG`. El respaldo del WMS no puede recuperar datos ausentes de la evidencia textual recibida.
+- Hallazgo de mensaje: la alerta generica de campos faltantes fue filtrada junto con la alerta falsa y WhatsApp solo mostro el proveedor no sincronizado. Se corrigio para recalcular y enumerar por SKU los campos que sigan ausentes despues del respaldo determinista.
+- Seguridad operativa: el borrador continua sujeto a revision humana y no crea OC operativa ni modifica inventario.
+- Estado: APROBADA CON HALLAZGO; transporte, clasificacion, totales e invariantes correctos; precision de tres campos y aviso especifico pendientes de una referencia nueva.

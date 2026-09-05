@@ -30,7 +30,9 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
   if (evidence && !evidenceIncludes(evidence, reference)) {
     throw inputError('El numero de la orden no aparece literalmente en el documento');
   }
-  const warnings = normalizeWarnings(source.advertencias || source.warnings)
+  const sourceWarnings = normalizeWarnings(source.advertencias || source.warnings);
+  const modelReportedMissingFields = sourceWarnings.some(isModelMissingItemWarning);
+  const warnings = sourceWarnings
     .filter((warning) => !isModelDerivedValidationWarning(warning));
   const normalizedItems = rawItems.map((item, index) => normalizeItem(item, index));
   const items = enrichItemsFromLineEvidence(normalizedItems, evidenceText).map((normalized) => {
@@ -51,6 +53,12 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
     if (!normalized.unit) warnings.push(`El item ${normalized.sku} no tiene unidad de medida`);
     return normalized;
   });
+  if (modelReportedMissingFields) {
+    const missingLots = items.filter((item) => !item.lot).map((item) => item.sku);
+    const missingExpiries = items.filter((item) => !item.expiryDate).map((item) => item.sku);
+    if (missingLots.length) warnings.push(`Lote no asociado de forma inequivoca: ${missingLots.join(', ')}`);
+    if (missingExpiries.length) warnings.push(`Vencimiento no asociado de forma inequivoca: ${missingExpiries.join(', ')}`);
+  }
   const suppliedTotal = optionalNonNegativeNumber(source.total_unidades ?? source.total_units, 'total_unidades');
   const totalsByUnit = calculateTotalsByUnit(items);
   const calculatedTotal = comparableCalculatedTotal(totalsByUnit, suppliedTotal);
@@ -460,9 +468,16 @@ function normalizeWarnings(value) {
 function isModelDerivedValidationWarning(value) {
   const warning = normalizedName(value);
   return warning.includes('NOCOINCIDE') && warning.includes('TOTAL')
-    || warning.includes('FALTANLOTE')
+    || isModelMissingItemWarning(value);
+}
+
+function isModelMissingItemWarning(value) {
+  const warning = normalizedName(value);
+  return warning.includes('FALTANLOTE')
     || warning.includes('FALTANVENCIMIENTO')
-    || warning.includes('FALTANLOTEYVENCIMIENTO');
+    || warning.includes('FALTANLOTEYVENCIMIENTO')
+    || warning.includes('NOMUESTRALOTE')
+    || warning.includes('NOMUESTRAVENCIMIENTO');
 }
 
 function parseWarnings(value) {
