@@ -1358,7 +1358,7 @@ module.exports = async (req, res) => {
               `Proveedor: ${order.proveedor_nombre || 'N/A'}`,
               `Fecha: ${formatDateOnly(order.fecha_orden)}`,
               ...order.items.map(item =>
-                `- ${item.sku} - ${item.producto}\n  Pendiente: ${Number(item.cantidad_pendiente)} ${item.unidad}${item.requiere_lote ? '\n  Lote del proveedor requerido' : ''}`
+                `- ${item.sku} - ${item.producto}\n  Pendiente: ${Number(item.cantidad_pendiente)} ${item.unidad}\n  Lote y vencimiento del proveedor requeridos`
               ),
               '',
             ]),
@@ -1371,7 +1371,7 @@ module.exports = async (req, res) => {
               `Proveedor: ${order.proveedor_nombre || '3Q'}`,
               `- ${order.sku} - ${order.producto}`,
               `  Pendiente: ${order.cantidad_pendiente} ${order.unidad}`,
-              ...(order.requiere_lote ? ['  Lote de 3Q requerido al recibir'] : []),
+              '  Lote y vencimiento de 3Q requeridos al recibir',
               '',
             ]),
             'Para preparar una entrega 3Q:',
@@ -1466,7 +1466,7 @@ module.exports = async (req, res) => {
         }
         const pending = prepared.reception.items.map(item =>
           `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
-          + `${item.lote_documento ? ` | PDF propone lote ${item.lote_documento}` : item.requiere_lote ? ' | lote proveedor requerido' : ' | lote opcional'}`
+          + `${item.lote_documento ? ` | PDF propone lote ${item.lote_documento}` : ' | lote proveedor requerido'}`
           + `${item.fecha_vencimiento_documento ? ` | PDF propone vencimiento ${item.fecha_vencimiento_documento}` : ''}`
           + `${item.ubicacion_sugerida ? ` | ubicacion sugerida ${item.ubicacion_sugerida}` : ''}`
         );
@@ -1476,7 +1476,7 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad y condicion; usa la ubicacion sugerida o informa otra ubicacion. Si el PDF propone lote o vencimiento, verifica ambos contra la etiqueta fisica; no necesitas dictarlos de nuevo cuando coincidan.',
+          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, condicion, lote, vencimiento y ubicacion para cada item. La ubicacion sugerida es flexible. Los datos del PDF son solo referencia y deben cotejarse contra la etiqueta fisica.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ID ${prepared.order.id}`,
         ].join('\n');
         responseContext.reception = {

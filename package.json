@@ -44,6 +44,8 @@
     "data:purchase-order-hints:apply": "node scripts/apply-purchase-order-document-hints-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:outsourcing-before-oc:dry-run": "node scripts/apply-outsourcing-before-purchase-order-migration.js",
     "data:outsourcing-before-oc:apply": "node scripts/apply-outsourcing-before-purchase-order-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:product-alerts:dry-run": "node scripts/apply-product-alert-thresholds-migration.js",
+    "data:product-alerts:apply": "node scripts/apply-product-alert-thresholds-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:warehouse-map-demo:dry-run": "node scripts/qa/seed-warehouse-map-demo-stock.js",
     "data:warehouse-map-demo:apply": "node scripts/qa/seed-warehouse-map-demo-stock.js --apply --yes-i-understand-this-changes-qa-inventory",
     "data:demo-io-hints:dry-run": "node scripts/qa/seed-demo-io-document-hints.js",

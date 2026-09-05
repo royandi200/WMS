@@ -144,6 +144,9 @@ CREATE TABLE productos (
   modelo              VARCHAR(50)  NULL,
   -- Precio base (lista 1 en COP, referencia rápida)
   precio_venta        DECIMAL(18,2) NULL,
+  stock_minimo        DECIMAL(15,4) NOT NULL DEFAULT 0,
+  stock_maximo        DECIMAL(15,4) NOT NULL DEFAULT 0,
+  permanencia_max_dias SMALLINT UNSIGNED NOT NULL DEFAULT 90,
   -- Sincronización
   siigo_synced_at     DATETIME     NULL,
   creado_en           DATETIME     DEFAULT CURRENT_TIMESTAMP,

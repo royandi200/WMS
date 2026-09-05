@@ -5,6 +5,7 @@ import {
   getLotDetail,
   getKardex,
   getLowStock,
+  getInventoryAging,
   getMapaBodega,
 } from '../api/inventory.api'
 
@@ -24,12 +25,14 @@ export const useInventoryStore = create((set) => ({
   summary:         null,
   products:        [],
   lowStock:        [],
+  aging:           { default_days: 90, rows: [], total: 0 },
   kardex:          [],
   kardexMeta:      { page: 1, total: 0 },
   mapa:            { ubicaciones: [], bodegas: [] },
   loadingSummary:  false,
   loadingKardex:   false,
   loadingLowStock: false,
+  loadingAging:    false,
   loadingMapa:     false,
   loading:         false,
   error:           null,
@@ -53,6 +56,17 @@ export const useInventoryStore = create((set) => ({
       set({ lowStock: Array.isArray(data) ? data : (data?.rows ?? []), loadingLowStock: false })
     } catch (e) {
       set({ error: e.response?.data?.error || 'Error al cargar stock bajo', loadingLowStock: false })
+    }
+  },
+
+  fetchAging: async () => {
+    set({ loadingAging: true, error: null })
+    try {
+      const res = await getInventoryAging()
+      const data = unwrap(res) || {}
+      set({ aging: { default_days: Number(data.default_days || 90), rows: data.rows || [], total: Number(data.total || 0) }, loadingAging: false })
+    } catch (e) {
+      set({ error: e.response?.data?.error || 'Error al cargar permanencia', loadingAging: false })
     }
   },
 

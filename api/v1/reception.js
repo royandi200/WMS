@@ -153,7 +153,7 @@ function receivedItemInput(body, item, totalItems) {
 
 async function processDistributedItem(conn, { item, input, reception, user, receptionId, body, txId }) {
   const normalized = normalizeReceptionDistributions(input, {
-    requiresLot: Boolean(item.requiere_lote),
+    requiresLot: true,
     receptionId,
     itemId: item.id,
   });
@@ -183,10 +183,40 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     groupedLots.set(entry.lot, current);
   }
   for (const lot of groupedLots.values()) {
-    const [existing] = await conn.execute(`SELECT id FROM lots WHERE lpn = ? LIMIT 1`, [lot.lot]);
-    if (existing.length) throw httpError(409, `El lote ${lot.lot} ya existe`);
-    const lotId = crypto.randomUUID();
-    lot.id = lotId;
+    const [existing] = await conn.execute(
+      `SELECT id, product_id, bodega_id, qty_current, status, expiry_date, supplier
+         FROM lots WHERE lpn = ? LIMIT 1 FOR UPDATE`,
+      [lot.lot]
+    );
+    const existingLot = existing[0];
+    if (existingLot) {
+      const existingExpiry = existingLot.expiry_date
+        ? new Date(existingLot.expiry_date).toISOString().slice(0, 10)
+        : null;
+      const statusCompatible = String(lot.condition) === 'DISPONIBLE'
+        ? ['DISPONIBLE', 'AGOTADO', 'DESPACHADO'].includes(String(existingLot.status))
+        : String(existingLot.status) === String(lot.condition);
+      const currentSupplier = String(reception.proveedor_nombre || '').trim().toLocaleLowerCase('es');
+      const existingSupplier = String(existingLot.supplier || '').trim().toLocaleLowerCase('es');
+      if (Number(existingLot.product_id) !== Number(item.producto_id)
+          || Number(existingLot.bodega_id) !== Number(reception.bodega_id)
+          || !statusCompatible
+          || (currentSupplier && existingSupplier && currentSupplier !== existingSupplier)
+          || existingExpiry !== lot.expiryDate) {
+        throw httpError(409, `El lote ${lot.lot} ya existe con otro SKU, proveedor, bodega, condicion o vencimiento`);
+      }
+      lot.id = existingLot.id;
+      lot.previousQuantity = Number(existingLot.qty_current || 0);
+      await conn.execute(
+        `UPDATE lots
+            SET qty_initial = qty_initial + ?, qty_current = qty_current + ?, status = ?, updated_at = NOW()
+          WHERE id = ?`,
+        [lot.quantity, lot.quantity, lot.condition, lot.id]
+      );
+      continue;
+    }
+    lot.id = crypto.randomUUID();
+    lot.previousQuantity = 0;
     const lotNotes = [
       body.notes,
       `Recepcion ${reception.numero}`,
@@ -199,13 +229,15 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
          (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier,
           origin, status, received_by, notes, expiry_date, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', ?, ?, ?, ?, NOW())`,
-      [lotId, lot.lot, item.producto_id, reception.bodega_id,
+      [lot.id, lot.lot, item.producto_id, reception.bodega_id,
        lot.quantity, lot.quantity, reception.proveedor_nombre || null, lot.condition,
        user.id, lotNotes, lot.expiryDate]
     );
   }
 
-  const availableBalances = new Map();
+  const availableBalances = new Map([...groupedLots.entries()].map(
+    ([lpn, lot]) => [lpn, Number(lot.previousQuantity || 0)]
+  ));
   for (const entry of distributions) {
     await conn.execute(
       `INSERT INTO recepcion_distribuciones
@@ -216,13 +248,26 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
        entry.condition, entry.quantity, entry.reason, user.id]
     );
     if (entry.condition === 'DISPONIBLE') {
-      await conn.execute(
-        `INSERT INTO stock
-           (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
-         VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
-        [item.producto_id, reception.bodega_id, entry.locationId, entry.lot,
-         entry.expiryDate, entry.quantity]
+      const [stockRows] = await conn.execute(
+        `SELECT id FROM stock
+          WHERE producto_id = ? AND bodega_id = ? AND ubicacion_id = ? AND lote = ?
+          LIMIT 1 FOR UPDATE`,
+        [item.producto_id, reception.bodega_id, entry.locationId, entry.lot]
       );
+      if (stockRows.length) {
+        await conn.execute(
+          `UPDATE stock SET cantidad = cantidad + ?, fecha_venc = ?, actualizado_en = NOW() WHERE id = ?`,
+          [entry.quantity, entry.expiryDate, stockRows[0].id]
+        );
+      } else {
+        await conn.execute(
+          `INSERT INTO stock
+             (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
+           VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
+          [item.producto_id, reception.bodega_id, entry.locationId, entry.lot,
+           entry.expiryDate, entry.quantity]
+        );
+      }
       await conn.execute(
         `INSERT INTO movimientos
            (tipo, producto_id, bodega_dest, ubicacion_dest, lote, cantidad,
@@ -435,9 +480,8 @@ async function confirmReceptionForUser({ body = {}, user }) {
     for (const item of items) {
       const input = receivedItemInput(body, item, items.length);
       if (!input) throw httpError(400, `Falta confirmar el item ${item.siigo_code}`);
-      if (item.modalidad_operativa === PRODUCT_MODES.OUTSOURCED
-          && (!Array.isArray(input.distributions) || !input.distributions.length)) {
-        throw httpError(400, `La recepcion 3Q de ${item.siigo_code} requiere distribuciones por condicion`);
+      if (!Array.isArray(input.distributions) || !input.distributions.length) {
+        throw httpError(400, `La recepcion de ${item.siigo_code} requiere cantidad, condicion, lote, vencimiento y ubicacion`);
       }
 
       const distributed = await processDistributedItem(conn, {
@@ -782,7 +826,19 @@ async function handlePost(req, res) {
     const bodegaId = await getDefaultBodega(conn);
     const qtyReceived = qtyTotal - qtyDamaged;
     const numero = await nextReceptionNumber(conn);
-    const lpn = body.lot_id || body.lpn || `L-REC-${product.siigo_code}-${Date.now()}`;
+    const lpn = String(body.lot_id || body.lpn || body.lote || '').trim();
+    const expiryDate = String(body.expiry_date || body.fecha_vencimiento || '').trim();
+    const locationId = Number(body.ubicacion_id || body.location_id || 0) || null;
+    if (!lpn) throw httpError(400, 'Lote del proveedor requerido');
+    if (!expiryDate || !/^\d{4}-\d{2}-\d{2}$/u.test(expiryDate)) {
+      throw httpError(400, 'Vencimiento requerido en formato YYYY-MM-DD');
+    }
+    if (!locationId) throw httpError(400, 'Ubicacion requerida');
+    const [validLocations] = await conn.execute(
+      `SELECT id FROM ubicaciones WHERE id = ? AND bodega_id = ? AND activa = 1 LIMIT 1`,
+      [locationId, bodegaId]
+    );
+    if (!validLocations.length) throw httpError(400, 'La ubicacion no pertenece a la bodega de recepcion');
 
     const [rec] = await conn.execute(
       `INSERT INTO recepciones
@@ -803,7 +859,7 @@ async function handlePost(req, res) {
          (recepcion_id, producto_id, lote, fecha_venc, cantidad_esp, cantidad_rec,
           precio_unitario, descuento, bodega_siigo_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [rec.insertId, product.id, lpn, body.expiry_date || null, qtyTotal, qtyReceived,
+      [rec.insertId, product.id, lpn, expiryDate, qtyTotal, qtyReceived,
        price || null, discount, body.bodega_siigo_id || null]
     );
 
@@ -812,20 +868,20 @@ async function handlePost(req, res) {
       `INSERT INTO lots
          (id, lpn, product_id, bodega_id, qty_initial, qty_current, supplier, origin, status, received_by, notes, expiry_date, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEPCION', 'DISPONIBLE', ?, ?, ?, NOW())`,
-      [lotId, lpn, product.id, bodegaId, qtyReceived, qtyReceived, body.supplier || null, user.id, body.notes || null, body.expiry_date || null]
+      [lotId, lpn, product.id, bodegaId, qtyReceived, qtyReceived, body.supplier || null, user.id, body.notes || null, expiryDate]
     );
 
     if (qtyReceived > 0) {
       await conn.execute(
-        `INSERT INTO stock (producto_id, bodega_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
-         VALUES (?, ?, ?, ?, ?, 0, NOW())
+        `INSERT INTO stock (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, 0, NOW())
          ON DUPLICATE KEY UPDATE cantidad = cantidad + VALUES(cantidad), actualizado_en = NOW()`,
-        [product.id, bodegaId, lpn, body.expiry_date || null, qtyReceived]
+        [product.id, bodegaId, locationId, lpn, expiryDate, qtyReceived]
       ).catch(async () => {
         await conn.execute(
-          `INSERT INTO stock (producto_id, bodega_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
-           VALUES (?, ?, ?, ?, ?, 0, NOW())`,
-          [product.id, bodegaId, lpn, body.expiry_date || null, qtyReceived]
+          `INSERT INTO stock (producto_id, bodega_id, ubicacion_id, lote, fecha_venc, cantidad, reservada, actualizado_en)
+           VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`,
+          [product.id, bodegaId, locationId, lpn, expiryDate, qtyReceived]
         );
       });
     }

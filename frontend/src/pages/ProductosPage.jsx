@@ -35,7 +35,7 @@ function typeLabel(value) {
 
 const EMPTY_FORM = {
   sku: '', name: '', description: '', type: 'Product',
-  unit: 'und', min_stock: '0', max_stock: '0',
+  unit: 'und',
 }
 
 const TABS = ['Catálogo', 'Nuevo producto']
@@ -93,8 +93,6 @@ export default function ProductosPage() {
       description: p.description || '',
       type:        p.type,
       unit:        p.unit,
-      min_stock:   String(p.min_stock ?? 0),
-      max_stock:   String(p.max_stock ?? 0),
     })
     setTab(1)
   }
@@ -109,8 +107,6 @@ export default function ProductosPage() {
       description: form.description.trim() || undefined,
       type:        form.type,
       unit:        form.unit.trim() || 'und',
-      min_stock:   Number(form.min_stock),
-      max_stock:   Number(form.max_stock),
     }
     const res = editing ? await update(editing.id, body) : await create(body)
     if (res.ok) {
@@ -345,10 +341,6 @@ export default function ProductosPage() {
           <Field label="Descripción">
             <textarea value={form.description} onChange={set('description')} placeholder="Descripción opcional" rows={2} className="input-field resize-none" />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Stock mínimo"><input type="number" min="0" step="0.001" value={form.min_stock} onChange={set('min_stock')} placeholder="0" className="input-field" /></Field>
-            <Field label="Stock máximo"><input type="number" min="0" step="0.001" value={form.max_stock} onChange={set('max_stock')} placeholder="0" className="input-field" /></Field>
-          </div>
           {editing && (
             <p className="text-xs text-muted bg-yellow-400/5 border border-yellow-400/20 rounded px-3 py-2">
               ✎ Editando: <strong className="text-yellow-400 font-mono">{editing.sku}</strong> — el SKU no se puede cambiar

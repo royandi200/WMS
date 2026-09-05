@@ -2,6 +2,8 @@
 
 Actualizado: 2026-09-02
 
+Seguimiento de pruebas desde el 2026-09-04: [bitacora de resultados, novedades y pendientes](bitacora-pruebas-manuales-2026-09.md). Se actualiza al terminar cada prueba; la siguiente requiere aprobacion de Juan. Este enlace no actualiza por si solo la cobertura historica de esta guia.
+
 ## 1. Objetivo del documento
 
 Este documento permite que un socio, responsable operativo o persona de QA entienda que hace el WMS y pueda validar sus funciones de forma ordenada. Cubre dashboard, WhatsApp, movimientos de inventario, trazabilidad, roles e integraciones.
@@ -456,7 +458,7 @@ Aprueba si las consultas no modifican datos, las ambiguedades fallan cerrado y l
 1. OP liberada -> Alistador.
 2. Produccion iniciada -> Admin y Recepcion/Cierre.
 3. Produccion cerrada -> Admin.
-4. Despacho listo -> Despacho.
+4. Despacho listo: comprobar que queda visible en dashboard y en la consulta de pendientes por WhatsApp. No se requiere aviso proactivo.
 5. Forzar una notificacion fallida controlada y reintentar desde dashboard.
 6. Repetir el evento y comprobar un solo envio por destinatario.
 7. Cruzar WhatsApp, Notificaciones y Webhook Logs por hora y referencia.

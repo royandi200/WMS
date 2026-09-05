@@ -384,6 +384,8 @@ export default function DashboardPage() {
   const reservedStock = Number(summary?.reservado ?? 0)
   const expiringLots = Number(summary?.vencimientos_proximos ?? 0)
   const stockAlerts = Number(summary?.bajo_stock ?? safeLowStock.length)
+  const dwellAlerts = Number(summary?.permanencia_alertas ?? 0)
+  const dwellDays = Number(summary?.permanencia_dias ?? 90)
   const receptionUnits = sum(scopedReceptions, (r) => r.cantidad_rec)
   const damagedUnits = sum(scopedReceptions, (r) => Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0))
   const dispatchUnits = sum(scopedDispatches, (r) => r.cantidad)
@@ -410,6 +412,12 @@ export default function DashboardPage() {
       severity: 'media',
       title: `${expiringLots} lotes proximos a vencer`,
       detail: 'Revisar FEFO, cuarentena o disposicion',
+      to: '/inventario',
+    }] : []),
+    ...(dwellAlerts ? [{
+      severity: 'media',
+      title: `${dwellAlerts} lotes con permanencia prolongada`,
+      detail: `Segun el umbral de cada SKU (predeterminado: ${dwellDays} dias)`,
       to: '/inventario',
     }] : []),
     ...(scopedWaste.length ? [{
@@ -523,12 +531,14 @@ export default function DashboardPage() {
               primary={fmtN(totalStock)}
               primaryLabel="u. disponibles"
               loading={isLoadingCore}
-              alert={stockAlerts > 0 || expiringLots > 0}
+              alert={stockAlerts > 0 || expiringLots > 0 || dwellAlerts > 0}
               metrics={[
                 { label: 'Reservado', value: fmtN(reservedStock) },
                 { label: 'Bajo minimo', value: fmtN(stockAlerts), color: stockAlerts ? '#f85149' : '#8b949e' },
               ]}
-              footer={expiringLots ? `${expiringLots} lotes proximos a vencer` : 'Sin vencimientos criticos'}
+              footer={dwellAlerts
+                ? `${dwellAlerts} lotes con ${dwellDays}+ dias en bodega`
+                : expiringLots ? `${expiringLots} lotes proximos a vencer` : 'Sin alertas de permanencia'}
             />
             <StageCard
               icon={Factory}
