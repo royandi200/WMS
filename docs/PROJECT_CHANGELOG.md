@@ -666,6 +666,7 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - Las entregas parciales pueden reutilizar un lote de proveedor existente solo si coinciden SKU, bodega, condicion y vencimiento; la actualizacion queda transaccional y conserva Kardex por recepcion.
 - Se agrego la alerta de permanencia por lote con saldo fisico, incluido inventario bloqueado. Cada SKU usa su propio umbral persistente y el valor predeterminado es 90 dias.
 - El mapa de bodega amplía el panel de detalle al seleccionar una ubicacion y deja visibles nombres, lotes y cantidades sin truncado horizontal.
+- El mapa principal elimina la vista alterna `Otras ubicaciones`; el plano documentado conserva la organizacion visual de secciones sin permitir crear secciones ajenas al plano. El detalle seleccionado ocupa cerca del 60% del ancho y distribuye el stock en columnas para evitar scroll interno innecesario.
 - Despachos permite abrir una hoja imprimible y guardarla como PDF con factura, cliente, SKU, lote, ubicacion y cantidad. La exportacion CSV permanece implementada, pero no se expone en la interfaz.
 - Se agrego `Sistema > Configurar alertas`, visible y operable solo para administradores, para modificar stock minimo y permanencia maxima por SKU. Cada cambio queda auditado en `system_logs` y no altera inventario.
 - Se confirmo `admin` como el unico identificador tecnico del perfil Administrador; `administrador` no se mantiene como un segundo rol ni como alias de autorizacion.

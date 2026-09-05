@@ -59,10 +59,19 @@ test('dispatch CSV remains implemented without being exposed in the dashboard', 
 
 test('selected warehouse location gets a readable responsive detail panel', () => {
   const map = fs.readFileSync(path.join(__dirname, '../frontend/src/components/MapaBodega.jsx'), 'utf8');
-  assert.match(map, /minmax\(400px,0\.85fr\)/u);
-  assert.match(map, /max-h-\[58vh\]/u);
+  assert.match(map, /minmax\(320px,2fr\)_minmax\(0,3fr\)/u);
+  assert.match(map, /grid grid-cols-1 xl:grid-cols-2/u);
+  assert.doesNotMatch(map, /max-h-\[58vh\]/u);
   assert.match(map, /break-all font-mono/u);
   assert.doesNotMatch(map, /shrink-0 w-64 bg-surface/u);
+});
+
+test('documented warehouse plan owns section organization without an alternate-locations tab', () => {
+  const map = fs.readFileSync(path.join(__dirname, '../frontend/src/components/MapaBodega.jsx'), 'utf8');
+  assert.match(map, /Organizar secciones/u);
+  assert.match(map, /documentedMode && \(/u);
+  assert.doesNotMatch(map, /Otras ubicaciones/u);
+  assert.doesNotMatch(map, /locationScope|otherLocations/u);
 });
 
 test('all receipt channels require physical lot, expiry and location', () => {

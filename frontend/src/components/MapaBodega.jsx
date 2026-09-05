@@ -130,27 +130,27 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
     <div className="flex flex-col gap-3">
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
-        {!documentedMode && (
-          <button onClick={() => setEditMode(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
-              editMode ? 'bg-primary/15 border-primary/40 text-primary' : 'bg-surface border-border text-muted hover:text-foreground'
-            }`}>
-            <Move size={12}/>{editMode ? 'Modo edición activo' : 'Organizar secciones'}
-          </button>
-        )}
+        <button onClick={() => setEditMode(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            editMode ? 'bg-primary/15 border-primary/40 text-primary' : 'bg-surface border-border text-muted hover:text-foreground'
+          }`}>
+          <Move size={12}/>{editMode ? 'Modo edición activo' : 'Organizar secciones'}
+        </button>
 
         {editMode && (
           <>
-            <div className="flex items-center gap-1">
-              <input value={newZone} onChange={e=>setNewZone(e.target.value)}
-                onKeyDown={e=>e.key==='Enter'&&addZone()}
-                placeholder="Nueva zona…"
-                className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary/50 w-36"/>
-              <button onClick={addZone} disabled={!newZone.trim()}
-                className="px-3 py-1.5 rounded-lg bg-primary text-black text-xs font-bold disabled:opacity-40 flex items-center gap-1">
-                <Plus size={12}/>Añadir
-              </button>
-            </div>
+            {!documentedMode && (
+              <div className="flex items-center gap-1">
+                <input value={newZone} onChange={e=>setNewZone(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&addZone()}
+                  placeholder="Nueva zona…"
+                  className="bg-surface border border-border rounded-lg px-3 py-1.5 text-xs text-foreground focus:outline-none focus:border-primary/50 w-36"/>
+                <button onClick={addZone} disabled={!newZone.trim()}
+                  className="px-3 py-1.5 rounded-lg bg-primary text-black text-xs font-bold disabled:opacity-40 flex items-center gap-1">
+                  <Plus size={12}/>Añadir
+                </button>
+              </div>
+            )}
             <button onClick={saveLayout}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/25 transition-colors">
               <Save size={12}/>Guardar
@@ -407,7 +407,7 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
       </div>
 
       <div className={`grid items-start gap-4 ${selected
-        ? 'grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(400px,0.85fr)] 2xl:grid-cols-[minmax(0,1.5fr)_minmax(480px,1fr)]'
+        ? 'grid-cols-1 xl:grid-cols-[minmax(320px,2fr)_minmax(0,3fr)]'
         : 'grid-cols-1'}`}>
 
         {/* Panel izquierdo — pasillos + estante */}
@@ -557,7 +557,7 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
                   <p className="text-[10px] font-semibold uppercase text-muted">Asignacion prevista</p>
                 </div>
                 {selected.uso_reservado && <p className="mb-2 text-xs font-medium text-primary">{selected.uso_reservado}</p>}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {(selected.asignaciones || []).map((item, index) => (
                     <div key={`${item.sku}-${index}`} className="min-w-0">
                       <p className="break-all font-mono text-xs text-foreground">{item.sku}</p>
@@ -569,25 +569,29 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
             )}
 
             {/* Items de stock */}
-            <div className="max-h-[58vh] overflow-y-auto">
+            <div>
               <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock fisico</p>
               {selected.items.length === 0 ? (
                 <div className="flex flex-col items-center py-6 gap-1">
                   <Box size={18} className="text-muted opacity-30"/>
                   <span className="text-xs text-muted">Vacía</span>
                 </div>
-              ) : selected.items.map((item,i) => (
-                <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 px-4 py-3 border-b border-border/20 last:border-0 hover:bg-white/3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-mono text-primary break-all">{item.sku}</p>
-                    <p className="text-[11px] leading-relaxed text-muted">{item.nombre}</p>
-                    {item.lote!=='—'&&<p className="mt-1 break-all text-[10px] text-muted/70">Lote: {item.lote}</p>}
-                  </div>
-                  <span className="text-sm font-bold tabular-nums text-foreground shrink-0">
-                    {Number(item.cantidad).toLocaleString('es-CO',{maximumFractionDigits:1})}
-                  </span>
+              ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-2">
+                  {selected.items.map((item,i) => (
+                    <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 px-4 py-3 border-b border-border/20 hover:bg-white/3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-mono text-primary break-all">{item.sku}</p>
+                        <p className="text-[11px] leading-relaxed text-muted">{item.nombre}</p>
+                        {item.lote!=='—'&&<p className="mt-1 break-all text-[10px] text-muted/70">Lote: {item.lote}</p>}
+                      </div>
+                      <span className="text-sm font-bold tabular-nums text-foreground shrink-0">
+                        {Number(item.cantidad).toLocaleString('es-CO',{maximumFractionDigits:1})}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
 
             {/* Acciones */}
@@ -618,7 +622,6 @@ export default function MapaBodega() {
   const [view,       setView]      = useState('plano')   // 'plano' | 'estantes'
   const [activeZona, setActiveZona] = useState(null)
   const [activeWarehouseId, setActiveWarehouseId] = useState(null)
-  const [locationScope, setLocationScope] = useState('documented')
 
   useEffect(() => { fetchMapa() }, [])
 
@@ -636,11 +639,8 @@ export default function MapaBodega() {
   const activeWarehouse = bodegas.find(bodega => Number(bodega.id) === Number(activeWarehouseId))
   const warehouseLocations = ubicaciones.filter(u => Number(u.bodega_id) === Number(activeWarehouseId))
   const documentedLocations = warehouseLocations.filter(u => u.en_plano_documentado)
-  const otherLocations = warehouseLocations.filter(u => !u.en_plano_documentado)
   const hasDocumentedPlan = activeWarehouse?.codigo === 'BG-PPAL' && documentedLocations.length > 0
-  const visibleLocations = hasDocumentedPlan
-    ? (locationScope === 'documented' ? documentedLocations : otherLocations)
-    : warehouseLocations
+  const visibleLocations = hasDocumentedPlan ? documentedLocations : warehouseLocations
 
   const handleZoneClick = (zona) => {
     setActiveZona(zona)
@@ -655,7 +655,6 @@ export default function MapaBodega() {
         {bodegas.map(bodega => (
           <button key={bodega.id} type="button" onClick={() => {
             setActiveWarehouseId(bodega.id)
-            setLocationScope('documented')
             setActiveZona(null)
             setView('plano')
           }} className={`border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
@@ -666,32 +665,17 @@ export default function MapaBodega() {
         ))}
       </div>
       {hasDocumentedPlan && (
-        <div className="flex gap-1">
-          <button type="button" onClick={() => {
-            setLocationScope('documented')
-            setActiveZona(null)
-            setView('plano')
-          }} className={`rounded-lg border px-3 py-2 text-xs font-medium ${
-            locationScope === 'documented'
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border text-muted hover:text-foreground'
-          }`}>Plano del cliente ({documentedLocations.length})</button>
-          <button type="button" onClick={() => {
-            setLocationScope('other')
-            setActiveZona(null)
-            setView('plano')
-          }} className={`rounded-lg border px-3 py-2 text-xs font-medium ${
-            locationScope === 'other'
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border text-muted hover:text-foreground'
-          }`}>Otras ubicaciones ({otherLocations.length})</button>
+        <div className="flex">
+          <span className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs font-medium text-primary">
+            Plano del cliente ({documentedLocations.length})
+          </span>
         </div>
       )}
       {view === 'plano' ? (
         <PlanoPajaro
           ubicaciones={visibleLocations}
           warehouseCode={activeWarehouse?.codigo}
-          documentedMode={hasDocumentedPlan && locationScope === 'documented'}
+          documentedMode={hasDocumentedPlan}
           onZoneClick={handleZoneClick}
           onRefresh={fetchMapa}
         />
@@ -699,7 +683,7 @@ export default function MapaBodega() {
         <VistaEstantes
           zona={activeZona}
           ubicaciones={zonaUbicaciones}
-          documentedMode={hasDocumentedPlan && locationScope === 'documented'}
+          documentedMode={hasDocumentedPlan}
           onBack={() => setView('plano')}
           onRefresh={fetchMapa}
         />
