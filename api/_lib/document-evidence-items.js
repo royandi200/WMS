@@ -11,7 +11,7 @@ function enrichItemsFromLineEvidence(items, evidenceText) {
     if (positions.has(key)) positions.get(key).push(index);
   });
 
-  return items.map((item) => {
+  const lineEnriched = items.map((item) => {
     const sku = String(item.sku || '').trim().toUpperCase();
     const matches = positions.get(sku) || [];
     if (matches.length !== 1) return item;
@@ -57,6 +57,90 @@ function enrichItemsFromLineEvidence(items, evidenceText) {
       expiryDate: item.expiryDate || dateHint?.date || null,
     };
   });
+
+  return enrichItemsFromFlattenedEvidence(lineEnriched, evidenceText, skuSet);
+}
+
+function enrichItemsFromFlattenedEvidence(items, evidenceText, skuSet) {
+  const evidence = String(evidenceText || '').replace(/\s+/gu, ' ').trim();
+  const upperEvidence = evidence.toUpperCase();
+  const positions = new Map();
+
+  for (const sku of skuSet) {
+    const matches = [...upperEvidence.matchAll(new RegExp(`(?<![A-Z0-9])${escapeRegExp(sku)}(?![A-Z0-9])`, 'gu'))];
+    positions.set(sku, matches.map((match) => match.index));
+  }
+
+  return items.map((item) => {
+    const sku = String(item.sku || '').trim().toUpperCase();
+    const matches = positions.get(sku) || [];
+    if (matches.length !== 1 || (item.unit && item.lot && item.expiryDate)) return item;
+
+    const start = matches[0] + sku.length;
+    const nextStarts = [...positions.entries()]
+      .filter(([otherSku]) => otherSku !== sku)
+      .flatMap(([, starts]) => starts)
+      .filter((position) => position > start);
+    const end = Math.min(
+      upperEvidence.length,
+      start + 1_000,
+      nextStarts.length ? Math.min(...nextStarts) : upperEvidence.length
+    );
+    const block = evidence.slice(start, end);
+    const quantityMatches = findQuantityMatches(block, item.quantity)
+      .filter(({ end: quantityEnd }) => {
+        const nearbyUnit = block.slice(quantityEnd, quantityEnd + 40)
+          .match(/(?<![A-Za-z])(und|unidades?|u|gramos?|gr|g|kilogramos?|kg|kilos?)(?![A-Za-z])/iu);
+        if (!nearbyUnit) return false;
+        const expectedUnit = normalizedUnit(item.unit);
+        return !expectedUnit || normalizedUnit(nearbyUnit[0]) === expectedUnit;
+      });
+    if (quantityMatches.length !== 1) return item;
+
+    const quantityEnd = quantityMatches[0].end;
+    const afterQuantity = block.slice(quantityEnd);
+    const unitMatches = [...afterQuantity.matchAll(/(?<![A-Za-z])(und|unidades?|u|gramos?|gr|g|kilogramos?|kg|kilos?)(?![A-Za-z])/giu)]
+      .map((match) => ({ unit: normalizedUnit(match[0]), index: quantityEnd + match.index, end: quantityEnd + match.index + match[0].length }))
+      .filter(({ unit, index }) => unit && index <= quantityEnd + 80);
+    const unitHint = unitMatches.length === 1 ? unitMatches[0] : null;
+
+    const dateMatches = findDateMatches(block)
+      .filter(({ index }) => index >= quantityEnd);
+    const dateHint = dateMatches.length === 1 ? dateMatches[0] : null;
+    const lotStart = unitHint ? unitHint.end : quantityEnd;
+    const lotEnd = dateHint ? dateHint.index : block.length;
+    const lotCandidates = [...block.slice(lotStart, lotEnd).matchAll(/[A-Za-z0-9][A-Za-z0-9._/]*[-_/][A-Za-z0-9._/-]*/gu)]
+      .map((match) => match[0])
+      .filter((candidate) => isUnambiguousLot(candidate, skuSet));
+
+    return {
+      ...item,
+      unit: item.unit || unitHint?.unit || null,
+      lot: item.lot || (lotCandidates.length === 1 ? lotCandidates[0] : null),
+      expiryDate: item.expiryDate || dateHint?.date || null,
+    };
+  });
+}
+
+function findQuantityMatches(value, quantity) {
+  const number = Number(quantity);
+  if (!Number.isFinite(number)) return [];
+  const forms = [...new Set([
+    String(number),
+    String(number).replace('.', ','),
+    number.toLocaleString('en-US', { maximumFractionDigits: 4 }),
+    number.toLocaleString('es-CO', { maximumFractionDigits: 4 }),
+  ])].sort((left, right) => right.length - left.length);
+  const pattern = forms.map(escapeRegExp).join('|');
+  return [...String(value || '').matchAll(new RegExp(`(?<![0-9.,])(?:${pattern})(?![0-9.,])`, 'gu'))]
+    .map((match) => ({ index: match.index, end: match.index + match[0].length }));
+}
+
+function findDateMatches(value) {
+  const matches = [...String(value || '').matchAll(/(?<!\d)(\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[-/.]\d{2}[-/.]\d{4})(?!\d)/gu)];
+  return matches
+    .map((match) => ({ date: normalizedDate(match[0]), index: match.index }))
+    .filter(({ date }) => Boolean(date));
 }
 
 function evidenceLines(value) {
@@ -112,6 +196,10 @@ function isUnambiguousLot(value, skuSet) {
   if (!/[A-Za-z]/u.test(text) || !/\d/u.test(text)) return false;
   if (normalizedDate(text) || normalizedUnit(text)) return false;
   return !skuSet.has(text.toUpperCase());
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 module.exports = {

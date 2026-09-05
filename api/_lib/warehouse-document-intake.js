@@ -22,7 +22,8 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) 
   if (!items.length) throw inputError('El documento debe incluir al menos un item');
   if (items.length > MAX_DOCUMENT_ITEMS) throw inputError(`El documento supera ${MAX_DOCUMENT_ITEMS} items`);
 
-  const warnings = normalizeWarnings(source.advertencias || source.warnings);
+  const warnings = normalizeWarnings(source.advertencias || source.warnings)
+    .filter((warning) => !isModelDerivedTotalWarning(warning));
   const evidence = cleanEvidenceText(evidenceText);
   assertDocumentTypeMarker(documentType, evidence);
   if (evidence && !evidenceIncludes(evidence, reference)) {
@@ -269,6 +270,15 @@ function optionalPositiveNumber(value, label) {
 function normalizeWarnings(value) {
   if (!Array.isArray(value)) return [];
   return value.map((warning) => cleanText(warning, 255)).filter(Boolean);
+}
+
+function isModelDerivedTotalWarning(value) {
+  const warning = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]/g, '')
+    .toUpperCase();
+  return warning.includes('NOCOINCIDE') && warning.includes('TOTAL');
 }
 
 function cleanText(value, maxLength) {

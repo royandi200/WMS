@@ -30,7 +30,8 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
   if (evidence && !evidenceIncludes(evidence, reference)) {
     throw inputError('El numero de la orden no aparece literalmente en el documento');
   }
-  const warnings = normalizeWarnings(source.advertencias || source.warnings);
+  const warnings = normalizeWarnings(source.advertencias || source.warnings)
+    .filter((warning) => !isModelDerivedValidationWarning(warning));
   const normalizedItems = rawItems.map((item, index) => normalizeItem(item, index));
   const items = enrichItemsFromLineEvidence(normalizedItems, evidenceText).map((normalized) => {
     if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
@@ -454,6 +455,14 @@ function comparableCalculatedTotal(totalsByUnit, suppliedTotal) {
 function normalizeWarnings(value) {
   if (!Array.isArray(value)) return [];
   return value.map((warning) => cleanText(warning, 255)).filter(Boolean);
+}
+
+function isModelDerivedValidationWarning(value) {
+  const warning = normalizedName(value);
+  return warning.includes('NOCOINCIDE') && warning.includes('TOTAL')
+    || warning.includes('FALTANLOTE')
+    || warning.includes('FALTANVENCIMIENTO')
+    || warning.includes('FALTANLOTEYVENCIMIENTO');
 }
 
 function parseWarnings(value) {

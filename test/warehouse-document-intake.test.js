@@ -67,6 +67,25 @@ test('3Q intake recovers an omitted unit from the exact SKU quantity block', () 
   assert.equal(input.items[0].unit, 'und');
 });
 
+test('3Q intake recovers omitted units from flattened PDF evidence', () => {
+  const input = normalizeWarehouseDocumentInput(validInput({
+    total_unidades: 66,
+    advertencias: ['El total declarado (66) no coincide con la suma de items (66)'],
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 23 },
+      { sku: '00006-TRP', descripcion: 'Tarros', cantidad: 43 },
+    ],
+  }), {
+    evidenceText: [
+      'SALIDA DE BODEGA HACIA 3Q SB-TEST-20260831-001',
+      '00001-TPBI TAPAS 23 und',
+      '00006-TRP TARROS 43 und',
+    ].join(' '),
+  });
+  assert.deepEqual(input.items.map((item) => item.unit), ['und', 'und']);
+  assert.deepEqual(input.warnings, []);
+});
+
 test('3Q evidence requires an explicit outsourcing marker', () => {
   assert.throws(
     () => normalizeWarehouseDocumentInput(validInput(), {

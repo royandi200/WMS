@@ -762,3 +762,15 @@ Estado: APROBADA | FALLIDA | BLOQUEADA
 - Compatibilidad: los borradores 3Q historicos sin unidad mantienen reintentos equivalentes como `und`; un cambio real de unidad forma una identidad operativa distinta.
 - Verificacion: pruebas documentales `30/30`, suite completa `203/203`, build Vite aprobado, prompt sincronizado por lectura posterior, topologia preservada y bot `ONLINE`.
 - Estado: IMPLEMENTADA; repeticion manual R03 pendiente tras despliegue del backend.
+
+### M74 - OC documental R03 y correccion de evidencia aplanada
+
+- Hora Bogota: 17:38-17:39.
+- Canal y rol: WhatsApp, Datana (`recepcion_cierre`), con verificacion directa en base de datos.
+- Documento: `QA-DOC-20260905-R03-01-OC-VALIDA.pdf`.
+- Resultado: se creo exactamente un borrador BuilderBot, ID 10, con 11 items, una copia del PDF y cero movimientos Kardex. `total_unidades` y `total_calculado` quedaron en `376`, pero el mensaje conservo una advertencia contradictoria generada durante la extraccion.
+- Persistencia correcta: los 11 SKU, cantidades y unidades quedaron registrados; nueve items conservaron lote y vencimiento completos.
+- Hallazgo repetido: `00018-ETBOS60` perdio el vencimiento y `00042-CMCG` perdio lote y vencimiento. El caso de `00018-ETBOS60` revelo una colision entre su cantidad `31` y el dia `31` del vencimiento.
+- Correccion: el respaldo determinista ahora admite evidencia PDF aplanada, delimita cada bloque entre SKU exactos y solo acepta una cantidad seguida por una unidad compatible. Las advertencias de total se recalculan en el servidor y no se conservan cuando contradicen los subtotales validados.
+- Verificacion local posterior: `205/205` pruebas y build Vite aprobados.
+- Estado: CORREGIDA LOCALMENTE; requiere nueva referencia documental despues del despliegue para validar el recorrido real de BuilderBot.

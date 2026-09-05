@@ -176,6 +176,35 @@ test('purchase order recovers omitted row fields only from an exact line-delimit
   assert.equal(normalized.items[0].expiryDate, '2028-01-31');
 });
 
+test('purchase order recovers omitted fields from flattened multi-row PDF evidence', () => {
+  const body = validInput({
+    total_unidades: 97,
+    advertencias: [
+      'Faltan lote y vencimiento legibles para algunos items.',
+      'La cantidad total de 97 und no coincide con la suma de items en unidades.',
+    ],
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapa', cantidad: 37, unidad: 'und' },
+      { sku: '00018-ETBOS60', descripcion: 'Etiqueta', cantidad: 31, unidad: 'und', lote: 'QA-ETBOS60-260905' },
+      { sku: '00042-CMCG', descripcion: 'Caja master', cantidad: 29, unidad: 'und' },
+    ],
+  });
+  const evidence = [
+    'ORDEN DE COMPRA OC-DEMO-20260902-001',
+    '00001-TPBI TAPA TARRO CUADRADO BLANCO 37 und QA-TPBI-260905 2028-01-31',
+    '00018-ETBOS60 ETIQUETA BOOSTER 31 und QA-ETBOS60-260905 2028-05-31',
+    '00042-CMCG CAJA MASTER CREA GUMS 29 und QA-CMCG-260905 2028-09-30',
+  ].join(' ');
+
+  const normalized = normalizePurchaseOrderDocumentInput(body, { evidenceText: evidence });
+  assert.deepEqual(normalized.items.map(({ lot, expiryDate }) => ({ lot, expiryDate })), [
+    { lot: 'QA-TPBI-260905', expiryDate: '2028-01-31' },
+    { lot: 'QA-ETBOS60-260905', expiryDate: '2028-05-31' },
+    { lot: 'QA-CMCG-260905', expiryDate: '2028-09-30' },
+  ]);
+  assert.deepEqual(normalized.warnings, []);
+});
+
 test('purchase order does not recover hints when a SKU block is ambiguous', () => {
   const body = validInput({
     total_unidades: 37,
