@@ -26,7 +26,7 @@ const AlertSettingsPage = lazy(() => import('./pages/AlertSettingsPage'))
 
 function AdminRoute({ children }) {
   const role = String(useAuthStore((state) => state.user?.rol) || '').toLowerCase()
-  return ['admin', 'administrador'].includes(role) ? children : <Navigate to="/" replace />
+  return role === 'admin' ? children : <Navigate to="/" replace />
 }
 
 function PageLoader() {

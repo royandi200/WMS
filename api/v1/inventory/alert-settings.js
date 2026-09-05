@@ -14,7 +14,7 @@ function httpError(status, message) {
 }
 
 async function handleGet(req, res) {
-  await requireRole(req, ['Admin', 'Administrador']);
+  await requireRole(req, ['Admin']);
   const search = String(req.query?.search || '').trim().slice(0, 80);
   const args = [];
   let filter = '';
@@ -64,7 +64,7 @@ async function handleGet(req, res) {
 }
 
 async function handlePut(req, res) {
-  const actor = await requireRole(req, ['Admin', 'Administrador']);
+  const actor = await requireRole(req, ['Admin']);
   const productId = normalizeProductId(req.body?.product_id);
   const minimumStock = normalizeMinimumStock(req.body?.stock_minimo);
   const dwellDays = normalizeConfiguredDwellDays(req.body?.permanencia_max_dias);

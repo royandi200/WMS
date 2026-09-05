@@ -668,6 +668,7 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - El mapa de bodega amplía el panel de detalle al seleccionar una ubicacion y deja visibles nombres, lotes y cantidades sin truncado horizontal.
 - Despachos permite abrir una hoja imprimible y guardarla como PDF con factura, cliente, SKU, lote, ubicacion y cantidad. La exportacion CSV permanece implementada, pero no se expone en la interfaz.
 - Se agrego `Sistema > Configurar alertas`, visible y operable solo para administradores, para modificar stock minimo y permanencia maxima por SKU. Cada cambio queda auditado en `system_logs` y no altera inventario.
+- Se confirmo `admin` como el unico identificador tecnico del perfil Administrador; `administrador` no se mantiene como un segundo rol ni como alias de autorizacion.
 - La alerta de stock minimo ahora usa disponibilidad operativa: excluye lotes vencidos, bloqueados o sin ubicacion activa e incluye productos activos con saldo cero.
 - Se revalido el flujo 3Q existente: remision, reserva FEFO, salida transaccional, vinculacion a OC y recepcion parcial o total.
 - La migracion 29 se aplico en la base configurada y asigno 90 dias como valor inicial. Validacion local: 183 pruebas aprobadas y build Vite aprobado. Cambios de aplicacion aun no desplegados.

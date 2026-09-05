@@ -22,12 +22,12 @@ test('alert settings accept bounded deterministic values', () => {
 
 test('only administrators can manage alert thresholds', () => {
   assert.equal(hasCapability('admin', CAPABILITIES.ALERT_SETTINGS_MANAGE), true);
-  assert.equal(hasCapability('administrador', CAPABILITIES.ALERT_SETTINGS_MANAGE), true);
-  for (const role of ['recepcion_cierre', 'alistador', 'despacho', 'consulta']) {
+  for (const role of ['administrador', 'recepcion_cierre', 'alistador', 'despacho', 'consulta']) {
     assert.equal(hasCapability(role, CAPABILITIES.ALERT_SETTINGS_MANAGE), false, role);
   }
   const route = fs.readFileSync(path.join(__dirname, '../api/v1/inventory/alert-settings.js'), 'utf8');
-  assert.match(route, /requireRole\(req, \['Admin', 'Administrador'\]\)/u);
+  assert.match(route, /requireRole\(req, \['Admin'\]\)/u);
+  assert.doesNotMatch(route, /Administrador/u);
   assert.doesNotMatch(route, /requireCapability/u);
 });
 
@@ -55,7 +55,9 @@ test('dashboard keeps alert settings in an admin-only section', () => {
   const sidebar = fs.readFileSync(path.join(__dirname, '../frontend/src/components/Sidebar.jsx'), 'utf8');
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/AlertSettingsPage.jsx'), 'utf8');
   assert.match(app, /path="configuracion-alertas" element=\{<AdminRoute>/u);
+  assert.match(app, /role === 'admin'/u);
   assert.match(sidebar, /alert_settings\.manage', adminOnly: true/u);
+  assert.match(sidebar, /item\.adminOnly[\s\S]*!== 'admin'/u);
   assert.match(page, /Stock minimo/u);
   assert.match(page, /Permanencia maxima/u);
 });

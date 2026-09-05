@@ -35,7 +35,7 @@ export default function Sidebar({ open, mobile = false, onClose }) {
   const capabilities = user?.capabilities || []
   const legacyAdmin = ['admin', 'supervisor'].includes(String(user?.rol || '').toLowerCase())
   const allowed = (item) => {
-    if (item.adminOnly && !['admin', 'administrador'].includes(String(user?.rol || '').toLowerCase())) return false
+    if (item.adminOnly && String(user?.rol || '').toLowerCase() !== 'admin') return false
     return legacyAdmin || capabilities.includes('*') || capabilities.includes(item.capability)
   }
   return (

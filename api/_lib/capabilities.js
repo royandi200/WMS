@@ -50,7 +50,6 @@ const READ_ONLY = [
 // workflow-specific roles. New roles are intentionally least-privileged.
 const ROLE_CAPABILITIES = Object.freeze({
   admin: ['*'],
-  administrador: ['*'],
   supervisor: ['*'],
   validador: [
     ...READ_ONLY,
