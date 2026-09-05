@@ -76,6 +76,15 @@ test('documented warehouse plan owns section organization without an alternate-l
   assert.doesNotMatch(map, /locationScope|otherLocations/u);
 });
 
+test('warehouse section dragging survives mouseup races and hides the unused WIP warehouse', () => {
+  const map = fs.readFileSync(path.join(__dirname, '../frontend/src/components/MapaBodega.jsx'), 'utf8');
+  assert.match(map, /const activeDrag = dragging\.current[\s\S]*if \(!activeDrag\) return/u);
+  assert.match(map, /zonesRef\.current = next[\s\S]*setZones\(next\)/u);
+  assert.doesNotMatch(map, /\[dragging\.current\.name\]/u);
+  assert.match(map, /bodegas\.filter\(bodega => bodega\.codigo !== 'BG-PROD'\)/u);
+  assert.match(map, /visibleWarehouses\.map/u);
+});
+
 test('all receipt channels require physical lot, expiry and location', () => {
   const route = fs.readFileSync(path.join(__dirname, '../api/v1/reception.js'), 'utf8');
   const whatsapp = fs.readFileSync(path.join(__dirname, '../api/_lib/builderbot-reception.js'), 'utf8');

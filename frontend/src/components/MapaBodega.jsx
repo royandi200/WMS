@@ -43,6 +43,7 @@ const apiFetch = (path, opts={}) =>
 function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, onRefresh }) {
   const canvasRef   = useRef(null)
   const dragging    = useRef(null)
+  const zonesRef    = useRef({})
   const [zones,     setZones]     = useState({})   // { zoneName: {x,y,w,h} }
   const [draggingZ, setDraggingZ] = useState(null)
   const [newZone,   setNewZone]   = useState('')
@@ -64,6 +65,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
         x: 40 + col * 220, y: 40 + row * 160, w: 180, h: 120
       }
     })
+    zonesRef.current = z
     setZones(z)
   }, [zonaNames, STORAGE_KEY])
 
@@ -84,30 +86,33 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
   }, [editMode, zones])
 
   const onMouseMove = useCallback((e) => {
-    if (!dragging.current) return
+    const activeDrag = dragging.current
+    if (!activeDrag) return
     const canvas = canvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
     const my = e.clientY - rect.top
-    const dx = mx - dragging.current.startMouseX
-    const dy = my - dragging.current.startMouseY
-    setZones(prev => ({
-      ...prev,
-      [dragging.current.name]: {
-        ...prev[dragging.current.name],
-        x: Math.max(0, dragging.current.origX + dx),
-        y: Math.max(0, dragging.current.origY + dy),
+    const dx = mx - activeDrag.startMouseX
+    const dy = my - activeDrag.startMouseY
+    const next = {
+      ...zonesRef.current,
+      [activeDrag.name]: {
+        ...zonesRef.current[activeDrag.name],
+        x: Math.max(0, activeDrag.origX + dx),
+        y: Math.max(0, activeDrag.origY + dy),
       }
-    }))
+    }
+    zonesRef.current = next
+    setZones(next)
   }, [])
 
   const onMouseUp = useCallback(() => {
     if (dragging.current) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(zones))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(zonesRef.current))
     }
     dragging.current = null
-  }, [zones])
+  }, [STORAGE_KEY])
 
   const addZone = () => {
     const name = newZone.trim()
@@ -116,6 +121,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
       const count = Object.keys(prev).length
       const cols = 3, col = count % cols, row = Math.floor(count / cols)
       const next = { ...prev, [name]: { x: 40+col*220, y: 40+row*160, w: 180, h: 120 } }
+      zonesRef.current = next
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
       return next
     })
@@ -619,16 +625,20 @@ export default function MapaBodega() {
 
   const ubicaciones = mapa?.ubicaciones ?? []
   const bodegas     = mapa?.bodegas     ?? []
+  const visibleWarehouses = useMemo(
+    () => bodegas.filter(bodega => bodega.codigo !== 'BG-PROD'),
+    [bodegas]
+  )
 
   useEffect(() => {
-    if (!bodegas.length) return
-    const preferred = bodegas.find(bodega => bodega.codigo === 'BG-PPAL') || bodegas[0]
-    if (!bodegas.some(bodega => Number(bodega.id) === Number(activeWarehouseId))) {
+    if (!visibleWarehouses.length) return
+    const preferred = visibleWarehouses.find(bodega => bodega.codigo === 'BG-PPAL') || visibleWarehouses[0]
+    if (!visibleWarehouses.some(bodega => Number(bodega.id) === Number(activeWarehouseId))) {
       setActiveWarehouseId(preferred.id)
     }
-  }, [bodegas, activeWarehouseId])
+  }, [visibleWarehouses, activeWarehouseId])
 
-  const activeWarehouse = bodegas.find(bodega => Number(bodega.id) === Number(activeWarehouseId))
+  const activeWarehouse = visibleWarehouses.find(bodega => Number(bodega.id) === Number(activeWarehouseId))
   const warehouseLocations = ubicaciones.filter(u => Number(u.bodega_id) === Number(activeWarehouseId))
   const documentedLocations = warehouseLocations.filter(u => u.en_plano_documentado)
   const hasDocumentedPlan = activeWarehouse?.codigo === 'BG-PPAL' && documentedLocations.length > 0
@@ -644,7 +654,7 @@ export default function MapaBodega() {
   return (
     <div className="space-y-4">
       <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
-        {bodegas.map(bodega => (
+        {visibleWarehouses.map(bodega => (
           <button key={bodega.id} type="button" onClick={() => {
             setActiveWarehouseId(bodega.id)
             setActiveZona(null)
