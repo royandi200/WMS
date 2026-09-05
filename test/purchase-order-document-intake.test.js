@@ -36,6 +36,60 @@ test('purchase order PDF extraction is deterministic and grounded in literal evi
   assert.deepEqual(first.warnings, []);
 });
 
+test('purchase order evidence requires an explicit document marker', () => {
+  assert.throws(
+    () => normalizePurchaseOrderDocumentInput(validInput(), {
+      evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1500 gr',
+    }),
+    /encabezado visible ORDEN DE COMPRA/u
+  );
+  assert.throws(
+    () => normalizePurchaseOrderDocumentInput(validInput(), {
+      evidenceText: 'ORDEN DE COMPRA Y SALIDA DE BODEGA HACIA 3Q OC-DEMO-20260902-001 00051-MPASH 1500 gr',
+    }),
+    /marcadores contradictorios/u
+  );
+});
+
+test('purchase order totals never add incompatible units', () => {
+  const input = validInput({
+    total_unidades: 80,
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 80, unidad: 'unidades' },
+      { sku: '00051-MPASH', descripcion: 'Gomas', cantidad: 8750, unidad: 'gr' },
+    ],
+  });
+  const normalized = normalizePurchaseOrderDocumentInput(input);
+  assert.equal(normalized.totalUnits, 80);
+  assert.equal(normalized.calculatedTotal, 80);
+  assert.doesNotMatch(normalized.warnings.join(' | '), /9126|suma de items/u);
+});
+
+test('purchase order mixed-unit total compares against the units subtotal', () => {
+  const input = validInput({
+    total_unidades: 79,
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 80, unidad: 'und' },
+      { sku: '00051-MPASH', descripcion: 'Gomas', cantidad: 8750, unidad: 'g' },
+    ],
+  });
+  const normalized = normalizePurchaseOrderDocumentInput(input);
+  assert.equal(normalized.calculatedTotal, 80);
+  assert.match(normalized.warnings.join(' | '), /79.*80/u);
+});
+
+test('purchase order rejects a weight subtotal presented as total units', () => {
+  const normalized = normalizePurchaseOrderDocumentInput(validInput({
+    total_unidades: 8750,
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 80, unidad: 'und' },
+      { sku: '00051-MPASH', descripcion: 'Gomas', cantidad: 8750, unidad: 'g' },
+    ],
+  }));
+  assert.equal(normalized.calculatedTotal, 80);
+  assert.match(normalized.warnings.join(' | '), /8750.*80/u);
+});
+
 test('purchase order extraction fails closed for invented SKU, quantity or ambiguous header', () => {
   const evidence = 'ORDEN DE COMPRA OC-DEMO-20260902-001 00051-MPASH 1500 gr';
   assert.throws(
@@ -58,13 +112,13 @@ test('purchase order extraction fails closed for invented SKU, quantity or ambig
     () => normalizePurchaseOrderDocumentInput(validInput({
       items: [{ sku: '00051-MPASH', descripcion: 'Gomas', cantidad: 150, unidad: 'gr' }],
       total_unidades: 150,
-    }), { evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1500 gr' }),
+    }), { evidenceText: 'ORDEN DE COMPRA OC-DEMO-20260902-001 00051-MPASH 1500 gr' }),
     /cantidad 150/u
   );
   assert.throws(
     () => normalizePurchaseOrderDocumentInput(validInput({
       items: [{ sku: '00051-MPAS', descripcion: 'Gomas', cantidad: 1500, unidad: 'gr' }],
-    }), { evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1500 gr' }),
+    }), { evidenceText: 'ORDEN DE COMPRA OC-DEMO-20260902-001 00051-MPASH 1500 gr' }),
     /no aparece literalmente/u
   );
 });
@@ -81,14 +135,14 @@ test('purchase order extraction preserves supplier lot and expiry only when grou
     }],
   });
   const grounded = normalizePurchaseOrderDocumentInput(body, {
-    evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1,500 gr PROV-LOT-77 30/11/2027',
+    evidenceText: 'ORDEN DE COMPRA OC-DEMO-20260902-001 00051-MPASH 1,500 gr PROV-LOT-77 30/11/2027',
   });
   assert.equal(grounded.items[0].lot, 'PROV-LOT-77');
   assert.equal(grounded.items[0].expiryDate, '2027-11-30');
   assert.deepEqual(grounded.warnings, []);
 
   const unsupported = normalizePurchaseOrderDocumentInput(body, {
-    evidenceText: 'OC-DEMO-20260902-001 00051-MPASH 1,500 gr',
+    evidenceText: 'ORDEN DE COMPRA OC-DEMO-20260902-001 00051-MPASH 1,500 gr',
   });
   assert.equal(unsupported.items[0].lot, null);
   assert.equal(unsupported.items[0].expiryDate, null);

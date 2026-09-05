@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -176,7 +177,7 @@ def data_table(headers, rows, widths, styles):
     return table
 
 
-def build_purchase_order(path):
+def build_purchase_order(path, run):
     styles = base_styles()
     doc = SimpleDocTemplate(
         str(path),
@@ -193,7 +194,7 @@ def build_purchase_order(path):
     story = [
         paragraph("ORDEN DE COMPRA - PRUEBA DOCUMENTAL MULTIREFERENCIA", styles["title"]),
         metadata_table([
-            ("Numero de OC", "QA-DOC-20260905-OC-MULTI-001", "Fecha de orden", "2026-09-05"),
+            ("Numero de OC", f"QA-DOC-{run}-OC-MULTI-001", "Fecha de orden", "2026-09-05"),
             ("Proveedor", "PROVEEDOR QA MULTISKU SAS", "NIT proveedor", "901555777-3"),
             ("Moneda", "COP", "Lugar de entrega", "BODEGA PRINCIPAL - BOGOTA D.C."),
             ("Comprador", "INFINITY BRANDS - ENTORNO QA", "Contacto", "recepcion.qa@wms.local"),
@@ -216,7 +217,7 @@ def build_purchase_order(path):
     doc.build(story, onFirstPage=page_header, onLaterPages=page_header)
 
 
-def build_warehouse_exit(path):
+def build_warehouse_exit(path, run):
     styles = base_styles()
     doc = SimpleDocTemplate(
         str(path),
@@ -232,7 +233,7 @@ def build_warehouse_exit(path):
     story = [
         paragraph("SALIDA DE BODEGA HACIA 3Q - PRUEBA MULTIREFERENCIA", styles["title"]),
         metadata_table([
-            ("Numero de salida", "QA-DOC-20260905-SALIDA-3Q-001", "Fecha", "2026-09-05"),
+            ("Numero de salida", f"QA-DOC-{run}-SALIDA-3Q-001", "Fecha", "2026-09-05"),
             ("Destinatario", "3Q - MAQUILA EXTERNA QA", "NIT destinatario", "900333222-1"),
             ("Direccion", "Calle 100 No. 20-30 - Zona industrial", "Ciudad y departamento", "Bogota D.C."),
             ("Entrega", "SOFI - PERFIL ADMINISTRADOR QA", "Recibe", "PENDIENTE DE FIRMA EN 3Q"),
@@ -259,14 +260,70 @@ def build_warehouse_exit(path):
     doc.build(story, onFirstPage=page_header, onLaterPages=page_header)
 
 
+def build_marker_case(path, run, title, reference, expected):
+    styles = base_styles()
+    doc = SimpleDocTemplate(
+        str(path),
+        pagesize=landscape(A4),
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=15 * mm,
+        bottomMargin=14 * mm,
+        title=title,
+        author="WMS QA",
+    )
+    story = [
+        paragraph(title, styles["title"]),
+        metadata_table([
+            ("Referencia", reference, "Fecha", "2026-09-05"),
+            ("Proveedor / destinatario", "TERCERO QA DOCUMENTAL", "Ejecucion", run),
+        ], styles),
+        Spacer(1, 5 * mm),
+        data_table(
+            ["SKU", "Producto / material", "Cantidad", "Unidad"],
+            [["00001-TPBI", "TAPA TARRO CUADRADO BLANCO (60 UNID)", "7", "und"]],
+            [42 * mm, 142 * mm, 30 * mm, 29 * mm],
+            styles,
+        ),
+        Spacer(1, 5 * mm),
+        paragraph(f"Resultado esperado: {expected}", styles["foot"]),
+        paragraph("Documento controlado de QA. No debe modificar inventario.", styles["foot"]),
+    ]
+    doc.build(story, onFirstPage=page_header, onLaterPages=page_header)
+
+
 def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    purchase_path = OUTPUT_DIR / "QA-DOC-20260905-OC-MULTI-001.pdf"
-    exit_path = OUTPUT_DIR / "QA-DOC-20260905-SALIDA-3Q-001.pdf"
-    build_purchase_order(purchase_path)
-    build_warehouse_exit(exit_path)
-    print(purchase_path)
-    print(exit_path)
+    parser = argparse.ArgumentParser(description="Genera PDF repetibles para regresion documental WMS")
+    parser.add_argument("--run", default="20260905-R02", help="Identificador unico: letras, numeros y guiones")
+    args = parser.parse_args()
+    run = args.run.strip().upper()
+    if not run or len(run) > 30 or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-" for char in run):
+        raise ValueError("--run debe contener entre 1 y 30 letras, numeros o guiones")
+
+    output_dir = OUTPUT_DIR / run.lower()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    purchase_path = output_dir / f"QA-DOC-{run}-01-OC-VALIDA.pdf"
+    exit_path = output_dir / f"QA-DOC-{run}-02-REMISION-3Q-VALIDA.pdf"
+    missing_path = output_dir / f"QA-DOC-{run}-03-SIN-MARCADOR.pdf"
+    conflict_path = output_dir / f"QA-DOC-{run}-04-MARCADORES-CONTRADICTORIOS.pdf"
+    build_purchase_order(purchase_path, run)
+    build_warehouse_exit(exit_path, run)
+    build_marker_case(
+        missing_path,
+        run,
+        "DOCUMENTO LOGISTICO SIN CLASIFICACION",
+        f"QA-DOC-{run}-SIN-MARCADOR-001",
+        "rechazo controlado por falta de encabezado admitido",
+    )
+    build_marker_case(
+        conflict_path,
+        run,
+        "ORDEN DE COMPRA / SALIDA DE BODEGA HACIA 3Q",
+        f"QA-DOC-{run}-CONFLICTO-001",
+        "rechazo controlado por marcadores contradictorios",
+    )
+    for path in (purchase_path, exit_path, missing_path, conflict_path):
+        print(path)
 
 
 if __name__ == "__main__":

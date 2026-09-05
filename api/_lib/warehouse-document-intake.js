@@ -1,5 +1,6 @@
 const { createHash } = require('crypto');
 const { downloadBuilderBotPdf } = require('./purchase-order-document-intake');
+const { assertDocumentTypeMarker } = require('./document-type-markers');
 
 const MAX_DOCUMENT_ITEMS = 100;
 
@@ -22,6 +23,7 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) 
 
   const warnings = normalizeWarnings(source.advertencias || source.warnings);
   const evidence = cleanEvidenceText(evidenceText);
+  assertDocumentTypeMarker(documentType, evidence);
   if (evidence && !evidenceIncludes(evidence, reference)) {
     throw inputError('La referencia_documento no aparece literalmente en el documento');
   }

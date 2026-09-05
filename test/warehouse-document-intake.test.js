@@ -49,6 +49,19 @@ test('document intake normalizes an exact, complete 3Q warehouse exit', () => {
   assert.match(input.hash, /^[a-f0-9]{64}$/u);
 });
 
+test('3Q evidence requires an explicit outsourcing marker', () => {
+  assert.throws(
+    () => normalizeWarehouseDocumentInput(validInput(), {
+      evidenceText: 'SALIDA DE BODEGA SB-TEST-20260831-001 3Q 00007-TRG 7000 00006-TRP 1200',
+    }),
+    /SALIDA DE BODEGA HACIA 3Q/u
+  );
+  const normalized = normalizeWarehouseDocumentInput(validInput(), {
+    evidenceText: 'REMISION A 3Q SB-TEST-20260831-001 00007-TRG 7000 00006-TRP 1200',
+  });
+  assert.equal(normalized.documentType, 'SALIDA_BODEGA_3Q');
+});
+
 test('document intake is deterministic and accepts BuilderBot params envelope', () => {
   const direct = normalizeWarehouseDocumentInput(validInput());
   const enveloped = normalizeWarehouseDocumentInput({ params: validInput() });
@@ -187,7 +200,7 @@ test('duplicate accepts equivalent operational data when OCR metadata changes', 
     }),
     userId: 5,
     evidenceText: [
-      'SALIDA DE BODEGA SB-TEST-20260831-001',
+      'SALIDA DE BODEGA HACIA 3Q SB-TEST-20260831-001',
       '00007-TRG 7000 2027-12-31 L-TEST-120',
       '00006-TRP 1200 2027-12-31 L-TEST-60',
     ].join('\n'),
@@ -231,7 +244,7 @@ test('duplicate rejects changes to operational items with a specific conflict', 
 
 test('BuilderBot document evidence rejects invented SKU and clears invented optional data', () => {
   const evidence = [
-    'SALIDA DE BODEGA SB-TEST-20260831-001',
+    'SALIDA DE BODEGA HACIA 3Q SB-TEST-20260831-001',
     '00007-TRG 7000 2027-12-31 L-TEST-120',
     '00006-TRP 1200 2027-12-31 L-TEST-60',
   ].join('\n');

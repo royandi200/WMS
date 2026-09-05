@@ -687,6 +687,13 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - Se revalido el flujo 3Q existente: remision, reserva FEFO, salida transaccional, vinculacion a OC y recepcion parcial o total.
 - La migracion 29 se aplico en la base configurada y asigno 90 dias como valor inicial. Validacion local: 183 pruebas aprobadas y build Vite aprobado. Cambios de aplicacion aun no desplegados.
 
+### 2026-09-05: enrutamiento seguro de PDF por contenido
+
+- Los PDF de WhatsApp se clasifican por un encabezado visible: `ORDEN DE COMPRA` para Recepciones y `SALIDA DE BODEGA HACIA 3Q` o `REMISION A 3Q` para Maquila 3Q.
+- La API valida el marcador contra el OCR y rechaza documentos sin marcador o con marcadores contradictorios; no confia solo en la decision del modelo, el nombre del archivo o el caption.
+- La lectura conserva el comportamiento no operativo: solo crea un borrador revisable y nunca modifica inventario.
+- Validacion local: 200 pruebas aprobadas. Prompt de BuilderBot sincronizado y bot verificado en linea; backend pendiente de despliegue.
+
 ## Regla de mantenimiento
 
 Al cerrar una entrega:

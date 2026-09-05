@@ -1,5 +1,6 @@
 const { createHash } = require('crypto');
 const { MAX_PDF_BYTES } = require('./purchase-order-documents');
+const { assertDocumentTypeMarker } = require('./document-type-markers');
 
 const MAX_DOCUMENT_ITEMS = 100;
 const DOCUMENT_TYPE = 'ORDEN_COMPRA';
@@ -24,6 +25,7 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
   if (rawItems.length > MAX_DOCUMENT_ITEMS) throw inputError(`La orden supera ${MAX_DOCUMENT_ITEMS} items`);
 
   const evidence = cleanEvidenceText(evidenceText);
+  assertDocumentTypeMarker(DOCUMENT_TYPE, evidence);
   if (evidence && !evidenceIncludes(evidence, reference)) {
     throw inputError('El numero de la orden no aparece literalmente en el documento');
   }
@@ -47,8 +49,9 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
     if (!normalized.unit) warnings.push(`El item ${normalized.sku} no tiene unidad de medida`);
     return normalized;
   });
-  const calculatedTotal = roundQty(items.reduce((sum, item) => sum + item.quantity, 0));
   const suppliedTotal = optionalNonNegativeNumber(source.total_unidades ?? source.total_units, 'total_unidades');
+  const totalsByUnit = calculateTotalsByUnit(items);
+  const calculatedTotal = comparableCalculatedTotal(totalsByUnit, suppliedTotal);
   if (suppliedTotal != null && Math.abs(suppliedTotal - calculatedTotal) > 0.0001) {
     warnings.push(`El total declarado (${suppliedTotal}) no coincide con la suma de items (${calculatedTotal})`);
   }
@@ -417,7 +420,34 @@ function normalizedName(value) {
 }
 
 function normalizedUnit(value) {
-  return String(value || '').trim().toLowerCase();
+  const unit = String(value || '').trim().toLowerCase();
+  if (/^(u|und|unidad|unidades)$/u.test(unit)) return 'und';
+  if (/^(g|gr|gramo|gramos)$/u.test(unit)) return 'g';
+  if (/^(kg|kilo|kilos|kilogramo|kilogramos)$/u.test(unit)) return 'kg';
+  return unit;
+}
+
+function calculateTotalsByUnit(items) {
+  const totals = new Map();
+  for (const item of items) {
+    const unit = normalizedUnit(item.unit) || 'sin_unidad';
+    totals.set(unit, roundQty((totals.get(unit) || 0) + item.quantity));
+  }
+  return totals;
+}
+
+function comparableCalculatedTotal(totalsByUnit, suppliedTotal) {
+  const entries = [...totalsByUnit.entries()];
+  if (!entries.length) return 0;
+  if (entries.length === 1) return entries[0][1];
+  // `total_unidades` must be compared with physical units when a document also
+  // contains weight-based materials. Never let a grams subtotal validate it.
+  if (totalsByUnit.has('und')) return totalsByUnit.get('und');
+  if (suppliedTotal != null) {
+    const exactMatches = entries.filter(([, total]) => Math.abs(total - suppliedTotal) <= 0.0001);
+    if (exactMatches.length === 1) return exactMatches[0][1];
+  }
+  return suppliedTotal == null ? entries[0][1] : suppliedTotal;
 }
 
 function normalizeWarnings(value) {

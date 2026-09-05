@@ -35,7 +35,7 @@ test('document intake requires text attached to the same WhatsApp message', () =
   );
 });
 
-test('document policy never recovers text from OCR or previous-message fields', () => {
+test('document policy never recovers text from OCR and documents the provider limitation', () => {
   const webhook = fs.readFileSync(
     path.join(__dirname, '../api/v1/webhook/builderbot.js'),
     'utf8'
@@ -52,6 +52,8 @@ test('document policy never recovers text from OCR or previous-message fields', 
     webhook,
     /assertDocumentHasSameMessageInstruction\(action, rawText\)/u
   );
-  assert.match(prompt, /Un texto enviado despues no recupera ni vincula este archivo/u);
-  assert.match(prompt, /PDF SIN TEXTO ADJUNTO/u);
+  assert.match(prompt, /Un texto enviado despues no recupera ni vincula el archivo anterior/u);
+  assert.match(prompt, /no expone de forma confiable el texto adjunto/u);
+  assert.match(prompt, /solo puede crear un borrador sujeto a revision humana/u);
+  assert.doesNotMatch(prompt, /La API valida que exista texto adjunto/u);
 });
