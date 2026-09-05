@@ -70,6 +70,8 @@ test('documented warehouse plan owns section organization without an alternate-l
   const map = fs.readFileSync(path.join(__dirname, '../frontend/src/components/MapaBodega.jsx'), 'utf8');
   assert.match(map, /Organizar secciones/u);
   assert.match(map, /documentedMode && \(/u);
+  assert.match(map, /onMouseUp[\s\S]*localStorage\.setItem\(STORAGE_KEY/u);
+  assert.doesNotMatch(map, /saveLayout|>Guardar<\/button>/u);
   assert.doesNotMatch(map, /Otras ubicaciones/u);
   assert.doesNotMatch(map, /locationScope|otherLocations/u);
 });

@@ -122,10 +122,6 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
     setNewZone('')
   }
 
-  const saveLayout = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(zones))
-  }
-
   return (
     <div className="flex flex-col gap-3">
       {/* Toolbar */}
@@ -151,10 +147,6 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
                 </button>
               </div>
             )}
-            <button onClick={saveLayout}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/25 transition-colors">
-              <Save size={12}/>Guardar
-            </button>
           </>
         )}
 
