@@ -81,7 +81,8 @@ test('warehouse section dragging survives mouseup races and hides the unused WIP
   assert.match(map, /const activeDrag = dragging\.current[\s\S]*if \(!activeDrag\) return/u);
   assert.match(map, /zonesRef\.current = next[\s\S]*setZones\(next\)/u);
   assert.doesNotMatch(map, /\[dragging\.current\.name\]/u);
-  assert.match(map, /bodegas\.filter\(bodega => bodega\.codigo !== 'BG-PROD'\)/u);
+  assert.match(map, /WAREHOUSE_ORDER = \['BG-PPAL', 'BG-CUAR', 'BG-DEVOL'\]/u);
+  assert.match(map, /bodegas[\s\S]*\.filter\(bodega => bodega\.codigo !== 'BG-PROD'\)/u);
   assert.match(map, /visibleWarehouses\.map/u);
 });
 

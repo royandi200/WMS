@@ -27,6 +27,8 @@ const ESTADO = {
   vacio: { bg:'#ffffff08', border:'#30363d',   dot:'#30363d' },
 }
 
+const WAREHOUSE_ORDER = ['BG-PPAL', 'BG-CUAR', 'BG-DEVOL']
+
 // ─── API helpers ──────────────────────────────────────────────────────────────
 const API = '/api/v1'
 const authHeaders = () => {
@@ -626,7 +628,14 @@ export default function MapaBodega() {
   const ubicaciones = mapa?.ubicaciones ?? []
   const bodegas     = mapa?.bodegas     ?? []
   const visibleWarehouses = useMemo(
-    () => bodegas.filter(bodega => bodega.codigo !== 'BG-PROD'),
+    () => bodegas
+      .filter(bodega => bodega.codigo !== 'BG-PROD')
+      .sort((left, right) => {
+        const leftOrder = WAREHOUSE_ORDER.indexOf(left.codigo)
+        const rightOrder = WAREHOUSE_ORDER.indexOf(right.codigo)
+        return (leftOrder < 0 ? Number.MAX_SAFE_INTEGER : leftOrder)
+          - (rightOrder < 0 ? Number.MAX_SAFE_INTEGER : rightOrder)
+      }),
     [bodegas]
   )
 
