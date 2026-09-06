@@ -59,7 +59,8 @@ export default function RecepcionPage() {
   const { loading, list, fetchList } = useReceptionStore()
   const user = useAuthStore((state) => state.user)
   const capabilities = user?.capabilities || []
-  const allowed = (capability) => capabilities.includes('*') || capabilities.includes(capability)
+  const legacyAdmin = ['admin', 'administrador'].includes(String(user?.rol || '').toLowerCase())
+  const allowed = (capability) => legacyAdmin || capabilities.includes('*') || capabilities.includes(capability)
   const visibleTabs = RECEPTION_TABS.filter((item) => allowed(item.capability))
 
   useEffect(() => {
