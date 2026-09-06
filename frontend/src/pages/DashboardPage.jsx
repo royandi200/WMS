@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -18,12 +18,8 @@ import {
   Zap,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
-import { useInventoryStore } from '../store/inventoryStore'
-import { useApprovalsStore } from '../store/approvalsStore'
-import { useProductionStore } from '../store/productionStore'
-import { useWasteStore } from '../store/wasteStore'
-import { useReceptionStore } from '../store/receptionStore'
-import { useDispatchStore } from '../store/dispatchStore'
+import client from '../api/client'
+import { formatBogotaDateTime } from '../utils/dateTime'
 
 const PERIODS = [
   { key: 'today', label: 'Hoy' },
@@ -48,17 +44,6 @@ const APPROVAL_LABEL = {
   INGRESO_RECEPCION: 'Recepcion',
 }
 
-function periodStart(period) {
-  const d = new Date()
-  if (period === 'today') {
-    d.setHours(0, 0, 0, 0)
-    return d
-  }
-  d.setDate(d.getDate() - (period === 'week' ? 7 : 30))
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
 function fmtN(value, decimals = 0) {
   if (value == null || Number.isNaN(Number(value))) return '-'
   return Number(value).toLocaleString('es-CO', { maximumFractionDigits: decimals })
@@ -69,27 +54,14 @@ function toDate(value) {
   return d && !Number.isNaN(d.getTime()) ? d : null
 }
 
-function inPeriod(value, period) {
-  const d = toDate(value)
-  return d ? d >= periodStart(period) : false
-}
-
 function hoursSince(value) {
   const d = toDate(value)
   if (!d) return null
   return Math.max(0, Math.round((Date.now() - d.getTime()) / 36e5))
 }
 
-function sum(rows, selector) {
-  return rows.reduce((acc, row) => acc + Math.abs(Number(selector(row) || 0)), 0)
-}
-
-function groupCount(rows, selector) {
-  return rows.reduce((acc, row) => {
-    const key = selector(row) || 'SIN_DATO'
-    acc[key] = (acc[key] || 0) + 1
-    return acc
-  }, {})
+function totalsText(rows) {
+  return rows?.length ? rows.map(row => `${fmtN(row.quantity, 4)} ${row.unit}`).join(' | ') : '0'
 }
 
 function SpinnerBlock({ rows = 3 }) {
@@ -153,7 +125,7 @@ function StageCard({
     <button
       type="button"
       onClick={() => navigate(href)}
-      className="group text-left bg-surface border border-border rounded-xl p-4 min-w-[220px] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
+      className="group text-left bg-surface border border-border rounded-lg p-4 min-w-[220px] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
       style={{
         boxShadow: alert ? `0 0 0 1px ${color}28` : undefined,
       }}
@@ -168,7 +140,7 @@ function StageCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}18` }}>
+          <div className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}18` }}>
             <Icon size={20} style={{ color }} />
           </div>
           <div className="min-w-0">
@@ -188,11 +160,11 @@ function StageCard({
             <span className="text-xs text-muted">{primaryLabel}</span>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="mt-4 grid grid-cols-1 gap-2">
             {metrics.map((m) => (
               <div key={m.label} className="rounded-lg border border-border/70 bg-background/30 px-3 py-2">
-                <p className="text-[10px] text-muted truncate">{m.label}</p>
-                <p className="text-sm font-semibold tabular-nums truncate" style={{ color: m.color || '#e6edf3' }}>
+                <p className="text-[10px] text-muted break-words">{m.label}</p>
+                <p className="text-sm font-semibold tabular-nums break-words" style={{ color: m.color || '#e6edf3' }}>
                   {m.value}
                 </p>
               </div>
@@ -211,7 +183,7 @@ function StageCard({
 
 function Section({ icon: Icon, title, action, children }) {
   return (
-    <section className="bg-surface border border-border rounded-xl overflow-hidden">
+    <section className="bg-surface border border-border rounded-lg overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">
           <Icon size={14} className="text-primary shrink-0" />
@@ -259,149 +231,69 @@ function RecentRow({ title, detail, amount, color }) {
 export default function DashboardPage() {
   const { user } = useAuthStore()
   const navigate = useNavigate()
-  const {
-    summary,
-    lowStock,
-    kardex,
-    loadingSummary,
-    loadingKardex,
-    loadingLowStock,
-    fetchSummary,
-    fetchLowStock,
-    fetchKardex,
-  } = useInventoryStore()
-  const {
-    pendingList,
-    loadingPending,
-    fetchPending,
-  } = useApprovalsStore()
-  const {
-    list: productionList,
-    loading: productionLoading,
-    fetchList: fetchProduction,
-  } = useProductionStore()
-  const {
-    list: wasteList,
-    loading: wasteLoading,
-    fetchList: fetchWaste,
-  } = useWasteStore()
-  const {
-    list: receptionList,
-    loading: receptionLoading,
-    fetchList: fetchReceptions,
-  } = useReceptionStore()
-  const {
-    list: dispatchList,
-    loading: dispatchLoading,
-    fetchList: fetchDispatches,
-  } = useDispatchStore()
-
   const [period, setPeriod] = useState('week')
   const [refreshing, setRefreshing] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState(Date.now())
+  const [snapshot, setSnapshot] = useState(null)
+  const [error, setError] = useState('')
+  const requestId = useRef(0)
 
   const loadAll = useCallback(async () => {
-    await Promise.all([
-      fetchSummary(),
-      fetchLowStock(),
-      fetchKardex({ limit: 200, page: 1 }),
-      fetchPending({ limit: 50 }),
-      fetchProduction({ limit: 100 }).catch(() => {}),
-      fetchWaste({ limit: 100 }).catch(() => {}),
-      fetchReceptions({ limit: 100 }).catch(() => {}),
-      fetchDispatches({ limit: 100 }).catch(() => {}),
-    ])
-    setLastUpdate(Date.now())
-  }, [
-    fetchSummary,
-    fetchLowStock,
-    fetchKardex,
-    fetchPending,
-    fetchProduction,
-    fetchWaste,
-    fetchReceptions,
-    fetchDispatches,
-  ])
+    const id = ++requestId.current
+    setRefreshing(true)
+    try {
+      const [metrics, inventory, lowStock] = await Promise.all([
+        client.get('/dashboard', { params: { period }, timeout: 30000 }),
+        client.get('/inventory/summary'),
+        client.get('/inventory/low-stock'),
+      ])
+      if (id !== requestId.current) return
+      if (![metrics, inventory, lowStock].every(response => response.data?.ok === true)) {
+        throw new Error('Respuesta incompleta de indicadores')
+      }
+      setSnapshot({ period, metrics: metrics.data.data, summary: inventory.data.data,
+        lowStock: lowStock.data.data, updatedAt: Date.now() })
+      setError('')
+    } catch (e) {
+      if (id === requestId.current) setError(e.response?.data?.error || 'No se pudieron actualizar los indicadores')
+    } finally {
+      if (id === requestId.current) setRefreshing(false)
+    }
+  }, [period])
 
   useEffect(() => {
     loadAll()
     const id = window.setInterval(loadAll, 30000)
-    return () => window.clearInterval(id)
+    return () => { window.clearInterval(id); requestId.current += 1 }
   }, [loadAll])
 
-  const refresh = async () => {
-    setRefreshing(true)
-    await loadAll()
-    setRefreshing(false)
-  }
-
-  const safeKardex = Array.isArray(kardex) ? kardex : []
-  const safeLowStock = Array.isArray(lowStock) ? lowStock : []
-  const safeApprovals = Array.isArray(pendingList) ? pendingList : []
-  const safeProductions = Array.isArray(productionList) ? productionList : []
-  const safeWaste = Array.isArray(wasteList) ? wasteList : []
-  const safeReceptions = Array.isArray(receptionList) ? receptionList : []
-  const safeDispatches = Array.isArray(dispatchList) ? dispatchList : []
-
-  const periodLabel = PERIODS.find((p) => p.key === period)?.label || 'Periodo'
-  const scopedReceptions = useMemo(
-    () => safeReceptions.filter((r) => (
-      (r.completado_en || String(r.estado || '').toLowerCase() === 'completada')
-      && Number(r.cantidad_rec || 0) > 0
-      && inPeriod(r.completado_en, period)
-    )),
-    [safeReceptions, period]
-  )
-  const scopedReceptionCount = useMemo(
-    () => new Set(scopedReceptions.map((r) => r.id || r.numero).filter(Boolean)).size,
-    [scopedReceptions]
-  )
-  const scopedDispatches = useMemo(
-    () => safeDispatches.filter((r) => inPeriod(r.despachado_en || r.creado_en, period)),
-    [safeDispatches, period]
-  )
-  const scopedWaste = useMemo(
-    () => safeWaste.filter((r) => inPeriod(r.created_at || r.creado_en, period)),
-    [safeWaste, period]
-  )
-  const scopedKardex = useMemo(
-    () => safeKardex.filter((r) => inPeriod(r.fecha || r.created_at, period)),
-    [safeKardex, period]
-  )
-
-  const productionByStatus = useMemo(
-    () => groupCount(safeProductions, (o) => String(o.status || o.estado || '').toUpperCase()),
-    [safeProductions]
-  )
-  const activeProductions =
-    (productionByStatus.EN_PROCESO || 0) +
-    (productionByStatus.APROBADA || 0) +
-    (productionByStatus.PLANEADA || 0)
-  const closedInPeriod = safeProductions.filter((o) => inPeriod(o.cerrado_en || o.closed_at, period)).length
-
-  const approvalByType = useMemo(
-    () => groupCount(safeApprovals, (a) => a.accion || a.tipo || a.type),
-    [safeApprovals]
-  )
-  const oldestApprovalHours = safeApprovals.reduce((max, a) => {
-    const h = hoursSince(a.creado_en || a.created_at)
-    return h == null ? max : Math.max(max, h)
-  }, 0)
-
-  const totalStock = Number(summary?.disponible ?? summary?.total_unidades ?? 0)
-  const reservedStock = Number(summary?.reservado ?? 0)
-  const expiringLots = Number(summary?.vencimientos_proximos ?? 0)
-  const stockAlerts = Number(summary?.bajo_stock ?? safeLowStock.length)
-  const dwellAlerts = Number(summary?.permanencia_alertas ?? 0)
-  const dwellDays = Number(summary?.permanencia_dias ?? 90)
-  const receptionUnits = sum(scopedReceptions, (r) => r.cantidad_rec)
-  const damagedUnits = sum(scopedReceptions, (r) => Math.max(0, Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0)))
-  const dispatchUnits = sum(scopedDispatches, (r) => r.cantidad)
-  const wasteUnits = sum(scopedWaste, (r) => r.qty ?? r.cantidad)
-  const entryUnits = sum(scopedKardex.filter((r) => r.tipo === 'entrada'), (r) => r.cantidad)
-  const exitUnits = sum(scopedKardex.filter((r) => r.tipo === 'salida'), (r) => r.cantidad)
-
-  const maxFlow = Math.max(entryUnits, exitUnits, wasteUnits, 1)
+  const refresh = loadAll
+  const current = snapshot?.period === period ? snapshot : null
+  const metrics = current?.metrics
+  const summary = current?.summary
+  const safeLowStock = current?.lowStock || []
+  const periodLabel = PERIODS.find(p => p.key === period)?.label || 'Periodo'
+  const lastUpdate = current?.updatedAt
+  const isLoadingCore = !metrics
+  const receptionLoading = isLoadingCore
+  const productionLoading = isLoadingCore
+  const wasteLoading = isLoadingCore
+  const loadingPending = isLoadingCore
+  const loadingKardex = isLoadingCore
+  const scopedReceptionCount = metrics?.reception.count || 0
+  const productionByStatus = metrics?.production.byStatus || {}
+  const activeProductions = ['PLANEADA', 'APROBADA', 'EN_PROCESO']
+    .reduce((n, state) => n + (productionByStatus[state] || 0), 0)
+  const closedInPeriod = metrics?.production.closed || 0
+  const approvalByType = metrics?.approvals?.byType || {}
+  const approvalCount = metrics?.approvals?.count || 0
+  const oldestApprovalHours = hoursSince(metrics?.approvals?.oldest) || 0
+  const stockAlerts = Number(summary?.bajo_stock || 0)
+  const expiringLots = Number(summary?.vencimientos_proximos || 0)
+  const dwellAlerts = Number(summary?.permanencia_alertas || 0)
+  const dwellDays = Number(summary?.permanencia_dias || 90)
+  const wasteCount = metrics?.waste.count || 0
+  const rejected = metrics?.reception.rejected || []
+  const hasRejected = rejected.some(row => row.quantity > 0)
 
   const exceptions = [
     ...safeLowStock.slice(0, 3).map((item) => ({
@@ -410,9 +302,9 @@ export default function DashboardPage() {
       detail: `${item.name || item.nombre || 'Producto'}: ${fmtN(item.disponible ?? item.stock)} / min ${fmtN(item.min_stock)}`,
       to: '/inventario',
     })),
-    ...(safeApprovals.length ? [{
+    ...(approvalCount ? [{
       severity: oldestApprovalHours >= 6 ? 'alta' : 'media',
-      title: `${safeApprovals.length} aprobaciones pendientes`,
+      title: `${approvalCount} aprobaciones pendientes`,
       detail: oldestApprovalHours ? `Mas antigua: ${oldestApprovalHours} h` : 'Requieren decision del supervisor',
       to: '/aprobaciones',
     }] : []),
@@ -428,39 +320,21 @@ export default function DashboardPage() {
       detail: `Segun el umbral de cada SKU (predeterminado: ${dwellDays} dias)`,
       to: '/inventario',
     }] : []),
-    ...(scopedWaste.length ? [{
+    ...(wasteCount ? [{
       severity: 'media',
-      title: `${fmtN(wasteUnits, 1)} u. en mermas`,
-      detail: `${scopedWaste.length} registros en ${periodLabel.toLowerCase()}`,
+      title: `${wasteCount} registros de merma`,
+      detail: `${totalsText(metrics?.waste.quantities)} en ${periodLabel.toLowerCase()}`,
       to: '/mermas',
     }] : []),
   ].slice(0, 6)
 
-  const recentEvents = [
-    ...scopedReceptions.slice(0, 4).map((r) => ({
-      title: r.numero || 'Recepcion',
-      detail: `${r.sku || '-'} - ${r.proveedor_nombre || 'Proveedor N/A'}`,
-      amount: `+${fmtN(r.cantidad_rec)} u`,
-      color: '#3fb950',
-      date: toDate(r.completado_en || r.creado_en)?.getTime() || 0,
-    })),
-    ...scopedDispatches.slice(0, 4).map((r) => ({
-      title: r.numero || 'Despacho',
-      detail: `${r.sku || '-'} - ${r.cliente_nombre || 'Cliente N/A'}`,
-      amount: `-${fmtN(r.cantidad)} u`,
-      color: '#f0883e',
-      date: toDate(r.despachado_en || r.creado_en)?.getTime() || 0,
-    })),
-    ...scopedWaste.slice(0, 4).map((r) => ({
-      title: r.numero || 'Merma',
-      detail: `${r.sku || '-'} - ${r.reason || r.motivo || 'Sin motivo'}`,
-      amount: `-${fmtN(r.qty ?? r.cantidad)} u`,
-      color: '#f85149',
-      date: toDate(r.created_at || r.creado_en)?.getTime() || 0,
-    })),
-  ].sort((a, b) => b.date - a.date).slice(0, 8)
+  const recentEvents = (metrics?.recent || []).map(row => ({
+    title: row.action.replace(/_/g, ' '),
+    detail: `${row.sku} | ${row.reference || '-'} | ${formatBogotaDateTime(row.created_at)}`,
+    amount: `${Number(row.qty) > 0 ? '+' : ''}${fmtN(row.qty, 4)} ${row.unit || 'sin unidad'}`,
+    color: Number(row.qty) > 0 ? '#3fb950' : Number(row.qty) < 0 ? '#f0883e' : '#8b949e',
+  }))
 
-  const isLoadingCore = loadingSummary || loadingKardex || loadingLowStock
   const greetingHour = new Date().getHours()
   const greeting = greetingHour < 12 ? 'Buenos dias' : greetingHour < 18 ? 'Buenas tardes' : 'Buenas noches'
 
@@ -485,7 +359,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 text-[11px] text-muted px-2 py-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ animation: 'liveDot 2s infinite' }} />
-            <span>actualizado {Math.max(0, Math.floor((Date.now() - lastUpdate) / 1000))}s</span>
+            <span>{lastUpdate ? `actualizado ${Math.max(0, Math.floor((Date.now() - lastUpdate) / 1000))}s` : 'Sin datos actualizados'}</span>
           </div>
           <PeriodTabs period={period} setPeriod={setPeriod} />
           <button
@@ -499,16 +373,19 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <section className="bg-surface border border-border rounded-xl overflow-hidden">
+      {error && <div role="alert" className="border border-red-500/50 bg-red-500/10 p-3 text-sm text-red-300">
+        {error}. {current ? 'Se muestran los ultimos datos obtenidos.' : 'No hay datos disponibles para este periodo.'}
+      </div>}
+      <section className="bg-surface border border-border rounded-lg overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border">
           <div className="flex items-center gap-2 min-w-0">
             <ShieldCheck size={15} className="text-primary shrink-0" />
             <h2 className="text-sm font-semibold text-foreground truncate">Plano de operaciones</h2>
-            <span className="text-[9px] text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded-full font-semibold">LIVE</span>
+            <span className="text-[9px] text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-1.5 py-0.5 rounded-full font-semibold">{error || !metrics ? 'SIN ACTUALIZAR' : 'LIVE'}</span>
           </div>
           <div className="hidden sm:flex items-center gap-1 text-[11px] text-muted">
             <Radio size={12} className="text-emerald-400" />
-            En tiempo real
+            {error || !metrics ? 'Pendiente de actualizar' : 'Actualizacion automatica'}
           </div>
         </div>
 
@@ -523,12 +400,12 @@ export default function DashboardPage() {
               primary={fmtN(scopedReceptionCount)}
               primaryLabel={`rec. ${periodLabel.toLowerCase()}`}
               loading={receptionLoading}
-              alert={damagedUnits > 0}
+              alert={hasRejected}
               metrics={[
-                { label: 'Unidades recibidas', value: fmtN(receptionUnits) },
-                { label: 'Daniadas', value: fmtN(damagedUnits), color: damagedUnits ? '#f85149' : '#8b949e' },
+                { label: 'Recibido', value: totalsText(metrics?.reception.quantities) },
+                { label: 'Rechazado', value: totalsText(rejected), color: hasRejected ? '#f85149' : '#8b949e' },
               ]}
-              footer={scopedReceptions[0]?.numero ? `Ultima: ${scopedReceptions[0].numero}` : 'Sin recepciones en periodo'}
+              footer={`Recepciones confirmadas: ${periodLabel.toLowerCase()}`}
             />
             <StageCard
               icon={Warehouse}
@@ -536,13 +413,13 @@ export default function DashboardPage() {
               subtitle="Stock, reserva y riesgo"
               color="#3fb950"
               href="/inventario"
-              primary={fmtN(totalStock)}
-              primaryLabel="u. disponibles"
+              primary={fmtN(metrics?.stock.products)}
+              primaryLabel="SKU con disponible"
               loading={isLoadingCore}
               alert={stockAlerts > 0 || expiringLots > 0 || dwellAlerts > 0}
               metrics={[
-                { label: 'Reservado', value: fmtN(reservedStock) },
-                { label: 'Bajo minimo', value: fmtN(stockAlerts), color: stockAlerts ? '#f85149' : '#8b949e' },
+                { label: 'Disponible', value: totalsText(metrics?.stock.quantities) },
+                { label: 'Reservado disponible', value: totalsText(metrics?.stock.reserved) },
               ]}
               footer={dwellAlerts
                 ? `${dwellAlerts} lotes con ${dwellDays}+ dias en bodega`
@@ -570,15 +447,15 @@ export default function DashboardPage() {
               subtitle="Perdidas y causa raiz"
               color="#f85149"
               href="/mermas"
-              primary={fmtN(wasteUnits, 1)}
-              primaryLabel={`u. ${periodLabel.toLowerCase()}`}
+              primary={fmtN(wasteCount)}
+              primaryLabel={`registros ${periodLabel.toLowerCase()}`}
               loading={wasteLoading}
-              alert={wasteUnits > 0}
+              alert={wasteCount > 0}
               metrics={[
-                { label: 'Registros', value: fmtN(scopedWaste.length) },
-                { label: 'Ordenes afectadas', value: fmtN(new Set(scopedWaste.map((w) => w.production_order_code || w.production_order_id).filter(Boolean)).size) },
+                { label: 'Cantidad', value: totalsText(metrics?.waste.quantities) },
+                { label: 'Ordenes afectadas', value: fmtN(metrics?.waste.orders) },
               ]}
-              footer={scopedWaste[0]?.reason ? `Ultimo motivo: ${scopedWaste[0].reason}` : 'Sin mermas en periodo'}
+              footer={wasteCount ? 'Bodega y produccion' : 'Sin mermas en periodo'}
             />
             <StageCard
               icon={ClipboardList}
@@ -586,38 +463,38 @@ export default function DashboardPage() {
               subtitle="Bloqueos operativos"
               color="#d2a8ff"
               href="/aprobaciones"
-              primary={fmtN(safeApprovals.length)}
+              primary={metrics?.approvals ? fmtN(approvalCount) : '-'}
               primaryLabel="pendientes"
               loading={loadingPending}
-              alert={safeApprovals.length > 0}
+              alert={approvalCount > 0}
               metrics={[
                 { label: 'Mas antigua', value: oldestApprovalHours ? `${oldestApprovalHours} h` : '-' },
                 { label: 'Produccion', value: fmtN((approvalByType.SOLICITAR_INICIO_PRODUCCION || 0) + (approvalByType.SOLICITAR_CIERRE_PRODUCCION || 0)) },
               ]}
-              footer={safeApprovals[0]?.codigo_solicitud ? `Siguiente: ${safeApprovals[0].codigo_solicitud}` : 'Sin aprobaciones pendientes'}
+              footer={metrics?.approvals ? 'Solicitudes pendientes actuales' : 'Sin permiso para consultar aprobaciones'}
             />
           </div>
 
           <div className="mt-5 pt-4 border-t border-border/50 grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <p className="text-[10px] text-muted uppercase">Entradas</p>
-              <p className="text-sm font-semibold text-foreground">{fmtN(entryUnits)} u.</p>
-              <MiniBar value={entryUnits} max={maxFlow} color="#3fb950" />
+              <p className="text-sm font-semibold text-foreground break-words">{metrics ? totalsText(metrics.flows.entry.quantities) : '-'}</p>
+              <p className="text-xs text-muted">{metrics?.flows.entry.count ?? '-'} movimientos de ingreso</p>
             </div>
             <div>
               <p className="text-[10px] text-muted uppercase">Salidas</p>
-              <p className="text-sm font-semibold text-foreground">{fmtN(exitUnits || dispatchUnits)} u.</p>
-              <MiniBar value={exitUnits || dispatchUnits} max={maxFlow} color="#f0883e" />
+              <p className="text-sm font-semibold text-foreground break-words">{metrics ? totalsText(metrics.flows.exit.quantities) : '-'}</p>
+              <p className="text-xs text-muted">{metrics?.flows.exit.count ?? '-'} movimientos de salida</p>
             </div>
             <div>
               <p className="text-[10px] text-muted uppercase">Mermas</p>
-              <p className="text-sm font-semibold text-foreground">{fmtN(wasteUnits, 1)} u.</p>
-              <MiniBar value={wasteUnits} max={maxFlow} color="#f85149" />
+              <p className="text-sm font-semibold text-foreground break-words">{metrics ? totalsText(metrics.waste.quantities) : '-'}</p>
+              <p className="text-xs text-muted">{metrics?.waste.count ?? '-'} registros</p>
             </div>
             <div>
               <p className="text-[10px] text-muted uppercase">Pendientes</p>
-              <p className="text-sm font-semibold text-foreground">{fmtN(safeApprovals.length)} aprobaciones</p>
-              <MiniBar value={safeApprovals.length} max={Math.max(safeApprovals.length, 10)} color="#d2a8ff" />
+              <p className="text-sm font-semibold text-foreground">{fmtN(approvalCount)} aprobaciones</p>
+              <MiniBar value={approvalCount} max={Math.max(approvalCount, 10)} color="#d2a8ff" />
             </div>
           </div>
         </div>
@@ -629,7 +506,7 @@ export default function DashboardPage() {
           title="Excepciones que requieren atencion"
           action={<button onClick={() => navigate('/inventario')} className="text-xs text-primary hover:underline">Ver modulo</button>}
         >
-          {exceptions.length === 0 ? (
+          {!metrics ? <SpinnerBlock /> : exceptions.length === 0 ? (
             <div className="py-10 text-center">
               <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
               <p className="text-sm text-foreground">Sin excepciones criticas</p>
@@ -661,9 +538,9 @@ export default function DashboardPage() {
           title="Aprobaciones por tipo"
           action={<button onClick={() => navigate('/aprobaciones')} className="text-xs text-primary hover:underline">Gestionar</button>}
         >
-          {loadingPending && !safeApprovals.length ? (
+          {loadingPending && !approvalCount ? (
             <SpinnerBlock rows={4} />
-          ) : safeApprovals.length === 0 ? (
+          ) : !metrics?.approvals ? <p className="text-sm text-muted">Sin permiso para consultar aprobaciones</p> : approvalCount === 0 ? (
             <div className="py-10 text-center">
               <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
               <p className="text-sm text-foreground">Nada pendiente</p>
@@ -677,7 +554,7 @@ export default function DashboardPage() {
                     <p className="text-xs text-foreground truncate">{APPROVAL_LABEL[type] || type.replace(/_/g, ' ')}</p>
                     <p className="text-xs font-semibold text-muted">{count}</p>
                   </div>
-                  <MiniBar value={count} max={safeApprovals.length} color="#d2a8ff" />
+                  <MiniBar value={count} max={approvalCount} color="#d2a8ff" />
                 </div>
               ))}
             </div>
@@ -690,13 +567,13 @@ export default function DashboardPage() {
           { icon: PackageCheck, label: 'Recepciones', to: '/recepciones', color: '#58a6ff' },
           { icon: Truck, label: 'Despachos', to: '/despachos', color: '#f0883e' },
           { icon: Warehouse, label: 'Inventario', to: '/inventario', color: '#3fb950' },
-          { icon: ClipboardList, label: 'Aprobaciones', to: '/aprobaciones', color: '#d2a8ff', badge: safeApprovals.length },
+          { icon: ClipboardList, label: 'Aprobaciones', to: '/aprobaciones', color: '#d2a8ff', badge: approvalCount },
         ].map(({ icon: Icon, label, to, color, badge }) => (
           <button
             key={to}
             type="button"
             onClick={() => navigate(to)}
-            className="flex items-center gap-2.5 p-3 bg-surface border border-border rounded-xl text-muted hover:text-foreground transition-colors"
+            className="flex items-center gap-2.5 p-3 bg-surface border border-border rounded-lg text-muted hover:text-foreground transition-colors"
           >
             <span className="p-1.5 rounded-lg shrink-0" style={{ background: `${color}18` }}>
               <Icon size={14} style={{ color }} />

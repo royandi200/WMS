@@ -45,6 +45,8 @@ function productionMaterialSummaries(rows = []) {
 function productionUseSummaries(rows = []) {
   const groups = new Map();
   for (const row of rows) {
+    // A planned allocation is not consumption. Keep fully returned deliveries as history.
+    if (Number(row.cantidad_consumida || 0) <= 0) continue;
     const key = [row.codigo_orden, row.producto_final, row.unidad].join('|');
     if (!groups.has(key)) {
       groups.set(key, {
@@ -79,6 +81,22 @@ function balancesByMovement(rows = [], currentBalance = 0) {
   return balances;
 }
 
+function productionReservationSummaries(rows = []) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!['APROBADA', 'EN_PROCESO'].includes(row.estado)) continue;
+    if (row.reposicion_id && row.reposicion_estado !== 'PENDIENTE_ALISTAMIENTO') continue;
+    const reserved = Math.max(0, Number(row.cantidad_reservada || 0) - Number(row.cantidad_consumida || 0));
+    if (!reserved) continue;
+    const key = [row.codigo_orden, row.producto_final, row.unidad].join('|');
+    const group = groups.get(key) || { order: row.codigo_orden, finalProduct: row.producto_final,
+      unit: row.unidad || 'und', reserved: 0 };
+    group.reserved = round(group.reserved + reserved);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 function paginateMessage(value, maxLength = 3400) {
   if (!Number.isInteger(maxLength) || maxLength < 500) throw new Error('Longitud de pagina invalida');
   const lines = String(value || '').split('\n');
@@ -111,4 +129,5 @@ module.exports = {
   paginateMessage,
   productionMaterialSummaries,
   productionUseSummaries,
+  productionReservationSummaries,
 };

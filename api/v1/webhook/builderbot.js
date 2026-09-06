@@ -78,7 +78,8 @@
 //        Fix: primero busca por `telefono` en usuarios reales (activos, no
 //        bots); sólo si no hay match crea/retorna el ghost bot.
 // =============================================================
-const mysql  = require('mysql2/promise');
+const { createConnection: DB } = require('../../_lib/db');
+const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
@@ -114,6 +115,7 @@ const {
   paginateMessage,
   productionMaterialSummaries,
   productionUseSummaries,
+  productionReservationSummaries,
 } = require('../../_lib/traceability-presentation');
 const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
 const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
@@ -125,15 +127,6 @@ const {
   prepareReceptionFromPurchaseOrder,
   confirmReceptionFromWhatsApp,
 } = require('../../_lib/builderbot-reception');
-
-const DB = () => mysql.createConnection({
-  host:           process.env.DB_HOST,
-  port:           parseInt(process.env.DB_PORT || '3306'),
-  user:           process.env.DB_USER,
-  password:       process.env.DB_PASSWORD,
-  database:       process.env.DB_NAME || 'kainotomia_WMS',
-  connectTimeout: 10000,
-});
 
 // BB Cloud API token y Bot ID
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
@@ -1560,7 +1553,7 @@ module.exports = async (req, res) => {
           draft.duplicate
             ? `La orden ${draft.referencia_documento} ya estaba registrada. No se duplico.`
             : `Orden ${draft.referencia_documento} leida y guardada como borrador.`,
-          `Items: ${draft.itemCount} | Total: ${Number(draft.totalUnits || 0)}`,
+          `Items: ${draft.itemCount}\nTotales: ${await draftQuantitySummary(db, draft.id)}`,
           `Estado: ${draft.estado}`,
           warningLines.length ? 'Revisiones necesarias:' : null,
           ...warningLines,
@@ -1593,7 +1586,7 @@ module.exports = async (req, res) => {
           draft.duplicate
             ? `El documento ${draft.referencia_documento} ya estaba registrado. No se duplico.`
             : `Documento ${draft.referencia_documento} leido y guardado como borrador.`,
-          `Items: ${draft.itemCount} | Total: ${Number(draft.totalUnits || 0)}`,
+          `Items: ${draft.itemCount}\nTotales: ${await draftQuantitySummary(db, draft.id)}`,
           `Estado: ${draft.estado}`,
           warningLines.length ? 'Revisiones necesarias:' : null,
           ...warningLines,
@@ -3058,9 +3051,10 @@ module.exports = async (req, res) => {
       : '  (Sin mermas asociadas)';
 
     const [productionUseRows] = await db.execute(
-      `SELECT op.codigo_orden, pt.siigo_code AS producto_final,
+      `SELECT op.codigo_orden, op.estado, pt.siigo_code AS producto_final,
               COALESCE(NULLIF(pm.unidad, ''), mat.unit_label, 'und') AS unidad,
-              pml.cantidad_consumida, pml.cantidad_devuelta,
+              pml.cantidad_consumida, pml.cantidad_devuelta, pml.cantidad_reservada,
+              pml.reposicion_id, pr.estado AS reposicion_estado,
               (SELECT COALESCE(SUM(m.cantidad), 0) FROM mermas m
                WHERE m.orden_produccion_id = op.id
                  AND m.producto_id = pm.producto_id) AS merma_proceso
@@ -3069,11 +3063,14 @@ module.exports = async (req, res) => {
        JOIN ordenes_produccion op ON op.id = pm.orden_produccion_id
        JOIN productos pt ON pt.id = op.producto_id
        JOIN productos mat ON mat.id = pm.producto_id
+       LEFT JOIN produccion_reposiciones pr ON pr.id = pml.reposicion_id
        WHERE pml.lote = ? ORDER BY op.creado_en ASC`,
       [params.id_lote]
     ).catch(() => [[]]);
-    const productionUses = productionUseRows.length
-      ? productionUseSummaries(productionUseRows).map(p =>
+    const consumedProduction = productionUseSummaries(productionUseRows);
+    const reservedProduction = productionReservationSummaries(productionUseRows);
+    const productionUses = consumedProduction.length
+      ? consumedProduction.map(p =>
           `  - ${p.order} -> ${p.finalProduct}: neto entregado ${p.netDelivered} ${p.unit}, merma proceso ${p.processWaste} ${p.unit}, uso productivo estimado ${p.productiveUse} ${p.unit}`
         ).join('\n')
       : '  (No consumido en produccion)';
@@ -3188,7 +3185,9 @@ module.exports = async (req, res) => {
       materialRows.length ? ['*Consumo real de materias primas:*', materialHistory] : null,
       productionRows.length ? ['*Produccion / resultado:*', productionHistory] : null,
       wasteRows.length ? ['*Mermas asociadas:*', wasteHistory] : null,
-      productionUseRows.length ? ['*Ordenes que consumieron este lote:*', productionUses] : null,
+      consumedProduction.length ? ['*Ordenes que consumieron este lote:*', productionUses] : null,
+      reservedProduction.length ? ['*Reservas de produccion (aun no consumidas):*',
+        reservedProduction.map(p => `  - ${p.order} -> ${p.finalProduct}: ${p.reserved} ${p.unit}`).join('\n')] : null,
       bomRows.length ? ['*Materias primas esperadas segun BOM:*', bomHistory] : null,
     ].filter(Boolean).flatMap(([title, content]) => ['', title, content]);
 
