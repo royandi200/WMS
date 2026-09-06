@@ -300,3 +300,32 @@ No se declara sistema completo aprobado, ni se da un numero de pruebas restantes
 - Migracion 30 aplicada a QA y verificada: tabla InnoDB, clave primaria tipo/usuario/base, sin modificar historicos ni inventario. Detalle en confirmaciones-adicionales.md.
 - 14:56 aprox.: 266/266 pruebas locales, 18 nuevas de workflows completos con doble transaccional (replay, concurrencia simulada, rollback y conflicto); build frontend aprobado. Incluye prueba sin referencia de merma/devolucion y evita repetir notificacion de liberacion en replay.
 - Pendiente de este bloque: publicacion/readback BBC y validacion real de nuevas confirmaciones en WhatsApp/dashboard/SQL. No se marcan aprobados los escenarios manuales solo por las pruebas automaticas. No se borraron OP 75/76 ni las mermas duplicadas historicas.
+
+### Publicacion y regresion real de confirmaciones - 2026-09-06, 14:57-15:03 Bogota
+
+- Codigo publicado directamente en main: 51e1aae6620dbaf63f0581ec6e06aecfff9facd9. GitHub informa despliegue Vercel completado a las 14:57:14. No se accedio directamente a Vercel.
+- Prompt Entrada y Voz actualizado por MCP BBC, readback exacto y topologia preservada; validacion y reboot aceptados. SHA256 7cfc42ea5ec7d14ad33d8fdec1084db7865def12bbf5f688ffa8e909e93ba38a. Sin cambios al flujo documental.
+- Roles verificados antes de enviar: Juan admin, Datana recepcion_cierre, Jobana alistador. No se cambiaron roles ni telefonos.
+
+#### D06 - Merma sin referencia manual y confirmacion adicional
+
+- 14:57 envio: `Se perdio 1 gramo de gomas ashwagandha del lote QA-RX-0905-MPASH, en B16, por derrame controlado de validacion de confirmaciones.` Mensaje real con tildes. Sin referencia nueva.
+- 14:58:10 registro MER-D5607B99, AUTO-MER-20260906-9455EDF5, 1 g, lote QA-RX-0905-MPASH/B16. No pidio codigo manual.
+- 14:58 confirmacion: `Confirma una nueva merma adicional como MER-D5607B99.` Recupero los datos de la base sin volver a pedirlos. Creo MER-CD1A1C6E, AUTO-MER-20260906-FBEB0D8A, a las 14:58:51; Kardex 14:58:52.
+- 14:59 reenvio literal: `La merma MER-CD1A1C6E ya estaba registrada. No se modifico inventario.` APROBADO.
+- SQL y dashboard: exactamente dos mermas nuevas de 1 g; Kardex -1 para cada una; lote/stock 1985 -> 1984 -> 1983 g, reserva 0. La confirmacion MERMA/usuario 5/base 31 contiene resultado MER-CD1A1C6E. No hay tercer descuento.
+
+#### D07 - Devolucion sin referencia manual y reintento con saldo agotado
+
+- Precondicion: despacho QA ID 51, FV-DEMO-MAN038-3Q-001, item 43, SKU 00105-PTBOS60, lote MAN-034-3Q-BOS60-001; dos unidades despachadas y ninguna devuelta.
+- 15:00 envio: `Del despacho ID 51 devolvieron 1 unidad de Booster 60, lote MAN-034-3Q-BOS60-001, por empaque danado durante el transporte. Dejala en cuarentena.` Mensaje real con tildes. Sin referencia nueva.
+- 15:00:51 creo DEV-236BAF92, AUTO-DEV-20260906-51AF97E3. No pidio inventar un codigo.
+- 15:01:39: `Confirma una nueva devolucion adicional como DEV-236BAF92.` Creo DEV-320EE035, AUTO-DEV-20260906-BED3C3D1, con los datos de la base. Mensaje real con tilde en devolucion.
+- 15:02 reenvio literal: `La devolucion DEV-320EE035 ya estaba registrada. No se modifico inventario.` APROBADO: ahora recupera el resultado previo; no intenta crear otra devolucion ni depende del error de saldo retornable.
+- SQL/dashboard: exactamente dos devoluciones de 1 und, dos lotes CUARENTENA, un Kardex por devolucion y cero filas de stock disponible para esos lotes. Factura, cliente, producto, lote origen, destino y actor coinciden. Confirmacion DEVOLUCION/usuario 5/base 28 conserva resultado DEV-320EE035.
+
+#### Limites y siguiente paso
+
+- Aprobados en vivo en este bloque: merma y devolucion normales sin referencia manual; adicional y reenvio literal; concordancia WhatsApp/dashboard/SQL. Mensajes revisados completos, sin Read more pendiente.
+- Produccion y ajuste de materiales: arreglo cubierto por pruebas automaticas, aun pendiente la repeticion manual de nuevas confirmaciones con esta version. OP 75 y 76 permanecen APROBADA y no se iniciaron. No presentar las pruebas automaticas como evidencia manual.
+- Siguen pendientes los demas casos ya identificados: indicadores/unidades/fechas, trazabilidad extensa, PDFs restantes y bateria integral final. Esta correccion no los da por solucionados.
