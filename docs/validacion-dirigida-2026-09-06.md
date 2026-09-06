@@ -367,3 +367,16 @@ No se declara sistema completo aprobado, ni se da un numero de pruebas restantes
 - Usar documentos con referencia nueva para nuevas altas; reenviar el mismo documento solo en pruebas de reintento. Las referencias viejas se conservan como evidencia, no se borran para fabricar un resultado limpio.
 - Congelar version y prompt al comenzar bateria integral. Registrar cambios de version y repetir solo los casos afectados si aparece un arreglo bloqueante.
 - Pendiente externo al cierre automatico: los dos envios manuales anteriores y navegacion WhatsApp de un historial realmente multipagina. Ya existe prueba aislada de 160 eventos sin omisiones; no insertar movimientos artificiales en historial para forzarla.
+
+### Cierre de ajustes y estado vigente - 2026-09-06, 15:48-15:53 Bogota
+
+- Aplicacion aae3f78722caa9a00fdc3ebdcef605b59832440d en main, despliegue confirmado por estado GitHub a las 15:49:13. Prompt Entrada/Voz sincronizado por MCP, readback exacto, topologia conservada, reboot aceptado. SHA256 b698e7434de27d08d0d85722b0545b2fba1227f72e8413f7c98fc2418006e9a1. No se cambio el flujo documental.
+- 15:49, Jobana repite la entrega literal: devuelve movimiento 395 existente, sin descuento, y ofrece confirmar otro movimiento real. Ya no inventa AJUSTE-77-0001.
+- 15:50:17, `Confirma un ajuste nuevo como el movimiento ID 395.` crea movimiento 396, 1 g, con datos recuperados de SQL. Reenvio literal 15:50 devuelve 396 existente, sin otro descuento.
+- 15:51:39, Juan cierra OP 77 con 2 conformes, 0 merma, C2; lote LPN-OP-20260906-000077 con vencimiento heredado 2027-12-31 y stock 2 und. No se creo una merma ficticia para compensar material adicional.
+- 15:52, Jobana repite la MISMA confirmacion de movimiento 395 con OP ya cerrada: devuelve 396 existente, sin error de estado ni descuento. APROBADO reintento posterior al cierre.
+- SQL/Kardex: gomas 5000 -> 4640 (inicio 360 g) -> 4639 (movimiento 395) -> 4638 (movimiento 396). Material consumido/entregado 362 g, adicional 2 g, devuelto 0; cuatro componentes por 2 und. Dashboard muestra -1 a las 15:41, saldo 4639, y -1 a las 15:50, saldo 4638. No hay tercer movimiento de 1 g. Clave MATERIAL/usuario 20/base 395 conserva resultado 396.
+- OP 78 permanece APROBADA por 2 und como caso preparado, no iniciada. OP 75/76 y errores historicos permanecen intactos. Revisar estas reservas antes de una nueva corrida; no confundir stock fisico con disponible.
+- Suite completa: 280/280, cero fallos; build frontend aprobado; diff --check sin errores. R10/R11 y manifiestos incluidos para reproducir pruebas locales; generador admite run nuevo y evita sobrescribir evidencia. No se incluyeron cambios ajenos de package-lock ni del otro generador documental.
+- Pendientes para aceptar version, no ocultos por los tests: reenvio manual R10, OC R11 por WhatsApp/dashboard/SQL y navegacion real de historial multipagina. Se mantienen como observaciones menores de la corrida: metadatos secundarios de cabecera 3Q, refresco al alternar pestanas internas y lista de alias ambigua en parrafo. No acreditar estos ultimos como corregidos ni bloquear por ellos la validacion operativa dirigida.
+- La bateria integral con cliente todavia NO se ha repetido. Pruebas locales, consultas HTTP y escenarios dirigidos aprobados no garantizan que todos los recorridos reales esten libres de errores.

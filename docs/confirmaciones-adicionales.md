@@ -75,3 +75,14 @@ registro y un solo efecto sobre inventario/reservas. Verificar tambien despues
 de cerrar la OP o agotar el saldo retornable. Conservar hora Bogota, actor,
 base, resultado, mensajes completos y diferencias de SQL/dashboard en
 validacion-dirigida-2026-09-06.md.
+
+## Guardado conversacional de materiales
+
+Desde el ajuste del 6 de septiembre, "entrega adicional" solo indica tipo de
+movimiento: no autoriza omitir deteccion de duplicados. El backend exige texto
+explicito para confirmar otro ajuste y valida que el ID numerico corresponda a
+un movimiento del propio usuario. Recupera orden, SKU, cantidad, lote y ubicacion
+de SQL; no usa un codigo inventado por la IA. Datos contradictorios y negaciones
+se rechazan sin inventario. El mensaje incluye el ID real para seleccionarlo.
+Ensayo real: base 395 -> resultado 396; reintentos antes/despues del cierre de
+OP 77 recuperan 396. Consultar bitacora para horarios y saldos.

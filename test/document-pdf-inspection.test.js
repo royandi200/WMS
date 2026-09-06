@@ -5,12 +5,15 @@ const path = require('node:path');
 const test = require('node:test');
 const { inspectStoredDocumentPdf } = require('../api/_lib/document-pdf-inspection');
 const { nativePdfEvidence, safePdfFailure, pdfReviewWarning } = require('../api/_lib/document-pdf-evidence');
-const directory = path.join(__dirname, '../output/pdf/regresion-documental/20260906-r09');
-const fixtures = JSON.parse(fs.readFileSync(path.join(directory, 'expected.json'), 'utf8'));
+const fixtures = ['20260906-r09', '20260906-r10'].flatMap(run => {
+  const directory = path.join(__dirname, '../output/pdf/regresion-documental', run);
+  return JSON.parse(fs.readFileSync(path.join(directory, 'expected.json'), 'utf8'))
+    .map(fixture => ({ ...fixture, directory }));
+});
 
 for (const fixture of fixtures) {
-  test(`stored PDF inspection and shared recovery preserve all rows: ${fixture.tipo}`, async () => {
-    const content = fs.readFileSync(path.join(directory, fixture.archivo));
+  test(`stored PDF inspection and shared recovery preserve all rows: ${fixture.referencia}`, async () => {
+    const content = fs.readFileSync(path.join(fixture.directory, fixture.archivo));
     const sha256 = createHash('sha256').update(content).digest('hex');
     const db = { async execute(sql) {
       assert.match(sql.trim(), /^SELECT /);

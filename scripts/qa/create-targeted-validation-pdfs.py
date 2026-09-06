@@ -1,4 +1,5 @@
 """Create controlled multi-page inputs and a separate expected-data manifest."""
+import argparse
 import json
 from pathlib import Path
 
@@ -37,10 +38,12 @@ EXIT = [
 ]
 
 
-def build(kind, rows):
+def build(kind, rows, run='20260906-R09'):
     purchase = kind == 'OC'
-    reference = f'QA-DOC-20260906-R09-{kind}-001'
+    reference = f'QA-DOC-{run}-{kind}-001'
     path = OUTPUT / f'{reference}.pdf'
+    if path.exists():
+        raise FileExistsError(f'No se sobrescribe evidencia existente: {path}')
     styles = getSampleStyleSheet()
     styles['BodyText'].fontSize = 9
     styles['BodyText'].leading = 12
@@ -52,7 +55,7 @@ def build(kind, rows):
     expected = []
     for i, (sku, name, quantity, unit) in enumerate(rows):
         expected.append(dict(sku=sku, descripcion=name, cantidad=quantity, unidad=unit,
-                             lote=f'QA-R09-{sku}' if purchase else None,
+                             lote=f'QA-{run.rsplit("-", 1)[-1]}-{sku}' if purchase else None,
                              vencimiento='2028-12-31' if purchase else None))
     for start in range(0, len(rows), 6):
         if start:
@@ -94,6 +97,22 @@ def build(kind, rows):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run', default='20260906-R09')
+    parser.add_argument('--kind', choices=['OC', 'SALIDA-3Q', 'both'], default='both')
+    parser.add_argument('--quantity-offset', type=int, default=0)
+    args = parser.parse_args()
+    run = args.run.upper().strip()
+    if not run or len(run) > 30 or any(c not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' for c in run):
+        raise ValueError('Referencia de corrida invalida')
+    OUTPUT = ROOT / 'output/pdf/regresion-documental' / run.lower()
+    selected = [('OC', PURCHASE), ('SALIDA-3Q', EXIT)]
+    selected = [(kind, [(sku, name, qty + args.quantity_offset, unit) for sku, name, qty, unit in rows])
+                for kind, rows in selected if args.kind in ('both', kind)]
+    if any(qty <= 0 for _, rows in selected for _, _, qty, _ in rows):
+        raise ValueError('Las cantidades deben ser positivas')
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    documents = [build('OC', PURCHASE), build('SALIDA-3Q', EXIT)]
+    if (OUTPUT / 'expected.json').exists():
+        raise FileExistsError('La corrida ya tiene manifiesto; usar otra referencia')
+    documents = [build(kind, rows, run) for kind, rows in selected]
     (OUTPUT / 'expected.json').write_text(json.dumps(documents, indent=2), encoding='utf-8')

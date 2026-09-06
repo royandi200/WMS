@@ -1,0 +1,81 @@
+[
+  {
+    "referencia": "QA-DOC-20260906-R10-SALIDA-3Q-001",
+    "tipo": "SALIDA-3Q",
+    "archivo": "QA-DOC-20260906-R10-SALIDA-3Q-001.pdf",
+    "items": [
+      {
+        "sku": "00001-TPBI",
+        "descripcion": "TAPA TARRO CUADRADO BLANCO (60 UNID)",
+        "cantidad": 25,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00006-TRP",
+        "descripcion": "TARRO CUADRADO x 60",
+        "cantidad": 25,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00018-ETBOS60",
+        "descripcion": "ETIQUETA BOOSTER x 60",
+        "cantidad": 19,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00035-LNTP60",
+        "descripcion": "LINER TARRO x 60",
+        "cantidad": 19,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00015-ETRESI60",
+        "descripcion": "ETIQUETA RESVERATROL x 60",
+        "cantidad": 21,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00003-TPGG",
+        "descripcion": "TAPA TARRO GRANDE GRIS x 120",
+        "cantidad": 33,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00007-TRG",
+        "descripcion": "TARRO GRANDE PRICESMART x 120",
+        "cantidad": 33,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00036-LNTG120",
+        "descripcion": "LINER TARRO GRANDE x 120",
+        "cantidad": 33,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00026-ETRES120",
+        "descripcion": "ETIQUETA RESVERATROL x 120",
+        "cantidad": 31,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      }
+    ]
+  }
+]
