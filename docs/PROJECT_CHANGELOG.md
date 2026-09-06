@@ -704,6 +704,17 @@ Las notificaciones solo deben habilitarse después de asignar y comprobar los te
 - El asistente documental incluye la unidad en cada item 3Q y responde de forma especifica cuando encuentra encabezados de OC y salida 3Q en un mismo PDF.
 - Validacion local: 203 pruebas aprobadas, build Vite aprobado, prompt BuilderBot sincronizado, topologia preservada y bot `ONLINE`.
 
+### 2026-09-06: cierre de hallazgos de la regresion integral
+
+- Los PDF con capa de texto se leen de forma determinista en el backend y se contrastan por SKU exacto antes de persistir; los escaneados conservan el analisis de BuilderBot y la revision humana.
+- Los administradores pueden corregir o descartar borradores 3Q no vinculados sin alterar el PDF original ni el inventario; cada correccion exige motivo, valida el catalogo y deja auditoria.
+- Kardex y trazabilidad presentan saldos por lote, agrupan materiales repetidos, evitan usos productivos negativos, enlazan la salida a 3Q con el PT recibido y el cliente final, y paginan mensajes largos.
+- Las consultas de inventario comparten el resolvedor de SKU y alias, muestran FEFO y excluyen lotes con saldo cero.
+- Las confirmaciones de OP, merma y devolucion adicionales reconstruyen los datos desde el identificador persistido para evitar bucles y reinterpretaciones.
+- El dashboard cuenta recepciones fisicas unicas y distingue advertencias revisables de errores documentales.
+- Se actualizo `mysql2` y se agrego `pdfjs-dist` tanto al paquete de pruebas como al paquete instalado por Vercel.
+- Validacion: `231/231` pruebas, build Vite aprobado, auditorias de dependencias sin vulnerabilidades moderadas o superiores, commit `9bbd5ac` publicado en `main`, despliegue saludable y prompt BuilderBot sincronizado con topologia preservada.
+
 ## Regla de mantenimiento
 
 Al cerrar una entrega:

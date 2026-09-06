@@ -813,7 +813,7 @@ Estado: APROBADA | FALLIDA | BLOQUEADA
 - Diagnostico: el WMS descarga y conserva el PDF, pero hoy normaliza principalmente la interpretacion de BuilderBot. Si `aiDocument` omite un dato, el respaldo del WMS no puede recuperarlo aunque siga presente en el archivo original.
 - Propuesta: extraer primero la capa de texto y posiciones directamente en el backend WMS; reconstruir tablas mediante coordenadas y SKU exactos; usar OCR solo cuando no exista una capa de texto util; contrastar esa lectura con la salida de IA; enviar a revision humana cualquier discrepancia.
 - Interfaz: mostrar el PDF original inmutable junto a una tabla corregible. Cada cambio debe conservar valor extraido, valor corregido, usuario, fecha y motivo. Guardar el borrador nunca modifica inventario; despues de convertirlo o vincularlo queda bloqueado.
-- Estado: IMPLEMENTADA LOCALMENTE el 2026-09-06. El backend extrae la capa de texto del PDF, reconstruye filas por SKU exacto y contrasta cantidades, unidades, lotes y vencimientos antes de persistir. Si el PDF es escaneado o no tiene texto util, conserva el fallback de BuilderBot y la revision humana. Pendiente repetir una prueba manual con una referencia documental nueva despues del despliegue.
+- Estado: DESPLEGADA el 2026-09-06 en `main` (`9bbd5ac`). El backend extrae la capa de texto del PDF, reconstruye filas por SKU exacto y contrasta cantidades, unidades, lotes y vencimientos antes de persistir. Si el PDF es escaneado o no tiene texto util, conserva el fallback de BuilderBot y la revision humana. Pendiente repetir una prueba manual con una referencia documental nueva.
 
 ### M77 - Documento R04 sin marcador
 
@@ -829,15 +829,16 @@ Estado: APROBADA | FALLIDA | BLOQUEADA
 - Recomendacion: permitir que un usuario autorizado corrija en dashboard los datos extraidos por OCR antes de crear o vincular una remision operativa.
 - Limites propuestos: conservar inmutable el PDF y su hash; editar solo el borrador; validar SKU contra catalogo, cantidades positivas, unidades y totales; registrar valor anterior, valor nuevo, usuario, fecha y motivo; exigir confirmacion explicita; bloquear cambios despues de convertir o vincular el borrador.
 - Inventario: editar o guardar el borrador nunca reserva ni descuenta existencias. El movimiento solo ocurre en la operacion posterior y autorizada.
-- Estado: IMPLEMENTADA LOCALMENTE el 2026-09-06. El administrador puede corregir o descartar borradores 3Q no vinculados; el PDF original permanece inmutable, la correccion exige motivo, valida catalogo y cantidades, deja auditoria y no modifica inventario. Pendiente validacion visual despues del despliegue.
+- Estado: DESPLEGADA el 2026-09-06 en `main` (`9bbd5ac`). El administrador puede corregir o descartar borradores 3Q no vinculados; el PDF original permanece inmutable, la correccion exige motivo, valida catalogo y cantidades, deja auditoria y no modifica inventario. Pendiente validacion visual.
 
 ### M78 - Cierre de hallazgos residuales post-regresion
 
 - Fecha: 2026-09-06.
-- Estado: implementacion local; sin validacion manual ni despliegue al momento de esta anotacion.
+- Estado: desplegado en `main` (`9bbd5ac`); frontend servido con los mismos hashes del build local, API de salud operativa y prompt de BuilderBot sincronizado por lectura posterior en `Entrada` y `Voz`.
 - Inventario y Kardex: la merma de bodega guarda y presenta saldo del lote, no disponibilidad agregada del SKU.
 - Trazabilidad: agrupa materiales repetidos, limita el uso productivo estimado a cero, enlaza material enviado a 3Q con PT recibido y cliente final, y pagina respuestas largas de WhatsApp.
 - Consultas: inventario usa el resolvedor comun de SKU/alias y falla con candidatos ante ambiguedad; los lotes disponibles se presentan como FEFO y se omiten saldos cero.
 - Reintentos: una OP, merma o devolucion repetida puede confirmarse como evento adicional usando el identificador devuelto por el WMS; los datos operativos se reconstruyen desde el registro persistido.
 - Dashboard: el KPI de recepciones cuenta recepciones fisicas unicas y la actividad reciente excluye borradores con cantidad cero.
 - Documentos: una advertencia exclusiva de proveedor no sincronizado exige revision, pero no se rotula como error del documento.
+- Verificacion automatica: `231/231` pruebas, build Vite aprobado, `npm audit` sin vulnerabilidades moderadas o superiores en raiz y API, y diff sin secretos ni errores de whitespace. El preflight E2E con telefonos no se ejecuto porque esta sesion no tenia esas variables de linea; las repeticiones manuales quedan para la siguiente bateria.
