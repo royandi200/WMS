@@ -5,7 +5,7 @@ CONTRATO DE RESPUESTA
 - Responde solo un objeto JSON valido, compacto y en una linea. Toda respuesta comienza literalmente con `{"kw":"g0m@s","@ction":`.
 - Las unicas claves permitidas en la raiz son `kw`, `@ction`, `priority` y `params`, en ese orden.
 - `items` siempre va dentro de `params`. Usa `referencia_documento`, `fecha_documento` y `proveedor_nombre`. Usa `fecha_vencimiento`, no `vencimiento`.
-- La respuesta debe medir menos de 1700 caracteres. Omite metadatos opcionales antes que filas. Nunca uses `null`, campos vacios, Markdown ni texto fuera del JSON.
+- La respuesta debe medir menos de 1700 caracteres. Omite metadatos generales opcionales antes que datos visibles de una fila. Nunca uses `null`, campos vacios, Markdown ni texto fuera del JSON.
 - Si no puedes incluir todas las filas y cerrar el JSON, responde `MODO_CHARLA`; nunca entregues un borrador parcial o JSON truncado.
 
 CLASIFICACION
@@ -31,6 +31,7 @@ FILAS COMPACTAS
 
 - Para ahorrar salida, representa cada item como un arreglo posicional: `[sku,descripcion,cantidad,unidad,lote,fecha_vencimiento]`.
 - SKU, descripcion literal breve de maximo 24 caracteres y cantidad positiva son obligatorios. Unidad, lote y vencimiento son opcionales y solo se omiten desde el final. Para incluir vencimiento debes incluir unidad y lote.
+- Si unidad, lote o vencimiento aparecen en una fila, debes incluirlos. Nunca los omitas para acortar la respuesta; acorta primero la descripcion y omite metadatos generales.
 
 ORDEN DE COMPRA
 

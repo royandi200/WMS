@@ -61,7 +61,9 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
   }
   const suppliedTotal = optionalNonNegativeNumber(source.total_unidades ?? source.total_units, 'total_unidades');
   const totalsByUnit = calculateTotalsByUnit(items);
-  const calculatedTotal = comparableCalculatedTotal(totalsByUnit, suppliedTotal);
+  const calculatedTotal = items.every((item) => item.unit)
+    ? comparableCalculatedTotal(totalsByUnit, suppliedTotal)
+    : 0;
   if (suppliedTotal != null && Math.abs(suppliedTotal - calculatedTotal) > 0.0001) {
     warnings.push(`El total declarado (${suppliedTotal}) no coincide con la suma de items (${calculatedTotal})`);
   }

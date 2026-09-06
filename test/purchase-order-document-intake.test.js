@@ -80,6 +80,19 @@ test('purchase order derives totals when the PDF declares neither row count nor 
   assert.deepEqual(normalized.warnings, []);
 });
 
+test('purchase order never totals quantities whose units are missing', () => {
+  const normalized = normalizePurchaseOrderDocumentInput(validInput({
+    total_unidades: undefined,
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 37 },
+      { sku: '00051-MPASH', descripcion: 'Gomas', cantidad: 8750 },
+    ],
+  }));
+  assert.equal(normalized.totalUnits, 0);
+  assert.equal(normalized.calculatedTotal, 0);
+  assert.match(normalized.warnings.join(' | '), /no tiene unidad de medida/u);
+});
+
 test('purchase order mixed-unit total compares against the units subtotal', () => {
   const input = validInput({
     total_unidades: 79,
@@ -353,6 +366,7 @@ test('purchase order document action is reception-scoped and cannot mutate inven
   assert.match(prompt, /La fuente del conteo son las filas reales de la tabla/u);
   assert.match(prompt, /exactamente un item de salida por cada fila de entrada/u);
   assert.match(prompt, /representa cada item como un arreglo posicional/u);
+  assert.match(prompt, /Nunca los omitas para acortar la respuesta/u);
   assert.match(warehouseDomain, /WHERE tipo_documento = \? AND origen = \? AND referencia_documento = \?/u);
   assert.match(webhook, /delete sanitized\.document_text/u);
   assert.match(webhook, /delete sanitized\.document_url/u);
