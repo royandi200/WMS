@@ -19,7 +19,7 @@ function enrichItemsFromLineEvidence(items, evidenceText) {
     const start = matches[0];
     let end = Math.min(lines.length, start + 1 + MAX_ITEM_BLOCK_LINES);
     for (let index = start + 1; index < end; index += 1) {
-      if (skuSet.has(lines[index].toUpperCase())) {
+      if (lines[index] === '\f' || skuSet.has(lines[index].toUpperCase())) {
         end = index;
         break;
       }
@@ -62,7 +62,8 @@ function enrichItemsFromLineEvidence(items, evidenceText) {
 }
 
 function enrichItemsFromFlattenedEvidence(items, evidenceText, skuSet) {
-  const evidence = String(evidenceText || '').replace(/\s+/gu, ' ').trim();
+  // Keep page boundaries even when collapsing row whitespace.
+  const evidence = String(evidenceText || '').replace(/[^\S\f]+/gu, ' ').trim();
   const upperEvidence = evidence.toUpperCase();
   const positions = new Map();
 
@@ -77,6 +78,7 @@ function enrichItemsFromFlattenedEvidence(items, evidenceText, skuSet) {
     if (matches.length !== 1 || (item.unit && item.lot && item.expiryDate)) return item;
 
     const start = matches[0] + sku.length;
+    const nextPage = evidence.indexOf('\f', start);
     const nextStarts = [...positions.entries()]
       .filter(([otherSku]) => otherSku !== sku)
       .flatMap(([, starts]) => starts)
@@ -84,6 +86,7 @@ function enrichItemsFromFlattenedEvidence(items, evidenceText, skuSet) {
     const end = Math.min(
       upperEvidence.length,
       start + 1_000,
+      nextPage < 0 ? upperEvidence.length : nextPage,
       nextStarts.length ? Math.min(...nextStarts) : upperEvidence.length
     );
     const block = evidence.slice(start, end);
@@ -145,9 +148,10 @@ function findDateMatches(value) {
 
 function evidenceLines(value) {
   return String(value || '')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
+    .replace(/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/g, ' ')
+    .replace(/\f/g, '\n\f\n')
     .split(/\r?\n/u)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .map((line) => line === '\f' ? line : line.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .slice(0, 10_000);
 }

@@ -96,9 +96,15 @@ async function registerWarehouseDocumentDraft({
     ? await downloadBuilderBotPdf(documentUrl, documentName)
     : null;
   const nativeEvidence = await nativePdfEvidence(db, document, body);
-  const input = normalizeWarehouseDocumentInput(nativeEvidence.body, {
-    evidenceText: nativeEvidence.text || evidenceText,
-  });
+  let input;
+  try {
+    input = normalizeWarehouseDocumentInput(nativeEvidence.body, {
+      evidenceText: nativeEvidence.text || evidenceText,
+    });
+  } catch (error) {
+    error.documentDiagnostics = nativeEvidence.diagnostics;
+    throw error;
+  }
   if (normalizedOrigin === 'BUILDERBOT' && !document) {
     input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
   }
@@ -170,6 +176,7 @@ async function registerWarehouseDocumentDraft({
         itemCount: input.items.length,
         totalUnits: Number(existing[0].total_unidades || 0),
         pdfStored: Boolean(document) || Number(existing[0].file_count || 0) > 0,
+        extractionDiagnostics: nativeEvidence.diagnostics,
       };
     }
 
@@ -223,6 +230,7 @@ async function registerWarehouseDocumentDraft({
       totalUnits: input.totalUnits,
       pdfStored: Boolean(document),
       extractionSource: nativeEvidence.used ? 'PDF_TEXT_LAYER' : 'BUILDERBOT',
+      extractionDiagnostics: nativeEvidence.diagnostics,
     };
   } catch (error) {
     await db.rollback().catch(() => {});
@@ -231,23 +239,43 @@ async function registerWarehouseDocumentDraft({
 }
 
 async function nativePdfEvidence(db, document, body) {
-  if (!document) return { body, text: '', used: false };
+  const source = body?.params && typeof body.params === 'object' ? body.params : body;
+  const modelItems = Array.isArray(source?.items) ? source.items : [];
+  // Fixed status values and counts only; never log document text, URLs or parser errors.
+  const diagnostics = {
+    status: 'NO_PDF', model_rows: Math.min(modelItems.length, MAX_DOCUMENT_ITEMS + 1),
+    compact_rows: Math.min(modelItems.filter(Array.isArray).length, MAX_DOCUMENT_ITEMS + 1),
+    native_rows: 0,
+  };
+  if (!document) return { body, text: '', used: false, diagnostics };
+  let stage = 'PDF_PARSE_FAILED';
   try {
     const extracted = await extractPdfTextLayer(document.content);
-    if (!extracted.text.trim()) return { body, text: '', used: false };
+    if (!extracted.text.trim()) {
+      diagnostics.status = 'NO_TEXT_LAYER';
+      return { body, text: '', used: false, diagnostics };
+    }
+    stage = 'CATALOG_READ_FAILED';
     const [products] = await db.execute(
       `SELECT siigo_code, nombre FROM productos
         WHERE activo = 1 AND siigo_code IS NOT NULL AND siigo_code <> ''`,
       []
     );
+    stage = 'NATIVE_ROWS_FAILED';
     const nativeItems = deriveCatalogItemsFromPdfTokens(extracted.tokens, products);
+    const recoveredBody = preferNativeItems(body, nativeItems);
+    const used = recoveredBody !== body;
+    diagnostics.native_rows = nativeItems.length;
+    diagnostics.status = used ? 'NATIVE_APPLIED' : 'MODEL_FALLBACK';
     return {
-      body: preferNativeItems(body, nativeItems),
+      body: recoveredBody,
       text: extracted.text,
-      used: nativeItems.length > 0,
+      used,
+      diagnostics,
     };
   } catch {
-    return { body, text: '', used: false };
+    diagnostics.status = stage;
+    return { body, text: '', used: false, diagnostics };
   }
 }
 
@@ -261,6 +289,13 @@ async function storeDraftFile(db, documentId, document) {
 }
 
 function normalizeItem(item = {}, index) {
+  if (Array.isArray(item)) {
+    item = {
+      sku: item[0], descripcion: item[1], cantidad: item[2],
+      unidad: item[3], lote: item[4], fecha_vencimiento: item[5],
+    };
+  }
+  if (!item || typeof item !== 'object') throw inputError(`El item ${index + 1} debe contener datos del producto`);
   const sku = cleanText(item.sku || item.codigo_barras || item.barcode, 80).toUpperCase();
   const description = cleanText(item.descripcion || item.producto || item.description, 255);
   const quantity = Number(item.cantidad ?? item.quantity);

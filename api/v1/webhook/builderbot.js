@@ -1599,6 +1599,7 @@ module.exports = async (req, res) => {
           'Sofi debe revisarlo y vincularlo con la remision 3Q antes de confirmar la salida. No se modifico inventario.',
         ].filter(Boolean).join('\n');
         responseContext.document_draft_id = draft.id;
+        responseContext.document_extraction = draft.extractionDiagnostics;
         responseContext.inventory_changed = false;
         break;
       }
@@ -3382,7 +3383,7 @@ module.exports = async (req, res) => {
     action,
     priority,
     payload: rawBody,
-    response: { error: errMsg, statusCode },
+    response: { error: errMsg, statusCode, ...(err.documentDiagnostics ? { document_extraction: err.documentDiagnostics } : {}) },
     status: isBusinessError ? 'REJECTED' : 'ERROR'
   }).catch(() => {});
 

@@ -78,7 +78,7 @@ Objetivo: comprobar los arreglos recientes antes del ensayo integral con cliente
 - D02: falta caso que realmente exceda una pagina conversacional. Los tres lotes consultados se leyeron completos con Read more, pero no excedieron el umbral.
 - D05: corregir confirmacion adicional reutilizable; OP 75/76 quedan reservadas como evidencia QA, no iniciarlas.
 - D06/D07: corregir reconocimiento conversacional y luego probar idempotencia; no se acredita porque no llegaron a ejecutar la accion.
-- D09: carga manual WhatsApp de los dos PDF R09 y cotejo SQL/dashboard pendiente.
+- D09: OC R09 validada como borrador con observaciones de presentacion; remision 3Q R09 probada y RECHAZADA. Corregir y repetir antes de acreditar flujo documental completo.
 
 ### D06 - Merma adicional desde registro previo
 
@@ -112,3 +112,45 @@ Objetivo: comprobar los arreglos recientes antes del ensayo integral con cliente
 - Build frontend: aprobado a las 12:52; diff --check sin errores.
 - Archivos: `output/pdf/regresion-documental/20260906-r09/QA-DOC-20260906-R09-OC-001.pdf` y `QA-DOC-20260906-R09-SALIDA-3Q-001.pdf`.
 - Siguiente accion manual: Juan/admin envia primero la OC como documento PDF sin texto adjunto; se valida clasificacion por encabezado, conservacion del original y borrador sin inventario. Despues, remision 3Q del mismo paquete.
+
+### D09-A - OC R09 recibida por WhatsApp sin texto adjunto
+
+- Fecha/hora: 2026-09-06, envio y respuesta 12:57; persistencia SQL 12:57:38 Bogota; cotejo final 13:01.
+- Actor: Juan/admin. Documento de 2 paginas enviado sin leyenda adjunta, segun mensaje visible de WhatsApp.
+- Resultado: clasificado ORDEN_COMPRA, un borrador ID 17, QA-DOC-20260906-R09-OC-001, PENDIENTE_REVISION. Respuesta completa legible, sin JSON.
+- Comparacion programatica SQL contra expected.json: 11/11 SKU, cantidad, unidad, lote y vencimiento exactos; los 11 enlazados al catalogo. Totales separados: 376 und y 8750 g.
+- Dashboard: Recepciones > Ordenes de compra muestra tarjeta y formulario Revisar con 11 renglones, sus lotes y vencimientos; fecha 2026-09-06 y proveedor PROVEEDOR QA MULTISKU SAS. No se eligio otro proveedor ni se confirmo/creo OC operativa.
+- PDF conservado: 4461 bytes, SHA256 647556b6ca092eacef2ed456289e281814117dc361210c167ef2b95ed45cb771. Coinciden archivo local, hash almacenado y hash calculado sobre contenido SQL.
+- Integridad: kardex 298 y movimientos 307, iguales al control previo. Checksum stock 21446.4850 y reserva 1440.8000; las reservas incluyen las dos OP de D05, no provienen de este PDF.
+- Advertencia esperada: proveedor ficticio no encontrado inequivocamente entre proveedores sincronizados. No corresponde a omision de SKU ni obliga a cambiar el proveedor automaticamente.
+- Observaciones pendientes: WhatsApp dice Total: 376 y omite los 8750 g, mientras dashboard si desglosa ambos; corregir resumen por unidad. NIT y moneda permanecen null (fuera de criterio bloqueante por decision previa del usuario). La descripcion extraida de 00001-TPBI omite '(60 UNID)', pero SKU, catalogo y campos operativos coinciden.
+- Estado: APROBADA carga y fidelidad de campos operativos del borrador; presentacion de totales WhatsApp pendiente. La aprobacion no incluye recepcion fisica, conciliacion con proveedor real ni idempotencia de reenvio de este PDF.
+- Siguiente prueba: cargar QA-DOC-20260906-R09-SALIDA-3Q-001.pdf desde Juan/admin sin texto adjunto. Esperados 9 SKU, 221 und, sin lotes ni vencimientos inventados y sin movimiento de inventario.
+
+### D09-B - Remision R09 recibida por WhatsApp sin texto adjunto
+
+- Fecha/hora: 2026-09-06, envio 13:03; respuesta 13:04. SQL webhook RECEIVED id 1462 a las 13:04:04 y REJECTED id 1463 a las 13:04:05 Bogota.
+- Actor: Juan/admin. Mensaje visible contiene PDF de 2 paginas, sin leyenda adjunta.
+- Respuesta completa: `El item 1 requiere SKU exacto en codigo de barras`. Estado: FALLIDA, no acreditar lectura documental 3Q punta a punta.
+- API recibio action REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO, tipo SALIDA_BODEGA_3Q, referencia correcta, item_count 9 y pdf_reference_received true. La clasificacion si llego al handler correcto.
+- SQL: no existe borrador para QA-DOC-20260906-R09-SALIDA-3Q-001. Dashboard Maquila 3Q > Documentos leidos tampoco lo muestra.
+- Integridad: kardex 298, movimientos 307, checksum stock 21446.4850 y reserva 1440.8000, iguales al control anterior. No se creo remision ni se modifico stock.
+- Catalogo SQL: los nueve SKU del PDF existen y tienen activo=1. No atribuir el error a SKU inexistente ni pedir cambiar el PDF sin diagnostico.
+- Pruebas locales reejecutadas: `node --test test/pdf-multipage-r09.test.js`, 2/2 aprobadas, incluyendo nueve SKU/cantidades/unidades exactos sin inventar lote/vencimiento de la remision.
+- Causa aun no confirmada: normalizeItem recibio el primer item sin sku/codigo_barras/barcode utilizable. Falta establecer por que nativePdfEvidence/preferNativeItems no restituyo los campos en esta llamada. El catch de extraccion nativa no deja diagnostico y los logs SQL documentales omiten el contenido por privacidad; no inferir que el OCR o el JSON fue la causa sin evidencia.
+- Intento de lectura BBC por MCP: conexion disponible, pero el log recuperado ya no incluia la ventana del fallo (solo un evento posterior). No se recupero payload original ni PDF remoto de este intento.
+- Siguiente paso tecnico: diagnostico saneado de disponibilidad/descarga/extraccion PDF, cantidad de filas nativas y esquema de campos del modelo, sin registrar PDF, URL temporal ni secretos; probar registerWarehouseDocumentDraft completo, no solo extractor aislado. Repetir la misma remision despues de corregir; no pedir reenvios a ciegas.
+- En esta comprobacion no se modificaron codigo, prompts, roles ni datos operativos. Solo se actualizo la bitacora local.
+
+### D09-B - Correccion del contrato compacto y registro completo
+
+- Fecha/hora: 2026-09-06, diagnostico y regresion interna 13:11-13:23 Bogota. No se enviaron mensajes ni se escribio en bases vivas durante esta correccion.
+- Causa reproducida: el prompt documental publicado en BBC exige filas posicionales `[sku, descripcion, cantidad, unidad, lote, vencimiento]`; el normalizador de OC las admitia, pero el de salida 3Q solo leia propiedades de objetos. Reproducido localmente el mismo error `El item 1 requiere SKU exacto en codigo de barras` con el contrato indicado por el prompt.
+- Limite de la evidencia: el payload original de las 13:04 no se recupero. La incompatibilidad contractual esta comprobada, pero sigue sin conocerse por que la extraccion nativa no reemplazo esas filas en aquella llamada. No atribuir este fallo a una lectura incorrecta del PDF por el modelo.
+- Hallazgo adicional reproducido en registro completo: despues del extractor nativo, enrichItemsFromLineEvidence volvia a colapsar el salto de pagina. Asignaba a 00003-TPGG la referencia del documento como lote y la fecha del encabezado de pagina 2 como vencimiento. El test aislado del extractor no cubria esta etapa.
+- Correcciones: normalizar filas compactas 3Q antes de validarlas; conservar limites de pagina tanto en enriquecimiento por lineas como en texto aplanado. No se inventan lotes/vencimientos que el documento no contiene.
+- Diagnostico agregado: estados fijos y conteos de filas compactas/nativas en contexto y logs del webhook 3Q, incluidos rechazos de normalizacion. No contiene texto del PDF, URL temporal, credenciales ni errores crudos del parser. Permite distinguir NO_PDF, NO_TEXT_LAYER, PDF_PARSE_FAILED, CATALOG_READ_FAILED, NATIVE_ROWS_FAILED, MODEL_FALLBACK y NATIVE_APPLIED.
+- Regresion nueva: seis casos de contrato/registro 3Q, con descarga simulada del PDF R09 real, SQL en memoria limitado a tablas de borradores, reintento compacto/objeto, fallo de catalogo nativo simulado, conflicto por cantidad y rechazo de datos invalidos; otros dos casos verifican limites de pagina por lineas y texto aplanado.
+- Resultado: 9/9 SKU, 221 und, lotes y vencimientos null, PDF original preservado y sin duplicacion. El registro completo pasa tanto con extraccion nativa como con fallback documental; el fallback se prueba con evidencia textual de la misma fuente, no con una respuesta capturada de BBC.
+- Suite completa: 242 aprobadas, 0 fallidas; build frontend aprobado 13:22; diff --check sin errores. Revision con wms-security-audit standard acotada al contrato externo, privacidad, idempotencia y controles sin mutacion de inventario. Sin cambios de dependencias, roles ni prompt BBC.
+- Estado: CORREGIDO Y VALIDADO LOCALMENTE. Sigue pendiente el reenvio real de QA-DOC-20260906-R09-SALIDA-3Q-001.pdf tras despliegue, cotejo de nueve filas en SQL/dashboard, respuesta WhatsApp y ausencia de movimientos. Los pendientes D02/D05/D06/D07/D08 no se dan por resueltos con esta correccion.
