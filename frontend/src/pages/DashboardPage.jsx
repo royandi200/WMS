@@ -75,7 +75,7 @@ function SpinnerBlock({ rows = 3 }) {
 }
 
 function MiniBar({ value, max, color }) {
-  const pct = max > 0 ? Math.max(4, Math.min(100, (Number(value || 0) / max) * 100)) : 0
+  const pct = max > 0 && Number(value) > 0 ? Math.max(4, Math.min(100, (Number(value) / max) * 100)) : 0
   return (
     <div className="h-1.5 rounded-full bg-border/70 overflow-hidden">
       <div
@@ -419,10 +419,10 @@ export default function DashboardPage() {
               alert={stockAlerts > 0 || expiringLots > 0 || dwellAlerts > 0}
               metrics={[
                 { label: 'Disponible', value: totalsText(metrics?.stock.quantities) },
-                { label: 'Reservado disponible', value: totalsText(metrics?.stock.reserved) },
+                { label: 'Reservado en lotes aptos', value: totalsText(metrics?.stock.reserved) },
               ]}
               footer={dwellAlerts
-                ? `${dwellAlerts} lotes con ${dwellDays}+ dias en bodega`
+                ? `${dwellAlerts} lotes con alerta de permanencia`
                 : expiringLots ? `${expiringLots} lotes proximos a vencer` : 'Sin alertas de permanencia'}
             />
             <StageCard
@@ -493,7 +493,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-[10px] text-muted uppercase">Pendientes</p>
-              <p className="text-sm font-semibold text-foreground">{fmtN(approvalCount)} aprobaciones</p>
+              <p className="text-sm font-semibold text-foreground">{metrics?.approvals ? fmtN(approvalCount) : '-'} aprobaciones</p>
               <MiniBar value={approvalCount} max={Math.max(approvalCount, 10)} color="#d2a8ff" />
             </div>
           </div>

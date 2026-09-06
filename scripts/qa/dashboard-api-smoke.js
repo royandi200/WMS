@@ -53,6 +53,9 @@ async function main() {
   const headers = { authorization: `Bearer ${token}`, accept: 'application/json' };
   const routes = [
     '/auth/me',
+    '/dashboard?period=today',
+    '/dashboard?period=week',
+    '/dashboard?period=month',
     '/inventory/summary',
     '/inventory/low-stock',
     '/inventory/product/00102-PTASH60',

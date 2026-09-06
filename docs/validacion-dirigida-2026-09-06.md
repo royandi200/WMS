@@ -341,3 +341,29 @@ No se declara sistema completo aprobado, ni se da un numero de pruebas restantes
 - 15:25: check-reporting-readonly.js aprobado en base QA, cero escrituras operativas. Periodo 31/08-06/09: 15 recepciones, 6.000 g y 184 und recibidos; 1 und rechazada; 15 mermas, 57 g y 6,25 und; 13 OP activas, 8 cerradas en el periodo. Estos valores son una fotografia de prueba, no una conciliacion del inventario historico.
 - 274/274 pruebas locales y build frontend aprobados. Nuevos casos: limites superiores a 100 mediante doble SQL, fallo cerrado, permisos de aprobaciones, periodo Bogota, totales persistidos, reservas vs consumo y 160 eventos paginados sin omisiones. La prueba de paginacion automatizada no sustituye su navegacion real por WhatsApp.
 - Pendientes de validacion al publicar: pantalla real y cambio de periodo; consulta real de trazabilidad con horario corregido; confirmaciones adicionales de produccion/materiales en vivo; reenvio manual R10 y nueva OC. No modificar los historicos defectuosos como sustituto de estas pruebas.
+
+### Validacion publicada y ampliacion - 2026-09-06, 15:29-15:44 Bogota
+
+- fffbb029a0a0b4ad2faf22898b091745da03b249 publicado en main; estado GitHub de despliegue Vercel success a las 15:29:33. Sin acceso directo a Vercel.
+- Dashboard 15:30-15:34: valores semanales coinciden con SQL; hoy muestra 3 recepciones/3 und, 4 mermas/12 g, entradas 3 und y salidas 12 g. Cambio 30 dias disponible. Vista movil efectiva 434 px sin desbordamiento horizontal ni cantidades recortadas; viewport restablecido.
+- 15:31-15:32: trazabilidad DEMO-GOMAS-001 por WhatsApp, Read more expandido. Ocho movimientos completos, saldo 319.25 g; OP 74 muestra 14:45 y 14:46, coincidente con Kardex/SQL. Solo OP 67/72/73/74 bajo consumo; OP 75/76 separadas como reservas. APROBADO horario/rotulado en vivo. No acredita multipagina real.
+- 15:33:02: Juan crea OP 77 por 2 und; 15:33:51 confirma otra como OP 77 y crea OP 78 por 2 und. Reenvio literal 15:35 devuelve OP 78 existente sin nuevas reservas. Clave PRODUCCION/usuario 5/base 77 conserva OP 78. APROBADO reintento real.
+- 15:38: dashboard-api-smoke.js aprueba 23/23 consultas HTTP 200, incluidos tres periodos del nuevo endpoint; prueba de lectura con login, no prueba de todas las escrituras.
+- 15:40:29-31: Jobana confirma materiales OP 77: cinco movimientos 390-394, cuatro componentes por 2 und y gomas 360 g. OP EN_PROCESO. Roles sin cambios.
+- 15:41:04: entrega adicional 1 g de gomas, lote DEMO-MAPA-B16-00051-MPASH/B16, movimiento 395. Reenvio 15:41:52 falla cerrado: IA inventa AJUSTE-77-0001 y confirmar_nuevo_ajuste=true aunque el texto solo repite la entrega. Ningun segundo movimiento.
+- Correccion adicional: no confiar en el booleano del modelo para entregas repetidas; exigir consentimiento explicito de un nuevo ajuste, validar ID numerico existente del propio actor y recuperar datos operativos de SQL. Mostrar ID real del movimiento en respuesta. Campos contradictorios y negacion fallan cerrados. Prompt distingue entrega adicional de confirmacion de otro movimiento.
+- Nueva OC R11: dos paginas, once SKU, sin total ni cantidad de filas declarados. Extraccion nativa local recupera 11/11, lotes y fechas completos; 406 und y 8753 g por separado. Ambas paginas renderizadas e inspeccionadas. No enviada a WhatsApp todavia.
+
+### Archivos para cerrar validacion documental
+
+1. Juan/admin: reenviar sin caption el mismo `output/pdf/regresion-documental/20260906-r10/QA-DOC-20260906-R10-SALIDA-3Q-001.pdf`. Esperado: borrador ID 19 existente, nueve filas, 239 und; PDF/hash iguales, sin nueva remision ni stock.
+2. Juan/admin: enviar `output/pdf/regresion-documental/20260906-r11/QA-DOC-20260906-R11-OC-001.pdf` sin caption. Marcador ORDEN DE COMPRA impreso. Esperado: nuevo borrador, once SKU, totales separados 8753 g / 406 und; cantidades exactas en expected.json, todos los lotes QA-R11 y vencimiento 2028-12-31. No crear OC operativa ni modificar inventario solo por subirlo.
+3. Cotejar respuesta completa, dashboard, once filas SQL y hash PDF, con fecha/hora de cada paso. La prueba local del lector no sustituye este recorrido por BBC.
+
+### Preparacion de la siguiente bateria
+
+- Mantener Juan admin, Datana recepcion_cierre y Jobana alistador. No cambiar telefonos ni roles entre consultas, produccion y cierre; cambiar solo cuando el bloque de despacho lo requiera, con verificacion previa.
+- Antes de cada operacion, consultar disponibilidad por lote/ubicacion, reservas y BOM; no reutilizar las cifras de este informe como saldos actuales.
+- Usar documentos con referencia nueva para nuevas altas; reenviar el mismo documento solo en pruebas de reintento. Las referencias viejas se conservan como evidencia, no se borran para fabricar un resultado limpio.
+- Congelar version y prompt al comenzar bateria integral. Registrar cambios de version y repetir solo los casos afectados si aparece un arreglo bloqueante.
+- Pendiente externo al cierre automatico: los dos envios manuales anteriores y navegacion WhatsApp de un historial realmente multipagina. Ya existe prueba aislada de 160 eventos sin omisiones; no insertar movimientos artificiales en historial para forzarla.

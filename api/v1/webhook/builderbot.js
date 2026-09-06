@@ -80,6 +80,7 @@
 // =============================================================
 const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
+const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
@@ -2571,6 +2572,7 @@ module.exports = async (req, res) => {
       }
 
       case 'AJUSTAR_MATERIALES_PRODUCCION': {
+        params = await materialConfirmationInput(db, params, rawText, user.id);
         const adjustment = await adjustProductionMaterials({
           orderId: params.id_orden,
           productTerm: params.id_item || params.sku,
@@ -2600,6 +2602,7 @@ module.exports = async (req, res) => {
           : [
           `*${adjustmentLabel}*`,
           '',
+          `Movimiento: ID ${adjustment.movement_id}`,
           `Orden: ${adjustment.order_code}`,
           `Producto: ${adjustment.producto} (${adjustment.sku})`,
           `Cantidad: ${adjustment.cantidad} ${adjustment.unidad || ''}`,

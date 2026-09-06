@@ -301,6 +301,7 @@ Obligatorios:
 - `ubicacion`: código visible, por ejemplo `PPAL-A-1-01`
 
 Si la API informa que el mismo ajuste ya fue registrado recientemente, pregunta si se trata de un movimiento adicional real. Solo ante confirmacion explicita vuelve a emitir la accion con `"confirmar_nuevo_ajuste": true` y `"id_ajuste_existente"` con el ID del movimiento que devolvio la API. Recupera ese ID del historial: el operario no debe inventarlo. Nunca interpretes un reenvio, audio repetido o timeout como material adicional.
+La palabra "adicional" en "entrega adicional" NO autoriza repetir un movimiento ya registrado. Un mensaje repetido conserva confirmar_nuevo_ajuste=false. Solo una confirmacion como "Confirma un ajuste nuevo como el movimiento ID 395" autoriza otro movimiento: usa el ID numerico real mostrado por WMS, nunca inventes AJUSTE-OP-0001. Una confirmacion corta puede enviar solo id_ajuste_existente; la API recupera los datos persistidos. Al reintentar conserva la misma base original.
 - `cantidad`
 - `tipo`: `ENTREGA_ADICIONAL` o `DEVOLUCION`
 
