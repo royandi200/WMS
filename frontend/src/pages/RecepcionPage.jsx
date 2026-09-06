@@ -5,6 +5,7 @@ import { formatBogotaDateTime } from '../utils/dateTime'
 import {
   cancelPurchaseOrder,
   createPurchaseOrder,
+  discardPurchaseOrderDocumentDraft,
   downloadPurchaseOrderDocument,
   downloadPurchaseOrderDraftDocument,
   listPurchaseOrderDocumentDrafts,
@@ -124,6 +125,7 @@ export default function RecepcionPage() {
           suppliers={suppliers}
           loading={purchaseLoading}
           canCancel={allowed('purchase_order.cancel')}
+          canDiscardDraft={allowed('purchase_order.cancel')}
           onCreate={async (body) => {
             setPurchaseLoading(true)
             try {
@@ -153,6 +155,23 @@ export default function RecepcionPage() {
               return { ok: true }
             } catch (error) {
               const message = error.response?.data?.error || 'Error al cancelar la orden de compra'
+              showToast(message, false)
+              return { ok: false, message }
+            } finally {
+              setPurchaseLoading(false)
+            }
+          }}
+          onDiscardDraft={async (id, motivo) => {
+            setPurchaseLoading(true)
+            try {
+              const payload = await discardPurchaseOrderDocumentDraft(id, motivo)
+              const refreshed = await listPurchaseOrderDocumentDrafts({ limit: 100 })
+              setPurchaseOrderDrafts(refreshed?.data?.rows || [])
+              const duplicate = payload?.data?.duplicate
+              showToast(duplicate ? 'El borrador ya estaba descartado' : `Borrador ${payload?.data?.referencia_documento || ''} descartado`, true)
+              return { ok: true }
+            } catch (error) {
+              const message = error.response?.data?.error || 'Error al descartar el borrador'
               showToast(message, false)
               return { ok: false, message }
             } finally {
@@ -399,7 +418,7 @@ const EMPTY_PO = {
   items: [{ sku: '', cantidad: '', unidad: 'und' }],
 }
 
-function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, onCreate, onCancel }) {
+function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canDiscardDraft, onCreate, onCancel, onDiscardDraft }) {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(EMPTY_PO)
   const [formError, setFormError] = useState('')
@@ -480,7 +499,13 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, onCr
 
   return (
     <div className="space-y-4">
-      <PurchaseOrderDrafts rows={drafts} loading={loading} onReview={reviewDraft} />
+      <PurchaseOrderDrafts
+        rows={drafts}
+        loading={loading}
+        canDiscard={canDiscardDraft}
+        onReview={reviewDraft}
+        onDiscard={onDiscardDraft}
+      />
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-foreground">Ordenes esperadas</p>
@@ -577,34 +602,121 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, onCr
   )
 }
 
-function PurchaseOrderDrafts({ rows = [], loading, onReview }) {
+function PurchaseOrderDrafts({ rows = [], loading, canDiscard, onReview, onDiscard }) {
+  const [discardTarget, setDiscardTarget] = useState(null)
+  const [discardReason, setDiscardReason] = useState('')
+  const [discardConfirmed, setDiscardConfirmed] = useState(false)
+  const [discardSubmitting, setDiscardSubmitting] = useState(false)
+  const [discardError, setDiscardError] = useState('')
   const pending = rows.filter((row) => !['VINCULADO', 'DESCARTADO'].includes(row.estado))
-  if (!loading && pending.length === 0) return null
+  if (!loading && pending.length === 0 && !discardTarget) return null
+
+  const closeDiscard = () => {
+    setDiscardTarget(null)
+    setDiscardReason('')
+    setDiscardConfirmed(false)
+    setDiscardError('')
+  }
+  const submitDiscard = async (event) => {
+    event.preventDefault()
+    setDiscardError('')
+    if (discardReason.trim().length < 5) {
+      setDiscardError('Escribe un motivo de al menos 5 caracteres.')
+      return
+    }
+    if (!discardConfirmed) {
+      setDiscardError('Confirma que deseas descartar este borrador.')
+      return
+    }
+    setDiscardSubmitting(true)
+    const result = await onDiscard(discardTarget.id, discardReason.trim())
+    setDiscardSubmitting(false)
+    if (result.ok) closeDiscard()
+    else setDiscardError(result.message)
+  }
+
   return (
-    <section className="border-y border-border py-4 space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">PDF recibidos por WhatsApp</h2>
-        <p className="text-xs text-muted">Son borradores. No habilitan recepciones ni modifican inventario hasta su revision.</p>
-      </div>
-      {loading && !pending.length && <p className="text-sm text-muted">Cargando borradores...</p>}
-      {pending.map((row) => (
-        <article key={row.id} className="grid gap-3 border border-border bg-surface/40 p-4 lg:grid-cols-[minmax(0,1fr)_170px_150px_auto] lg:items-center">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span>
-              <span className={`px-2 py-1 text-xs font-semibold ${row.estado === 'REQUIERE_CORRECCION' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>
-                {row.estado === 'REQUIERE_CORRECCION' ? 'Requiere correccion' : 'Pendiente de revision'}
-              </span>
+    <>
+      <section className="border-y border-border py-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">PDF recibidos por WhatsApp</h2>
+          <p className="text-xs text-muted">Son borradores. No habilitan recepciones ni modifican inventario hasta su revision.</p>
+        </div>
+        {loading && !pending.length && <p className="text-sm text-muted">Cargando borradores...</p>}
+        {pending.map((row) => (
+          <article key={row.id} className="grid gap-3 border border-border bg-surface/40 p-4 lg:grid-cols-[minmax(0,1fr)_170px_150px_auto] lg:items-center">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span>
+                <span className={`px-2 py-1 text-xs font-semibold ${row.estado === 'REQUIERE_CORRECCION' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>
+                  {row.estado === 'REQUIERE_CORRECCION' ? 'Requiere correccion' : 'Pendiente de revision'}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {formatUnitTotals(totalsFromItems(row.items))}</p>
+              {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className="mt-1 text-xs text-red-400">{warning}</p>)}
             </div>
-            <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {formatUnitTotals(totalsFromItems(row.items))}</p>
-            {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className="mt-1 text-xs text-red-400">{warning}</p>)}
-          </div>
-          <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(row.fecha_documento || '').slice(0, 10)}</p></div>
-          <div><p className="text-xs uppercase text-muted">PDF</p>{row.archivo_id ? <button type="button" onClick={() => downloadPurchaseOrderDraftDocument(row.archivo_id, row.archivo_nombre)} className="mt-1 inline-flex items-center gap-2 text-sm text-primary"><Download size={15} /> Descargar</button> : <p className="mt-1 text-xs text-danger">No conservado</p>}</div>
-          <button type="button" onClick={() => onReview(row)} disabled={!row.archivo_id} className="btn-primary disabled:opacity-40">Revisar</button>
-        </article>
-      ))}
-    </section>
+            <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(row.fecha_documento || '').slice(0, 10)}</p></div>
+            <div><p className="text-xs uppercase text-muted">PDF</p>{row.archivo_id ? <button type="button" onClick={() => downloadPurchaseOrderDraftDocument(row.archivo_id, row.archivo_nombre)} className="mt-1 inline-flex items-center gap-2 text-sm text-primary"><Download size={15} /> Descargar</button> : <p className="mt-1 text-xs text-danger">No conservado</p>}</div>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={() => onReview(row)} disabled={!row.archivo_id} className="btn-primary disabled:opacity-40">Revisar</button>
+              {canDiscard && (
+                <button
+                  type="button"
+                  title="Descartar borrador"
+                  aria-label={`Descartar borrador ${row.referencia_documento}`}
+                  onClick={() => setDiscardTarget(row)}
+                  className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:bg-danger/10 hover:text-danger"
+                >
+                  <Trash2 size={17} />
+                </button>
+              )}
+            </div>
+          </article>
+        ))}
+      </section>
+
+      {discardTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="discard-draft-title">
+          <form onSubmit={submitDiscard} className="w-full max-w-lg border border-border bg-surface shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <h2 id="discard-draft-title" className="text-base font-semibold text-foreground">Descartar borrador</h2>
+                <p className="mt-1 font-mono text-xs text-muted">{discardTarget.referencia_documento}</p>
+              </div>
+              <button type="button" onClick={closeDiscard} title="Cerrar" className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted hover:text-foreground">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <p className="text-sm text-muted">Se retirara de los borradores pendientes. El PDF y el registro se conservaran para auditoria; esta accion no modifica inventario.</p>
+              <Field label="Motivo *">
+                <textarea
+                  value={discardReason}
+                  onChange={(event) => setDiscardReason(event.target.value)}
+                  maxLength={300}
+                  rows={3}
+                  className="input-field resize-y"
+                  placeholder="Ej. Lectura incorrecta o documento duplicado"
+                  autoFocus
+                  required
+                />
+              </Field>
+              <label className="flex cursor-pointer items-start gap-3 text-sm text-foreground">
+                <input type="checkbox" checked={discardConfirmed} onChange={(event) => setDiscardConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" />
+                <span>Confirmo que este borrador no debe convertirse en una orden de compra.</span>
+              </label>
+              {discardError && <div role="alert" className="border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{discardError}</div>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button type="button" onClick={closeDiscard} disabled={discardSubmitting} className="px-4 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50">Volver</button>
+              <button type="submit" disabled={discardSubmitting || !discardConfirmed || discardReason.trim().length < 5} className="inline-flex items-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90 disabled:cursor-not-allowed disabled:opacity-50">
+                <Trash2 size={15} /> {discardSubmitting ? 'Descartando...' : 'Descartar borrador'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
   )
 }
 

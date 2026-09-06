@@ -3,6 +3,10 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const { registerWarehouseDocumentDraft } = require('../_lib/warehouse-document-intake');
 const { safeDownloadName } = require('../_lib/purchase-order-documents');
+const {
+  discardPurchaseOrderDocumentDraft,
+  normalizePurchaseOrderDocumentDiscard,
+} = require('../_lib/purchase-order-document-discard');
 
 async function handleGet(req, res) {
   const fileId = Number(req.query?.file_id || 0);
@@ -109,6 +113,23 @@ async function handlePost(req, res) {
   }
 }
 
+async function handleDelete(req, res) {
+  const user = await requireCapability(req, CAPABILITIES.PURCHASE_ORDER_CANCEL);
+  const input = normalizePurchaseOrderDocumentDiscard(req.body || {});
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const data = await discardPurchaseOrderDocumentDraft(conn, { ...input, userId: user.id });
+    await conn.commit();
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
 function parseJsonArray(value) {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -127,11 +148,12 @@ function maskValue(value) {
 }
 
 module.exports = async (req, res) => {
-  cors(res, 'GET,POST');
+  cors(res, 'GET,POST,DELETE');
   if (req.method === 'OPTIONS') return res.status(200).end();
   try {
     if (req.method === 'GET') return await handleGet(req, res);
     if (req.method === 'POST') return await handlePost(req, res);
+    if (req.method === 'DELETE') return await handleDelete(req, res);
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ ok: false, error: error.message });

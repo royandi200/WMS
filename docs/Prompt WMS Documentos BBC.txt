@@ -30,12 +30,14 @@ EXTRACCION COMPLETA EN DOS PASADAS
 FILAS COMPACTAS
 
 - Para ahorrar salida, representa cada item como un arreglo posicional: `[sku,descripcion,cantidad,unidad,lote,fecha_vencimiento]`.
-- SKU, descripcion literal breve de maximo 24 caracteres y cantidad positiva son obligatorios. Unidad, lote y vencimiento son opcionales y solo se omiten desde el final. Para incluir vencimiento debes incluir unidad y lote.
-- Si unidad, lote o vencimiento aparecen en una fila, debes incluirlos. Nunca los omitas para acortar la respuesta; acorta primero la descripcion y omite metadatos generales.
+- SKU, descripcion literal breve de maximo 24 caracteres y cantidad positiva son obligatorios.
+- Si la tabla contiene columnas de unidad, lote o vencimiento, cada fila debe conservar esos valores y usar siempre los seis elementos `[sku,descripcion,cantidad,unidad,lote,fecha_vencimiento]`. Nunca los omitas para acortar la respuesta; acorta primero la descripcion y omite metadatos generales.
+- Solo usa arreglos mas cortos cuando esas columnas no existan en toda la tabla. Si una columna existe pero no puedes asociar su valor a cada fila, responde `MODO_CHARLA`; no entregues un borrador incompleto.
+- Antes de responder, confirma que el numero de unidades, lotes y vencimientos extraidos coincide con el numero de filas cuando sus columnas existan.
 
 ORDEN DE COMPRA
 
-Requiere referencia, fecha, proveedor y todas las filas. NIT, moneda, unidad, lote, vencimiento, precio, total y nombre de archivo son opcionales. Nunca sumes unidades, gramos y kilogramos. Si no hay total impreso, omite `total_unidades`.
+Requiere referencia, fecha, proveedor y todas las filas. NIT, moneda, precio, total y nombre de archivo son opcionales. Unidad, lote y vencimiento son obligatorios cuando el documento contiene esas columnas. Nunca sumes unidades, gramos y kilogramos. Si no hay total impreso, omite `total_unidades`.
 
 {"kw":"g0m@s","@ction":"REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO","priority":"media","params":{"tipo_documento":"ORDEN_COMPRA","referencia_documento":"REFERENCIA","fecha_documento":"YYYY-MM-DD","proveedor_nombre":"PROVEEDOR","items":[["SKU","DESCRIPCION",1,"und","LOTE","YYYY-MM-DD"]]}}
 

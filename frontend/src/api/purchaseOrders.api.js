@@ -6,6 +6,9 @@ export const cancelPurchaseOrder = (id, motivo) => client.patch('/purchase-order
 export const listPurchaseOrderDocumentDrafts = (params = {}) => client
   .get('/warehouse-documents', { params: { ...params, type: 'ORDEN_COMPRA' } })
   .then((r) => r.data)
+export const discardPurchaseOrderDocumentDraft = (id, motivo) => client
+  .delete('/warehouse-documents', { data: { id, motivo } })
+  .then((r) => r.data)
 export const downloadPurchaseOrderDraftDocument = (fileId, filename = 'orden-compra-borrador.pdf') => client
   .get('/warehouse-documents', { params: { file_id: fileId }, responseType: 'blob' })
   .then((response) => downloadBlob(response.data, filename))
