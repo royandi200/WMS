@@ -3110,26 +3110,28 @@ module.exports = async (req, res) => {
          JOIN maquila_materiales mm ON mm.id = mml.maquila_material_id
          JOIN ordenes_maquila om ON om.id = mm.orden_maquila_id
          JOIN productos p ON p.id = mm.producto_id
-         LEFT JOIN maquila_envio_items mei ON mei.maquila_material_lote_id = mml.id
-         LEFT JOIN maquila_envios me ON me.id = mei.maquila_envio_id AND me.estado = 'CONFIRMADO'
-        WHERE mml.lote = ?
+         JOIN maquila_envio_items mei ON mei.maquila_material_lote_id = mml.id
+         JOIN maquila_envios me ON me.id = mei.maquila_envio_id AND me.estado = 'CONFIRMADO'
+        WHERE mml.lote = ? AND mm.producto_id = ?
         ORDER BY om.id, me.confirmado_en, me.id`,
-      [params.id_lote]
-    ).catch(() => [[]]);
+      [params.id_lote, l.product_id]
+    );
     const sourceOrderIds = [...new Set(outsourcingSourceRows.map(row => Number(row.orden_id)).filter(Boolean))];
     const outsourcingSourceReceipts = sourceOrderIds.length ? await db.execute(
       `SELECT mr.orden_maquila_id AS orden_id, r.numero AS recepcion_numero,
               r.completado_en AS recibido_en, p.siigo_code AS producto_sku,
-              p.nombre AS producto_nombre, rd.lote AS lote_pt, rd.cantidad,
+              p.nombre AS producto_nombre, rd.lote AS lote_pt, rd.cantidad, rd.condicion,
               COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad
          FROM maquila_recepciones mr
          JOIN recepciones r ON r.id = mr.recepcion_id
-         JOIN recepcion_distribuciones rd ON rd.recepcion_id = r.id
-         JOIN productos p ON p.id = rd.producto_id
+         JOIN recepcion_items ri ON ri.recepcion_id = r.id AND ri.producto_id = mr.producto_id
+         JOIN recepcion_distribuciones rd ON rd.recepcion_id = r.id AND rd.recepcion_item_id = ri.id
+         JOIN productos p ON p.id = ri.producto_id
         WHERE mr.orden_maquila_id IN (${sourceOrderIds.map(() => '?').join(',')})
+          AND r.estado = 'completada'
         ORDER BY r.completado_en, r.id, rd.id`,
       sourceOrderIds
-    ).then(([rows]) => rows).catch(() => []) : [];
+    ).then(([rows]) => rows) : [];
     const receivedPtLots = [...new Set(outsourcingSourceReceipts.map(row => row.lote_pt).filter(Boolean))];
     const outsourcingSourceDispatches = receivedPtLots.length ? await db.execute(
       `SELECT di.lote AS lote_pt, d.numero AS despacho_numero,
@@ -3141,7 +3143,7 @@ module.exports = async (req, res) => {
           AND d.estado = 'despachado' AND di.cantidad_des > 0
         ORDER BY d.despachado_en, d.id`,
       receivedPtLots
-    ).then(([rows]) => rows).catch(() => []) : [];
+    ).then(([rows]) => rows) : [];
     const outsourcingSourceHistory = outsourcingSourceRows.length
       ? sourceOrderIds.map(orderId => {
           const orderRows = outsourcingSourceRows.filter(row => Number(row.orden_id) === orderId);
@@ -3152,7 +3154,7 @@ module.exports = async (req, res) => {
               `    Envio ${row.remision_numero} (${row.remision_tipo}): ${Number(row.cantidad_enviada)} ${row.unidad} | ${formatBogotaDateTime(row.enviado_en)}`
             ),
             ...receipts.map(row =>
-              `    Recibido ${row.recepcion_numero}: ${row.producto_sku} - ${row.producto_nombre} | ${Number(row.cantidad)} ${row.unidad} | lote PT ${row.lote_pt} | ${formatBogotaDateTime(row.recibido_en)}`
+              `    Recibido ${row.recepcion_numero}: ${row.producto_sku} - ${row.producto_nombre} | ${Number(row.cantidad)} ${row.unidad} | ${row.condicion} | lote PT ${row.lote_pt} | ${formatBogotaDateTime(row.recibido_en)}`
             ),
             ...receipts.flatMap(receipt => outsourcingSourceDispatches
               .filter(dispatch => dispatch.lote_pt === receipt.lote_pt)

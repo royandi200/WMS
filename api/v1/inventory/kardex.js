@@ -66,7 +66,7 @@ module.exports = async (req, res) => {
     );
 
     const productIds = [...new Set(rows.filter((r) => !r.lot_id).map((r) => Number(r.product_id)).filter(Boolean))];
-    const lotIds = [...new Set(rows.map((r) => Number(r.lot_id)).filter(Boolean))];
+    const lotIds = [...new Set(rows.filter((r) => r.lot_id).map((r) => String(r.lot_id)))];
     let balanceById = {};
     const lotBalanceById = {};
 
@@ -80,7 +80,7 @@ module.exports = async (req, res) => {
         lotIds
       );
       for (const lotId of lotIds) {
-        const movements = lotRows.filter((row) => Number(row.lot_id) === lotId);
+        const movements = lotRows.filter((row) => String(row.lot_id) === lotId);
         const balances = balancesByMovement(movements, Number(movements[0]?.qty_current || 0));
         for (const [id, value] of balances) lotBalanceById[id] = value;
       }
