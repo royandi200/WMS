@@ -142,15 +142,16 @@ function StartForm({ loading, onSubmit, onDone }) {
       customer_reference: form.customer_reference.trim() || undefined,
       final_customer: form.final_customer.trim() || undefined,
       notes: form.notes || undefined,
-      confirmar_nueva_orden: confirmDuplicate,
+      confirmar_nueva_orden: Boolean(confirmDuplicate),
+      id_orden_existente: confirmDuplicate || undefined,
     })
     if (res.ok) {
       if (res.data?.requires_confirmation) {
-        setConfirmDuplicate(true)
+        setConfirmDuplicate(res.data.order_id)
         setToast({ msg: `Ya existe ${res.data.order_code} con los mismos datos. Vuelve a enviar solo si necesitas otra orden igual.`, ok: false })
         return
       }
-      setToast({ msg: 'Orden iniciada', ok: true })
+      setToast({ msg: res.data?.already_released ? 'La orden adicional ya estaba liberada. No se modifico inventario.' : 'Orden liberada', ok: true })
       setTimeout(() => { setToast(null); onDone() }, 1500)
     } else {
       setToast({ msg: res.message, ok: false })
@@ -215,14 +216,18 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
       ...form,
       ubicacion_id: Number(form.ubicacion_id),
       cantidad: Number(form.cantidad),
-      confirmar_nuevo_ajuste: confirmDuplicate,
+      confirmar_nuevo_ajuste: Boolean(confirmDuplicate),
+      id_ajuste_existente: confirmDuplicate || undefined,
     })
     if (result.ok && result.data?.requires_confirmation) {
-      setConfirmDuplicate(true)
+      setConfirmDuplicate(result.data.movement_id)
       setToast({ msg: 'Ya existe un movimiento igual reciente. Vuelve a enviar solo si es un ajuste nuevo.', ok: false })
       return
     }
-    setToast(result.ok ? { msg: `${form.tipo} registrada`, ok: true } : { msg: result.message, ok: false })
+    setToast(result.ok ? {
+      msg: result.data?.already_recorded ? 'El movimiento adicional ya estaba registrado. No se modifico inventario.' : `${form.tipo} registrada`,
+      ok: true,
+    } : { msg: result.message, ok: false })
   }
   return (
     <form onSubmit={handle} className="max-w-xl bg-surface border border-border rounded-lg p-6 space-y-4">

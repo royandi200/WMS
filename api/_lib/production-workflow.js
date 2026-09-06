@@ -4,6 +4,7 @@ const { resolvePrimaryWarehouse } = require('./warehouses');
 const { notifyRoles } = require('./builderbot-notifications');
 const { assertInternalProductionProduct } = require('./product-modes');
 const { resolveProductReference } = require('./product-references');
+const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
 
 function httpError(status, message, data) {
   const error = new Error(message);
@@ -39,7 +40,7 @@ async function defaultWarehouse(conn) {
 }
 
 async function releaseProductionOrder({
-  product, quantity, originType, customerReference, finalCustomer, notes, userId, confirmNew = false,
+  product, quantity, originType, customerReference, finalCustomer, notes, userId, confirmNew = false, existingOrderId,
 }) {
   const qty = Number(quantity);
   const origin = String(originType || '').trim().toUpperCase();
@@ -58,6 +59,15 @@ async function releaseProductionOrder({
   let dedupeLock = null;
   try {
     await conn.beginTransaction();
+    const confirmation = confirmNew ? await beginAdditionalConfirmation(conn, {
+      kind: 'PRODUCCION', userId, base: existingOrderId,
+      payload: { product: String(product), quantity: qty, originType: origin,
+        customerReference: customerReference || null, finalCustomer: finalCustomer || null },
+    }) : null;
+    if (confirmation?.result) {
+      await conn.commit();
+      return { ...confirmation.result, already_released: true, requires_confirmation: false };
+    }
     const finalProduct = await resolveProductReference(conn, product, { modes: ['PR'] });
     assertInternalProductionProduct(finalProduct);
     dedupeLock = productionReleaseLockName({
@@ -201,7 +211,6 @@ async function releaseProductionOrder({
         });
       }
     }
-    await conn.commit();
     const result = {
       order_id: created.insertId,
       order_code: code,
@@ -214,6 +223,8 @@ async function releaseProductionOrder({
       picking,
       already_released: false,
     };
+    await completeAdditionalConfirmation(conn, confirmation, result);
+    await conn.commit();
     result.notification = await notifyRoles({
       event: `production_released:${created.insertId}`,
       roles: ['alistador'],

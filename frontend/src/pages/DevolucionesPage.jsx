@@ -69,16 +69,19 @@ export default function DevolucionesPage() {
         lote_origen: form.lote_origen.trim(),
         ubicacion: form.ubicacion.trim() || undefined,
         observaciones: form.observaciones.trim() || undefined,
-        confirmar_nueva_devolucion: confirmDuplicate,
+        confirmar_nueva_devolucion: Boolean(confirmDuplicate),
+        id_devolucion_existente: confirmDuplicate || undefined,
       }
       const res = await createReturn(payload)
       const data = res?.data || res
       if (data.requires_confirmation) {
-        setConfirmDuplicate(true)
+        setConfirmDuplicate(data.id || data.numero)
         showToast('Ya existe una devolucion igual reciente. Revisa los datos y vuelve a enviar solo si es un retorno nuevo.', false)
         return
       }
-      showToast(`Devolucion ${data.numero || ''} registrada. ${data.destino || ''}`, true)
+      showToast(data.already_completed
+        ? `La devolucion ${data.numero || ''} ya estaba registrada. No se modifico inventario.`
+        : `Devolucion ${data.numero || ''} registrada. ${data.destino || ''}`, true)
       setForm(EMPTY)
       setConfirmDuplicate(false)
       await fetchRows()

@@ -17,6 +17,7 @@ module.exports = async (req, res) => {
       finalCustomer: body.cliente_final || body.final_customer,
       notes: body.notas || body.notes,
       confirmNew: body.confirmar_nueva_orden === true || body.confirm_new_order === true,
+      existingOrderId: body.id_orden_existente,
       userId: user.id,
     });
     return res.status(data.already_released ? 200 : 201).json({ ok: true, data });

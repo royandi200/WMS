@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { resolveProductReference } = require('./product-references');
+const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -143,6 +144,14 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
   let dedupeLock = null;
   try {
     await conn.beginTransaction();
+    const confirmation = data.confirmNew ? await beginAdditionalConfirmation(conn, {
+      kind: 'MERMA', userId, base: input.id_merma_existente,
+      payload: data,
+    }) : null;
+    if (confirmation?.result) {
+      await conn.commit();
+      return { ...confirmation.result, already_completed: true, requires_confirmation: false };
+    }
     let order = null;
     let lotRow = null;
     let stockRow = null;
@@ -189,8 +198,10 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
       if (!samePayload) {
         throw httpError(409, 'La referencia de merma ya fue utilizada con datos diferentes');
       }
+      const result = { ...existing, already_completed: true };
+      await completeAdditionalConfirmation(conn, confirmation, result);
       await conn.commit();
-      return { ...existing, already_completed: true };
+      return result;
     }
 
     if (data.order) {
@@ -333,8 +344,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
        userId]
     );
 
-    await conn.commit();
-    return {
+    const result = {
       id: inserted.insertId,
       numero: number,
       referencia_externa: data.externalReference,
@@ -354,6 +364,9 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
           ?? input.reference ?? input.referencia ?? ''
       ).trim(),
     };
+    await completeAdditionalConfirmation(conn, confirmation, result);
+    await conn.commit();
+    return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
     if (error.code === 'ER_DUP_ENTRY') {

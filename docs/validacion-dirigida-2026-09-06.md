@@ -1,7 +1,7 @@
 # Validacion dirigida posterior a arreglos
 
 Fecha: 2026-09-06. Horas en America/Bogota.
-Aplicacion: main, implementacion 9bbd5ac, documentacion b511e43.
+Linea base al iniciar: main, implementacion 9bbd5ac, documentacion b511e43. Los despliegues y resultados posteriores se detallan cronologicamente; la consolidacion vigente esta al final.
 Objetivo: comprobar los arreglos recientes antes del ensayo integral con cliente.
 
 ## Configuracion comprobada
@@ -73,7 +73,7 @@ Objetivo: comprobar los arreglos recientes antes del ensayo integral con cliente
 - SQL: 12 recepciones completadas distintas y 26 filas de items. APROBADO el conteo unico.
 - Pendientes de presentacion/escala: tarjeta suma gramos y unidades bajo etiqueta unica de unidades recibidas; Entradas muestra 0 mientras recepciones muestra 6181. El dashboard consulta un limite de filas y agrega en frontend, por lo que validar volumen >100 antes de afirmar KPI completo.
 
-## Pendientes de esta corrida
+## Pendientes de esta corrida al primer corte (historico)
 
 - D02: falta caso que realmente exceda una pagina conversacional. Los tres lotes consultados se leyeron completos con Read more, pero no excedieron el umbral.
 - D05: corregir confirmacion adicional reutilizable; OP 75/76 quedan reservadas como evidencia QA, no iniciarlas.
@@ -192,3 +192,111 @@ Objetivo: comprobar los arreglos recientes antes del ensayo integral con cliente
 - El enriquecimiento no vuelve a rellenar valores opcionales cuando las filas ya proceden del lector nativo, evitando que una ausencia de lote/vencimiento sea sustituida por un encabezado.
 - Regresion local: 247 pruebas aprobadas, build frontend aprobado. Casos nuevos cubren ambos PDF almacenados, recuperacion de ultima fila omitida por la IA, integridad, permisos y rechazo antes de escrituras si falla el lector. Registro 3Q conserva nueve filas/221 und y reintento idempotente.
 - Comando reproducible de lectura remota: con E2E_DASHBOARD_EMAIL y E2E_DASHBOARD_PASSWORD en entorno, node --use-system-ca scripts/qa/inspect-stored-pdf.js 17 18. Contrasta los archivos realmente almacenados contra hashes y campos de los PDF R09 locales. No se declara verificacion remota hasta ejecutarlo despues del despliegue.
+
+### D09 - Resultado desplegado y saneamiento del borrador R09
+
+- Fecha: 2026-09-06, horas Bogota. Commit 64934aee07d0c3cecce57aab5bc649467600d3f7 enviado a main; GitHub confirma despliegue Vercel success. No se accedio directamente a Vercel.
+- 13:58:48: ejecutado inspect-stored-pdf.js contra el servidor con los originales almacenados, no sustitutos locales. OC ID 17: dos paginas, 11/11 referencias; salida 3Q ID 18: dos paginas, 9/9 referencias. Ambos devuelven NATIVE_APPLIED. El script comprueba hashes y campos exactos SKU/cantidad/unidad/lote/vencimiento contra el manifiesto de las pruebas. Ninguna escritura de borrador ni inventario durante esta inspeccion.
+- El resultado demuestra lectura nativa correcta en el runtime desplegado para ambos PDF. No permite atribuir a un modulo concreto la excepcion anterior, cuyo stack no se recupero; tampoco equivale a un nuevo recorrido completo BBC/WhatsApp.
+- 14:02:49 y 14:04:08: correccion deliberada del borrador 3Q ID 18 mediante el formulario existente del dashboard, usuario Admin WMS (ID 1), auditada en system_logs 73 y 74. Se recupero 00026-ETRES120, 29 und, y se retiraron lote/vencimiento indebidamente tomados del encabezado de 00003-TPGG. Es saneamiento del borrador fallido, no una nueva extraccion automatica de WhatsApp.
+- Novedad UI/automatizacion: vaciar el control de fecha parecio efectivo en snapshot, pero la primera escritura conservo el vencimiento. Se detecto por SQL antes de cerrar la prueba; se reconstruyo esa fila en el mismo formulario, preservando SKU y cantidad, y la segunda escritura lo elimino. Registrar para reproduccion posterior manual: distinguir comportamiento del control de fecha y eventos de automatizacion; causa no establecida.
+- Resultado SQL final: 9 filas, 221 und, cero lotes y cero vencimientos declarados, coherente con el PDF de salida. El documento original permanece en 4026 bytes y SHA256 017c709ee74c8b58a502a528e62e19640622827bc0ad26689ca71d4ff565729f, coincidente con SHA2(contenido,256).
+- Integridad final: kardex 298, movimientos 307, checksum stock 21446.4850 y checksum reservas 1440.8000, identicos al control previo. Estos sumatorios mixtos son controles de integridad, no indicadores operativos. No se creo/vinculo/confirmo remision, OC ni movimiento.
+- Estado: lector desplegado APROBADO para los originales OC y 3Q; saneamiento auditado APROBADO. Pendiente repetir una vez el mismo PDF 3Q desde Juan/admin para verificar relectura por webhook con NATIVE_APPLIED y respuesta idempotente de documento ya registrado, sin duplicar ni modificar inventario. No se necesita un nuevo PDF. Los pendientes D02/D05/D06/D07/D08 siguen abiertos.
+
+### D09-B - Reenvio real R09 aprobado tras correccion
+
+- Fecha/hora Bogota: 2026-09-06, PDF enviado 14:06 desde Juan/admin sin texto adjunto; webhook 1470 RECEIVED 14:07:04 y 1471 PROCESSED 14:07:06. Respuesta WhatsApp completa y legible, sin JSON ni truncamiento: documento ya registrado, no duplicado, 9 items, 221 unidades, PENDIENTE_REVISION, sin modificacion de inventario.
+- Diagnostico real del webhook: NATIVE_APPLIED, model_rows 8, compact_rows 8, native_rows 9. El modelo sigue omitiendo una fila, pero el lector nativo desplegado recupera las nueve desde el original antes de validar el reintento. No atribuir la recuperacion al prompt ni a la correccion manual del borrador previo.
+- Cotejo SQL: existe un solo borrador para la referencia, ID 18, nueve filas/221 und, cero lotes y cero vencimientos, sin OC ni remision vinculadas. Kardex 298, movimientos 307, checksum stock 21446.4850 y reservas 1440.8000: sin cambios respecto al control anterior.
+- Resultado: APROBADA lectura nativa por el recorrido real WhatsApp/BBC/webhook y APROBADA idempotencia del mismo PDF. Esta prueba utiliza un borrador previamente saneado; no constituye prueba de alta nueva en servidor tras este despliegue. El alta nueva completa cuenta con regresion local, y debe distinguirse de esta evidencia de reintento. No se probo un PDF escaneado ni se cierran los otros pendientes funcionales.
+
+## Consolidacion vigente y siguiente prueba - 2026-09-06, 14:13 Bogota
+
+Esta seccion actualiza los cortes historicos anteriores. Un resultado local o de un caso concreto no cierra automaticamente todo su paquete funcional.
+
+### D10 - Alta nueva documental R10 (preparada, pendiente de envio)
+
+- Archivo: `output/pdf/regresion-documental/20260906-r10/QA-DOC-20260906-R10-SALIDA-3Q-001.pdf`. Referencia nueva, dos paginas, nueve SKU activos y cantidades distintas de R09. No imprime conteo ni total; el esperado queda solamente en `expected.json`, que NO se envia a BBC.
+- Perfil comprobado en SQL: Juan/admin, 573174442659. Datana sigue recepcion_cierre y Jobana alistador. Enviar a la linea del agente como documento PDF, sin texto adjunto, una sola vez; no borrar el envio mientras se observa la respuesta.
+- Esperado: un NUEVO borrador de salida 3Q, nueve filas, 239 und; destinatario 3Q - MAQUILA EXTERNA QA, fecha 2026-09-06. Cantidades: TPBI 25, TRP 25, ETBOS60 19, LNTP60 19, ETRESI60 21, TPGG 33, TRG 33, LNTG120 33, ETRES120 31. Ningun lote/vencimiento aparece en este PDF: deben permanecer null, sin inventar datos del encabezado. Los lotes operativos se validan separadamente al preparar/confirmar la remision.
+- Verificacion interna: ambas paginas renderizadas y revisadas; extractor nativo recupera nueve filas y todos los campos exactos. Caso nuevo prueba recuperacion cuando el modelo omite la ultima fila. Seis pruebas dirigidas aprobadas; suite completa 248/248, cero fallos. No se modifico la logica de aplicacion ni se necesita desplegar para este fixture.
+- Base previa: referencia R10 inexistente; kardex 298, movimientos 307, checksum stock 21446.4850 y reservas 1440.8000. Los nueve SKU existen activos. No se requiere aumentar stock porque el documento solo crea borrador.
+- Al recibir: registrar hora de envio/respuesta y webhook; exigir NATIVE_APPLIED; comparar cada SKU/cantidad/unidad y ausencias de lote/vencimiento en SQL y dashboard; comprobar PDF/hash original, un solo borrador, sin remision vinculada ni variacion de inventario. Si pasa, repetir el archivo para comprobar idempotencia de un alta creada enteramente con esta version. No corregir manualmente el borrador para dar por aprobada la extraccion.
+
+### Pendientes reales por prioridad
+
+| Prioridad | Paquete | Que falta comprobar o corregir |
+|---|---|---|
+| Alta | Documentos | D10: alta nueva 3Q y su reintento; OC nueva con todos sus lotes/vencimientos tras despliegue del lector compartido. R09 ya acredita lector en servidor y reintento 3Q, no alta nueva con esta version. |
+| Alta | Produccion adicional | D05: consumir una sola vez la confirmacion de operacion adicional; repetirla no debe crear otra OP/reserva. OP 75/76 se conservan como evidencia, no iniciarlas. |
+| Alta | Merma adicional | D06: recuperar el registro base en conversacion, pedir solo lo necesario y validar un unico movimiento ante reintentos. No llego a ejecutar la accion en la prueba. |
+| Alta | Devolucion adicional | D07: recuperar contexto sin pedir id_item tecnico, respetar maximo retornable y comprobar idempotencia. No llego a ejecutar la accion en la prueba. |
+| Media | Trazabilidad | D02: provocar paginacion real, separar reservas sin consumo de consumo real y unificar hora Bogota entre Kardex/dashboard/WhatsApp. UUID y trazabilidad inversa 3Q ya tienen repeticion aprobada. |
+| Media | Totales y escala | D08 y resumen OC: separar gramos/unidades; resolver Entradas 0 frente a recepciones; validar mas de 100 filas para que el limite de consulta no trunque indicadores. Conteo de recepciones unicas ya aprobado. |
+| Menor / reproduccion | Interfaz | Alias ambiguos en lista legible; reproducir manualmente el vaciado de vencimiento en correccion 3Q para distinguir fallo UI de automatizacion. Correccion/descarte auditados ya probados. |
+
+### Cuando repetir la bateria completa
+
+1. Ahora: cerrar alta documental nueva y reintento, luego corregir y repetir los casos dirigidos bloqueantes. No reiniciar todas las pruebas manuales mientras esos fallos conocidos sigan abiertos.
+2. Despues: ejecutar una bateria integral final sobre una version fija, con dataset nuevo e identificable y tres perfiles configurados por bloques. Cubrir recepcion segura, produccion propia/reposicion/merma/cierre, IO, envio/recepcion parcial 3Q, despacho, devoluciones/cuarentena, trazabilidad, roles, notificaciones y dashboard. Incluir ausencias de datos, reintentos, concurrencia donde aplique y cotejo SQL antes/despues. Mantener desactivadas las decisiones de negocio no aprobadas.
+3. Durante ajustes: suite automatizada segura completa en cada cambio de logica; repetir manualmente lo afectado. Ampliar la regresion si cambian servicios compartidos, permisos, reservas o transacciones. Las 248 pruebas locales no sustituyen WhatsApp/BBC ni aceptacion del cliente.
+4. La bateria del cliente sin SIIGO real certifica el flujo WMS con datos de prueba, no la integracion contable productiva. Mantener esa validacion separada y coordinada con el responsable de SIIGO. No reabrir funciones fuera de alcance, como disposicion final oculta, para cerrar esta corrida.
+
+No se declara sistema completo aprobado, ni se da un numero de pruebas restantes definitivo antes de resolver estos paquetes y desglosar su regresion. Las afirmaciones historicas de implementado en otros planes deben leerse junto con los resultados reales mas recientes de esta bitacora.
+
+### D10 - Alta nueva R10 aprobada en los tres canales
+
+- 2026-09-06, envio WhatsApp 14:15; RECEIVED 1472 a las 14:16:00 y PROCESSED 1473 a las 14:16:02 Bogota. Juan/admin envia PDF sin caption. Respuesta completa, sin JSON: nuevo borrador, nueve items, 239 unidades, PENDIENTE_REVISION.
+- SQL: un unico borrador ID 19. Los nueve SKU y cantidades coinciden exactamente con expected.json, todos en und; lote y vencimiento null en todas las filas. Destinatario 3Q - MAQUILA EXTERNA QA y fecha 2026-09-06 correctos; sin OC ni remision vinculadas. No hubo correccion manual.
+- Diagnostico real: NATIVE_APPLIED, model_rows 9, compact_rows 9, native_rows 9. Esta vez tanto modelo como lector devolvieron todas las filas.
+- PDF original: 4026 bytes; SHA256 ee15f36050745b4c74632b785beece57b25cd27a3b16880eaecc8ebdbcba3d51 igual en archivo local, hash almacenado y contenido SQL.
+- Dashboard Maquila 3Q > Documentos leidos: nueve filas/239 und y PDF descargable. Se requirio salir/volver a la pagina para refrescar el alta de WhatsApp; alternar pestanas internas no actualizo la lista. Observacion UX de refresco, no perdida de datos.
+- Observacion no bloqueante para inventario: ciudad, entrega y recibe presentes en el encabezado no se trasladaron al borrador; NIT tambien ausente, aunque el usuario ya lo considera secundario. No declarar fidelidad de todos los metadatos por haber validado los items. Mantener en pendientes de lectura de cabecera/presentacion.
+- Integridad: kardex 298, movimientos 307, checksum stock 21446.4850, reservas 1440.8000, sin cambios. APROBADA alta nueva para campos operativos definidos. Sigue pendiente reintento del mismo R10 y nueva OC con esta version; el reintento R09 ya esta aprobado.
+
+### D02 - Limite de pagina y nuevo cotejo horario
+
+- 2026-09-06, 14:19 Bogota. Juan/admin pide pagina 2 de TEST_AGENT-MPASH-FIFO-NEW. Respuesta controlada: pagina invalida, rango 1 a 1. Webhook 1474/1475, consulta rechazada sin escrituras operativas. APROBADO limite de pagina; NO acredita navegacion de un historial realmente multipagina.
+- Lectura SQL para seleccionar caso: el lote con mas movimientos existentes tiene 18; no se insertaron historiales artificiales ni se redujo el umbral de 3400 caracteres para simular una aprobacion. Sigue pendiente un fixture suficientemente extenso para pagina 1/2/ultima y reconstruccion integra.
+- 14:20-14:21, consulta DEMO-GOMAS-001. Se expandio Read more y se leyo hasta la ultima OP. Se confirmaron saldo 319.25 g y los ocho movimientos fisicos.
+- FALLO de consistencia horaria persistente: consumo adicional OP 74, SQL texto 2026-09-05 14:45:34; Kardex muestra 14:45 y WhatsApp 09:45. Devolucion 5 g: Kardex 14:46 y WhatsApp 09:46. No elegir hora correcta sin revisar serializacion/zonas, aunque las operaciones son las mismas.
+- FALLO de rotulado persistente: OP 63/64/65/66/71/75/76 figuran como ordenes que consumieron con neto 0. Separar asignacion/reserva de consumo efectivo. No se modifico inventario en estas consultas.
+
+### D06 - Variante conversacional resuelve contexto, reintento duplica merma
+
+- 2026-09-06, 14:21:49 Bogota. Juan/admin: `Registra una nueva merma adicional igual a MER-4ABBD46A. Es otro derrame de 5 gramos del mismo producto y lote, en la misma ubicacion.` (mensaje real con tildes).
+- SQL previo: registro base de 5 g, SKU 00051-MPASH, lote QA-RX-0905-MPASH, ubicacion B16; saldo lote 1995 g. La variante explicita recupera producto/lote/ubicacion y crea MER-84D14B9F con un movimiento de -5, saldo 1990 g. No hubo que dictar SKU ni lote. APROBADA recuperacion en esta frase; la frase corta de las 12:42 sigue sin validacion positiva.
+- Reenvio literal 14:22, procesado 14:23:03: crea MER-A6C5FC05, otros -5 g, saldo 1985 g. FALLO de idempotencia de la confirmacion adicional. Dos mensajes de prueba generaron dos mermas/10 g cuando el segundo era reintento del primero. Se detuvieron las repeticiones.
+- Evidencia preservada, sin borrar ni compensar historicos. Corregir confirmacion adicional persistente/consumible antes de repetir un escenario nuevo. El riesgo es equivalente al ya comprobado en OP 75/76; resolver la causa comun, no solo la frase del prompt.
+- Dashboard 14:22, actividad reciente muestra MER-84D14B9F como -5 u pese a ser gramos; continua D08 de unidades. No confundir disponibilidad agregada del producto en la respuesta con saldo de lote.
+
+### D08 - Repeticion visual de indicadores
+
+- 2026-09-06, 14:22 Bogota. Periodo 7 dias muestra 12 recepciones/6181 unidades recibidas y Entradas 0 u. La merma de 5 g se presenta como -5 u en actividad reciente; sumatorio de mermas tambien rotulado u.
+- Resultado: FALLOS de presentacion/consistencia persistentes; no se certifica escala mayor de 100 filas ni se crean recepciones ficticias solo para inflar el conteo. Priorizar agregacion por unidad y consulta de totales sin truncamiento, luego validar carga con fixtures aislados.
+
+### D07 - Variante conversacional y limite retornable
+
+- 2026-09-06, 14:23:53 Bogota. Juan/admin: `Registra una devolucion adicional igual a DEV-D42BAF7B. Es otra unidad del mismo despacho y lote, con el mismo motivo, ubicacion y condicion.` (mensaje real con tildes).
+- Base: despacho ID 49, item 41, SKU 00276-PTZNASHWA, lote DEMO-ENSAYO-FINAL-IO-ZENOVA-001; dos unidades despachadas y una devuelta. La segunda unidad era retornable.
+- Resultado: DEV-B9C596FD, un nuevo lote L-DEV-00276-PTZNASHWA-B9C596FD, 1 und DISPONIBLE en B13, estado RECUPERABLE heredado de la solicitud. Un movimiento Kardex +1 y saldo 1. Historial dashboard confirma factura, cliente, lote origen/nuevo, ubicacion, cantidad, estado y actor Juan. APROBADA recuperacion del contexto para esta frase.
+- Reenvio literal 14:25, webhook 1484/1485: REJECTED, despachadas 2/devueltas 2/maximo 0. SQL mantiene dos devoluciones del despacho con suma 2. APROBADO limite retornable y rechazo sin movimiento.
+- Idempotencia NO aprobada: el reintento no devuelve la devolucion previamente creada, sino un error de exceso. El limite fisico evita una tercera unidad en este caso, pero no demuestra proteccion contra duplicado cuando quede mas saldo retornable. No repetir con mas stock hasta corregir la confirmacion consumible comun a OP, merma y devolucion.
+
+### Cierre del bloque de pruebas 14:16-14:27
+
+- Documentos: alta nueva R10 aprobada en WhatsApp/dashboard/SQL, sin correccion manual. Intento de reenvio desde Forward media en WhatsApp no abrio selector ni produjo mensaje; no se cuenta como prueba enviada. Sigue pendiente reenvio manual R10 (sin caption) y alta nueva OC. No hay otro webhook documental posterior al 1473.
+- Integridad global final: mermas 27 (+2), devoluciones 26 (+1), kardex 301 (+3), movimientos 310 (+3), checksum stock 21437.4850 (delta numerico -9 por -10 g y +1 und; no mezclarlo como magnitud operativa), reserva 1440.8000 sin cambio. Los tres movimientos corresponden a las operaciones identificadas; la segunda merma es el duplicado detectado y preservado como evidencia.
+- No se modificaron roles, prompts, codigo de aplicacion, Siigo ni configuracion; no se hizo push en este bloque. Anotaciones guardadas localmente. OP 75/76 no se ejecutaron ni se recreo un nuevo duplicado de produccion, porque el fallo ya estaba reproducido y no ha cambiado el codigo.
+- Orden recomendado siguiente: corregir confirmacion adicional de un solo uso (D05/D06/D07), cubrirla automaticamente y repetir con fixtures nuevos; resolver horarios/rotulado/totales, validar paginacion con caso suficientemente extenso; cerrar PDFs pendientes; luego una bateria integral final sobre version fija. No acreditar los casos bloqueados con nuevos reintentos sobre la misma logica defectuosa.
+
+### Correccion D05/D06/D07 y ajustes de materiales - 2026-09-06, 14:49-14:56 Bogota
+
+- Confirmado en codigo: referencias de merma y devolucion ya son opcionales en dashboard y WhatsApp; las rutas generan AUTO-MER/AUTO-DEV. No confundir codigo nuevo con el lote/orden/despacho fisico obligatorio.
+- Causa del duplicado: los booleanos confirmar_nueva_* omitian el detector semantico sin guardar que la confirmacion habia sido consumida. El ajuste de materiales de OP tenia el mismo patron y se incluyo en el arreglo.
+- Implementada confirmacion durable por tipo/actor/base existente, hash de payload y resultado guardados en la misma transaccion de inventario. Reintento devuelve el resultado antes de consultar saldos o estados mutables; cambios de payload fallan cerrados. Dashboard conserva la base sin digitacion manual. Prompt aclara que el reintento conserva la base original, no el registro nuevo.
+- 14:49 aprox.: comprobacion real MySQL con tablas temporales: commit, rollback, reintento por ID o numero, conflicto por payload; cero escrituras en tablas operativas. No se acredita concurrencia real entre conexiones con esa prueba.
+- Migracion 30 aplicada a QA y verificada: tabla InnoDB, clave primaria tipo/usuario/base, sin modificar historicos ni inventario. Detalle en confirmaciones-adicionales.md.
+- 14:56 aprox.: 266/266 pruebas locales, 18 nuevas de workflows completos con doble transaccional (replay, concurrencia simulada, rollback y conflicto); build frontend aprobado. Incluye prueba sin referencia de merma/devolucion y evita repetir notificacion de liberacion en replay.
+- Pendiente de este bloque: publicacion/readback BBC y validacion real de nuevas confirmaciones en WhatsApp/dashboard/SQL. No se marcan aprobados los escenarios manuales solo por las pruebas automaticas. No se borraron OP 75/76 ni las mermas duplicadas historicas.

@@ -19,6 +19,7 @@ module.exports = async (req, res) => {
       quantity: body.cantidad ?? body.quantity,
       reason: body.motivo || body.reason,
       confirmNew: body.confirmar_nuevo_ajuste === true || body.confirm_new_adjustment === true,
+      existingAdjustmentId: body.id_ajuste_existente,
       userId: user.id,
     });
     return res.status(200).json({ ok: true, data });

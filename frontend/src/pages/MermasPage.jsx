@@ -44,13 +44,14 @@ export default function MermasPage() {
       location: form.type === 'BODEGA' ? form.location.trim() : undefined,
       production_order_id: form.type === 'PROCESO' ? form.production_order_id.trim() : undefined,
       reason: form.reason.trim(),
-      confirmar_nueva_merma: confirmDuplicate,
+      confirmar_nueva_merma: Boolean(confirmDuplicate),
+      id_merma_existente: confirmDuplicate || undefined,
     }
     const response = await submit(body)
     if (response.ok) {
       const result = response.data?.data || response.data
       if (result?.requires_confirmation) {
-        setConfirmDuplicate(true)
+        setConfirmDuplicate(result.id || result.numero)
         showToast('Ya existe una merma igual reciente. Revisa los datos y vuelve a enviar solo si es una perdida nueva.', false)
         return
       }

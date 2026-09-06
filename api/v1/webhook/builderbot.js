@@ -1855,6 +1855,7 @@ module.exports = async (req, res) => {
               ? { id_orden: existing.codigo_orden }
               : { id_lote: existing.lote, ubicacion: existing.ubicacion }),
             confirmar_nueva_merma: true,
+            id_merma_existente: existing.id,
           };
         }
         const result = await reportWaste(
@@ -2100,6 +2101,7 @@ module.exports = async (req, res) => {
             ubicacion: existing.estado === 'RECUPERABLE' ? existing.ubicacion : undefined,
             observaciones: existing.observaciones,
             confirmar_nueva_devolucion: true,
+            id_devolucion_existente: existing.id,
           };
         }
         const returned = await createCustomerReturn({
@@ -2487,6 +2489,7 @@ module.exports = async (req, res) => {
           finalCustomer: customerOrder.finalCustomer,
           notes: params.notas || params.observaciones,
           confirmNew: params.confirmar_nueva_orden === true,
+          existingOrderId: params.id_orden_existente,
           userId: user.id,
         });
         if (productionResult.requires_confirmation) {
@@ -2494,6 +2497,11 @@ module.exports = async (req, res) => {
             `Ya existe la orden ${productionResult.order_code} con el mismo producto, cantidad y destino. No se modifico inventario.`,
             `Si necesitas una orden adicional identica, responde: confirma una nueva produccion adicional para la orden ID ${productionResult.order_id}.`,
           ].join('\n');
+          responseContext.production = productionResult;
+          break;
+        }
+        if (productionResult.already_released) {
+          mensaje = `La orden adicional ${productionResult.order_code} ya habia sido liberada. No se modifico inventario.`;
           responseContext.production = productionResult;
           break;
         }
@@ -2580,12 +2588,13 @@ module.exports = async (req, res) => {
           quantity: params.cantidad,
           reason: params.motivo,
           confirmNew: params.confirmar_nuevo_ajuste === true,
+          existingAdjustmentId: params.id_ajuste_existente,
           userId: user.id,
         });
         if (adjustment.requires_confirmation) {
           mensaje = [
             `Ese movimiento ya fue registrado para ${adjustment.order_code}. No se modifico inventario.`,
-            'Si se trata de otro movimiento identico, confirma que es un ajuste nuevo.',
+            `Si se trata de otro movimiento identico, confirma un ajuste nuevo como el movimiento ID ${adjustment.movement_id}.`,
           ].join('\n');
           responseContext.production_material = adjustment;
           break;
@@ -2593,7 +2602,9 @@ module.exports = async (req, res) => {
         const adjustmentLabel = adjustment.tipo === 'DEVOLUCION'
           ? 'Devolucion de material registrada'
           : 'Entrega adicional registrada';
-        mensaje = [
+        mensaje = adjustment.already_recorded
+          ? `El movimiento adicional ID ${adjustment.movement_id} ya estaba registrado. No se modifico inventario.`
+          : [
           `*${adjustmentLabel}*`,
           '',
           `Orden: ${adjustment.order_code}`,

@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
 const { createConnection } = require('./db');
 const { workflowFlags } = require('./feature-flags');
 const { resolveProductReference } = require('./product-references');
@@ -184,14 +185,24 @@ async function createCustomerReturn(input, userId) {
   let dedupeLock = null;
   try {
     await conn.beginTransaction();
+    const confirmation = data.confirmNew ? await beginAdditionalConfirmation(conn, {
+      kind: 'DEVOLUCION', userId, base: input.id_devolucion_existente,
+      payload: data,
+    }) : null;
+    if (confirmation?.result) {
+      await conn.commit();
+      return { ...confirmation.result, already_completed: true, requires_confirmation: false };
+    }
 
     const existing = await existingReturn(conn, data.externalReference);
     if (existing) {
       if (!returnMatches(existing, data)) {
         throw httpError(409, 'La referencia de devolucion ya fue utilizada con datos diferentes');
       }
+      const result = { ...existing, already_completed: true };
+      await completeAdditionalConfirmation(conn, confirmation, result);
       await conn.commit();
-      return { ...existing, already_completed: true };
+      return result;
     }
 
     const numericDispatchId = /^\d+$/.test(data.dispatchReference)
@@ -358,8 +369,7 @@ async function createCustomerReturn(input, userId) {
        data.quantity, data.quantity, `devolucion:${returnNumber}`, notes, userId]
     );
 
-    await conn.commit();
-    return {
+    const result = {
       id: inserted.insertId,
       numero: returnNumber,
       referencia_externa: data.externalReference,
@@ -382,6 +392,9 @@ async function createCustomerReturn(input, userId) {
       already_completed: false,
       generated_reference: generatedReference,
     };
+    await completeAdditionalConfirmation(conn, confirmation, result);
+    await conn.commit();
+    return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;

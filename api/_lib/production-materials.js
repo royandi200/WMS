@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { resolveProductReference } = require('./product-references');
+const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -22,7 +23,7 @@ function materialAdjustmentLockName({ userId, orderId, productId, lot, locationI
 }
 
 async function adjustProductionMaterials({
-  orderId, productTerm, lot, locationId, locationCode, type, quantity, reason, userId, confirmNew = false,
+  orderId, productTerm, lot, locationId, locationCode, type, quantity, reason, userId, confirmNew = false, existingAdjustmentId,
 }) {
   const adjustmentType = String(type || '').trim().toUpperCase();
   const qty = Number(quantity);
@@ -37,6 +38,15 @@ async function adjustProductionMaterials({
   let dedupeLock = null;
   try {
     await conn.beginTransaction();
+    const confirmation = confirmNew ? await beginAdditionalConfirmation(conn, {
+      kind: 'MATERIAL', userId, base: existingAdjustmentId,
+      payload: { orderId: String(orderId), product: productValue, lot: lpn,
+        location: String(locationReference), type: adjustmentType, quantity: qty, reason: reason || null },
+    }) : null;
+    if (confirmation?.result) {
+      await conn.commit();
+      return { ...confirmation.result, already_recorded: true, requires_confirmation: false };
+    }
     const [orders] = await conn.execute(
       `SELECT * FROM ordenes_produccion WHERE id = ? OR codigo_orden = ? LIMIT 1 FOR UPDATE`,
       [orderId, orderId]
@@ -97,6 +107,7 @@ async function adjustProductionMaterials({
     if (recent.length && !confirmNew) {
       await conn.commit();
       return {
+        movement_id: recent[0].id,
         order_code: order.codigo_orden,
         tipo: adjustmentType,
         sku: product.siigo_code,
@@ -154,7 +165,7 @@ async function adjustProductionMaterials({
       await conn.execute(`UPDATE produccion_materiales SET cantidad_devuelta = cantidad_devuelta + ?, actualizado_en = NOW() WHERE id = ?`, [qty, material.id]);
     }
 
-    await conn.execute(
+    const [movement] = await conn.execute(
       `INSERT INTO movimientos
          (tipo, producto_id, bodega_orig, bodega_dest, ubicacion_orig, ubicacion_dest,
           lote, cantidad, referencia_id, referencia_tipo, usuario_id, siigo_sync)
@@ -178,8 +189,8 @@ async function adjustProductionMaterials({
        Number(lots[0]?.qty_current || 0), `produccion:${order.codigo_orden}`,
        reason || adjustmentType, userId]
     );
-    await conn.commit();
-    return {
+    const result = {
+      movement_id: movement.insertId,
       order_code: order.codigo_orden,
       tipo: adjustmentType,
       sku: product.siigo_code,
@@ -191,6 +202,9 @@ async function adjustProductionMaterials({
       cantidad: qty,
       already_recorded: false,
     };
+    await completeAdditionalConfirmation(conn, confirmation, result);
+    await conn.commit();
+    return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;
