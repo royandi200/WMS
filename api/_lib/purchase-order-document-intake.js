@@ -3,16 +3,12 @@ const { MAX_PDF_BYTES } = require('./purchase-order-documents');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
 const { enrichItemsFromLineEvidence } = require('./document-evidence-items');
 const { documentDraftStatus } = require('./document-draft-status');
-const {
-  deriveCatalogItemsFromPdfTokens,
-  extractPdfTextLayer,
-  preferNativeItems,
-} = require('./pdf-text-layer');
+const { nativePdfEvidence, pdfReviewWarning } = require('./document-pdf-evidence');
 
 const MAX_DOCUMENT_ITEMS = 100;
 const DOCUMENT_TYPE = 'ORDEN_COMPRA';
 
-function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = {}) {
+function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '', recoverFields = true } = {}) {
   const source = body.params && typeof body.params === 'object' ? body.params : body;
   const documentType = cleanText(source.tipo_documento || source.document_type, 50).toUpperCase();
   const reference = cleanText(source.referencia_documento || source.numero || source.order_number, 80);
@@ -41,7 +37,7 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '' } = 
   const warnings = sourceWarnings
     .filter((warning) => !isModelDerivedValidationWarning(warning));
   const normalizedItems = rawItems.map((item, index) => normalizeItem(item, index));
-  const items = enrichItemsFromLineEvidence(normalizedItems, evidenceText).map((normalized) => {
+  const items = (recoverFields ? enrichItemsFromLineEvidence(normalizedItems, evidenceText) : normalizedItems).map((normalized) => {
     if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
       throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
     }
@@ -175,8 +171,11 @@ async function registerPurchaseOrderDocumentDraft({
   const nativeEvidence = await nativePdfEvidence(db, document, body);
   const input = normalizePurchaseOrderDocumentInput(nativeEvidence.body, {
     evidenceText: nativeEvidence.text || evidenceText,
+    recoverFields: !nativeEvidence.used,
   });
   if (!document) input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
+  const verificationWarning = pdfReviewWarning(nativeEvidence);
+  if (verificationWarning) input.warnings.push(verificationWarning);
 
   await db.beginTransaction();
   try {
@@ -283,6 +282,7 @@ async function registerPurchaseOrderDocumentDraft({
       supplierId: supplier?.id || null,
       pdfStored: Boolean(document),
       extractionSource: nativeEvidence.used ? 'PDF_TEXT_LAYER' : 'BUILDERBOT',
+      extractionDiagnostics: nativeEvidence.diagnostics,
     };
   } catch (error) {
     await db.rollback().catch(() => {});
@@ -359,27 +359,6 @@ function normalizeItem(item = {}, index) {
     expiryDate: normalizeDate(source.fecha_vencimiento || source.expiry_date),
     lot: optionalText(source.lote || source.lot, 100),
   };
-}
-
-async function nativePdfEvidence(db, document, body) {
-  if (!document) return { body, text: '', used: false };
-  try {
-    const extracted = await extractPdfTextLayer(document.content);
-    if (!extracted.text.trim()) return { body, text: '', used: false };
-    const [products] = await db.execute(
-      `SELECT siigo_code, nombre FROM productos
-        WHERE activo = 1 AND siigo_code IS NOT NULL AND siigo_code <> ''`,
-      []
-    );
-    const nativeItems = deriveCatalogItemsFromPdfTokens(extracted.tokens, products);
-    return {
-      body: preferNativeItems(body, nativeItems),
-      text: extracted.text,
-      used: nativeItems.length > 0,
-    };
-  } catch {
-    return { body, text: '', used: false };
-  }
 }
 
 function operationalIdentity(input) {

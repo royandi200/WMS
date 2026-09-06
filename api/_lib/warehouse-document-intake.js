@@ -3,15 +3,11 @@ const { downloadBuilderBotPdf } = require('./purchase-order-document-intake');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
 const { enrichItemsFromLineEvidence, normalizedUnit } = require('./document-evidence-items');
 const { documentDraftStatus } = require('./document-draft-status');
-const {
-  deriveCatalogItemsFromPdfTokens,
-  extractPdfTextLayer,
-  preferNativeItems,
-} = require('./pdf-text-layer');
+const { nativePdfEvidence, pdfReviewWarning } = require('./document-pdf-evidence');
 
 const MAX_DOCUMENT_ITEMS = 100;
 
-function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) {
+function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '', recoverFields = true } = {}) {
   const source = body.params && typeof body.params === 'object' ? body.params : body;
   const documentType = cleanText(source.tipo_documento || source.document_type, 50).toUpperCase();
   const reference = cleanText(source.referencia_documento || source.document_reference, 80);
@@ -36,7 +32,7 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '' } = {}) 
     throw inputError('La referencia_documento no aparece literalmente en el documento');
   }
   const parsedItems = items.map((item, index) => normalizeItem(item, index));
-  const normalizedItems = enrichItemsFromLineEvidence(parsedItems, evidenceText).map((normalized) => {
+  const normalizedItems = (recoverFields ? enrichItemsFromLineEvidence(parsedItems, evidenceText) : parsedItems).map((normalized) => {
     if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
       throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
     }
@@ -100,6 +96,7 @@ async function registerWarehouseDocumentDraft({
   try {
     input = normalizeWarehouseDocumentInput(nativeEvidence.body, {
       evidenceText: nativeEvidence.text || evidenceText,
+      recoverFields: !nativeEvidence.used,
     });
   } catch (error) {
     error.documentDiagnostics = nativeEvidence.diagnostics;
@@ -108,6 +105,8 @@ async function registerWarehouseDocumentDraft({
   if (normalizedOrigin === 'BUILDERBOT' && !document) {
     input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
   }
+  const verificationWarning = pdfReviewWarning(nativeEvidence);
+  if (verificationWarning) input.warnings.push(verificationWarning);
 
   await db.beginTransaction();
   try {
@@ -235,47 +234,6 @@ async function registerWarehouseDocumentDraft({
   } catch (error) {
     await db.rollback().catch(() => {});
     throw error;
-  }
-}
-
-async function nativePdfEvidence(db, document, body) {
-  const source = body?.params && typeof body.params === 'object' ? body.params : body;
-  const modelItems = Array.isArray(source?.items) ? source.items : [];
-  // Fixed status values and counts only; never log document text, URLs or parser errors.
-  const diagnostics = {
-    status: 'NO_PDF', model_rows: Math.min(modelItems.length, MAX_DOCUMENT_ITEMS + 1),
-    compact_rows: Math.min(modelItems.filter(Array.isArray).length, MAX_DOCUMENT_ITEMS + 1),
-    native_rows: 0,
-  };
-  if (!document) return { body, text: '', used: false, diagnostics };
-  let stage = 'PDF_PARSE_FAILED';
-  try {
-    const extracted = await extractPdfTextLayer(document.content);
-    if (!extracted.text.trim()) {
-      diagnostics.status = 'NO_TEXT_LAYER';
-      return { body, text: '', used: false, diagnostics };
-    }
-    stage = 'CATALOG_READ_FAILED';
-    const [products] = await db.execute(
-      `SELECT siigo_code, nombre FROM productos
-        WHERE activo = 1 AND siigo_code IS NOT NULL AND siigo_code <> ''`,
-      []
-    );
-    stage = 'NATIVE_ROWS_FAILED';
-    const nativeItems = deriveCatalogItemsFromPdfTokens(extracted.tokens, products);
-    const recoveredBody = preferNativeItems(body, nativeItems);
-    const used = recoveredBody !== body;
-    diagnostics.native_rows = nativeItems.length;
-    diagnostics.status = used ? 'NATIVE_APPLIED' : 'MODEL_FALLBACK';
-    return {
-      body: recoveredBody,
-      text: extracted.text,
-      used,
-      diagnostics,
-    };
-  } catch {
-    diagnostics.status = stage;
-    return { body, text: '', used: false, diagnostics };
   }
 }
 

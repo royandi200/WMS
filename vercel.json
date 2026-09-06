@@ -3,6 +3,14 @@
   "installCommand": "cd api && npm install && cd ../frontend && npm install",
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/v1/webhook/builderbot.js": {
+      "includeFiles": "api/node_modules/{pdfjs-dist/legacy/build/**,@napi-rs/canvas*/**}"
+    },
+    "api/v1/warehouse-documents.js": {
+      "includeFiles": "api/node_modules/{pdfjs-dist/legacy/build/**,@napi-rs/canvas*/**}"
+    }
+  },
   "crons": [
     {
       "path": "/api/v1/siigo/import-purchases",

@@ -91,14 +91,25 @@ for (const failNativeCatalog of [false, true]) {
       db, userId: 5, origin: 'BUILDERBOT', evidenceText: evidence.text,
       documentUrl: 'https://runtime-sessions.s3.amazonaws.com/qa-r09.pdf', documentName: fixture.archivo,
     };
-    const first = await registerWarehouseDocumentDraft({ ...args, body: { ...header, items: compactItems } });
+    if (failNativeCatalog) {
+      await assert.rejects(registerWarehouseDocumentDraft({ ...args, body: { ...header, items: compactItems } }), error => {
+        assert.equal(error.status, 503);
+        assert.equal(error.documentDiagnostics.status, 'CATALOG_READ_FAILED');
+        return true;
+      });
+      assert.equal(db.state.header, null);
+      assert.equal(db.state.rows.length, 0);
+      assert.equal(db.state.commits, 0);
+      return;
+    }
+    const first = await registerWarehouseDocumentDraft({ ...args, body: { ...header, items: compactItems.slice(0, -1) } });
     assert.equal(first.itemCount, 9);
     assert.equal(first.totalUnits, 221);
     assert.equal(first.estado, 'PENDIENTE_REVISION');
     assert.equal(first.extractionSource, failNativeCatalog ? 'BUILDERBOT' : 'PDF_TEXT_LAYER');
     assert.deepEqual(first.extractionDiagnostics, {
       status: failNativeCatalog ? 'CATALOG_READ_FAILED' : 'NATIVE_APPLIED',
-      model_rows: 9, compact_rows: 9, native_rows: failNativeCatalog ? 0 : 9,
+      model_rows: 8, compact_rows: 8, native_rows: 9,
     });
     assert.deepEqual(db.state.rows, objectItems.map(item => ({
       sku_extraido: item.sku, cantidad: item.cantidad, unidad: item.unidad,

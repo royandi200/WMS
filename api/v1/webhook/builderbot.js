@@ -1570,6 +1570,7 @@ module.exports = async (req, res) => {
         ].filter(Boolean).join('\n');
         responseContext.document_draft_id = draft.id;
         responseContext.purchase_order_id = draft.ordenCompraId || null;
+        responseContext.document_extraction = draft.extractionDiagnostics;
         responseContext.inventory_changed = false;
         break;
       }

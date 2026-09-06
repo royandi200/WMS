@@ -1,4 +1,5 @@
 const { normalizedDate, normalizedUnit } = require('./document-evidence-items');
+const { pathToFileURL } = require('node:url');
 
 const MAX_PDF_PAGES = 50;
 const MAX_TEXT_CHARS = 500_000;
@@ -9,13 +10,29 @@ function cleanToken(value) {
 
 async function extractPdfTextLayer(content) {
   if (!Buffer.isBuffer(content) || !content.length) return { text: '', tokens: [], pages: 0 };
+  // Static dependencies keep Node file tracing from dropping PDF.js runtime assets.
+  if (!globalThis.DOMMatrix) {
+    const { DOMMatrix, ImageData, Path2D } = require('@napi-rs/canvas');
+    globalThis.DOMMatrix = DOMMatrix;
+    globalThis.ImageData ||= ImageData;
+    globalThis.Path2D ||= Path2D;
+  }
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const document = await pdfjs.getDocument({
+  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')).href;
+  const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(content),
     disableFontFace: true,
     isEvalSupported: false,
     useSystemFonts: true,
-  }).promise;
+  });
+  try {
+    return await readPdfPages(await loadingTask.promise);
+  } finally {
+    await loadingTask.destroy();
+  }
+}
+
+async function readPdfPages(document) {
   if (document.numPages > MAX_PDF_PAGES) throw new Error(`El PDF supera ${MAX_PDF_PAGES} paginas`);
 
   const pages = [];

@@ -1,5 +1,6 @@
 const { query, createConnection } = require('../_lib/db');
-const { cors, requireCapability } = require('../_lib/auth');
+const { cors, requireCapability, requireRole } = require('../_lib/auth');
+const { inspectStoredDocumentPdf } = require('../_lib/document-pdf-inspection');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const { registerWarehouseDocumentDraft } = require('../_lib/warehouse-document-intake');
 const { safeDownloadName } = require('../_lib/purchase-order-documents');
@@ -14,6 +15,22 @@ const {
 const { documentDraftStatus } = require('../_lib/document-draft-status');
 
 async function handleGet(req, res) {
+  if (req.query?.inspect_pdf != null) {
+    await requireRole(req, ['admin', 'administrador']);
+    res.setHeader('Cache-Control', 'private, no-store');
+    const conn = await createConnection();
+    try {
+      const data = await inspectStoredDocumentPdf(conn, req.query.inspect_pdf);
+      return res.status(200).json({ ok: true, data });
+    } catch (error) {
+      if (error.documentDiagnostics) return res.status(503).json({
+        ok: false, error: 'No fue posible leer el PDF original', diagnostics: error.documentDiagnostics,
+      });
+      throw error;
+    } finally {
+      await conn.end().catch(() => {});
+    }
+  }
   const fileId = Number(req.query?.file_id || 0);
   if (Number.isInteger(fileId) && fileId > 0) {
     const files = await query(
