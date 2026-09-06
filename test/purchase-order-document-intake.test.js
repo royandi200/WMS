@@ -65,6 +65,21 @@ test('purchase order totals never add incompatible units', () => {
   assert.doesNotMatch(normalized.warnings.join(' | '), /9126|suma de items/u);
 });
 
+test('purchase order derives totals when the PDF declares neither row count nor total', () => {
+  const input = validInput({
+    total_unidades: undefined,
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 37, unidad: 'und' },
+      { sku: '00006-TRP', descripcion: 'Tarros', cantidad: 43, unidad: 'und' },
+    ],
+  });
+  const normalized = normalizePurchaseOrderDocumentInput(input);
+  assert.equal(normalized.items.length, 2);
+  assert.equal(normalized.totalUnits, 80);
+  assert.equal(normalized.calculatedTotal, 80);
+  assert.deepEqual(normalized.warnings, []);
+});
+
 test('purchase order mixed-unit total compares against the units subtotal', () => {
   const input = validInput({
     total_unidades: 79,
@@ -332,8 +347,38 @@ test('purchase order document action is reception-scoped and cannot mutate inven
   assert.match(route, /estado = 'VINCULADO'/u);
   assert.match(prompt, /REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO/u);
   assert.match(prompt, /REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO/u);
+  assert.match(prompt, /Toda respuesta comienza literalmente con `\{"kw":"g0m@s","@ction":`/u);
+  assert.match(prompt, /Las unicas claves permitidas en la raiz son `kw`, `@ction`, `priority` y `params`/u);
+  assert.match(prompt, /`fecha_vencimiento`, no `vencimiento`/u);
+  assert.match(prompt, /La fuente del conteo son las filas reales de la tabla/u);
+  assert.match(prompt, /exactamente un item de salida por cada fila de entrada/u);
+  assert.match(prompt, /representa cada item como un arreglo posicional/u);
   assert.match(warehouseDomain, /WHERE tipo_documento = \? AND origen = \? AND referencia_documento = \?/u);
   assert.match(webhook, /delete sanitized\.document_text/u);
   assert.match(webhook, /delete sanitized\.document_url/u);
   assert.match(webhook, /builderBotDocumentValue\(rawBody\.document_url\)/u);
+});
+
+test('normalizes compact document rows without losing operational fields', () => {
+  const normalized = normalizePurchaseOrderDocumentInput({
+    tipo_documento: 'ORDEN_COMPRA',
+    referencia_documento: 'OC-COMPACTA-001',
+    fecha_documento: '2026-09-05',
+    proveedor_nombre: 'Proveedor QA',
+    items: [
+      ['00051-MPASH', 'Gomas Ashwagandha', 8750, 'gr', 'LOTE-QA-001', '2028-11-30'],
+    ],
+  }, {
+    evidenceText: 'TIPO DOCUMENTO WMS: ORDEN_COMPRA OC-COMPACTA-001 00051-MPASH 8750 LOTE-QA-001 30/11/2028',
+  });
+
+  assert.deepEqual(normalized.items[0], {
+    sku: '00051-MPASH',
+    description: 'Gomas Ashwagandha',
+    quantity: 8750,
+    unit: 'gr',
+    unitPrice: null,
+    expiryDate: '2028-11-30',
+    lot: 'LOTE-QA-001',
+  });
 });

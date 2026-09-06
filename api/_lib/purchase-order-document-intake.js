@@ -318,10 +318,21 @@ function draftResult(row, input, duplicate) {
 }
 
 function normalizeItem(item = {}, index) {
-  const sku = cleanText(item.sku || item.codigo || item.codigo_barras, 80).toUpperCase();
-  const description = cleanText(item.descripcion || item.producto || item.description, 255);
-  const quantity = Number(item.cantidad ?? item.quantity);
-  const unitPriceRaw = item.precio_unitario ?? item.unit_price;
+  const source = Array.isArray(item)
+    ? {
+        sku: item[0],
+        descripcion: item[1],
+        cantidad: item[2],
+        unidad: item[3],
+        lote: item[4],
+        fecha_vencimiento: item[5],
+        precio_unitario: item[6],
+      }
+    : item;
+  const sku = cleanText(source.sku || source.codigo || source.codigo_barras, 80).toUpperCase();
+  const description = cleanText(source.descripcion || source.producto || source.description, 255);
+  const quantity = Number(source.cantidad ?? source.quantity);
+  const unitPriceRaw = source.precio_unitario ?? source.unit_price;
   const unitPrice = unitPriceRaw == null || unitPriceRaw === '' ? null : Number(unitPriceRaw);
   if (!sku) throw inputError(`El item ${index + 1} requiere SKU exacto`);
   if (!description) throw inputError(`El item ${index + 1} requiere descripcion`);
@@ -331,10 +342,10 @@ function normalizeItem(item = {}, index) {
     sku,
     description,
     quantity: roundQty(quantity),
-    unit: optionalText(item.unidad || item.unit, 20),
+    unit: optionalText(source.unidad || source.unit, 20),
     unitPrice: unitPrice == null ? null : Number(unitPrice.toFixed(6)),
-    expiryDate: normalizeDate(item.fecha_vencimiento || item.expiry_date),
-    lot: optionalText(item.lote || item.lot, 100),
+    expiryDate: normalizeDate(source.fecha_vencimiento || source.expiry_date),
+    lot: optionalText(source.lote || source.lot, 100),
   };
 }
 
