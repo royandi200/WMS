@@ -654,7 +654,7 @@ function PurchaseOrderDrafts({ rows = [], loading, canDiscard, onReview, onDisca
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {formatUnitTotals(totalsFromItems(row.items))}</p>
-              {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className="mt-1 text-xs text-red-400">{warning}</p>)}
+              {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className={`mt-1 text-xs ${row.estado === 'REQUIERE_CORRECCION' ? 'text-red-400' : 'text-yellow-400'}`}>{warning}</p>)}
             </div>
             <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(row.fecha_documento || '').slice(0, 10)}</p></div>
             <div><p className="text-xs uppercase text-muted">PDF</p>{row.archivo_id ? <button type="button" onClick={() => downloadPurchaseOrderDraftDocument(row.archivo_id, row.archivo_nombre)} className="mt-1 inline-flex items-center gap-2 text-sm text-primary"><Download size={15} /> Descargar</button> : <p className="mt-1 text-xs text-danger">No conservado</p>}</div>

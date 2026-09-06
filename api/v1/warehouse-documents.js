@@ -7,6 +7,11 @@ const {
   discardPurchaseOrderDocumentDraft,
   normalizePurchaseOrderDocumentDiscard,
 } = require('../_lib/purchase-order-document-discard');
+const {
+  normalizeWarehouseDraftReview,
+  reviewWarehouseDocumentDraft,
+} = require('../_lib/warehouse-document-draft-review');
+const { documentDraftStatus } = require('../_lib/document-draft-status');
 
 async function handleGet(req, res) {
   const fileId = Number(req.query?.file_id || 0);
@@ -90,6 +95,9 @@ async function handleGet(req, res) {
   for (const row of rows) {
     row.items = byDocument.get(row.id) || [];
     row.advertencias = parseJsonArray(row.advertencias);
+    if (['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(row.estado)) {
+      row.estado = documentDraftStatus(row.advertencias);
+    }
     row.nit = row.nit ? maskValue(row.nit) : null;
     row.proveedor_nit = row.proveedor_nit ? maskValue(row.proveedor_nit) : null;
     row.telefono = row.telefono ? maskValue(row.telefono) : null;
@@ -114,12 +122,34 @@ async function handlePost(req, res) {
 }
 
 async function handleDelete(req, res) {
-  const user = await requireCapability(req, CAPABILITIES.PURCHASE_ORDER_CANCEL);
   const input = normalizePurchaseOrderDocumentDiscard(req.body || {});
+  const user = await requireCapability(
+    req,
+    input.documentType === 'SALIDA_BODEGA_3Q'
+      ? CAPABILITIES.OUTSOURCING_MANAGE
+      : CAPABILITIES.PURCHASE_ORDER_CANCEL
+  );
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
     const data = await discardPurchaseOrderDocumentDraft(conn, { ...input, userId: user.id });
+    await conn.commit();
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
+async function handlePatch(req, res) {
+  const user = await requireCapability(req, CAPABILITIES.OUTSOURCING_MANAGE);
+  const input = normalizeWarehouseDraftReview(req.body || {});
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const data = await reviewWarehouseDocumentDraft(conn, input, user.id);
     await conn.commit();
     return res.status(200).json({ ok: true, data });
   } catch (error) {
@@ -148,11 +178,12 @@ function maskValue(value) {
 }
 
 module.exports = async (req, res) => {
-  cors(res, 'GET,POST,DELETE');
+  cors(res, 'GET,POST,PATCH,DELETE');
   if (req.method === 'OPTIONS') return res.status(200).end();
   try {
     if (req.method === 'GET') return await handleGet(req, res);
     if (req.method === 'POST') return await handlePost(req, res);
+    if (req.method === 'PATCH') return await handlePatch(req, res);
     if (req.method === 'DELETE') return await handleDelete(req, res);
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (error) {

@@ -8,6 +8,15 @@ const {
   operationalDocumentIdentity,
   registerWarehouseDocumentDraft,
 } = require('../api/_lib/warehouse-document-intake');
+const { documentDraftStatus } = require('../api/_lib/document-draft-status');
+
+test('supplier matching warnings require review but not document correction', () => {
+  assert.equal(documentDraftStatus([
+    'Proveedor no encontrado de forma inequivoca en el catalogo sincronizado',
+  ]), 'PENDIENTE_REVISION');
+  assert.equal(documentDraftStatus(['SKU no encontrado o inactivo: QA-1']), 'REQUIERE_CORRECCION');
+  assert.equal(documentDraftStatus([]), 'PENDIENTE_REVISION');
+});
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
 const { buildWarehouseExitPdf } = require('../scripts/qa/demo-pdf');
 
@@ -48,6 +57,22 @@ test('document intake normalizes an exact, complete 3Q warehouse exit', () => {
   assert.equal(input.calculatedTotal, 8200);
   assert.deepEqual(input.warnings, []);
   assert.match(input.hash, /^[a-f0-9]{64}$/u);
+});
+
+test('3Q intake derives its total without a declared row count or total', () => {
+  const input = normalizeWarehouseDocumentInput(validInput({
+    total_bultos: undefined,
+    total_unidades: undefined,
+    items: [
+      { sku: '00001-TPBI', descripcion: 'Tapas', cantidad: 23, unidad: 'und' },
+      { sku: '00006-TRP', descripcion: 'Tarros', cantidad: 43, unidad: 'und' },
+    ],
+  }));
+  assert.equal(input.items.length, 2);
+  assert.equal(input.totalPackages, null);
+  assert.equal(input.totalUnits, 66);
+  assert.equal(input.calculatedTotal, 66);
+  assert.deepEqual(input.warnings, []);
 });
 
 test('3Q intake recovers an omitted unit from the exact SKU quantity block', () => {

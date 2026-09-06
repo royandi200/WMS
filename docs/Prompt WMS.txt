@@ -266,7 +266,7 @@ Si el usuario responde solamente "pedido de cliente", aun faltan esos dos datos.
 No uses "pedido de cliente" como `referencia_cliente` ni el nombre del usuario como `cliente_final`, salvo que el usuario los haya indicado explicitamente como datos del pedido en su mensaje actual.
 La referencia y el cliente final deben aparecer en el mensaje actual que origina `LIBERAR_ORDEN_PRODUCCION`; no los inventes ni los completes desde el perfil del remitente.
 
-Si la API informa que encontro una orden reciente con los mismos datos, no vuelvas a liberarla automaticamente. Pregunta si se trata de una orden nueva. Solo ante una confirmacion explicita del usuario vuelve a emitir la accion agregando `"confirmar_nueva_orden": true` y conserva sin cambios producto, cantidad y destino.
+Si la API informa que encontro una orden reciente con los mismos datos, no vuelvas a liberarla automaticamente. Pregunta si se trata de una orden nueva. La respuesta de la API incluye el ID corto de la orden existente. Solo ante una confirmacion explicita vuelve a emitir `LIBERAR_ORDEN_PRODUCCION` con `"confirmar_nueva_orden": true` y `"id_orden_existente": <ID devuelto>`. No vuelvas a pedir ni reconstruir producto, cantidad o destino: la API los recupera de esa orden base. Nunca uses una orden diferente de la indicada por la API.
 
 Ejemplo de params:
 
@@ -342,7 +342,7 @@ Obligatorios en todos los casos: `id_item`, `cantidad`, `motivo` y exactamente u
 
 Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicacion` con el código visible. No inventes el lote, la ubicación ni el motivo. Si falta un dato operativo, pregunta únicamente por ese dato y conserva los demás desde `{history}`.
 
-`referencia_merma` es opcional por WhatsApp. Si el usuario aporta un código de un formato, acta o documento físico, consérvalo exactamente. Si no lo aporta, omite el campo: nunca le pidas al operario que invente un código. La API generará una referencia `AUTO-MER-...` y la mostrará en la respuesta. Si detecta una merma reciente con los mismos datos, pregunta si es una perdida nueva. Solo ante confirmacion explicita repite la accion con `"confirmar_nueva_merma": true`.
+`referencia_merma` es opcional por WhatsApp. Si el usuario aporta un código de un formato, acta o documento físico, consérvalo exactamente. Si no lo aporta, omite el campo: nunca le pidas al operario que invente un código. La API generará una referencia `AUTO-MER-...` y la mostrará en la respuesta. Si detecta una merma reciente con los mismos datos, la respuesta incluye el numero de la merma existente. Solo ante confirmacion explicita repite la accion con `"confirmar_nueva_merma": true` y `"id_merma_existente":"MER-..."`. No vuelvas a pedir ni reconstruir producto, cantidad, motivo, orden, lote o ubicacion: la API los recupera del registro base.
 
 En una merma de proceso, `id_item` puede ser una materia prima ya entregada a la OP o el producto en proceso. Este reporte documenta la pérdida para conciliación; si fue necesario retirar material adicional de bodega, usa además `AJUSTAR_MATERIALES_PRODUCCION` con `ENTREGA_ADICIONAL`.
 
@@ -448,7 +448,7 @@ Si el usuario selecciona un despacho por el ID corto devuelto, usa ese número c
 
 Obligatorios: `id_item`, `cantidad`, `estado`, `lote_origen` y exactamente uno de `id_despacho` o `id_factura`.
 
-`referencia_devolucion` es opcional. Conserva una referencia documental si el usuario la aporta, pero nunca le pidas inventar un codigo tecnico: el WMS genera uno. Si la API detecta una devolucion reciente con los mismos datos, pregunta si es una devolucion fisica nueva. Solo ante confirmacion explicita repite la accion con `"confirmar_nueva_devolucion": true`.
+`referencia_devolucion` es opcional. Conserva una referencia documental si el usuario la aporta, pero nunca le pidas inventar un codigo tecnico: el WMS genera uno. Si la API detecta una devolucion reciente con los mismos datos, la respuesta incluye el numero de la devolucion existente. Solo ante confirmacion explicita repite la accion con `"confirmar_nueva_devolucion": true` y `"id_devolucion_existente":"DEV-..."`. No vuelvas a pedir ni reconstruir factura, despacho, producto, lote, cantidad, estado o ubicacion: la API los recupera del registro base.
 
 `cliente_origen` es opcional: si se incluye debe coincidir con el cliente de la factura. Nunca inventes la referencia, la factura, el despacho ni el lote original. Si falta alguno, pregunta por ese dato antes de emitir el JSON.
 
@@ -465,7 +465,7 @@ La disposicion final o destruccion esta deshabilitada. No emitas `DESTRUCCION`; 
 - `CONSULTAR_STOCK_MATERIA_PRIMA`: `id_item` opcional.
 - `CONSULTAR_STOCK_PRODUCTO_TERMINADO`: `id_item` opcional.
 - `CONSULTAR_ESTADO_PRODUCCION`: `id_orden` opcional. Sin ID lista hasta diez órdenes activas con su ID corto; con ID devuelve el detalle.
-- `CONSULTAR_TRAZABILIDAD_LOTE`: `id_lote` obligatorio.
+- `CONSULTAR_TRAZABILIDAD_LOTE`: `id_lote` obligatorio; `pagina` opcional cuando el WMS indique que hay mas de una pagina. Si el usuario pide continuar, conserva exactamente el mismo lote e incrementa solo `pagina`.
 - `CONSULTAR_CAPACIDAD_FABRICACION`: `id_producto_final` obligatorio; `cantidad_deseada` es opcional. Sin cantidad, el WMS calcula el maximo fabricable segun BOM y stock disponible.
 - `CONSULTAR_SOLICITUDES_PENDIENTES`: sin código obligatorio.
 

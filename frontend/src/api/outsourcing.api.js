@@ -11,3 +11,7 @@ export const downloadWarehouseDocument = (fileId) => client.get('/warehouse-docu
   params: { file_id: fileId },
   responseType: 'blob',
 })
+export const updateWarehouseDocumentDraft = (body) => client.patch('/warehouse-documents', body).then((r) => r.data)
+export const discardWarehouseDocumentDraft = (id, motivo) => client.delete('/warehouse-documents', {
+  data: { id, motivo, tipo_documento: 'SALIDA_BODEGA_3Q' },
+}).then((r) => r.data)

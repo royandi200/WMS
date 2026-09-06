@@ -2,6 +2,7 @@
 // Lee de la tabla `kardex` (nueva) — action descriptivo por handler
 const { query } = require('../../_lib/db');
 const { cors, requireAuth } = require('../../_lib/auth');
+const { balancesByMovement } = require('../../_lib/traceability-presentation');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -26,6 +27,7 @@ module.exports = async (req, res) => {
     const rows = await query(
       `SELECT
          k.id,
+         k.lot_id,
          k.product_id,
          CASE
            WHEN COALESCE(k.action, '') <> '' THEN k.action
@@ -63,8 +65,26 @@ module.exports = async (req, res) => {
       args
     );
 
-    const productIds = [...new Set(rows.map((r) => Number(r.product_id)).filter(Boolean))];
+    const productIds = [...new Set(rows.filter((r) => !r.lot_id).map((r) => Number(r.product_id)).filter(Boolean))];
+    const lotIds = [...new Set(rows.map((r) => Number(r.lot_id)).filter(Boolean))];
     let balanceById = {};
+    const lotBalanceById = {};
+
+    if (lotIds.length) {
+      const lotRows = await query(
+        `SELECT k.id, k.lot_id, k.qty, l.qty_current
+           FROM kardex k
+           JOIN lots l ON l.id = k.lot_id
+          WHERE k.lot_id IN (${lotIds.map(() => '?').join(',')})
+          ORDER BY k.lot_id, k.created_at, k.id`,
+        lotIds
+      );
+      for (const lotId of lotIds) {
+        const movements = lotRows.filter((row) => Number(row.lot_id) === lotId);
+        const balances = balancesByMovement(movements, Number(movements[0]?.qty_current || 0));
+        for (const [id, value] of balances) lotBalanceById[id] = value;
+      }
+    }
 
     if (productIds.length) {
       const availableRows = await query(
@@ -107,9 +127,12 @@ module.exports = async (req, res) => {
 
     const normalizedRows = rows.map((row) => ({
       ...row,
-      balance_after: Object.prototype.hasOwnProperty.call(balanceById, row.id)
+      balance_after: row.lot_id && Object.prototype.hasOwnProperty.call(lotBalanceById, row.id)
+        ? lotBalanceById[row.id]
+        : Object.prototype.hasOwnProperty.call(balanceById, row.id)
         ? balanceById[row.id]
         : row.balance_after,
+      balance_scope: row.lot_id ? 'LOTE' : 'PRODUCTO',
     }));
 
     return res.status(200).json({

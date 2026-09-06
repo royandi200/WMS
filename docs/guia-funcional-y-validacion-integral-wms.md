@@ -194,7 +194,7 @@ Estado: recuperable y cuarentena `MANUAL VALIDADO`; destruccion e intentos acumu
 - Consultar historico por producto, orden/lote, ubicacion, motivo y fecha.
 - Desde WhatsApp, generar automaticamente una referencia cuando el operario no dispone de una.
 
-Estado: bodega y proceso `MANUAL VALIDADO`; notificacion proactiva de merma permanece `PENDIENTE` segun politica.
+Estado: bodega y proceso `MANUAL VALIDADO`. Por decision del proyecto no se requiere una notificacion proactiva independiente para cada merma; la conciliacion y el cierre de produccion notifican el resultado relevante.
 
 ### 7.10 Kardex y trazabilidad
 
@@ -203,7 +203,7 @@ Estado: bodega y proceso `MANUAL VALIDADO`; notificacion proactiva de merma perm
 - Reconstruir hacia atras proveedor/OC/recepcion y hacia adelante factura/despacho/cliente.
 - Conservar lote, ubicacion, cantidad, saldo, referencia y fecha.
 
-Estado: trazabilidad de PR e IO `MANUAL VALIDADO`; trazabilidad completa de 3Q hasta cliente final `PENDIENTE`.
+Estado: trazabilidad de PR e IO `MANUAL VALIDADO`; trazabilidad inversa de 3Q hasta PT y cliente final `AUTOMATIZADA` y pendiente de repeticion manual.
 
 ### 7.11 Aprobaciones
 
@@ -245,6 +245,8 @@ Estado: `MANUAL VALIDADO`; mensajes fueron reformateados para lectura por bloque
 - Recibir PDF de salida a 3Q como borrador documental.
 - Rechazar archivos que no sean PDF validos, sean demasiado grandes, provengan de origen no permitido o contengan SKU/cantidades no sustentados.
 - Evitar duplicados y detectar un mismo numero con contenido operativo diferente.
+- Leer directamente la capa de texto del PDF para recuperar filas omitidas por la IA; usar la interpretacion de BuilderBot como fallback cuando el archivo sea escaneado.
+- Corregir o descartar en dashboard un borrador 3Q no vinculado, conservando el PDF original y una auditoria del cambio.
 
 Estado: OC y salida 3Q `MANUAL VALIDADO` en ejemplos controlados; documentos reales variables `PENDIENTE` de muestreo con el cliente.
 

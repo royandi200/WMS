@@ -2,6 +2,12 @@ const { createHash } = require('crypto');
 const { downloadBuilderBotPdf } = require('./purchase-order-document-intake');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
 const { enrichItemsFromLineEvidence, normalizedUnit } = require('./document-evidence-items');
+const { documentDraftStatus } = require('./document-draft-status');
+const {
+  deriveCatalogItemsFromPdfTokens,
+  extractPdfTextLayer,
+  preferNativeItems,
+} = require('./pdf-text-layer');
 
 const MAX_DOCUMENT_ITEMS = 100;
 
@@ -84,12 +90,15 @@ async function registerWarehouseDocumentDraft({
   documentUrl = '',
   documentName = '',
 }) {
-  const input = normalizeWarehouseDocumentInput(body, { evidenceText });
   const normalizedOrigin = String(origin || 'BUILDERBOT').trim().toUpperCase();
   if (!['BUILDERBOT', 'DASHBOARD'].includes(normalizedOrigin)) throw inputError('Origen documental no soportado');
   const document = normalizedOrigin === 'BUILDERBOT'
-    ? await downloadBuilderBotPdf(documentUrl, documentName || input.sourceFileName)
+    ? await downloadBuilderBotPdf(documentUrl, documentName)
     : null;
+  const nativeEvidence = await nativePdfEvidence(db, document, body);
+  const input = normalizeWarehouseDocumentInput(nativeEvidence.body, {
+    evidenceText: nativeEvidence.text || evidenceText,
+  });
   if (normalizedOrigin === 'BUILDERBOT' && !document) {
     input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
   }
@@ -177,7 +186,7 @@ async function registerWarehouseDocumentDraft({
       resolved.push({ ...item, product: products[0] || null });
     }
     input.warnings = [...new Set(input.warnings)].slice(0, 50);
-    const status = input.warnings.length ? 'REQUIERE_CORRECCION' : 'PENDIENTE_REVISION';
+    const status = documentDraftStatus(input.warnings);
     const [created] = await db.execute(
       `INSERT INTO documentos_bodega_borrador
          (tipo_documento, origen, referencia_documento, fecha_documento,
@@ -213,10 +222,32 @@ async function registerWarehouseDocumentDraft({
       itemCount: input.items.length,
       totalUnits: input.totalUnits,
       pdfStored: Boolean(document),
+      extractionSource: nativeEvidence.used ? 'PDF_TEXT_LAYER' : 'BUILDERBOT',
     };
   } catch (error) {
     await db.rollback().catch(() => {});
     throw error;
+  }
+}
+
+async function nativePdfEvidence(db, document, body) {
+  if (!document) return { body, text: '', used: false };
+  try {
+    const extracted = await extractPdfTextLayer(document.content);
+    if (!extracted.text.trim()) return { body, text: '', used: false };
+    const [products] = await db.execute(
+      `SELECT siigo_code, nombre FROM productos
+        WHERE activo = 1 AND siigo_code IS NOT NULL AND siigo_code <> ''`,
+      []
+    );
+    const nativeItems = deriveCatalogItemsFromPdfTokens(extracted.tokens, products);
+    return {
+      body: preferNativeItems(body, nativeItems),
+      text: extracted.text,
+      used: nativeItems.length > 0,
+    };
+  } catch {
+    return { body, text: '', used: false };
   }
 }
 

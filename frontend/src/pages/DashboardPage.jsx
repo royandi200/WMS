@@ -345,8 +345,16 @@ export default function DashboardPage() {
 
   const periodLabel = PERIODS.find((p) => p.key === period)?.label || 'Periodo'
   const scopedReceptions = useMemo(
-    () => safeReceptions.filter((r) => inPeriod(r.completado_en || r.creado_en, period)),
+    () => safeReceptions.filter((r) => (
+      (r.completado_en || String(r.estado || '').toLowerCase() === 'completada')
+      && Number(r.cantidad_rec || 0) > 0
+      && inPeriod(r.completado_en, period)
+    )),
     [safeReceptions, period]
+  )
+  const scopedReceptionCount = useMemo(
+    () => new Set(scopedReceptions.map((r) => r.id || r.numero).filter(Boolean)).size,
+    [scopedReceptions]
   )
   const scopedDispatches = useMemo(
     () => safeDispatches.filter((r) => inPeriod(r.despachado_en || r.creado_en, period)),
@@ -387,7 +395,7 @@ export default function DashboardPage() {
   const dwellAlerts = Number(summary?.permanencia_alertas ?? 0)
   const dwellDays = Number(summary?.permanencia_dias ?? 90)
   const receptionUnits = sum(scopedReceptions, (r) => r.cantidad_rec)
-  const damagedUnits = sum(scopedReceptions, (r) => Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0))
+  const damagedUnits = sum(scopedReceptions, (r) => Math.max(0, Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0)))
   const dispatchUnits = sum(scopedDispatches, (r) => r.cantidad)
   const wasteUnits = sum(scopedWaste, (r) => r.qty ?? r.cantidad)
   const entryUnits = sum(scopedKardex.filter((r) => r.tipo === 'entrada'), (r) => r.cantidad)
@@ -512,7 +520,7 @@ export default function DashboardPage() {
               subtitle="Entrada y calidad"
               color="#58a6ff"
               href="/recepciones"
-              primary={fmtN(scopedReceptions.length)}
+              primary={fmtN(scopedReceptionCount)}
               primaryLabel={`rec. ${periodLabel.toLowerCase()}`}
               loading={receptionLoading}
               alert={damagedUnits > 0}

@@ -2,6 +2,12 @@ const { createHash } = require('crypto');
 const { MAX_PDF_BYTES } = require('./purchase-order-documents');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
 const { enrichItemsFromLineEvidence } = require('./document-evidence-items');
+const { documentDraftStatus } = require('./document-draft-status');
+const {
+  deriveCatalogItemsFromPdfTokens,
+  extractPdfTextLayer,
+  preferNativeItems,
+} = require('./pdf-text-layer');
 
 const MAX_DOCUMENT_ITEMS = 100;
 const DOCUMENT_TYPE = 'ORDEN_COMPRA';
@@ -165,8 +171,11 @@ async function registerPurchaseOrderDocumentDraft({
   documentUrl = '',
   documentName = '',
 }) {
-  const input = normalizePurchaseOrderDocumentInput(body, { evidenceText });
-  const document = await downloadBuilderBotPdf(documentUrl, documentName || input.sourceFileName);
+  const document = await downloadBuilderBotPdf(documentUrl, documentName);
+  const nativeEvidence = await nativePdfEvidence(db, document, body);
+  const input = normalizePurchaseOrderDocumentInput(nativeEvidence.body, {
+    evidenceText: nativeEvidence.text || evidenceText,
+  });
   if (!document) input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
 
   await db.beginTransaction();
@@ -237,7 +246,7 @@ async function registerPurchaseOrderDocumentDraft({
       resolved.push({ ...item, product: products[0] || null });
     }
     input.warnings = [...new Set(input.warnings)].slice(0, 50);
-    const status = input.warnings.length ? 'REQUIERE_CORRECCION' : 'PENDIENTE_REVISION';
+    const status = documentDraftStatus(input.warnings);
     const [created] = await db.execute(
       `INSERT INTO documentos_bodega_borrador
          (tipo_documento, origen, referencia_documento, fecha_documento,
@@ -273,6 +282,7 @@ async function registerPurchaseOrderDocumentDraft({
       totalUnits: input.totalUnits,
       supplierId: supplier?.id || null,
       pdfStored: Boolean(document),
+      extractionSource: nativeEvidence.used ? 'PDF_TEXT_LAYER' : 'BUILDERBOT',
     };
   } catch (error) {
     await db.rollback().catch(() => {});
@@ -349,6 +359,27 @@ function normalizeItem(item = {}, index) {
     expiryDate: normalizeDate(source.fecha_vencimiento || source.expiry_date),
     lot: optionalText(source.lote || source.lot, 100),
   };
+}
+
+async function nativePdfEvidence(db, document, body) {
+  if (!document) return { body, text: '', used: false };
+  try {
+    const extracted = await extractPdfTextLayer(document.content);
+    if (!extracted.text.trim()) return { body, text: '', used: false };
+    const [products] = await db.execute(
+      `SELECT siigo_code, nombre FROM productos
+        WHERE activo = 1 AND siigo_code IS NOT NULL AND siigo_code <> ''`,
+      []
+    );
+    const nativeItems = deriveCatalogItemsFromPdfTokens(extracted.tokens, products);
+    return {
+      body: preferNativeItems(body, nativeItems),
+      text: extracted.text,
+      used: nativeItems.length > 0,
+    };
+  } catch {
+    return { body, text: '', used: false };
+  }
 }
 
 function operationalIdentity(input) {

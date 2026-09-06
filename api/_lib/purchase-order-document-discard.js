@@ -4,24 +4,30 @@ function httpError(status, message) {
   return error;
 }
 
+const SUPPORTED_DOCUMENT_TYPES = new Set(['ORDEN_COMPRA', 'SALIDA_BODEGA_3Q']);
+
 function normalizePurchaseOrderDocumentDiscard(body = {}) {
   const id = Number(body.id || body.document_draft_id || body.documento_borrador_id || 0);
   const reason = String(body.motivo || body.reason || '').trim().replace(/\s+/g, ' ');
+  const documentType = String(body.tipo_documento || body.document_type || 'ORDEN_COMPRA').trim().toUpperCase();
   if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Borrador de orden de compra invalido');
+  if (!SUPPORTED_DOCUMENT_TYPES.has(documentType)) throw httpError(400, 'Tipo de borrador no soportado');
   if (reason.length < 5) throw httpError(400, 'El motivo para descartar el borrador es obligatorio');
   if (reason.length > 300) throw httpError(400, 'El motivo para descartar el borrador supera 300 caracteres');
-  return { id, reason };
+  return { id, reason, documentType };
 }
 
-async function discardPurchaseOrderDocumentDraft(conn, { id, reason, userId }) {
+async function discardPurchaseOrderDocumentDraft(conn, {
+  id, reason, userId, documentType = 'ORDEN_COMPRA',
+}) {
   const [drafts] = await conn.execute(
     `SELECT id, referencia_documento, estado, orden_compra_id, maquila_envio_id
        FROM documentos_bodega_borrador
-      WHERE id = ? AND tipo_documento = 'ORDEN_COMPRA'
+      WHERE id = ? AND tipo_documento = ?
       LIMIT 1 FOR UPDATE`,
-    [id]
+    [id, documentType]
   );
-  if (!drafts.length) throw httpError(404, 'Borrador de orden de compra no encontrado');
+  if (!drafts.length) throw httpError(404, 'Borrador documental no encontrado');
   const draft = drafts[0];
 
   if (draft.estado === 'DESCARTADO') {
@@ -49,11 +55,12 @@ async function discardPurchaseOrderDocumentDraft(conn, { id, reason, userId }) {
     `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
      VALUES ('warehouse_documents', 'INFO', ?, ?, ?, NOW())`,
     [
-      `Borrador de orden de compra ${draft.referencia_documento} descartado`,
+      `Borrador ${documentType} ${draft.referencia_documento} descartado`,
       userId,
       JSON.stringify({
         documento_borrador_id: id,
         referencia_documento: draft.referencia_documento,
+        tipo_documento: documentType,
         estado_anterior: draft.estado,
         motivo: reason,
       }),

@@ -786,3 +786,58 @@ Estado: APROBADA | FALLIDA | BLOQUEADA
 - Hallazgo de mensaje: la alerta generica de campos faltantes fue filtrada junto con la alerta falsa y WhatsApp solo mostro el proveedor no sincronizado. Se corrigio para recalcular y enumerar por SKU los campos que sigan ausentes despues del respaldo determinista.
 - Seguridad operativa: el borrador continua sujeto a revision humana y no crea OC operativa ni modifica inventario.
 - Estado: APROBADA CON HALLAZGO; transporte, clasificacion, totales e invariantes correctos; precision de tres campos y aviso especifico pendientes de una referencia nueva.
+
+### M76 - Remision documental R04 hacia 3Q
+
+- Hora Bogota: 18:05-18:06.
+- Canal y rol: WhatsApp, Juan (`admin`), con verificacion directa en base de datos y dashboard.
+- Documento: `QA-DOC-20260905-R04-02-REMISION-3Q-VALIDA.pdf`, enviado sin texto adjunto.
+- Resultado: se creo exactamente un borrador BuilderBot, ID 12, con una copia documental, estado `REQUIERE_CORRECCION` y cero movimientos Kardex. No se creo ni vinculo una remision operativa.
+- Extraccion: ocho de las nueve referencias quedaron asociadas al catalogo con cantidad y unidad `und`. BuilderBot omitio `00026-ETRES120` por `29 und`; por eso `total_calculado` quedo en `192` frente al total declarado `221`.
+- Fallo cerrado: WhatsApp y dashboard muestran la diferencia de conteo y total; Sofi no puede tratar la lectura incompleta como remision confirmada.
+- Dashboard: presenta destinatario, fecha, nueve bultos, datos sensibles enmascarados, PDF descargable, ocho lineas y las dos validaciones pendientes.
+- Estado: APROBADA CON HALLAZGO; unidad de linea corregida e invariantes de inventario correctos, pero la extraccion documental omitio la ultima referencia.
+
+### M77 - Marcadores contradictorios R04
+
+- Hora Bogota: 18:17-18:18.
+- Canal y rol: WhatsApp, Juan (`admin`), con verificacion directa en base de datos.
+- Documento: `QA-DOC-20260905-R04-04-MARCADORES-CONTRADICTORIOS.pdf`.
+- Resultado: rechazo especifico porque contiene simultaneamente `ORDEN DE COMPRA` y `SALIDA DE BODEGA HACIA 3Q`.
+- Fallo cerrado: no se creo borrador, no se persistieron items y no hubo movimientos Kardex.
+- Estado: APROBADA.
+
+### Mejora prioritaria - Lectura documental independiente de BuilderBot
+
+- Evidencia: los PDF R04 contienen capa de texto completa. Una extraccion local del archivo original recupera las 11 filas de la OC y las 9 filas de la remision 3Q, mientras BuilderBot omitio campos de tres filas de la OC y la ultima fila de la remision.
+- Diagnostico: el WMS descarga y conserva el PDF, pero hoy normaliza principalmente la interpretacion de BuilderBot. Si `aiDocument` omite un dato, el respaldo del WMS no puede recuperarlo aunque siga presente en el archivo original.
+- Propuesta: extraer primero la capa de texto y posiciones directamente en el backend WMS; reconstruir tablas mediante coordenadas y SKU exactos; usar OCR solo cuando no exista una capa de texto util; contrastar esa lectura con la salida de IA; enviar a revision humana cualquier discrepancia.
+- Interfaz: mostrar el PDF original inmutable junto a una tabla corregible. Cada cambio debe conservar valor extraido, valor corregido, usuario, fecha y motivo. Guardar el borrador nunca modifica inventario; despues de convertirlo o vincularlo queda bloqueado.
+- Estado: IMPLEMENTADA LOCALMENTE el 2026-09-06. El backend extrae la capa de texto del PDF, reconstruye filas por SKU exacto y contrasta cantidades, unidades, lotes y vencimientos antes de persistir. Si el PDF es escaneado o no tiene texto util, conserva el fallback de BuilderBot y la revision humana. Pendiente repetir una prueba manual con una referencia documental nueva despues del despliegue.
+
+### M77 - Documento R04 sin marcador
+
+- Hora Bogota: 18:11.
+- Canal y rol: WhatsApp, Juan (`admin`), con verificacion directa en base de datos.
+- Documento: `QA-DOC-20260905-R04-03-SIN-MARCADOR.pdf`, enviado sin texto adjunto.
+- Resultado: rechazo explicito porque no contiene un encabezado documental admitido.
+- Fallo cerrado: no se creo borrador, no se persistieron items y no hubo movimientos Kardex.
+- Estado: APROBADA.
+
+### Decision pendiente - Correccion humana de borradores documentales 3Q
+
+- Recomendacion: permitir que un usuario autorizado corrija en dashboard los datos extraidos por OCR antes de crear o vincular una remision operativa.
+- Limites propuestos: conservar inmutable el PDF y su hash; editar solo el borrador; validar SKU contra catalogo, cantidades positivas, unidades y totales; registrar valor anterior, valor nuevo, usuario, fecha y motivo; exigir confirmacion explicita; bloquear cambios despues de convertir o vincular el borrador.
+- Inventario: editar o guardar el borrador nunca reserva ni descuenta existencias. El movimiento solo ocurre en la operacion posterior y autorizada.
+- Estado: IMPLEMENTADA LOCALMENTE el 2026-09-06. El administrador puede corregir o descartar borradores 3Q no vinculados; el PDF original permanece inmutable, la correccion exige motivo, valida catalogo y cantidades, deja auditoria y no modifica inventario. Pendiente validacion visual despues del despliegue.
+
+### M78 - Cierre de hallazgos residuales post-regresion
+
+- Fecha: 2026-09-06.
+- Estado: implementacion local; sin validacion manual ni despliegue al momento de esta anotacion.
+- Inventario y Kardex: la merma de bodega guarda y presenta saldo del lote, no disponibilidad agregada del SKU.
+- Trazabilidad: agrupa materiales repetidos, limita el uso productivo estimado a cero, enlaza material enviado a 3Q con PT recibido y cliente final, y pagina respuestas largas de WhatsApp.
+- Consultas: inventario usa el resolvedor comun de SKU/alias y falla con candidatos ante ambiguedad; los lotes disponibles se presentan como FEFO y se omiten saldos cero.
+- Reintentos: una OP, merma o devolucion repetida puede confirmarse como evento adicional usando el identificador devuelto por el WMS; los datos operativos se reconstruyen desde el registro persistido.
+- Dashboard: el KPI de recepciones cuenta recepciones fisicas unicas y la actividad reciente excluye borradores con cantidad cero.
+- Documentos: una advertencia exclusiva de proveedor no sincronizado exige revision, pero no se rotula como error del documento.

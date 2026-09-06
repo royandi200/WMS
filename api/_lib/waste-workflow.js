@@ -285,6 +285,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
     );
 
     let balance = null;
+    let lotBalance = null;
     if (stockRow) {
       const [stockUpdate] = await conn.execute(
         `UPDATE stock SET cantidad = cantidad - ?, actualizado_en = NOW()
@@ -301,6 +302,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
         [data.quantity, data.quantity, lotRow.id, data.quantity]
       );
       if (lotUpdate.affectedRows !== 1) throw httpError(409, 'El saldo del lote cambio; vuelve a consultar');
+      lotBalance = Number((Number(lotRow.qty_current) - data.quantity).toFixed(4));
 
       await conn.execute(
         `INSERT INTO movimientos
@@ -325,7 +327,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [crypto.randomUUID(), crypto.randomUUID(), lotRow?.id || null, product.id,
        userId, order ? 'MERMA_PROCESO' : 'MERMA_BODEGA',
-       -data.quantity, balance,
+       -data.quantity, lotBalance,
        `merma:${number}`,
        `${data.reason}${order ? ` | Orden: ${order.codigo_orden}` : ` | Lote: ${data.lot} | Ubicacion: ${data.location}`}`,
        userId]
@@ -345,6 +347,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
       codigo_orden: order?.codigo_orden || null,
       ubicacion: stockRow?.codigo || null,
       balance_disponible: balance,
+      saldo_lote: lotBalance,
       already_completed: false,
       generated_reference: allowGeneratedReference && !String(
         input.external_reference ?? input.referencia_merma ?? input.referencia_externa

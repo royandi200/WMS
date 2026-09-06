@@ -34,7 +34,7 @@ function draft(overrides = {}) {
 test('purchase order draft discard input is normalized and bounded', () => {
   assert.deepEqual(
     normalizePurchaseOrderDocumentDiscard({ document_draft_id: '15', motivo: '  Lectura   incorrecta  ' }),
-    { id: 15, reason: 'Lectura incorrecta' }
+    { id: 15, reason: 'Lectura incorrecta', documentType: 'ORDEN_COMPRA' }
   );
   assert.throws(() => normalizePurchaseOrderDocumentDiscard({ id: 0, motivo: 'Duplicado' }), /invalido/u);
   assert.throws(() => normalizePurchaseOrderDocumentDiscard({ id: 15, motivo: 'no' }), /obligatorio/u);
@@ -91,9 +91,9 @@ test('linked purchase order draft cannot be discarded', async () => {
 
 test('warehouse document route exposes authorized transactional discard', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'warehouse-documents.js'), 'utf8');
-  assert.match(source, /requireCapability\(req, CAPABILITIES\.PURCHASE_ORDER_CANCEL\)/u);
+  assert.match(source, /CAPABILITIES\.PURCHASE_ORDER_CANCEL/u);
   assert.match(source, /req\.method === 'DELETE'/u);
-  assert.match(source, /GET,POST,DELETE/u);
+  assert.match(source, /GET,POST,PATCH,DELETE/u);
   assert.match(source, /beginTransaction\(\)/u);
   assert.match(source, /rollback\(\)/u);
 });

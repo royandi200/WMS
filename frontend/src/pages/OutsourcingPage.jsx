@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ArrowRight, CheckCircle2, Download, Factory, FileText, Plus, Send, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, Factory, FileText, Pencil, Plus, Save, Send, Trash2, X } from 'lucide-react'
 import {
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
   createOutsourcingOrder,
+  discardWarehouseDocumentDraft,
   downloadWarehouseDocument,
   linkOutsourcingPurchaseOrder,
   listOutsourcingOrders,
   listWarehouseDocumentDrafts,
   prepareAdditionalOutsourcingShipment,
+  updateWarehouseDocumentDraft,
 } from '../api/outsourcing.api'
 import { listPurchaseOrders } from '../api/purchaseOrders.api'
 import { listSuppliers } from '../api/suppliers.api'
@@ -120,7 +122,15 @@ export default function OutsourcingPage() {
           }}
         />
       )}
-      {tab === 'documents' && <DocumentDraftsPanel rows={data.document_drafts || []} loading={loading} />}
+      {tab === 'documents' && (
+        <DocumentDraftsPanel
+          rows={data.document_drafts || []}
+          loading={loading}
+          canManage={canManage}
+          onUpdate={(body) => run(() => updateWarehouseDocumentDraft(body), 'Borrador 3Q corregido')}
+          onDiscard={(id, motivo) => run(() => discardWarehouseDocumentDraft(id, motivo), 'Borrador 3Q descartado')}
+        />
+      )}
       {tab === 'create' && canManage && (
         <CreateForm
           purchaseOrders={purchaseOrders.filter((order) => order.documento_id && !['CANCELADA', 'CERRADA'].includes(order.estado))}
@@ -148,7 +158,10 @@ export default function OutsourcingPage() {
   )
 }
 
-function DocumentDraftsPanel({ rows, loading }) {
+function DocumentDraftsPanel({ rows, loading, canManage, onUpdate, onDiscard }) {
+  const [reviewTarget, setReviewTarget] = useState(null)
+  const [discardTarget, setDiscardTarget] = useState(null)
+  const pendingRows = rows.filter((row) => !['VINCULADO', 'DESCARTADO'].includes(row.estado))
   const download = async (row) => {
     if (!row.archivo_id) return
     const response = await downloadWarehouseDocument(row.archivo_id)
@@ -167,15 +180,19 @@ function DocumentDraftsPanel({ rows, loading }) {
       </div>
     </div>
     {loading && !rows.length && <p className="py-12 text-center text-sm text-muted">Cargando documentos...</p>}
-    {!loading && !rows.length && <p className="py-12 text-center text-sm text-muted">No hay documentos leidos</p>}
-    {rows.map((row) => {
+    {!loading && !pendingRows.length && <p className="py-12 text-center text-sm text-muted">No hay documentos pendientes de revision</p>}
+    {pendingRows.map((row) => {
       const needsCorrection = row.estado === 'REQUIERE_CORRECCION'
       return <article key={row.id} className="border border-border bg-surface/40">
-        <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px_44px] lg:items-center">
+        <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px_auto] lg:items-center">
           <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere correccion' : 'Pendiente de revision'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {row.origen} | Leido por {row.creado_por_nombre}</p></div>
           <div><p className="text-xs uppercase text-muted">Fecha documento</p><p className="mt-1 text-sm text-foreground">{formatDateOnly(row.fecha_documento)}</p></div>
           <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} bultos` : ''}</p></div>
-          <button type="button" disabled={!row.archivo_id} onClick={() => download(row)} title={row.archivo_id ? 'Descargar PDF original' : 'PDF no conservado'} className="inline-flex h-10 w-10 items-center justify-center border border-border text-primary disabled:cursor-not-allowed disabled:text-muted"><Download size={16} /></button>
+          <div className="flex justify-end gap-1">
+            <button type="button" disabled={!row.archivo_id} onClick={() => download(row)} title={row.archivo_id ? 'Descargar PDF original' : 'PDF no conservado'} className="inline-flex h-10 w-10 items-center justify-center border border-border text-primary disabled:cursor-not-allowed disabled:text-muted"><Download size={16} /></button>
+            {canManage && <button type="button" onClick={() => setReviewTarget(row)} title="Corregir datos extraidos" aria-label={`Corregir borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-foreground hover:border-primary hover:text-primary"><Pencil size={16} /></button>}
+            {canManage && <button type="button" onClick={() => setDiscardTarget(row)} title="Descartar borrador" aria-label={`Descartar borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger hover:text-danger"><Trash2 size={16} /></button>}
+          </div>
         </header>
         <div className="grid gap-4 border-b border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-4">
           <DocumentField label="Destinatario" value={row.destinatario_nombre} />
@@ -190,9 +207,101 @@ function DocumentDraftsPanel({ rows, loading }) {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] text-sm"><thead><tr className="border-b border-border bg-surface">{['Codigo / SKU', 'Producto leido', 'Cantidad', 'Vencimiento', 'Lote', 'Catalogo WMS'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}</tr></thead><tbody>{(row.items || []).map((item, index) => <tr key={`${row.id}-${item.sku_extraido}-${index}`} className="border-b border-border/50"><td className="px-4 py-3 font-mono text-xs text-foreground">{item.sku_extraido}</td><td className="px-4 py-3 text-xs">{item.descripcion_extraida}</td><td className="px-4 py-3 tabular-nums">{Number(item.cantidad)} {item.unidad || ''}</td><td className="px-4 py-3 text-xs">{formatDateOnly(item.fecha_vencimiento)}</td><td className="px-4 py-3 font-mono text-xs">{item.lote || '-'}</td><td className={`px-4 py-3 text-xs ${item.producto_id ? 'text-green-400' : 'text-red-400'}`}>{item.producto_id ? `${item.sku_catalogo} - ${item.producto_catalogo}` : 'SKU no encontrado'}</td></tr>)}</tbody></table>
         </div>
-        {(row.advertencias || []).length > 0 && <div className="border-t border-border bg-red-500/5 px-4 py-3"><p className="mb-1 text-xs font-semibold text-red-400">Validaciones pendientes</p>{row.advertencias.map((warning) => <p key={warning} className="text-xs text-muted">- {warning}</p>)}</div>}
+        {(row.advertencias || []).length > 0 && <div className={`border-t border-border px-4 py-3 ${needsCorrection ? 'bg-red-500/5' : 'bg-yellow-400/5'}`}><p className={`mb-1 text-xs font-semibold ${needsCorrection ? 'text-red-400' : 'text-yellow-400'}`}>Validaciones pendientes</p>{row.advertencias.map((warning) => <p key={warning} className="text-xs text-muted">- {warning}</p>)}</div>}
       </article>
     })}
+    {reviewTarget && <DocumentDraftReviewModal row={reviewTarget} onClose={() => setReviewTarget(null)} onSave={async (body) => { const ok = await onUpdate(body); if (ok) setReviewTarget(null) }} />}
+    {discardTarget && <DocumentDraftDiscardModal row={discardTarget} onClose={() => setDiscardTarget(null)} onDiscard={async (reason) => { const ok = await onDiscard(discardTarget.id, reason); if (ok) setDiscardTarget(null) }} />}
+  </div>
+}
+
+function DocumentDraftReviewModal({ row, onClose, onSave }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    id: row.id,
+    fecha_documento: String(row.fecha_documento || '').slice(0, 10),
+    destinatario_nombre: row.destinatario_nombre || '',
+    total_bultos: row.total_bultos ?? '',
+    motivo: '',
+    items: (row.items || []).map((item) => ({
+      sku: item.sku_extraido || '',
+      descripcion: item.descripcion_extraida || '',
+      cantidad: Number(item.cantidad),
+      unidad: item.unidad || 'und',
+      lote: item.lote || '',
+      fecha_vencimiento: String(item.fecha_vencimiento || '').slice(0, 10),
+    })),
+  })
+  const setHeader = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const setItem = (index, key, value) => setForm((current) => ({
+    ...current,
+    items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item),
+  }))
+  const removeItem = (index) => setForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      await onSave({
+        ...form,
+        total_bultos: form.total_bultos === '' ? null : Number(form.total_bultos),
+        items: form.items.map((item) => ({ ...item, cantidad: Number(item.cantidad) })),
+      })
+    } catch (submitError) {
+      setError(submitError.message || 'No fue posible guardar la correccion')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-labelledby="review-3q-title">
+    <form onSubmit={submit} className="flex max-h-[92vh] w-full max-w-6xl flex-col border border-border bg-surface shadow-2xl">
+      <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div><h2 id="review-3q-title" className="text-base font-semibold text-foreground">Corregir lectura de {row.referencia_documento}</h2><p className="mt-1 text-xs text-muted">El PDF original permanece inmutable. Guardar este borrador no mueve inventario.</p></div>
+        <button type="button" onClick={onClose} title="Cerrar" className="inline-flex h-8 w-8 items-center justify-center text-muted hover:text-foreground"><X size={18} /></button>
+      </header>
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label="Destinatario"><input value={form.destinatario_nombre} onChange={setHeader('destinatario_nombre')} className="input-field" required /></Field>
+          <Field label="Fecha documento"><input type="date" value={form.fecha_documento} onChange={setHeader('fecha_documento')} className="input-field" required /></Field>
+          <Field label="Bultos"><input type="number" min="0" step="any" value={form.total_bultos} onChange={setHeader('total_bultos')} className="input-field" /></Field>
+        </div>
+        <div className="space-y-2">
+          {form.items.map((item, index) => <div key={`${index}-${item.sku}`} className="grid gap-2 border-b border-border/60 pb-2 lg:grid-cols-[150px_minmax(220px,1fr)_100px_90px_150px_150px_36px]">
+            <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" className="input-field font-mono" required />
+            <input value={item.descripcion} onChange={(event) => setItem(index, 'descripcion', event.target.value)} placeholder="Descripcion" className="input-field" required />
+            <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} className="input-field" required />
+            <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" required />
+            <input value={item.lote} onChange={(event) => setItem(index, 'lote', event.target.value)} placeholder="Lote opcional" className="input-field font-mono" />
+            <input type="date" value={item.fecha_vencimiento} onChange={(event) => setItem(index, 'fecha_vencimiento', event.target.value)} className="input-field" />
+            <button type="button" disabled={form.items.length === 1} onClick={() => removeItem(index)} title="Eliminar fila" className="inline-flex h-10 w-9 items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
+          </div>)}
+          <button type="button" onClick={() => setForm((current) => ({ ...current, items: [...current.items, { sku: '', descripcion: '', cantidad: '', unidad: 'und', lote: '', fecha_vencimiento: '' }] }))} className="inline-flex items-center gap-2 border border-border px-3 py-2 text-sm text-foreground hover:border-primary"><Plus size={15} /> Agregar fila</button>
+        </div>
+        <Field label="Motivo de la correccion"><textarea value={form.motivo} onChange={setHeader('motivo')} minLength={5} maxLength={300} rows={3} className="input-field resize-y" placeholder="Ej. OCR omitio la ultima referencia" required /></Field>
+        {error && <div role="alert" className="border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>}
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-muted hover:text-foreground">Cancelar</button><button type="submit" disabled={saving || form.motivo.trim().length < 5} className="btn-primary inline-flex items-center gap-2"><Save size={15} /> {saving ? 'Guardando...' : 'Guardar correccion'}</button></footer>
+    </form>
+  </div>
+}
+
+function DocumentDraftDiscardModal({ row, onClose, onDiscard }) {
+  const [reason, setReason] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const submit = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    try { await onDiscard(reason) } finally { setSaving(false) }
+  }
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-labelledby="discard-3q-title">
+    <form onSubmit={submit} className="w-full max-w-lg border border-border bg-surface shadow-2xl">
+      <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4"><div><h2 id="discard-3q-title" className="text-base font-semibold text-foreground">Descartar {row.referencia_documento}</h2><p className="mt-1 text-xs text-muted">El PDF y la auditoria se conservaran. El borrador dejara de aparecer como pendiente.</p></div><button type="button" onClick={onClose} title="Cerrar" className="inline-flex h-8 w-8 items-center justify-center text-muted hover:text-foreground"><X size={18} /></button></header>
+      <div className="space-y-4 px-5 py-5"><Field label="Motivo"><textarea value={reason} onChange={(event) => setReason(event.target.value)} minLength={5} maxLength={300} rows={4} className="input-field resize-y" required /></Field><label className="flex items-start gap-3 text-sm text-foreground"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" /><span>Confirmo que este borrador no debe vincularse a una remision 3Q.</span></label></div>
+      <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-muted">Volver</button><button type="submit" disabled={saving || !confirmed || reason.trim().length < 5} className="inline-flex items-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-50"><Trash2 size={15} /> {saving ? 'Descartando...' : 'Descartar borrador'}</button></footer>
+    </form>
   </div>
 }
 

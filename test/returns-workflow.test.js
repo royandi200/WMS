@@ -85,4 +85,6 @@ test('dashboard and BuilderBot use the shared return workflow', () => {
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
   assert.match(dashboard, /createCustomerReturn\(req\.body \|\| \{\}, user\.id\)/u);
   assert.match(webhook, /parseCustomerReturnReferences\(rawText\)/u);
+  assert.match(webhook, /params\.id_devolucion_existente/u);
+  assert.match(webhook, /confirma una nueva devolucion adicional como/u);
 });

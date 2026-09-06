@@ -108,4 +108,15 @@ test('dashboard and BuilderBot use the shared transactional waste workflow', () 
   const workflow = fs.readFileSync(path.join(__dirname, '../api/_lib/waste-workflow.js'), 'utf8');
   assert.match(workflow, /allowContextualPartial: true/u);
   assert.match(workflow, /SELECT producto_id FROM produccion_materiales/u);
+  assert.match(workflow, /saldo_lote: lotBalance/u);
+});
+
+test('BuilderBot can reconstruct a confirmed repeated waste from its persisted record', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
+  const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
+  assert.match(webhook, /params\.id_merma_existente/u);
+  assert.match(webhook, /confirma una nueva merma adicional como/u);
+  assert.match(prompt, /"id_merma_existente":"MER-\.\.\."/u);
 });
