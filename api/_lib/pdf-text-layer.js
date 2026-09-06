@@ -32,7 +32,7 @@ async function extractPdfTextLayer(content) {
         index,
       }))
       .filter((item) => item.text);
-    allTokens.push(...positioned.map((item) => item.text));
+    allTokens.push(...positioned.map((item) => ({ text: item.text, page: pageNumber })));
 
     const lineMap = new Map();
     for (const item of positioned.sort((left, right) => {
@@ -89,15 +89,21 @@ function lotFromTokens(tokens, unitIndex, expiryIndex, knownSkus) {
 function deriveCatalogItemsFromPdfTokens(tokens = [], products = []) {
   const catalog = new Map(products.map((product) => [String(product.siigo_code || '').toUpperCase(), product]));
   const knownSkus = new Set(catalog.keys());
-  const normalizedTokens = tokens.map(cleanToken).filter(Boolean);
+  const normalizedTokens = tokens.map((token) => ({
+    text: cleanToken(typeof token === 'object' && token !== null ? token.text : token),
+    page: typeof token === 'object' && token !== null ? token.page : null,
+  })).filter((token) => token.text);
   const positions = normalizedTokens
-    .map((token, index) => ({ token: token.toUpperCase(), index }))
+    .map((token, index) => ({ token: token.text.toUpperCase(), page: token.page, index }))
     .filter(({ token }) => knownSkus.has(token));
   const items = [];
   for (let positionIndex = 0; positionIndex < positions.length && items.length < 100; positionIndex += 1) {
     const position = positions[positionIndex];
     const end = positions[positionIndex + 1]?.index ?? Math.min(normalizedTokens.length, position.index + 20);
-    const block = normalizedTokens.slice(position.index + 1, Math.min(end, position.index + 20));
+    // A new page starts a new evidence context, not a continuation of the last row.
+    const candidates = normalizedTokens.slice(position.index + 1, Math.min(end, position.index + 20));
+    const pageBoundary = candidates.findIndex((token) => token.page !== position.page);
+    const block = candidates.slice(0, pageBoundary < 0 ? undefined : pageBoundary).map((token) => token.text);
     let unitIndex = -1;
     let quantityIndex = -1;
     for (let index = 1; index < block.length; index += 1) {

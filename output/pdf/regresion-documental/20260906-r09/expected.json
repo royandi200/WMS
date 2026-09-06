@@ -1,0 +1,176 @@
+[
+  {
+    "referencia": "QA-DOC-20260906-R09-OC-001",
+    "tipo": "OC",
+    "archivo": "QA-DOC-20260906-R09-OC-001.pdf",
+    "items": [
+      {
+        "sku": "00001-TPBI",
+        "descripcion": "TAPA TARRO CUADRADO BLANCO (60 UNID)",
+        "cantidad": 37,
+        "unidad": "und",
+        "lote": "QA-R09-00001-TPBI",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00006-TRP",
+        "descripcion": "TARRO CUADRADO x 60",
+        "cantidad": 43,
+        "unidad": "und",
+        "lote": "QA-R09-00006-TRP",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00017-ETASH60",
+        "descripcion": "ETIQUETA ASHWAGANDHA x 60",
+        "cantidad": 29,
+        "unidad": "und",
+        "lote": "QA-R09-00017-ETASH60",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00035-LNTP60",
+        "descripcion": "LINER TARRO x 60",
+        "cantidad": 41,
+        "unidad": "und",
+        "lote": "QA-R09-00035-LNTP60",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00018-ETBOS60",
+        "descripcion": "ETIQUETA BOOSTER x 60",
+        "cantidad": 31,
+        "unidad": "und",
+        "lote": "QA-R09-00018-ETBOS60",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00003-TPGG",
+        "descripcion": "TAPA TARRO GRANDE GRIS x 120",
+        "cantidad": 47,
+        "unidad": "und",
+        "lote": "QA-R09-00003-TPGG",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00007-TRG",
+        "descripcion": "TARRO GRANDE PRICESMART x 120",
+        "cantidad": 53,
+        "unidad": "und",
+        "lote": "QA-R09-00007-TRG",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00036-LNTG120",
+        "descripcion": "LINER TARRO GRANDE x 120",
+        "cantidad": 59,
+        "unidad": "und",
+        "lote": "QA-R09-00036-LNTG120",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00042-CMCG",
+        "descripcion": "CAJA MASTER CREA GUMS x 24",
+        "cantidad": 17,
+        "unidad": "und",
+        "lote": "QA-R09-00042-CMCG",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00040-CMV",
+        "descripcion": "CAJA MASTER VINAGRE x 24",
+        "cantidad": 19,
+        "unidad": "und",
+        "lote": "QA-R09-00040-CMV",
+        "vencimiento": "2028-12-31"
+      },
+      {
+        "sku": "00051-MPASH",
+        "descripcion": "GOMAS ASHWAGANDHA - MAGNESIO Y VITAMINA C",
+        "cantidad": 8750,
+        "unidad": "g",
+        "lote": "QA-R09-00051-MPASH",
+        "vencimiento": "2028-12-31"
+      }
+    ]
+  },
+  {
+    "referencia": "QA-DOC-20260906-R09-SALIDA-3Q-001",
+    "tipo": "SALIDA-3Q",
+    "archivo": "QA-DOC-20260906-R09-SALIDA-3Q-001.pdf",
+    "items": [
+      {
+        "sku": "00001-TPBI",
+        "descripcion": "TAPA TARRO CUADRADO BLANCO (60 UNID)",
+        "cantidad": 23,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00006-TRP",
+        "descripcion": "TARRO CUADRADO x 60",
+        "cantidad": 23,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00018-ETBOS60",
+        "descripcion": "ETIQUETA BOOSTER x 60",
+        "cantidad": 17,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00035-LNTP60",
+        "descripcion": "LINER TARRO x 60",
+        "cantidad": 17,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00015-ETRESI60",
+        "descripcion": "ETIQUETA RESVERATROL x 60",
+        "cantidad": 19,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00003-TPGG",
+        "descripcion": "TAPA TARRO GRANDE GRIS x 120",
+        "cantidad": 31,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00007-TRG",
+        "descripcion": "TARRO GRANDE PRICESMART x 120",
+        "cantidad": 31,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00036-LNTG120",
+        "descripcion": "LINER TARRO GRANDE x 120",
+        "cantidad": 31,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      },
+      {
+        "sku": "00026-ETRES120",
+        "descripcion": "ETIQUETA RESVERATROL x 120",
+        "cantidad": 29,
+        "unidad": "und",
+        "lote": null,
+        "vencimiento": null
+      }
+    ]
+  }
+]
