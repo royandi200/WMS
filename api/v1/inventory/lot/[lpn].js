@@ -1,5 +1,6 @@
 const { query } = require('../../../_lib/db');
 const { cors, requireAuth } = require('../../../_lib/auth');
+const { receptionLotPartitions } = require('../../../_lib/reception-lot-trace');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -16,6 +17,9 @@ module.exports = async (req, res) => {
   if (!lpn) return res.status(400).json({ ok: false, error: 'LPN requerido' });
 
   try {
+    const partitions = await receptionLotPartitions({ execute: async (sql, values) => [await query(sql, values)] }, lpn);
+    const selected = partitions.find(row => row.lote === lpn)
+      || partitions.find(row => row.condicion === 'DISPONIBLE') || partitions[0];
     const rows = await query(
       `SELECT
          l.id AS lot_id,
@@ -49,7 +53,7 @@ module.exports = async (req, res) => {
        LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id
        WHERE BINARY l.lpn = BINARY ?
        LIMIT 1`,
-      [lpn]
+      [selected?.lote || lpn]
     );
 
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
@@ -63,6 +67,9 @@ module.exports = async (req, res) => {
       ok: true,
       data: {
         ...row,
+        lote_consultado: lpn,
+        lote_proveedor: selected?.lote_proveedor || lpn,
+        partidas_recepcion: partitions,
         qty_initial: Number(row.qty_initial || 0),
         qty_current: Number(row.qty_current || 0),
         stock_cantidad: row.stock_cantidad == null ? null : Number(row.stock_cantidad),
@@ -74,6 +81,7 @@ module.exports = async (req, res) => {
       },
     });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ ok: false, error: err.message });
     console.error('[inventory/lot/:lpn]', err.message);
     return res.status(500).json({ ok: false, error: 'Error al obtener lote' });
   }

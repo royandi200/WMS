@@ -49,7 +49,8 @@ test('preparing a reception is idempotent and cannot mutate inventory', () => {
   assert.doesNotMatch(domain, /INSERT INTO (?:stock|movimientos|kardex|lots)/u);
   assert.match(route, /requireCapability\(req, CAPABILITIES\.RECEPTION_CONFIRM\)/u);
   assert.match(route, /action === 'PREPARAR_DESDE_OC'/u);
-  assert.match(route, /motivo de la diferencia/u);
+  assert.match(route, /validateReceptionItem/u);
+  assert.match(fs.readFileSync(path.join(__dirname, '../api/_lib/reception-distributions.js'), 'utf8'), /motivo de la diferencia/u);
   assert.match(route, /La recepcion ya pertenece a otra orden de compra/u);
 });
 

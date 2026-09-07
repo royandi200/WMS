@@ -888,7 +888,8 @@ function ReceptionTable({ rows, loading }) {
               <td className="px-4 py-3">{r.producto_nombre || '-'}</td>
                 <td className="px-4 py-3 text-xs min-w-64">{r.distribuciones?.length
                   ? r.distribuciones.map((d, index) => <div key={index} className="mb-2 last:mb-0">
-                      <span className="font-mono break-all">{d.lote}</span>
+                      <span className="font-mono break-all">{d.lote_proveedor || d.lote}</span>
+                      {d.lote_proveedor && d.lote !== d.lote_proveedor && <span className="block text-muted break-all">Partida: {d.lote}</span>}
                       <span className="block">{Number(d.cantidad)} | {d.condicion} | {d.ubicacion || '-'}</span>
                       {d.motivo && <span className="block text-muted">{d.motivo}</span>}
                     </div>)

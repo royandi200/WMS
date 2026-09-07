@@ -2840,6 +2840,12 @@ module.exports = async (req, res) => {
 
       // ── Trazabilidad de lote ──────────────────────────────────
       case 'CONSULTAR_TRAZABILIDAD_LOTE': {
+  const { receptionLotPartitions, partitionTraceText } = require('../../_lib/reception-lot-trace');
+  const receiptPartitions = await receptionLotPartitions(db, params.id_lote);
+  const selectedPartition = receiptPartitions.find(row => row.lote === params.id_lote)
+    || receiptPartitions.find(row => row.condicion === 'DISPONIBLE') || receiptPartitions[0];
+  const requestedSupplierLot = params.id_lote;
+  if (selectedPartition) params = { ...params, id_lote: selectedPartition.lote };
   const [lotRows] = await db.execute(
     `SELECT l.*, p.nombre, p.siigo_code,
             COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad
@@ -3153,6 +3159,8 @@ module.exports = async (req, res) => {
       : '';
 
     const traceSections = [
+      receiptPartitions.some(row => row.lote !== row.lote_proveedor)
+        ? ['*Recepcion por condicion (cantidades recibidas):*', partitionTraceText(receiptPartitions)] : null,
       ['📋 *Historial:*', history],
       dispatchRows.length ? ['*Despachos / clientes:*', dispatchHistory] : null,
       returnRows.length ? ['*Devoluciones:*', returnHistory] : null,
@@ -3170,6 +3178,8 @@ module.exports = async (req, res) => {
 
     const fullTraceMessage = [
       `🔎 *Lote: ${params.id_lote}*`,
+      selectedPartition && selectedPartition.lote !== requestedSupplierLot
+        ? `Consulta por lote proveedor: ${requestedSupplierLot}. Saldo e historial siguientes corresponden a la partida ${selectedPartition.lote}.` : null,
       `Producto: ${l.nombre} (${l.siigo_code})`,
       l.notes ? `Referencia: ${l.notes}` : '',
       `Inicial: ${l.qty_initial} ${l.unidad}`,

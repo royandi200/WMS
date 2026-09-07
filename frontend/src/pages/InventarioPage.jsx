@@ -276,15 +276,23 @@ function ProductResult({ data }) {
 function LotResult({ data }) {
   const lot = data.lot || data
   return (
-    <div className="bg-surface border border-border rounded-lg p-5 max-w-2xl">
+    <div className="space-y-4">
       <p className="text-xs text-muted mb-1">Lote</p>
-      <h2 className="text-lg font-semibold font-mono text-foreground">{lot.lpn || lot.lote || '-'}</h2>
+      <h2 className="text-lg font-semibold font-mono text-foreground break-all">{lot.lote_proveedor || lot.lpn || lot.lote || '-'}</h2>
+      {lot.lote_proveedor && lot.lpn !== lot.lote_proveedor && <p className="text-xs text-muted break-all">Partida consultada: {lot.lpn}</p>}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
         <Metric label="SKU" value={lot.sku || lot.siigo_code || '-'} />
-        <Metric label="Cantidad" value={lot.qty_current ?? lot.cantidad ?? '-'} />
+        <Metric label="Saldo de la partida" value={lot.qty_current ?? lot.cantidad ?? '-'} />
         <Metric label="Estado" value={lot.status || lot.estado_calculado || '-'} />
         <Metric label="Vence" value={formatDate(lot.expiry_date || lot.fecha_venc)} />
       </div>
+      {lot.partidas_recepcion?.length > 0 && <Table
+        cols={['Lote proveedor', 'Partida', 'Recepcion', 'Recibido', 'Condicion al recibir', 'Ubicacion', 'Vence', 'Motivo']}
+        rows={lot.partidas_recepcion.map(part => [
+          part.lote_proveedor, part.lote, part.recepcion, formatQuantity(part.cantidad, lot.unit),
+          <StatusBadge value={part.condicion} />, part.ubicacion || '-', formatDate(part.fecha_venc), part.motivo || '-',
+        ])}
+      />}
     </div>
   )
 }

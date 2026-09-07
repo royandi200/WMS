@@ -5,10 +5,10 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { pushCompraToSiigo } = require('../_lib/siigo.purchases');
 const {
-  assertAvailableQuantityWithinExpected,
   internalReceptionLot,
   newKardexEntryIds,
-  normalizeReceptionDistributions,
+  assignReceptionPartitions,
+  validateReceptionItem,
 } = require('../_lib/reception-distributions');
 const { resolvePrimaryWarehouse } = require('../_lib/warehouses');
 const { workflowFlags } = require('../_lib/feature-flags');
@@ -143,7 +143,7 @@ async function handleGet(req, res) {
   );
   const ids = [...new Set(rows.map(row => row.recepcion_item_id).filter(Boolean))];
   const distributions = ids.length ? await query(
-    `SELECT rd.recepcion_item_id, rd.lote, rd.cantidad, rd.condicion, rd.motivo,
+    `SELECT rd.recepcion_item_id, rd.lote, rd.lote_proveedor, rd.cantidad, rd.condicion, rd.motivo,
             u.codigo AS ubicacion, rd.fecha_venc
        FROM recepcion_distribuciones rd
        LEFT JOIN ubicaciones u ON u.id = rd.ubicacion_id
@@ -171,21 +171,14 @@ function receivedItemInput(body, item, totalItems) {
 }
 
 async function processDistributedItem(conn, { item, input, reception, user, receptionId, body, txId }) {
-  const normalized = normalizeReceptionDistributions(input, {
-    requiresLot: true,
-    receptionId,
-    itemId: item.id,
-  });
-  if (!normalized) return null;
+  const normalized = assignReceptionPartitions(validateReceptionItem(
+    input, item.cantidad_esp, item.siigo_code, body.reason || body.motivo
+  ), receptionId, item.id);
   const { distributions, totals } = normalized;
   const expected = Number(item.cantidad_esp);
   const shortage = Math.max(expected - totals.received, 0);
   const overage = Math.max(totals.received - expected, 0);
-  assertAvailableQuantityWithinExpected(totals, expected, item.siigo_code);
   const reason = String(input.reason || input.motivo || body.reason || body.motivo || '').trim();
-  if ((shortage > 0.0001 || overage > 0.0001) && !reason) {
-    throw httpError(400, `Debes indicar el motivo de la diferencia para ${item.siigo_code}`);
-  }
   const locationIds = [...new Set(distributions.map(entry => entry.locationId).filter(Boolean))];
   if (locationIds.length) {
     const placeholders = locationIds.map(() => '?').join(',');
@@ -201,6 +194,29 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     const current = groupedLots.get(entry.lot) || { ...entry, quantity: 0 };
     current.quantity += entry.quantity;
     groupedLots.set(entry.lot, current);
+  }
+  // Validate provenance before creating either the available or blocked partitions.
+  for (const supplierLot of [...new Set(distributions.map(entry => entry.supplierLot))].sort()) {
+    const entry = distributions.find(row => row.supplierLot === supplierLot);
+    const [knownLots] = await conn.execute(
+      `SELECT l.product_id, l.bodega_id, l.expiry_date, l.supplier
+         FROM lots l
+        WHERE BINARY l.lpn = BINARY ? OR EXISTS (
+          SELECT 1 FROM recepcion_distribuciones rd
+          WHERE BINARY rd.lote = BINARY l.lpn AND BINARY rd.lote_proveedor = BINARY ?
+        ) FOR UPDATE`, [supplierLot, supplierLot]
+    );
+    for (const known of knownLots) {
+      const expiry = known.expiry_date ? new Date(known.expiry_date).toISOString().slice(0, 10) : null;
+      const supplier = String(known.supplier || '').trim().toLocaleLowerCase('es');
+      const incomingSupplier = String(reception.proveedor_nombre || '').trim().toLocaleLowerCase('es');
+      if (Number(known.product_id) !== Number(item.producto_id)
+          || Number(known.bodega_id) !== Number(reception.bodega_id)
+          || expiry !== entry.expiryDate
+          || (supplier && incomingSupplier && supplier !== incomingSupplier)) {
+        throw httpError(409, `El lote proveedor ${supplierLot} ya existe con otro SKU, proveedor, bodega o vencimiento`);
+      }
+    }
   }
   for (const lot of groupedLots.values()) {
     const [existing] = await conn.execute(
@@ -241,7 +257,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
       body.notes,
       `Recepcion ${reception.numero}`,
       lot.internalLot
-        ? 'Partida interna generada para producto sin lote obligatorio'
+        ? `Partida bloqueada ${lot.condition} | Lote proveedor ${lot.supplierLot}`
         : 'Lote informado por el proveedor',
     ].filter(Boolean).join(' | ');
     await conn.execute(
@@ -261,10 +277,10 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
   for (const entry of distributions) {
     await conn.execute(
       `INSERT INTO recepcion_distribuciones
-         (recepcion_id, recepcion_item_id, ubicacion_id, lote, fecha_venc,
+         (recepcion_id, recepcion_item_id, ubicacion_id, lote, lote_proveedor, fecha_venc,
           condicion, cantidad, motivo, usuario_id, creado_en)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [receptionId, item.id, entry.locationId, entry.lot, entry.expiryDate,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [receptionId, item.id, entry.locationId, entry.lot, entry.supplierLot, entry.expiryDate,
        entry.condition, entry.quantity, entry.reason, user.id]
     );
     if (entry.condition === 'DISPONIBLE') {
@@ -308,6 +324,19 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
          user.id, entry.quantity, balanceAfter, `recepcion:${reception.numero}`,
          `Condicion ${entry.condition} | Ubicacion ${entry.locationId} | Operacion ${txId}`, user.id]
       );
+    } else {
+      const balanceAfter = Number((Number(availableBalances.get(entry.lot) || 0) + entry.quantity).toFixed(4));
+      availableBalances.set(entry.lot, balanceAfter);
+      const blockedIds = newKardexEntryIds();
+      await conn.execute(
+        `INSERT INTO kardex
+           (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
+            reference, notes, approved_by, created_at)
+         VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION_BLOQUEADO', ?, ?, ?, ?, ?, NOW())`,
+        [blockedIds.id, blockedIds.txId, groupedLots.get(entry.lot).id, item.producto_id,
+         user.id, entry.quantity, balanceAfter, `recepcion:${reception.numero}`,
+         `Lote proveedor ${entry.supplierLot} | ${entry.condition} | Ubicacion ${entry.locationId} | ${entry.reason} | Operacion ${txId}`, user.id]
+      );
     }
   }
 
@@ -330,9 +359,10 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     );
   }
   const first = distributions[0];
+  const supplierLots = new Set(distributions.map(entry => entry.supplierLot));
   await conn.execute(
     `UPDATE recepcion_items SET lote = ?, fecha_venc = ?, cantidad_rec = ? WHERE id = ?`,
-    [groupedLots.size === 1 ? first.lot : null, groupedLots.size === 1 ? first.expiryDate : null,
+    [supplierLots.size === 1 ? first.supplierLot : null, supplierLots.size === 1 ? first.expiryDate : null,
      totals.received, item.id]
   );
   return {

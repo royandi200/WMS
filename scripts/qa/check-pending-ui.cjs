@@ -52,6 +52,18 @@ async function main() {
           await new Promise(resolve => { releaseProduct = resolve; });
           data = { producto: { nombre: 'OLD-PRODUCT-SHOULD-NOT-RENDER' }, stock: [] };
         }
+        if (url.pathname.includes('/inventory/lot/')) data = {
+          lpn: 'QA-PROVEEDOR', lote_proveedor: 'QA-PROVEEDOR', sku: 'SKU-QA', unit: 'und',
+          qty_current: 3, status: 'DISPONIBLE', expiry_date: '2027-11-30',
+          partidas_recepcion: [
+            { lote_proveedor: 'QA-PROVEEDOR', lote: 'QA-PROVEEDOR', recepcion: 'REC-QA', cantidad: 3,
+              condicion: 'DISPONIBLE', ubicacion: 'B13', fecha_venc: '2027-11-30' },
+            { lote_proveedor: 'QA-PROVEEDOR', lote: 'RECBLK-CUARENTENA-QA', recepcion: 'REC-QA', cantidad: 1,
+              condicion: 'CUARENTENA', ubicacion: 'CUAR-C-1-01', fecha_venc: '2027-11-30', motivo: 'revision calidad' },
+            { lote_proveedor: 'QA-PROVEEDOR', lote: 'RECBLK-RECHAZO-QA', recepcion: 'REC-QA', cantidad: 1,
+              condicion: 'RECHAZADO', ubicacion: 'CUAR-C-1-01', fecha_venc: '2027-11-30', motivo: 'empaque roto' },
+          ],
+        };
         if (url.pathname.endsWith('/reception')) data = { rows: [{ id: 1, recepcion_item_id: 10,
           numero: 'REC-QA', estado: 'completada', sku: 'SKU-QA', producto_nombre: 'Producto QA',
           cantidad_rec: 5, cantidad_fisica: 5, cantidad_oc: 5, creado_en: '2026-09-06 12:00:00',
@@ -75,6 +87,11 @@ async function main() {
       await page.waitForLoadState('networkidle');
       assert.equal(await page.getByText('OLD-PRODUCT-SHOULD-NOT-RENDER').count(), 0);
       assert.equal(await page.getByPlaceholder('Ej: L-2024-001').inputValue(), '');
+      await page.getByPlaceholder('Ej: L-2024-001').fill('QA-PROVEEDOR');
+      await page.getByRole('button', { name: 'Buscar', exact: true }).click();
+      await page.getByText('RECBLK-RECHAZO-QA', { exact: true }).waitFor();
+      assert.equal(await page.getByText('RECBLK-CUARENTENA-QA', { exact: true }).count(), 1);
+      await page.screenshot({ path: path.join(output, `mixed-lot-${viewport.width}.png`), fullPage: true });
       await page.goto(`${origin}/recepciones`);
       await page.getByRole('button', { name: 'Historico', exact: true }).click();
       await page.getByText('QA-RECHAZO', { exact: true }).waitFor();
@@ -84,7 +101,7 @@ async function main() {
       await page.goto(`${origin}/despachos`);
       await page.getByRole('columnheader', { name: 'Sin asignar', exact: true }).waitFor();
       assert.deepEqual(errors, []);
-      results.push({ viewport, checks: ['unit groups', 'late response isolation', 'receipt distributions', 'unassigned label'], ok: true });
+      results.push({ viewport, checks: ['unit groups', 'late response isolation', 'mixed supplier lot', 'receipt distributions', 'unassigned label'], ok: true });
       await context.close();
     }
     console.log(JSON.stringify({ ok: true, outbound_requests: 0, synthetic_data: true, results }, null, 2));

@@ -40,7 +40,7 @@ function remainingPurchaseOrderItems(orderedItems = [], acceptedItems = []) {
 
 async function loadPreparedReception(conn, preparationKey) {
   const [rows] = await conn.execute(
-    `SELECT id, numero, orden_compra_id, proveedor_nombre, estado
+    `SELECT id, numero, orden_compra_id, proveedor_nombre, estado, bodega_id
        FROM recepciones
       WHERE preparacion_clave = ? AND estado IN ('borrador', 'en_proceso')
       LIMIT 1`,
@@ -191,6 +191,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
     orden_compra_id: orderId,
     orden_compra_numero: order.numero,
     proveedor_nombre: order.proveedor_nombre,
+    bodega_id: bodegaId,
     estado: 'borrador',
     items: itemsWithLocations,
     duplicate: false,

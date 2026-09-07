@@ -1,6 +1,7 @@
 const { preparePurchaseOrderReception } = require('./purchase-order-reception');
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
+const { normalizeReceptionDistributions, validateReceptionItem } = require('./reception-distributions');
 
 function inputError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -407,19 +408,20 @@ function itemDistributions(item = {}) {
   return distributions;
 }
 
-async function resolveLocation(db, code) {
+async function resolveLocation(db, code, warehouseId) {
   const locationCode = String(code || '').trim();
   if (!locationCode) return null;
   const [rows] = await db.execute(
-    `SELECT id, codigo FROM ubicaciones WHERE UPPER(codigo) = UPPER(?) AND activa = 1 LIMIT 2`,
-    [locationCode]
+    `SELECT id, codigo FROM ubicaciones WHERE UPPER(codigo) = UPPER(?) AND activa = 1
+       ${warehouseId ? 'AND bodega_id = ?' : ''} LIMIT 2`,
+    warehouseId ? [locationCode, warehouseId] : [locationCode]
   );
   if (!rows.length) throw inputError(`Ubicacion no encontrada: ${locationCode}`, 404);
   if (rows.length > 1) throw inputError(`La ubicacion ${locationCode} no es unica`, 409);
   return rows[0];
 }
 
-async function buildConfirmationItems(db, preparedItems, params = {}) {
+async function buildConfirmationItems(db, preparedItems, params = {}, options = {}) {
   const incoming = suppliedItems(params);
   const preparedByProduct = new Map(preparedItems.map(item => [Number(item.producto_id), item]));
   const seen = new Set();
@@ -439,7 +441,8 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
     for (const entry of itemDistributions(item)) {
       const location = await resolveLocation(
         db,
-        entry.ubicacion || entry.codigo_ubicacion || entry.location_code
+        entry.ubicacion || entry.codigo_ubicacion || entry.location_code,
+        options.warehouseId
       );
       const reportedLot = String(entry.lote || entry.lpn || entry.lot_id || '').trim();
       const reportedExpiry = String(
@@ -462,7 +465,7 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
         ubicacion: location?.codigo || null,
       });
     }
-    result.push({
+    const confirmedItem = {
       item_id: prepared.item_id,
       product_id: prepared.producto_id,
       sku: product.siigo_code,
@@ -472,7 +475,11 @@ async function buildConfirmationItems(db, preparedItems, params = {}) {
       cantidad_recibida: item.cantidad_recibida ?? item.cantidad_total ?? null,
       motivo: item.motivo_diferencia || item.motivo || null,
       distributions,
-    });
+    };
+    const expected = prepared.cantidad_pendiente ?? prepared.cantidad_esp;
+    if (expected != null) validateReceptionItem(confirmedItem, expected, product.siigo_code);
+    else normalizeReceptionDistributions(confirmedItem);
+    result.push(confirmedItem);
   }
 
   const missing = preparedItems.filter(item => !seen.has(Number(item.producto_id)));
@@ -664,7 +671,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const isExplicitConfirmation = explicitConfirmation(rawText, order, params);
   let items;
   if (!isExplicitConfirmation) {
-    items = await buildConfirmationItems(db, prepared.reception.items, params);
+    items = await buildConfirmationItems(db, prepared.reception.items, params, { warehouseId: prepared.reception.bodega_id });
     await saveReceptionDraft(db, {
       order,
       reception: prepared.reception,
@@ -690,7 +697,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   if (!draft) {
     throw inputError('No hay una vista previa vigente. Registra primero los datos fisicos de la recepcion', 409);
   }
-  items = await buildConfirmationItems(db, prepared.reception.items, { items: draft.items });
+  items = await buildConfirmationItems(db, prepared.reception.items, { items: draft.items }, { warehouseId: prepared.reception.bodega_id });
   const effectiveParams = { ...params, items };
   const confirmationKey = receptionConfirmationKey(
     order.id,
