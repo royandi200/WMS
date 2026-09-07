@@ -1,0 +1,176 @@
+{
+  "run": "20260906-R12",
+  "upload_only": [
+    {
+      "file": "QA-DOC-20260906-R12-OC-SIN-CONTEO-NI-TOTAL.pdf",
+      "sha256": "a5bcb281dab47022f69ca5b019a77df892de7ac9911f1d11d9934b05bfbc8c43",
+      "pages": 1,
+      "expected_rows": 11
+    },
+    {
+      "file": "QA-DOC-20260906-R12-02-REMISION-3Q-VALIDA.pdf",
+      "sha256": "3e4f29b74244b1779a1cadf13ac4dd6bfd53d1da4c73108f81b3fe8745ed15ac",
+      "pages": 1,
+      "expected_rows": 9
+    },
+    {
+      "file": "QA-DOC-20260906-R12-03-SIN-MARCADOR.pdf",
+      "sha256": "09d78e5501cc042e59c544206c1e1c1da0e1e02d3a128d4f9adc8f3c567ce7f0",
+      "pages": 1,
+      "expected_rows": 1
+    },
+    {
+      "file": "QA-DOC-20260906-R12-04-MARCADORES-CONTRADICTORIOS.pdf",
+      "sha256": "9972732f7c0b623be48f4f49ec99bdffbce22219a67cdf2b61dadf7482846a98",
+      "pages": 1,
+      "expected_rows": 1
+    }
+  ],
+  "purchase_items": [
+    [
+      "00001-TPBI",
+      "TAPA TARRO CUADRADO BLANCO (60 UNID)",
+      37,
+      "und",
+      "QA-TPBI-260905",
+      "2028-01-31"
+    ],
+    [
+      "00006-TRP",
+      "TARRO CUADRADO x 60",
+      43,
+      "und",
+      "QA-TRP-260905",
+      "2028-02-29"
+    ],
+    [
+      "00017-ETASH60",
+      "ETIQUETA ASHWAGANDHA x 60",
+      29,
+      "und",
+      "QA-ETASH60-260905",
+      "2028-03-31"
+    ],
+    [
+      "00035-LNTP60",
+      "LINER TARRO x 60",
+      41,
+      "und",
+      "QA-LNTP60-260905",
+      "2028-04-30"
+    ],
+    [
+      "00018-ETBOS60",
+      "ETIQUETA BOOSTER x 60",
+      31,
+      "und",
+      "QA-ETBOS60-260905",
+      "2028-05-31"
+    ],
+    [
+      "00003-TPGG",
+      "TAPA TARRO GRANDE GRIS x 120",
+      47,
+      "und",
+      "QA-TPGG-260905",
+      "2028-06-30"
+    ],
+    [
+      "00007-TRG",
+      "TARRO GRANDE PRICESMART x 120",
+      53,
+      "und",
+      "QA-TRG-260905",
+      "2028-07-31"
+    ],
+    [
+      "00036-LNTG120",
+      "LINER TARRO GRANDE x 120",
+      59,
+      "und",
+      "QA-LNTG120-260905",
+      "2028-08-31"
+    ],
+    [
+      "00042-CMCG",
+      "CAJA MASTER CREA GUMS x 24",
+      17,
+      "und",
+      "QA-CMCG-260905",
+      "2028-09-30"
+    ],
+    [
+      "00040-CMV",
+      "CAJA MASTER VINAGRE x 24",
+      19,
+      "und",
+      "QA-CMV-260905",
+      "2028-10-31"
+    ],
+    [
+      "00051-MPASH",
+      "GOMAS ASHWAGANDHA - MAGNESIO Y VITAMINA C",
+      8750,
+      "g",
+      "QA-MPASH-260905",
+      "2027-12-15"
+    ]
+  ],
+  "shipment_items": [
+    [
+      "00001-TPBI",
+      "TAPA TARRO CUADRADO BLANCO (60 UNID)",
+      23,
+      "und"
+    ],
+    [
+      "00006-TRP",
+      "TARRO CUADRADO x 60",
+      23,
+      "und"
+    ],
+    [
+      "00018-ETBOS60",
+      "ETIQUETA BOOSTER x 60",
+      17,
+      "und"
+    ],
+    [
+      "00035-LNTP60",
+      "LINER TARRO x 60",
+      17,
+      "und"
+    ],
+    [
+      "00015-ETRESI60",
+      "ETIQUETA RESVERATROL x 60",
+      19,
+      "und"
+    ],
+    [
+      "00003-TPGG",
+      "TAPA TARRO GRANDE GRIS x 120",
+      31,
+      "und"
+    ],
+    [
+      "00007-TRG",
+      "TARRO GRANDE PRICESMART x 120",
+      31,
+      "und"
+    ],
+    [
+      "00036-LNTG120",
+      "LINER TARRO GRANDE x 120",
+      31,
+      "und"
+    ],
+    [
+      "00026-ETRES120",
+      "ETIQUETA RESVERATROL x 120",
+      29,
+      "und"
+    ]
+  ],
+  "negative_expected": "No operational document or inventory mutation; request unambiguous document classification"
+}
