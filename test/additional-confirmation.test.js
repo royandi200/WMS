@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { createRequire } = require('module');
 const { beginAdditionalConfirmation } = require('../api/_lib/additional-confirmation');
+const { additionalOperationInput } = require('../api/_lib/additional-operation-input');
 
 // Transaction fixture: private writes, unique-key contention, commit and rollback.
 // Unknown SQL fails so a new business path cannot silently pass these tests.
@@ -53,9 +54,12 @@ function database() {
           writes.push(sql.split(' ').slice(0, 3).join(' '));
           return [{ insertId: state.nextId++, affectedRows: 1 }];
         }
-        if (/FROM (mermas m|devoluciones dv)/.test(sql)) return [[]];
+        if (/FROM (mermas m|devoluciones dv)/.test(sql)) {
+          return [sql.includes('DATE_SUB') && state.recentReturn ? [state.recentReturn] : []];
+        }
         if (/FROM ordenes_produccion/.test(sql)) {
-          return sql.includes('DATE_SUB') ? [[]] : [[{ id: 7, codigo_orden: 'OP-7', estado: 'EN_PROCESO', producto_id: 1 }]];
+          return sql.includes('DATE_SUB') ? [state.recentProduction ? [state.recentProduction] : []]
+            : [[{ id: 7, codigo_orden: 'OP-7', estado: 'EN_PROCESO', producto_id: 1 }]];
         }
         if (/FROM bom b/.test(sql)) return [[{ id: 1, insumo_id: 1, cantidad_por_unidad: 1, unidad: 'und', sku: 'SKU-1', nombre: 'QA' }]];
         if (/FROM produccion_materiales/.test(sql)) return [[{ id: 1, producto_id: 1, unidad: 'und' }]];
@@ -166,4 +170,37 @@ test('dashboard and WhatsApp initial waste and return requests generate referenc
     assert.equal(result.generated_reference, true);
     assert.match(result.referencia_externa, /^AUTO-(MER|DEV)-\d{8}-[A-F0-9]{8}$/);
   }
+});
+
+test('RI-004: sanitized model flag reaches the real production duplicate detector without reserving', async () => {
+  const db = database();
+  db.recentProduction = { id: 79, codigo_orden: 'OP-79', estado: 'APROBADA',
+    cantidad_planeada: 3, origen_tipo: 'STOCK_SEGURIDAD' };
+  const input = additionalOperationInput('LIBERAR_ORDEN_PRODUCCION', {
+    confirmar_nueva_orden: true, id_orden_existente: 79,
+  }, { text: 'Cambio el destino: produce tres tarros de ashwagandha 60 para stock de seguridad.' });
+  const result = await workflow('production-workflow.js', db).releaseProductionOrder({
+    product: 'SKU-1', quantity: 3, originType: 'STOCK_SEGURIDAD', userId: 5,
+    confirmNew: input.confirmar_nueva_orden, existingOrderId: input.id_orden_existente,
+  });
+  assert.equal(result.requires_confirmation, true);
+  assert.equal(result.order_id, 79);
+  assert.equal(db.writes.length, 0);
+  assert.equal(db.rows.size, 0);
+  assert.equal(db.notifications || 0, 0);
+});
+
+test('RI-008: sanitized return flag preserves the real duplicate detector and inventory', async () => {
+  const db = database();
+  db.recentReturn = { id: 30, numero: 'DEV-30', cantidad: 1, estado: 'CUARENTENA' };
+  const input = additionalOperationInput('GESTION_DEVOLUCION', {
+    id_item: 'SKU-1', id_despacho: 'DSP-1', lote_origen: 'LOT-1', cantidad: 1,
+    estado: 'CUARENTENA', confirmar_nueva_devolucion: true, id_devolucion_existente: 30,
+    confirm_new_return: true,
+  }, { text: 'Registra una devolucion del cliente del despacho ID 58: 1 unidad, por empaque danado. Dejar en cuarentena.' });
+  const result = await workflow('returns-workflow.js', db).createCustomerReturn(input, 5);
+  assert.equal(result.requires_confirmation, true);
+  assert.equal(result.numero, 'DEV-30');
+  assert.equal(db.writes.length, 0);
+  assert.equal(db.rows.size, 0);
 });

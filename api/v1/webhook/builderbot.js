@@ -81,6 +81,7 @@
 const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
+const { additionalOperationInput } = require('../../_lib/additional-operation-input');
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
@@ -1345,6 +1346,8 @@ module.exports = async (req, res) => {
     }
 
     let mensaje = '';
+
+    params = additionalOperationInput(action, params, rawBody, info);
 
     switch (action) {
 

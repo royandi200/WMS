@@ -86,3 +86,36 @@ de SQL; no usa un codigo inventado por la IA. Datos contradictorios y negaciones
 se rechazan sin inventario. El mensaje incluye el ID real para seleccionarlo.
 Ensayo real: base 395 -> resultado 396; reintentos antes/despues del cierre de
 OP 77 recuperan 396. Consultar bitacora para horarios y saldos.
+
+## Proteccion de produccion y devoluciones en WhatsApp (local, 2026-09-06)
+
+RI-004/RI-008: una bandera `confirmar_nueva_orden` o
+`confirmar_nueva_devolucion` generada por IA no constituye consentimiento.
+El webhook sanea tambien los alias ingleses y obtiene la base exclusivamente
+de una confirmacion explicita en el mensaje actual. Ejemplos del formato:
+
+- `Confirma una nueva produccion adicional para la orden ID 79.`
+- `Confirmo otra devolucion como ID 30.`
+- `Confirma una nueva devolucion adicional como DEV-30.`
+
+Los IDs anteriores son ejemplos, no instrucciones para operar registros reales.
+WMS debe mostrar la base existente; el usuario no inventa una referencia.
+Se aceptan acentos y mayusculas. Citas, negaciones, preguntas, bases ambiguas
+o cambios de cantidad dentro de la confirmacion no autorizan otra operacion.
+El parser es deliberadamente acotado; otras formulaciones pueden pedir aclaracion.
+Las solicitudes ordinarias mantienen el detector de duplicados previo.
+
+Una confirmacion valida reutiliza el registro persistido y la clave durable
+existentes. No se modifica el contrato del dashboard ni se requiere otra
+migracion por este ajuste. La tabla mencionada anteriormente sigue siendo
+prerrequisito del mecanismo de confirmaciones adicionales.
+
+El texto independiente del transporte tiene prioridad. En el contrato legacy,
+`info.body` sigue pasando por IA: esta proteccion no demuestra por si sola que
+ese texto sea una copia fiel del mensaje humano. No se usan explicaciones de
+la IA ni campos dentro de params como evidencia de consentimiento.
+
+Verificacion local: suite 295/295 y build correctos. Las pruebas utilizan
+dependencias/base simuladas, no inventario operativo. Sigue pendiente desplegar
+y revalidar por WhatsApp; ver el consolidado del 6 de septiembre. No confundir
+este resultado con los ensayos reales anteriores de ajustes de materiales.
