@@ -123,6 +123,29 @@ test('RI-006/009: webhook blocks a customer return substituted for production ma
   }
 });
 
+test('flat reception traverses real webhook with permissions, totals and preview-only boundaries', async () => {
+  const params = { orden_compra_id: 21, confirmacion_final: false,
+    partidas: [3, 1, 1].map((cantidad, i) => ({ sku: 'SKU-QA', total_recibido: 5,
+      cantidad, condicion: ['DISPONIBLE', 'CUARENTENA', 'RECHAZADO'][i], lote: 'LOT-QA',
+      ubicacion: 'B13', fecha_vencimiento: '2027-11-30', motivo: 'QA' })) };
+  for (const role of ['admin', 'recepcion_cierre', 'alistador']) {
+    const h = harness({ role });
+    const result = await h.send('CONFIRMAR_RECEPCION_OC', 'Para la recepcion ID 21 llegaron 5 unidades', params);
+    assert.equal(result.ok, role !== 'alistador', result.mensaje);
+    assert.equal(h.calls.length, role !== 'alistador' ? 1 : 0);
+    if (h.calls.length) {
+      assert.deepEqual(h.calls[0].params.items[0].distribuciones.map(r => r.cantidad), [3, 1, 1]);
+      assert.equal(result.context.reception.inventory_changed, false);
+    }
+  }
+  for (const bad of [{ ...params, confirmacion_final: true }, { ...params, items: [] },
+    { ...params, partidas: [{ ...params.partidas[0], cantidad: 6 }] }]) {
+    const h = harness();
+    assert.equal((await h.send('CONFIRMAR_RECEPCION_OC', 'Confirmo la recepcion ID 21', bad)).ok, false);
+    assert.equal(h.calls.length, 0);
+  }
+});
+
 test('webhook hides SQL failures and does not automatically repeat a failed inventory operation', async () => {
   const h = harness({ operationError: Object.assign(new Error('SQL internal details'), {
     code: 'ER_LOCK_DEADLOCK', sql: 'UPDATE private_table SET value=secret',

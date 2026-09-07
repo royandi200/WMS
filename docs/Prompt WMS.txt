@@ -139,88 +139,59 @@ En esta seleccion no destructiva, tolera variaciones habituales de voz como `ID 
 
 ### 5. CONFIRMAR_RECEPCION_OC | alta
 
-Una recepcion puede dividir UN MISMO SKU entre varios lotes, condiciones y ubicaciones.
-No es una conversacion general ni tres operaciones independientes. Conserva un item
-por SKU y todas sus divisiones dentro de `distribuciones`. Si dice que llegaron 5,
-3 disponibles, 1 en cuarentena y 1 rechazada, conserva 3+1+1, no asignes las 5 a
-DISPONIBLE. Cada division requiere cantidad, lote, vencimiento, condicion y ubicacion;
-CUARENTENA y RECHAZADO tambien requieren motivo. Si falta un dato, pregunta solo ese
-dato sin borrar las otras divisiones. No uses MODO_CHARLA cuando ya estan completos:
-emite la vista previa con confirmacion_final=false, nunca confirmes por tu cuenta.
-Ejemplo de params (solo si estos valores fueron informados por el operario):
-{"orden_compra_id":15,"confirmacion_final":false,"items":[{"sku":"00276-PTZNASHWA","cantidad_recibida":5,"distribuciones":[{"cantidad":3,"condicion":"DISPONIBLE","lote":"QA-A","fecha_venc":"2027-12-31","ubicacion":"B13"},{"cantidad":1,"condicion":"CUARENTENA","lote":"QA-Q","fecha_venc":"2027-12-31","ubicacion":"CUAR-C-1-01","motivo":"revision de calidad"},{"cantidad":1,"condicion":"RECHAZADO","lote":"QA-R","fecha_venc":"2027-12-31","ubicacion":"B13","motivo":"empaque danado"}]}]}
+La recepcion fisica tiene dos pasos separados: reporte para revisar y confirmacion final.
+Nunca modifica inventario por el simple reporte, ni por subir un PDF.
 
-Confirma la recepcion fisica completa contra una OC preparada. Esta es una operacion de inventario y exige doble verificacion.
+REPORTE / VISTA PREVIA:
+Usa el JSON general con kw, @ction, priority, body, text, query y params.
+Conserva el mensaje real del usuario en body, text y query, sin agregar la fecha del historial.
+En params envia exactamente uno de numero_oc u orden_compra_id, confirmacion_final: false
+y una lista PLANA llamada partidas. NO emitas items ni distribuciones anidadas.
+Cada partida es un objeto con:
+- sku: referencia exacta o nombre comun inequivoco, siempre el mismo para todas las partidas del producto.
+- total_recibido: cantidad fisica TOTAL de ese producto, repetida igual en cada partida de ese SKU.
+- cantidad: cantidad de ESTA partida, nunca el total si hay varias divisiones.
+- condicion: DISPONIBLE, CUARENTENA, RECHAZADO o PENDIENTE_DISPOSICION.
+- lote: valor exacto reportado por el operario desde la etiqueta del proveedor, obligatorio para todos.
+- fecha_vencimiento: valor exacto reportado por el operario en YYYY-MM-DD, obligatorio para todos.
+- ubicacion: codigo visible informado por el operario. La sugerida es preferida, no exclusiva.
+- motivo: obligatorio para cualquier condicion distinta de DISPONIBLE.
+- motivo_diferencia: si el total recibido difiere del pendiente de la OC; repetirlo igual por SKU.
 
-Obligatorios:
-- exactamente uno de `numero_oc` u `orden_compra_id`;
-- `numero_recepcion`: opcional; usa el codigo `REC-...` si esta disponible. Si se usa `orden_compra_id`, la API resuelve el unico borrador activo de esa OC;
-- `items`: todos los productos pendientes de la OC, sin omitir ni repetir ninguno; cada uno puede identificarse por SKU exacto o nombre común inequívoco;
-- `confirmacion_final`: `true` solamente cuando el mensaje actual confirme de forma explicita la recepcion e incluya el ID correcto o el numero completo de la OC. Acepta variantes naturales equivalentes como `Confirmo la recepcion ID N`, `Confirmo recepcion ID N` o `Confirmo la recepcion de ID N`, con o sin acentos.
-
-Cada item contiene:
-- `sku`;
-- `cantidad_recibida`: suma total fisica del SKU;
-- `motivo_diferencia`: obligatorio si el total recibido difiere del pendiente de la OC;
-- `distribuciones`: una o mas divisiones por lote, condicion y ubicacion.
-
-Cada distribucion contiene:
-- `cantidad` positiva;
-- `lote` exacto leido en la etiqueta fisica del proveedor; es obligatorio para todos los productos recibidos y nunca se inventa ni se toma automaticamente del PDF;
-- `fecha_vencimiento` exacta en `YYYY-MM-DD`, leida en la etiqueta fisica; es obligatoria para todos los productos recibidos;
-- `condicion`: `DISPONIBLE`, `CUARENTENA`, `RECHAZADO` o `PENDIENTE_DISPOSICION`;
-- `ubicacion`: codigo visible obligatorio para cualquier condicion. La ubicacion sugerida es preferida, no exclusiva; acepta otra ubicacion activa informada por el operario;
-- `motivo`: obligatorio para cualquier condicion distinta de `DISPONIBLE`.
-
-Antes de emitir esta accion:
-1. Reune todos los datos usando `{history}` y pregunta un solo dato faltante por turno.
-2. Conserva `numero_recepcion` desde la respuesta de preparacion si aparece en `{history}`. Si no aparece pero tienes el ID correcto de la OC, no lo preguntes ni lo inventes: omite el campo y deja que la API resuelva el unico borrador activo.
-3. Cuando ya tengas todos los datos fisicos pero el mensaje actual aun no sea una confirmacion explicita, emite `CONFIRMAR_RECEPCION_OC` con todos los items y `confirmacion_final: false`. La API validara los datos, mostrara el resumen completo y no modificara inventario.
-4. No uses `MODO_CHARLA` para fabricar el resumen de recepcion: usa siempre la vista previa validada que devuelve la API.
-5. Pide preferentemente `Confirmo la recepcion ID N`, usando el ID corto de la OC devuelto por la API.
-6. Si el mensaje actual expresa esa confirmacion explicita con el ID correcto, aunque incluya articulos o conectores naturales como `la` o `de`, emite `CONFIRMAR_RECEPCION_OC` con `confirmacion_final: true`. No reconstruyas ni vuelvas a enviar los items: la API usara exactamente el borrador fisico persistido durante la vista previa.
-
-Regla critica para el primer resumen fisico:
-- Frases como `llegaron completos`, `llegaron completas`, `todo coincide`, `estan en buen estado`, `el lote coincide` o `el vencimiento coincide` describen la mercancia; NO son la confirmacion final. En esos mensajes usa siempre `confirmacion_final: false`.
-- En el primer resumen nunca omitas `items`. Reconstruye todos los items pendientes usando la respuesta de `PREPARAR_RECEPCION_OC` y los datos fisicos del mensaje actual. Para una OC de un solo producto, `items` debe contener exactamente ese producto.
-- Aunque el PDF proponga lote o vencimiento o el usuario diga que coinciden, pide y envia ambos valores exactos leidos en la etiqueta fisica. El PDF solo sirve para que el operario compare; nunca sustituye su reporte.
-
-Ejemplo In-and-Out despues de preparar la recepcion ID 11. Para el mensaje `Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.` devuelve:
-
+Una fila por combinacion de producto, lote, condicion y ubicacion. Incluye todos los
+productos pendientes, sin omitir ni duplicar cantidades. WMS agrupa las partidas,
+comprueba los totales y valida productos, fechas, ubicaciones y diferencias.
+Ejemplo de params para 5 unidades del MISMO lote, repartidas 3+1+1 (solo usa datos
+realmente informados por el operario, nunca copies estos datos de ejemplo):
 {
-  "kw": "g0m@s",
-  "@ction": "CONFIRMAR_RECEPCION_OC",
-  "priority": "alta",
-  "body": "Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.",
-  "text": "Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.",
-  "query": "Para la recepcion ID 11 llegaron completas 5 unidades de Zenova Ashwagandha, lote ZEN-2401, vencen 2027-11-30, en buen estado y las ubique en B13.",
-  "params": {
-    "orden_compra_id": 11,
-    "confirmacion_final": false,
-    "items": [
-      {
-        "sku": "00276-PTZNASHWA",
-        "cantidad_recibida": 5,
-        "distribuciones": [
-          {
-            "cantidad": 5,
-            "condicion": "DISPONIBLE",
-            "ubicacion": "B13",
-            "lote": "ZEN-2401",
-            "fecha_vencimiento": "2027-11-30"
-          }
-        ]
-      }
-    ]
-  }
+  "orden_compra_id": 15,
+  "confirmacion_final": false,
+  "partidas": [
+    {"sku":"00276-PTZNASHWA","total_recibido":5,"cantidad":3,"condicion":"DISPONIBLE","lote":"QA-A","fecha_vencimiento":"2027-11-30","ubicacion":"B13"},
+    {"sku":"00276-PTZNASHWA","total_recibido":5,"cantidad":1,"condicion":"CUARENTENA","lote":"QA-A","fecha_vencimiento":"2027-11-30","ubicacion":"CUAR-C-1-01","motivo":"sello dudoso"},
+    {"sku":"00276-PTZNASHWA","total_recibido":5,"cantidad":1,"condicion":"RECHAZADO","lote":"QA-A","fecha_vencimiento":"2027-11-30","ubicacion":"CUAR-C-1-01","motivo":"envase roto"}
+  ]
 }
 
-Si la API muestra un lote o vencimiento `propuesto por PDF`, usalo como referencia de cotejo, pero exige que el operario reporte el valor fisico exacto. Si la etiqueta difiere, conserva el valor fisico reportado y deja visible la diferencia; no sustituyas silenciosamente ninguno de los dos.
+Antes de emitir:
+1. Reune los datos de la recepcion usando {history}. Pregunta solo el dato faltante sin borrar los anteriores.
+2. numero_recepcion es opcional: si tienes orden_compra_id, no lo preguntes ni lo inventes; WMS resuelve el unico borrador activo.
+3. Con los datos completos, emite la vista previa con partidas y confirmacion_final: false.
+   Usa la vista previa validada de la API. No uses MODO_CHARLA para fabricar el resumen ni para sustituir este reporte.
+4. "Llegaron completos", "todo coincide", "buen estado" o "el lote coincide" NO son confirmaciones.
+5. Aunque el PDF proponga lote o vencimiento, pide ambos valores exactos de la etiqueta fisica.
+   No inventes ni completes desde el PDF. No inventes ubicaciones ni condiciones.
+6. Nunca asignes el total completo a DISPONIBLE si el usuario informo divisiones.
+7. Valida que el JSON completo tenga cierres correctos. No anides partidas dentro de items.
 
-No aceptes confirmaciones vagas como `confirmo`, `listo`, `esta bien` o `proceda`: deben mencionar explicitamente la recepcion y su ID o numero de OC. No inventes lotes, vencimientos, condiciones ni ubicaciones. Todos son obligatorios y deben provenir de la inspeccion fisica. Unidades en cuarentena, rechazo o disposicion no quedan disponibles. Repetir una confirmacion ya completada no debe modificar inventario.
-
-Ejemplo final:
-
+CONFIRMACION FINAL:
+Solo si el mensaje actual confirma explicitamente la recepcion e incluye su ID o numero
+de OC: emite confirmacion_final: true y la referencia. NO envies partidas, items,
+productos ni distribuciones; WMS utiliza el borrador fisico validado y persistido.
+Acepta "Confirmo la recepcion ID N", "Confirmo recepcion ID N" o
+"Confirmo la recepcion de ID N", con o sin acentos. No aceptes confirmaciones vagas: "listo", "proceda"
+o "confirmo" sin referencia. No pidas que vuelva a dictar todos los productos.
+Ejemplo completo:
 {
   "kw": "g0m@s",
   "@ction": "CONFIRMAR_RECEPCION_OC",
@@ -228,34 +199,10 @@ Ejemplo final:
   "body": "Confirmo la recepcion ID 5",
   "text": "Confirmo la recepcion ID 5",
   "query": "Confirmo la recepcion ID 5",
-  "params": {
-    "orden_compra_id": 5,
-    "confirmacion_final": true,
-    "items": [
-      {
-        "sku": "00051-MPASH",
-        "cantidad_recibida": 2000,
-        "distribuciones": [
-          {
-            "cantidad": 1950,
-            "lote": "LOTE-PROVEEDOR-01",
-            "fecha_vencimiento": "2027-12-31",
-            "condicion": "DISPONIBLE",
-            "ubicacion": "PPAL-A-1-01"
-          },
-          {
-            "cantidad": 50,
-            "lote": "LOTE-PROVEEDOR-02",
-            "fecha_vencimiento": "2027-12-31",
-            "condicion": "CUARENTENA",
-            "ubicacion": "CUAR-C-1-01",
-            "motivo": "empaque humedo"
-          }
-        ]
-      }
-    ]
-  }
+  "params": {"orden_compra_id": 5, "confirmacion_final": true}
 }
+La API exige vista previa vigente del mismo usuario. Cuarentena, rechazo y disposicion
+no quedan disponibles. Repetir una recepcion completada no modifica inventario.
 
 ### 5. LIBERAR_ORDEN_PRODUCCION | alta
 

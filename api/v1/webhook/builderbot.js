@@ -133,6 +133,7 @@ const {
 
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
+const { receptionPartidas } = require('../../_lib/reception-partidas');
 const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
@@ -1480,7 +1481,7 @@ module.exports = async (req, res) => {
       case 'CONFIRMAR_RECEPCION_OC': {
         const confirmation = await confirmReceptionFromWhatsApp({
           db,
-          params,
+          params: receptionPartidas(params),
           rawText,
           user,
         });
