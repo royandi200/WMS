@@ -14,6 +14,12 @@ const OPERATIONS = Object.freeze({
 
 const reject = message => Object.assign(new Error(message), { status: 409 });
 
+function legacyMessageText(value) {
+  // BBC prefixes the copied current message with this transport timestamp.
+  // Do not strip arbitrary brackets, quoted messages or user-authored outer text.
+  return value.replace(/^\[(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4} \d{2}:\d{2}:\d{2}\]:\s*/, '');
+}
+
 function currentText(rawBody, info) {
   // Prefer independently transported text. Never substitute model prose/params
   // for a missing current message; legacy BBC still carries it in info.body.
@@ -23,7 +29,7 @@ function currentText(rawBody, info) {
       // BBC can retain a PDF trigger in outer fields after the PDF flow ends.
       // Only this exact transport marker is skipped; empty/negative text is not.
       if (/^_event_document__[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(source[key].trim())) continue;
-      return source[key];
+      return source === rawBody ? source[key] : legacyMessageText(source[key]);
     }
   }
   return '';
@@ -63,4 +69,4 @@ function additionalOperationInput(action, params, rawBody, info) {
   return { ...clean, [operation.flag]: true, [operation.base]: id || selected };
 }
 
-module.exports = { additionalOperationInput, currentText };
+module.exports = { additionalOperationInput, currentText, legacyMessageText };

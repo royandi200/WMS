@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { workflowFlags } = require('./feature-flags');
+const { assertDispatchQuantity } = require('./dispatch-confirmation-input');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -30,7 +31,7 @@ function buildDispatchLookup({ dispatchId, invoiceId }) {
   throw httpError(400, 'despacho_id o id_factura es obligatorio');
 }
 
-async function confirmImportedDispatch({ dispatchId, invoiceId, userId }) {
+async function confirmImportedDispatch({ dispatchId, invoiceId, userId, expectedQuantity }) {
   const lookup = buildDispatchLookup({ dispatchId, invoiceId });
   const conn = await createConnection();
   try {
@@ -79,6 +80,7 @@ async function confirmImportedDispatch({ dispatchId, invoiceId, userId }) {
       [dispatch.id]
     );
     if (!items.length) throw httpError(409, 'Despacho sin reservas de inventario');
+    assertDispatchQuantity(items, expectedQuantity);
     const dispatched = [];
     for (const item of items) {
       const quantity = Number(item.cantidad_sol || 0);

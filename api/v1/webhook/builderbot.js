@@ -81,7 +81,7 @@
 const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
-const { additionalOperationInput } = require('../../_lib/additional-operation-input');
+const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
 const { assertOperationalIntent, publicOperationalError } = require('../../_lib/operational-intent-guard');
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
@@ -132,6 +132,8 @@ const {
 } = require('../../_lib/builderbot-reception');
 
 // BB Cloud API token y Bot ID
+const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
+const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
@@ -168,7 +170,7 @@ function parseBuilderBotInfo(rawBody) {
         const parsed = JSON.parse(candidate);
         if (parsed && typeof parsed === 'object') return parsed;
       } catch {
-        return {};
+        return recoverReceptionPreview(candidate, rawBody) || {};
       }
     }
     if (typeof candidate === 'object') return candidate;
@@ -2526,10 +2528,12 @@ module.exports = async (req, res) => {
       }
 
       case 'CONFIRMAR_DESPACHO_SIIGO': {
+        const dispatchInput = dispatchConfirmationInput(currentText(rawBody, info), params);
         const dispatchResult = await confirmImportedDispatch({
           dispatchId: params.despacho_id || params.id_despacho,
           invoiceId: params.siigo_invoice_id || params.id_factura,
           userId: user.id,
+          ...dispatchInput,
         });
         const lots = (dispatchResult.lotes || []).map(item =>
           `- ${item.sku}: ${item.cantidad} und del lote ${item.lote}`

@@ -7,7 +7,7 @@ const { createRequire } = require('node:module');
 const { additionalOperationInput } = require('../api/_lib/additional-operation-input');
 
 // Exercise the real webhook dispatch without DB, network or inventory writes.
-function harness({ operationError } = {}) {
+function harness({ operationError, role = 'admin' } = {}) {
   const calls = [];
   const baseReads = [];
   const filename = path.resolve(__dirname, '../api/v1/webhook/builderbot.js');
@@ -16,7 +16,7 @@ function harness({ operationError } = {}) {
     async end() {},
     async execute(sql, args) {
       if (sql.includes('INSERT INTO webhook_logs')) return [{ affectedRows: 1 }];
-      if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: 'admin' }]];
+      if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];
       if (sql.includes('FROM ordenes_produccion o')) {
         baseReads.push(args);
@@ -33,6 +33,16 @@ function harness({ operationError } = {}) {
     },
   };
   const mocks = {
+    '../../_lib/dispatch-workflow': {
+      confirmImportedDispatch: async input => { calls.push(input); return { numero: 'DSP-QA', lotes: [] }; },
+    },
+    '../../_lib/builderbot-reception': {
+      ...nativeRequire('../../_lib/builderbot-reception'),
+      confirmReceptionFromWhatsApp: async input => {
+        calls.push(input);
+        return { requires_confirmation: true, inventory_changed: false, message: 'Resumen QA; confirma despues.' };
+      },
+    },
     '../../_lib/db': { createConnection: async () => db },
     '../../_lib/auth': { requireWebhookSecret() {} },
     '../../_lib/production-workflow': { releaseProductionOrder: async input => {
@@ -64,6 +74,41 @@ function harness({ operationError } = {}) {
     return body;
   } };
 }
+
+test('N1-05 real webhook: partial intent never reaches dispatch; complete confirmation still works', async () => {
+  const h = harness();
+  const result = await h.send('CONFIRMAR_DESPACHO_SIIGO',
+    'Confirma parcialmente el despacho ID 60 enviando solo 1 unidad de las 2 solicitadas.', { id_despacho: 60 });
+  assert.equal(result.ok, false);
+  assert.equal(h.calls.length, 0);
+  const complete = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60.', { id_despacho: 60 });
+  assert.equal(complete.ok, true, complete.mensaje);
+  assert.equal(h.calls.length, 1);
+  await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60 con 2 unidades.', { id_despacho: 60 });
+  assert.equal(h.calls[1].expectedQuantity, 2);
+});
+
+test('N1-09 real webhook: malformed mixed receipt reaches preview only, with RBAC preserved', async () => {
+  const text = 'Para la recepcion ID 18 llegaron 5 unidades, 3 disponibles, 1 cuarentena y 1 rechazada.';
+  const info = { '@ction': 'CONFIRMAR_RECEPCION_OC', body: text, params: {
+    orden_compra_id: 18, confirmacion_final: false, items: [{ sku: 'SKU-QA', cantidad_recibida: 5,
+      distribuciones: [3, 1, 1].map((cantidad, i) => ({ cantidad,
+        condicion: ['DISPONIBLE', 'CUARENTENA', 'RECHAZADO'][i], lote: 'LOT-QA',
+        ubicacion: 'B13', fecha_vencimiento: '2027-11-30', motivo: 'QA' })) }],
+  } };
+  const malformed = JSON.stringify(info).replace(/\}\]\}\]\}\}$/, '}]}}}');
+  for (const role of ['admin', 'alistador']) {
+    const h = harness({ role });
+    const result = await h.send('', '', {}, { body: text, text, info: malformed });
+    assert.equal(result.ok, role === 'admin', result.mensaje);
+    assert.equal(h.calls.length, role === 'admin' ? 1 : 0);
+    if (h.calls.length) {
+      assert.equal(h.calls[0].params.confirmacion_final, false);
+      assert.equal(result.context.reception.inventory_changed, false);
+      assert.equal(h.calls[0].params.items[0].distribuciones.length, 3);
+    }
+  }
+});
 
 test('RI-006/009: webhook blocks a customer return substituted for production materials or destruction', async () => {
   for (const text of ['Devuelvo 5 gramos de gomas de la orden ID 79',
@@ -153,6 +198,18 @@ for (const s of scenarios) {
     assert.equal((await denied.send(s.action, s.confirmation, s.flags,
       { body: marker, text: 'No confirmo otra operacion.' })).ok, false);
     assert.equal(denied.calls.length, 0);
+  });
+
+  test(`${s.name}: N1-04 exact BBC timestamp after PDF preserves explicit consent and base on replay`, async () => {
+    const h = harness();
+    const marker = '_event_document__cc05fd12-630d-4b49-b065-f9da56993581';
+    const text = '[Sunday, September 6, 2026 23:34:14]: ' + s.confirmation;
+    for (let i = 0; i < 2; i++) {
+      const result = await h.send(s.action, text, {}, { body: marker, text: marker, query: marker });
+      assert.equal(result.ok, true, result.mensaje);
+      assert.equal(h.calls[i][s.flag], true);
+      assert.equal(String(h.calls[i][s.base]), s.expectedBase);
+    }
   });
 
   test(`${s.name}: RI-004/008 repeated text cannot authorize model-generated additional flags`, async () => {
