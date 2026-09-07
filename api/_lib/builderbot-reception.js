@@ -424,7 +424,7 @@ async function resolveLocation(db, code, warehouseId) {
 async function buildConfirmationItems(db, preparedItems, params = {}, options = {}) {
   const incoming = suppliedItems(params);
   const preparedByProduct = new Map(preparedItems.map(item => [Number(item.producto_id), item]));
-  const seen = new Set();
+  const seen = new Map();
   const result = [];
 
   for (const item of incoming) {
@@ -435,8 +435,6 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
     const productId = Number(product.id);
     const prepared = preparedByProduct.get(productId);
     if (!prepared) throw inputError(`El producto ${reference} no pertenece al saldo pendiente de la OC`, 409);
-    if (seen.has(productId)) throw inputError(`El producto ${product.siigo_code} esta repetido`);
-    seen.add(productId);
     const distributions = [];
     for (const entry of itemDistributions(item)) {
       const location = await resolveLocation(
@@ -476,12 +474,38 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
       motivo: item.motivo_diferencia || item.motivo || null,
       distributions,
     };
-    const expected = prepared.cantidad_pendiente ?? prepared.cantidad_esp;
-    if (expected != null) validateReceptionItem(confirmedItem, expected, product.siigo_code);
-    else normalizeReceptionDistributions(confirmedItem);
-    result.push(confirmedItem);
+    // Validate each fragment's declared subtotal before joining disjoint distributions.
+    const normalized = normalizeReceptionDistributions(confirmedItem);
+    const keys = normalized.distributions.map(entry => JSON.stringify([
+      entry.supplierLot.toUpperCase(), entry.condition, entry.locationId,
+    ]));
+    const previous = seen.get(productId);
+    if (previous) {
+      if (keys.some(key => previous.keys.has(key))) {
+        throw inputError(`El producto ${product.siigo_code} tiene distribuciones repetidas. Indica una sola cantidad por lote, condicion y ubicacion`);
+      }
+      const reasons = [previous.item.motivo, confirmedItem.motivo].filter(Boolean);
+      if (new Set(reasons.map(reason => String(reason).trim())).size > 1) {
+        throw inputError(`Aclara el motivo de diferencia de ${product.siigo_code}`);
+      }
+      previous.item.distributions.push(...distributions);
+      if (previous.item.distributions.length > 20) throw inputError('Un item no puede superar 20 distribuciones');
+      previous.item.cantidad_recibida = Number((previous.total + normalized.totals.received).toFixed(4));
+      previous.item.motivo = reasons[0] || null;
+      previous.total = previous.item.cantidad_recibida;
+      keys.forEach(key => previous.keys.add(key));
+    } else {
+      seen.set(productId, { item: confirmedItem, keys: new Set(keys), total: normalized.totals.received });
+      result.push(confirmedItem);
+    }
   }
 
+  for (const item of result) {
+    const prepared = preparedByProduct.get(Number(item.product_id));
+    const expected = prepared.cantidad_pendiente ?? prepared.cantidad_esp;
+    if (expected != null) validateReceptionItem(item, expected, item.sku);
+    else normalizeReceptionDistributions(item);
+  }
   const missing = preparedItems.filter(item => !seen.has(Number(item.producto_id)));
   if (missing.length) {
     throw inputError(`Falta confirmar: ${missing.map(item => item.sku).join(', ')}`);
@@ -636,8 +660,9 @@ async function consumeReceptionDraft(db, receptionId, userId) {
 
 async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const order = await findPurchaseOrder(db, params);
+  const isExplicitConfirmation = explicitConfirmation(rawText, order, params);
   const requestedReception = await findPreparedReception(db, order.id, params, {
-    allowCompleted: order.estado === 'CERRADA',
+    allowCompleted: order.estado === 'CERRADA' || isExplicitConfirmation,
   });
   if (requestedReception.estado === 'completada') {
     return {
@@ -668,7 +693,6 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   if (Number(prepared.reception.id) !== Number(requestedReception.id)) {
     throw inputError('El borrador REC- no coincide con el saldo activo de la OC', 409);
   }
-  const isExplicitConfirmation = explicitConfirmation(rawText, order, params);
   let items;
   if (!isExplicitConfirmation) {
     items = await buildConfirmationItems(db, prepared.reception.items, params, { warehouseId: prepared.reception.bodega_id });

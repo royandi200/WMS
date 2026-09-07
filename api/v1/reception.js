@@ -332,10 +332,10 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
         `INSERT INTO kardex
            (id, tx_id, lot_id, product_id, user_id, action, qty, balance_after,
             reference, notes, approved_by, created_at)
-         VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION_BLOQUEADO', ?, ?, ?, ?, ?, NOW())`,
+         VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION', ?, ?, ?, ?, ?, NOW())`,
         [blockedIds.id, blockedIds.txId, groupedLots.get(entry.lot).id, item.producto_id,
          user.id, entry.quantity, balanceAfter, `recepcion:${reception.numero}`,
-         `Lote proveedor ${entry.supplierLot} | ${entry.condition} | Ubicacion ${entry.locationId} | ${entry.reason} | Operacion ${txId}`, user.id]
+         `Ingreso fisico bloqueado; disponible +0 | Lote proveedor ${entry.supplierLot} | ${entry.condition} | Ubicacion ${entry.locationId} | ${entry.reason} | Operacion ${txId}`, user.id]
       );
     }
   }

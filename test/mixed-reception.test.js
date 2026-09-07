@@ -65,7 +65,14 @@ function database({ failAt, invalidLocation = false, knownLots = [] } = {}) {
       if (sql.startsWith('SELECT id FROM stock')) return [[]];
       if (sql.startsWith('INSERT INTO stock')) { state.stock.push(values); return [{}]; }
       if (sql.startsWith('INSERT INTO movimientos')) { state.movements.push(values); return [{}]; }
-      if (sql.startsWith('INSERT INTO kardex')) { state.kardex.push({ sql, values }); return [{}]; }
+      if (sql.startsWith('INSERT INTO kardex')) {
+        const migration = fs.readFileSync(path.resolve(__dirname, '../database/28_outsourcing_before_purchase_order.sql'), 'utf8');
+        const enumBody = migration.match(/MODIFY COLUMN action ENUM\(([\s\S]*?)\)/)[1];
+        const allowed = [...enumBody.matchAll(/'([^']+)'/g)].map(match => match[1]);
+        const action = sql.match(/VALUES \(\?, \?, \?, \?, \?, '([^']+)'/)[1];
+        assert.ok(allowed.includes(action), `Unsupported live-schema Kardex event: ${action}`);
+        state.kardex.push({ sql, values }); return [{}];
+      }
       if (sql.startsWith('INSERT INTO recepcion_novedades') || sql.startsWith('UPDATE recepcion_items')) return [{}];
       if (sql.startsWith('SELECT producto_id, SUM(cantidad_ordenada)')) return [[{ producto_id: 104, cantidad: 5 }]];
       if (sql.startsWith('SELECT COALESCE(SUM(ri.cantidad_esp)')) return [[{ facturada: 5, fisica: 5 }]];
@@ -108,7 +115,8 @@ test('actual confirmation writes only 3 available, audits both blocked parts and
   assert.equal(conn.state.stock[0][5], 3);
   assert.equal(conn.state.movements.length, 1);
   assert.equal(conn.state.kardex.length, 3);
-  assert.equal(conn.state.kardex.filter(k => k.sql.includes('INGRESO_RECEPCION_BLOQUEADO')).length, 2);
+  assert.ok(conn.state.kardex.every(k => k.sql.includes("'INGRESO_RECEPCION'")));
+  assert.equal(conn.state.kardex.filter(k => k.values[8].includes('Ingreso fisico bloqueado; disponible +0')).length, 2);
   assert.equal(new Set(conn.state.kardex.map(k => k.values[1])).size, 3);
   assert.ok(conn.state.distributions.every(d => d[4] === mixed().distributions[0].lote));
   const before = JSON.stringify(conn.state);

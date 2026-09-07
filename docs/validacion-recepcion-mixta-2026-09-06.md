@@ -1,5 +1,83 @@
 # Recepcion mixta: mismo lote proveedor, distintas condiciones
 
+## Resultado real por WhatsApp: 2026-09-06, 22:18-22:30 Bogota
+
+**VALIDACION PARCIAL. Stock correcto; tres hallazgos abiertos.** Este corte sustituye
+los estados de publicacion/validacion pendiente de las secciones locales inferiores.
+
+- Publicado en main `1cd515646aaa2e56ec7c9eb67d83ab22567d6eac`; GitHub informo
+  despliegue Vercel exitoso. Sin acceso directo a Vercel. Migracion31 aplicada
+  previamente, aditiva y sin reescribir cantidades historicas.
+- Perfil emisor: Juan admin. Datana recepcion_cierre y Jobana alistador sin cambios.
+- OC6, recepcion61 `REC-OC-6-001`, SKU `00276-PTZNASHWA`, 5 und,
+  lote fisico `QA-PREVIEW-20260906-IO`, vence 2027-11-30.
+- No hubo carga/reenvio de PDF, cambios BBC, llamadas Siigo ni otra recepcion.
+
+### Secuencia y evidencia
+
+| Hora Bogota | Paso | Resultado observado |
+| --- | --- | --- |
+| 22:18 | Describir un producto, 5 und, distribucion 3/1/1 | Rechazado: producto repetido. Logs1746/1747: item_count2 para un solo SKU. Sin cambio de stock ni del resumen persistido anterior. |
+| 22:21-22:22 | Aclarar que es un solo producto y repetir distribucion | Resumen correcto: 3 disponibles B13; 1 cuarentena y 1 rechazada CUAR-C-1-01, cada una con motivo. Lote/fecha correctos. Logs1748/1749 y nuevo resumen persistido con un item, tres distribuciones. |
+| 22:22-22:23 | Confirmo la recepcion ID 6 | Confirmada 5/3/1/1. Logs1750/1751. Recepcion completada, OC RECIBIDA_PARCIAL con saldo2 por cantidades aceptadas. |
+| 22:27 | Repetir Confirmo la recepcion ID 6 | Rechazo incorrecto de UX: Prepara primero la recepcion de la OC. Logs1752/1753. Cero nuevas escrituras de inventario. |
+| 22:28 | Trazabilidad del lote proveedor | Relaciona las tres condiciones, cantidades recibidas, ubicaciones, motivos y partidas. Saldo seleccionado3. Mensaje expandido con Read more y leido completo. Logs1754/1755. |
+| 22:29 | Trazabilidad de partida cuarentena | Relaciona lote proveedor y las otras partidas, saldo1 CUARENTENA. Read more expandido y texto completo leido. Historial muestra tipo de evento vacio. Logs1756/1757. |
+| 22:28-22:30 | Dashboard Historico y Buscar Lote | Historico muestra las tres distribuciones y saldo OC2. Buscar Lote muestra recibido3/1/1, condicion, ubicacion, vencimiento y motivo; saldo de partida disponible3. |
+
+Mensaje corto que SI permitio generar el resumen:
+
+> Corrige el resumen de la recepcion ID 6. Es un solo producto: Zenova Ashwagandha.
+> Llegaron 5 unidades del lote QA-PREVIEW-20260906-IO, vencimiento 30 de noviembre
+> de 2027: 3 buenas en B13, 1 en cuarentena en CUAR-C-1-01 por revision de calidad
+> y 1 rechazada en CUAR-C-1-01 por empaque roto. Solo muestrame el resumen,
+> todavia no confirmes.
+
+### Comprobacion SQL
+
+| Medida | Antes | Despues de confirmar y repetir |
+| --- | --- | --- |
+| Stock SKU Zenova | 36.5 | 39.5 |
+| Lots | 159 | 162 |
+| Distribuciones recepcion | 42 | 45 |
+| Kardex | 358 | 361 |
+| Movimientos | 359 | 360 |
+
+Disponible: lote `QA-PREVIEW-20260906-IO`, qty_current3, stock3.
+Cuarentena: `RECBLK-3422e007c109a87963b8ffc42f983dc3`, qty_current1, stock0.
+Rechazado: `RECBLK-acc1ed044af584c638f2d457382b8a64`, qty_current1, stock0.
+Las tres distribuciones conservan el mismo lote_proveedor y vencimiento.
+Rechazado no fue destruido. No se liberaron partidas bloqueadas.
+
+### Hallazgos abiertos y siguiente arreglo acotado
+
+1. **RM-01, auditoria, prioridad alta de correccion:** MySQL real define
+   `kardex.action` como ENUM sin `INGRESO_RECEPCION_BLOQUEADO`; el codigo nuevo
+   `api/v1/reception.js:335` usa ese valor. Las dos entradas bloqueadas persistieron
+   con action vacio, aunque cantidades, lotes, saldo y notas son correctos.
+   Se verifico COLUMN_TYPE y las filas; no se certifica el sql_mode de aquella conexion.
+   Filas afectadas: `cb511164-71eb-4e5d-8337-b972cbcf71b0` y
+   `94015922-3711-4483-a66a-bf054de551f7`. La trazabilidad WhatsApp expone `| : +1.000`.
+   Requiere compatibilizar el evento con el esquema real y probar persistencia real
+   del tipo, no solo mocks. Cualquier reparacion debe limitarse a estas filas
+   verificadas, sin modificar cantidades y con registro de correccion.
+2. **RM-02, idempotencia conversacional:** repetir con ID6 no duplica pero pide
+   preparar de nuevo. `builderbot-reception.js:640` solo permite buscar completadas
+   si la OC esta CERRADA; aqui quedo RECIBIDA_PARCIAL. Resolver la ultima confirmacion
+   del usuario sin confundirla con una nueva recepcion parcial; no preparar ni confirmar
+   una nueva recepcion como forma de aprobar esta prueba.
+3. **RM-03, interpretacion:** el primer mensaje produjo dos items para un SKU y el
+   guard de `builderbot-reception.js:438` rechazo correctamente. La reformulacion
+   funciono, no es una correccion del problema original. BBC read_logs no entrego
+   JSON completo de ese intervalo: no atribuir a MCP, nombre PDF ni causa de prompt
+   especifica. Conservar el control de duplicados; agregar regresion de agrupacion
+   sin sumar inadvertidamente cantidades duplicadas.
+
+No se corrigieron estos tres hallazgos ni se reescribieron las dos filas de auditoria
+durante esta validacion. No ejecutar otra bateria completa para resolverlos: primero
+correccion acotada y revalidacion dirigida. Las 323 pruebas locales y el build pasaron,
+pero sus dobles SQL no detectaron la diferencia ENUM real ni certifican el E2E.
+
 Fecha: 2026-09-06, America/Bogota. Corte de implementacion local: 22:09.
 Base de implementacion: 2b7edc7. El corte de las secciones siguientes describe las pruebas locales.
 
