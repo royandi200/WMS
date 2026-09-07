@@ -114,6 +114,10 @@ El texto independiente del transporte tiene prioridad. En el contrato legacy,
 `info.body` sigue pasando por IA: esta proteccion no demuestra por si sola que
 ese texto sea una copia fiel del mensaje humano. No se usan explicaciones de
 la IA ni campos dentro de params como evidencia de consentimiento.
+El evento tecnico exacto `_event_document__<UUID>` se ignora como fuente de
+texto: BBC lo retuvo en los campos externos tras una carga PDF (log 1706).
+No se ignoran textos humanos vacios, negativos o contradictorios. Esto mantiene
+la limitacion del contrato legacy, no autentica independientemente `info.body`.
 
 Verificacion local: suite 295/295 y build correctos. Las pruebas utilizan
 dependencias/base simuladas, no inventario operativo. Sigue pendiente desplegar

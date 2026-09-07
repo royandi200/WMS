@@ -109,6 +109,25 @@ const scenarios = [
 ];
 
 for (const s of scenarios) {
+  test(`${s.name}: stale BBC document event is not human text or consent`, async () => {
+    const marker = '_event_document__d0df89e8-fa7a-417f-949b-1094374a38e1';
+    const outer = { body: marker, text: marker, query: marker };
+    const h = harness();
+    const result = await h.send(s.action, s.confirmation, {}, outer);
+    assert.equal(result.ok, true, result.mensaje);
+    assert.equal(h.calls[0][s.flag], true);
+    const repeat = harness();
+    await repeat.send(s.action, s.text, { ...s.params, ...s.flags }, outer);
+    assert.equal(repeat.calls[0][s.flag], false);
+    const missing = harness();
+    assert.equal((await missing.send(s.action, '', s.flags, outer)).ok, false);
+    assert.equal(missing.calls.length, 0);
+    const denied = harness();
+    assert.equal((await denied.send(s.action, s.confirmation, s.flags,
+      { body: marker, text: 'No confirmo otra operacion.' })).ok, false);
+    assert.equal(denied.calls.length, 0);
+  });
+
   test(`${s.name}: RI-004/008 repeated text cannot authorize model-generated additional flags`, async () => {
     const h = harness();
     assert.equal((await h.send(s.action, s.text, s.params)).ok, true);

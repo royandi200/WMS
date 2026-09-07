@@ -19,7 +19,11 @@ function currentText(rawBody, info) {
   // for a missing current message; legacy BBC still carries it in info.body.
   for (const source of [rawBody, info]) {
     for (const key of ['body', 'text', 'query']) {
-      if (typeof source?.[key] === 'string') return source[key];
+      if (typeof source?.[key] !== 'string') continue;
+      // BBC can retain a PDF trigger in outer fields after the PDF flow ends.
+      // Only this exact transport marker is skipped; empty/negative text is not.
+      if (/^_event_document__[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(source[key].trim())) continue;
+      return source[key];
     }
   }
   return '';
