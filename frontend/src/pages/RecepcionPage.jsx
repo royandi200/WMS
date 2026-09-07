@@ -878,7 +878,7 @@ function ReceptionTable({ rows, loading }) {
               ? r.diferencia_factura_fisica
               : Number(r.cantidad_esp || 0) - Number(r.cantidad_rec || 0)
             return (
-            <tr key={`${r.id}-${r.lote || ''}`} className="border-b border-border/50 hover:bg-white/[0.02]">
+              <tr key={`${r.id}-${r.recepcion_item_id || r.lote || ''}`} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs">{r.numero}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.orden_compra_numero || '-'}{r.ordenes_maquila && <span className="block text-primary">{r.ordenes_maquila}</span>}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.siigo_purchase_name || '-'}</td>
@@ -886,7 +886,13 @@ function ReceptionTable({ rows, loading }) {
               <td className="px-4 py-3">{r.proveedor_nombre || '-'}</td>
               <td className="px-4 py-3 font-mono text-xs">{r.sku || '-'}</td>
               <td className="px-4 py-3">{r.producto_nombre || '-'}</td>
-              <td className="px-4 py-3 font-mono text-xs">{r.lote || '-'}</td>
+                <td className="px-4 py-3 text-xs min-w-64">{r.distribuciones?.length
+                  ? r.distribuciones.map((d, index) => <div key={index} className="mb-2 last:mb-0">
+                      <span className="font-mono break-all">{d.lote}</span>
+                      <span className="block">{Number(d.cantidad)} | {d.condicion} | {d.ubicacion || '-'}</span>
+                      {d.motivo && <span className="block text-muted">{d.motivo}</span>}
+                    </div>)
+                  : (r.lote || '-')}</td>
               <td className="px-4 py-3 tabular-nums text-xs">{r.cantidad_oc ?? '-'} / {documentQuantity ?? '-'} / {r.cantidad_aceptada_acumulada ?? r.cantidad_fisica ?? r.cantidad_rec ?? '-'}</td>
               <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.saldo_oc) > 0 ? 'text-yellow-400' : 'text-green-400'}>Saldo OC: {r.saldo_oc ?? '-'}</span><span className={`block ${Number(documentDifference) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>{usesSiigoInvoice ? 'Factura-Fisico' : 'Documento-Fisico'}: {documentDifference ?? '-'}</span></td>
               <td className="px-4 py-3">{r.usuario_nombre || '-'}</td>

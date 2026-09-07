@@ -2,6 +2,8 @@
 const { query } = require('../../_lib/db');
 const { cors, requireAuth } = require('../../_lib/auth');
 const { DEFAULT_DWELL_DAYS } = require('../../_lib/inventory-aging');
+const { STOCK_JOINS_SQL, AVAILABLE_STOCK_SQL } = require('../../_lib/inventory-availability');
+const { quantityTotals } = require('../../_lib/quantity-totals');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -14,13 +16,19 @@ module.exports = async (req, res) => {
       `SELECT
          COUNT(DISTINCT s.producto_id)              AS total_productos,
          SUM(s.cantidad)                            AS total_unidades,
-         SUM(CASE WHEN p.activo=1 THEN 1 ELSE 0 END) AS productos_activos,
+         COUNT(DISTINCT CASE WHEN p.activo=1 THEN p.id END) AS productos_activos,
          SUM(s.cantidad - s.reservada)              AS disponible,
          SUM(s.reservada)                           AS reservado
        FROM stock s
        LEFT JOIN productos p ON p.id = s.producto_id`
     );
     const totals = totalsRows[0];
+    const stockRows = await query(`SELECT s.cantidad, COALESCE(s.reservada, 0) AS reservada,
+      ${AVAILABLE_STOCK_SQL} AS disponible, NULLIF(p.unit_label, '') AS unidad
+      FROM stock s JOIN productos p ON p.id = s.producto_id ${STOCK_JOINS_SQL}`);
+    const quantities = quantityTotals(stockRows);
+    const available = quantityTotals(stockRows, 'disponible');
+    const reserved = quantityTotals(stockRows, 'reservada');
 
     const bajoRows = await query(
       `SELECT COUNT(*) AS cnt
@@ -60,10 +68,13 @@ module.exports = async (req, res) => {
       ok: true,
       data: {
         total_productos:      Number(totals.total_productos)   || 0,
-        total_unidades:       Number(totals.total_unidades)    || 0,
+        total_unidades:       quantities.length <= 1 ? (quantities[0]?.quantity || 0) : null,
+        cantidades_por_unidad: quantities,
+        disponible_por_unidad: available,
+        reservado_por_unidad: reserved,
         productos_activos:    Number(totals.productos_activos) || 0,
-        disponible:           Number(totals.disponible)        || 0,
-        reservado:            Number(totals.reservado)         || 0,
+        disponible:           available.length <= 1 ? (available[0]?.quantity || 0) : null,
+        reservado:            reserved.length <= 1 ? (reserved[0]?.quantity || 0) : null,
         bajo_stock:           Number(bajo_stock),
         alertas_stock:        Number(alertasRows[0]?.cnt)      || 0,
         vencimientos_proximos:Number(vencRows[0]?.cnt)         || 0,

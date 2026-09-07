@@ -141,7 +141,25 @@ async function handleGet(req, res) {
      LIMIT ?`,
     [limit]
   );
-  return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
+  const ids = [...new Set(rows.map(row => row.recepcion_item_id).filter(Boolean))];
+  const distributions = ids.length ? await query(
+    `SELECT rd.recepcion_item_id, rd.lote, rd.cantidad, rd.condicion, rd.motivo,
+            u.codigo AS ubicacion, rd.fecha_venc
+       FROM recepcion_distribuciones rd
+       LEFT JOIN ubicaciones u ON u.id = rd.ubicacion_id
+      WHERE rd.recepcion_item_id IN (${ids.map(() => '?').join(',')})
+      ORDER BY rd.id`, ids
+  ) : [];
+  const byItem = new Map();
+  for (const distribution of distributions) {
+    const key = Number(distribution.recepcion_item_id);
+    if (!byItem.has(key)) byItem.set(key, []);
+    byItem.get(key).push(distribution);
+  }
+  return res.status(200).json({ ok: true, data: {
+    rows: rows.map(row => ({ ...row, distribuciones: byItem.get(Number(row.recepcion_item_id)) || [] })),
+    total: rows.length,
+  } });
 }
 
 function receivedItemInput(body, item, totalItems) {

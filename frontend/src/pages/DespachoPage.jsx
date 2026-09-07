@@ -81,7 +81,7 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[1100px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Factura', 'Despacho', 'Cliente', 'SKU', 'Lote / ubicacion', 'Facturado', 'Asignado', 'Reserva activa', 'Despachado', 'Pendiente', 'Estado', 'Fecha', 'Accion'].map((label) => (
+          {['Factura', 'Despacho', 'Cliente', 'SKU', 'Lote / ubicacion', 'Facturado', 'Asignado', 'Reserva activa', 'Despachado', 'Sin asignar', 'Estado', 'Fecha', 'Accion'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>

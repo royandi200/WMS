@@ -63,4 +63,4 @@ function additionalOperationInput(action, params, rawBody, info) {
   return { ...clean, [operation.flag]: true, [operation.base]: id || selected };
 }
 
-module.exports = { additionalOperationInput };
+module.exports = { additionalOperationInput, currentText };

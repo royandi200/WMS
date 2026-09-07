@@ -7,7 +7,7 @@ const { createRequire } = require('node:module');
 const { additionalOperationInput } = require('../api/_lib/additional-operation-input');
 
 // Exercise the real webhook dispatch without DB, network or inventory writes.
-function harness() {
+function harness({ operationError } = {}) {
   const calls = [];
   const baseReads = [];
   const filename = path.resolve(__dirname, '../api/v1/webhook/builderbot.js');
@@ -44,6 +44,7 @@ function harness() {
       ...nativeRequire('../../_lib/returns-workflow'),
       createCustomerReturn: async input => {
         calls.push(input);
+        if (operationError) throw operationError;
         return { numero: 'DEV-QA', already_completed: true,
           requires_confirmation: !input.confirmar_nueva_devolucion };
       },
@@ -63,6 +64,32 @@ function harness() {
     return body;
   } };
 }
+
+test('RI-006/009: webhook blocks a customer return substituted for production materials or destruction', async () => {
+  for (const text of ['Devuelvo 5 gramos de gomas de la orden ID 79',
+    'Destruye una unidad de la devolucion ID 30']) {
+    const h = harness();
+    const result = await h.send('GESTION_DEVOLUCION', text, {
+      id_item: 'SKU-QA', cantidad: 1, estado: 'CUARENTENA', lote_origen: 'LOT-QA',
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.mensaje, /No se (?:modifico inventario|registro otra operacion)/);
+    assert.equal(h.calls.length, 0);
+  }
+});
+
+test('webhook hides SQL failures and does not automatically repeat a failed inventory operation', async () => {
+  const h = harness({ operationError: Object.assign(new Error('SQL internal details'), {
+    code: 'ER_LOCK_DEADLOCK', sql: 'UPDATE private_table SET value=secret',
+  }) });
+  const result = await h.send('GESTION_DEVOLUCION', 'Registra una devolucion del cliente', {
+    id_item: 'SKU-QA', cantidad: 1, estado: 'CUARENTENA', lote_origen: 'LOT-QA',
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.mensaje, /concurrencia/);
+  assert.doesNotMatch(JSON.stringify(result), /private_table|secret|SQL internal/);
+  assert.equal(h.calls.length, 1);
+});
 
 test('consent accepts accents/case and short IDs, but not another operation or two bases', () => {
   const action = 'GESTION_DEVOLUCION';

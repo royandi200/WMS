@@ -82,6 +82,7 @@ const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput } = require('../../_lib/additional-operation-input');
+const { assertOperationalIntent, publicOperationalError } = require('../../_lib/operational-intent-guard');
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
@@ -877,61 +878,30 @@ function supervisorNotificationLine(notification) {
 }
 
 async function queryStockDisponible(db, { sku, bodega, tipoFiltro }) {
-  try {
-    if (sku) {
-      const [rows] = await db.execute(
-        `SELECT lote, disponible, vence, estado_lote, ubicacion
-         FROM v_stock_disponible
-         WHERE sku = ? AND bodega = ?
-         ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, lote ASC`,
-        [sku, bodega]
-      );
-      return { modo: 'vista', rows };
-    } else {
-      const [rows] = await db.execute(
-        `SELECT sku, nombre, SUM(disponible) AS total
-         FROM v_stock_disponible
-         WHERE tipo_producto = ? AND bodega = ?
-         GROUP BY sku, nombre
-         ORDER BY total DESC LIMIT 10`,
-        [tipoFiltro, bodega]
-      );
-      return { modo: 'vista_resumen', rows };
-    }
-  } catch (_) {
-    if (sku) {
-      const [rows] = await db.execute(
-        `SELECT s.lote,
-                (s.cantidad - s.reservada) AS disponible,
-                l.expiry_date AS vence,
-                COALESCE(l.status, 'DISPONIBLE') AS estado_lote,
-                b.codigo AS bodega_codigo,
-                u.codigo AS ubicacion
-         FROM stock s
-         JOIN productos p  ON p.id  = s.producto_id
-         JOIN bodegas   b  ON b.id  = s.bodega_id
-         LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id
-         LEFT JOIN lots l  ON l.lpn = s.lote
-         WHERE p.siigo_code = ?
-         ORDER BY b.id ASC,
-                  CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
-                  l.expiry_date ASC, s.id ASC`,
-        [sku]
-      );
-      return { modo: 'fallback', rows };
-    } else {
-      const [rows] = await db.execute(
-        `SELECT p.siigo_code AS sku, p.nombre,
-                COALESCE(SUM(s.cantidad - s.reservada), 0) AS total
-         FROM productos p
-         LEFT JOIN stock s ON s.producto_id = p.id
-         WHERE p.activo = 1 AND p.tipo_producto = ?
-         GROUP BY p.id ORDER BY total DESC LIMIT 10`,
-        [tipoFiltro]
-      );
-      return { modo: 'fallback_resumen', rows };
-    }
+  const { STOCK_JOINS_SQL, AVAILABLE_STOCK_SQL } = require('../../_lib/inventory-availability');
+  if (sku) {
+    const [rows] = await db.execute(
+      `SELECT s.lote, ${AVAILABLE_STOCK_SQL} AS disponible,
+              s.cantidad AS saldo_fisico,
+              COALESCE(l.expiry_date, s.fecha_venc) AS vence,
+              l.status AS estado_lote, u.codigo AS ubicacion
+         FROM stock s JOIN productos p ON p.id = s.producto_id ${STOCK_JOINS_SQL}
+        WHERE p.siigo_code = ? AND b.codigo = ? AND s.cantidad > 0
+        ORDER BY CASE WHEN vence IS NULL THEN 1 ELSE 0 END, vence ASC, s.id ASC`,
+      [sku, bodega]
+    );
+    return { modo: 'stock_elegible', rows };
   }
+  const [rows] = await db.execute(
+    `SELECT p.siigo_code AS sku, p.nombre, p.unit_label AS unidad,
+            COALESCE(SUM(${AVAILABLE_STOCK_SQL}), 0) AS total
+       FROM stock s JOIN productos p ON p.id = s.producto_id ${STOCK_JOINS_SQL}
+      WHERE p.activo = 1 AND p.tipo_producto = ? AND b.codigo = ?
+      GROUP BY p.id, p.siigo_code, p.nombre, p.unit_label
+      ORDER BY total DESC LIMIT 10`,
+    [tipoFiltro, bodega]
+  );
+  return { modo: 'stock_elegible_resumen', rows };
 }
 
 // findFifoLot — selecciona el lote FIFO más antiguo con stock disponible
@@ -1347,6 +1317,7 @@ module.exports = async (req, res) => {
 
     let mensaje = '';
 
+    assertOperationalIntent(action, rawBody, info);
     params = additionalOperationInput(action, params, rawBody, info);
 
     switch (action) {
@@ -2770,7 +2741,7 @@ module.exports = async (req, res) => {
               }
               // 2) En cuarentena por estado_lote
               if (r.estado_lote === 'CUARENTENA') {
-                lotesCuarentenaInfo.push({ lpnCorto, disp });
+                lotesCuarentenaInfo.push({ lpnCorto, disp: Number(r.saldo_fisico || 0) });
                 continue;
               }
               // 3) Disponible real
@@ -2812,7 +2783,7 @@ module.exports = async (req, res) => {
           }
         } else {
           const lines = result.rows.length
-            ? result.rows.map(r => `  • ${r.sku}: *${parseFloat(r.total)} und*`).join('\n')
+            ? result.rows.map(r => `  • ${r.sku}: *${parseFloat(r.total)} ${r.unidad || 'sin unidad'}*`).join('\n')
             : '  (Sin stock registrado)';
           mensaje = `📦 *Stock ${label} — Top 10:*\n${lines}`;
         }
@@ -3404,11 +3375,12 @@ module.exports = async (req, res) => {
     status: isBusinessError ? 'REJECTED' : 'ERROR'
   }).catch(() => {});
 
+  const publicMessage = publicOperationalError(err);
   const body = {
     ok: false,
-    message: `❌ ${errMsg}`,
-    mensaje: `❌ ${errMsg}`,
-    error: errMsg,
+    message: `❌ ${publicMessage}`,
+    mensaje: `❌ ${publicMessage}`,
+    error: publicMessage,
     status: statusCode
   };
 

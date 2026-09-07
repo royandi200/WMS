@@ -240,6 +240,7 @@ async function releaseProductionOrder({
         '*Materiales FEFO*',
         ...picking.flatMap((item, index) => [
           `${index + 1}. *${item.sku}*`,
+          `   Producto: ${item.producto}`,
           `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
           `   Lote: ${item.lote}`,
           `   Ubicacion: ${item.ubicacion || item.ubicacion_id}`,

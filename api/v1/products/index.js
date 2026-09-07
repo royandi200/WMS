@@ -2,6 +2,7 @@
 // POST /api/v1/products  — crear producto
 const { query } = require('../../_lib/db');
 const { cors, requireAuth, requireRole } = require('../../_lib/auth');
+const { STOCK_JOINS_SQL, AVAILABLE_STOCK_SQL } = require('../../_lib/inventory-availability');
 
 // Mapea una fila de producto + métricas dashboard al contrato que espera el frontend.
 const toRow = (row) => ({
@@ -53,7 +54,8 @@ module.exports = async (req, res) => {
           p.*,
           vd.producto_id,
           vd.sku,
-          vd.disponible,
+          COALESCE((SELECT SUM(${AVAILABLE_STOCK_SQL}) FROM stock s
+            ${STOCK_JOINS_SQL} WHERE s.producto_id = p.id), 0) AS disponible,
           vd.cuarentena,
           vd.reservado,
           vd.total_fisico,
@@ -102,7 +104,10 @@ module.exports = async (req, res) => {
 
       return res.status(200).json({
         ok: true,
-        data: { rows: rows.map(toRow), total: Number(countRows[0]?.total ?? 0) }
+        data: { rows: rows.map(row => toRow({ ...row,
+          semaforo: Number(row.disponible) <= 0 ? 'CRITICO'
+            : Number(row.stock_minimo) > 0 && Number(row.disponible) <= Number(row.stock_minimo) ? 'ATENCION' : 'OK',
+        })), total: Number(countRows[0]?.total ?? 0) }
       });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ ok: false, error: err.message });

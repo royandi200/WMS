@@ -139,6 +139,17 @@ En esta seleccion no destructiva, tolera variaciones habituales de voz como `ID 
 
 ### 5. CONFIRMAR_RECEPCION_OC | alta
 
+Una recepcion puede dividir UN MISMO SKU entre varios lotes, condiciones y ubicaciones.
+No es una conversacion general ni tres operaciones independientes. Conserva un item
+por SKU y todas sus divisiones dentro de `distribuciones`. Si dice que llegaron 5,
+3 disponibles, 1 en cuarentena y 1 rechazada, conserva 3+1+1, no asignes las 5 a
+DISPONIBLE. Cada division requiere cantidad, lote, vencimiento, condicion y ubicacion;
+CUARENTENA y RECHAZADO tambien requieren motivo. Si falta un dato, pregunta solo ese
+dato sin borrar las otras divisiones. No uses MODO_CHARLA cuando ya estan completos:
+emite la vista previa con confirmacion_final=false, nunca confirmes por tu cuenta.
+Ejemplo de params (solo si estos valores fueron informados por el operario):
+{"orden_compra_id":15,"confirmacion_final":false,"items":[{"sku":"00276-PTZNASHWA","cantidad_recibida":5,"distribuciones":[{"cantidad":3,"condicion":"DISPONIBLE","lote":"QA-A","fecha_venc":"2027-12-31","ubicacion":"B13"},{"cantidad":1,"condicion":"CUARENTENA","lote":"QA-Q","fecha_venc":"2027-12-31","ubicacion":"CUAR-C-1-01","motivo":"revision de calidad"},{"cantidad":1,"condicion":"RECHAZADO","lote":"QA-R","fecha_venc":"2027-12-31","ubicacion":"B13","motivo":"empaque danado"}]}]}
+
 Confirma la recepcion fisica completa contra una OC preparada. Esta es una operacion de inventario y exige doble verificacion.
 
 Obligatorios:
@@ -293,6 +304,12 @@ No inventes lotes. La API usa las reservas FEFO existentes.
 ### 7. AJUSTAR_MATERIALES_PRODUCCION | alta
 
 Registra materia prima adicional entregada o devolución de material durante una OP.
+
+Prioridad de intencion: "devuelvo 5 gramos de gomas de la orden ID 79" o "sobraron
+materiales de OP-..." corresponde a AJUSTAR_MATERIALES_PRODUCCION con tipo DEVOLUCION,
+NO a GESTION_DEVOLUCION (esta ultima es retorno de cliente contra despacho).
+Conserva id_orden, id_item (SKU o alias), cantidad, id_lote y ubicacion informados;
+pregunta solo los faltantes. No inventes despacho, cliente ni referencias nuevas.
 
 Obligatorios:
 - `id_orden`
@@ -462,7 +479,7 @@ Para `RECUPERABLE`, `ubicacion` tambien es obligatoria. `CUARENTENA` se dirige a
 - `RECUPERABLE`: puede volver a stock siguiendo la validación del WMS.
 - `CUARENTENA`: no queda disponible.
 
-La disposicion final o destruccion esta deshabilitada. No emitas `DESTRUCCION`; conserva la devolucion en `CUARENTENA` hasta que exista una decision posterior del cliente.
+La disposicion final o destruccion esta deshabilitada. Si solicitan destruir, NO emitas GESTION_DEVOLUCION, REPORTE_MERMA ni un ajuste alternativo. Responde mediante MODO_CHARLA que esta opcion no esta habilitada y no se modifico inventario. Nunca reemplaces DESTRUCCION por CUARENTENA o RECUPERABLE. Una devolucion a cuarentena solo se registra si el usuario la solicita como tal.
 
 ### 14. Consultas | baja
 

@@ -1,6 +1,7 @@
 const { query } = require('../../_lib/db');
 const { cors, requireAuth } = require('../../_lib/auth');
 const { DEFAULT_DWELL_DAYS } = require('../../_lib/inventory-aging');
+const { STOCK_JOINS_SQL, AVAILABLE_STOCK_SQL } = require('../../_lib/inventory-availability');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -36,14 +37,15 @@ module.exports = async (req, res) => {
               COALESCE((SELECT SUM(s.reservada) FROM stock s
                          WHERE s.producto_id = l.product_id AND s.bodega_id = l.bodega_id
                            AND s.lote = l.lpn), 0) AS reservada,
-              CASE WHEN l.status = 'DISPONIBLE'
-                   THEN GREATEST(l.qty_current - COALESCE((SELECT SUM(s.reservada) FROM stock s
-                                WHERE s.producto_id = l.product_id AND s.bodega_id = l.bodega_id
-                                  AND s.lote = l.lpn), 0), 0)
-                   ELSE 0 END AS disponible
+              COALESCE(eligible.disponible, 0) AS disponible
          FROM lots l
          JOIN productos p ON p.id = l.product_id
          JOIN bodegas b ON b.id = l.bodega_id
+         LEFT JOIN (
+           SELECT l.id AS lot_id, SUM(${AVAILABLE_STOCK_SQL}) AS disponible
+             FROM stock s ${STOCK_JOINS_SQL}
+            GROUP BY l.id
+         ) eligible ON eligible.lot_id = l.id
         WHERE l.qty_current > 0
           AND l.status NOT IN ('DESPACHADO', 'AGOTADO')
           AND DATEDIFF(CURDATE(), DATE(l.created_at)) >= p.permanencia_max_dias

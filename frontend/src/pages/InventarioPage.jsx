@@ -1,5 +1,5 @@
 import MapaBodega from '../components/MapaBodega'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
 
 const TABS = ['Resumen', 'Stock Bajo', 'Permanencia', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
@@ -9,6 +9,7 @@ export default function InventarioPage() {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState(null)
   const [searched, setSearched] = useState(false)
+  const requestVersion = useRef(0)
 
   const {
     summary, lowStock, aging, loading, loadingAging, error,
@@ -18,15 +19,17 @@ export default function InventarioPage() {
   useEffect(() => { fetchSummary() }, [])
   useEffect(() => { if (tab === 1) fetchLowStock() }, [tab])
   useEffect(() => { if (tab === 2) fetchAging() }, [tab])
-  useEffect(() => { setQuery(''); setResult(null); setSearched(false); clearError() }, [tab])
+  useEffect(() => { requestVersion.current += 1; setQuery(''); setResult(null); setSearched(false); clearError() }, [tab])
 
   const handleSearch = async (e) => {
     e.preventDefault()
     if (!query.trim()) return
+    const version = ++requestVersion.current
     setSearched(false)
     const data = tab === 3
       ? await fetchProductStock(query.trim())
       : await fetchLotDetail(query.trim())
+    if (version !== requestVersion.current) return
     setResult(data)
     setSearched(true)
   }
@@ -62,10 +65,12 @@ export default function InventarioPage() {
           {loading && !summary && <Spinner />}
           {summary && (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {Object.entries(summary).filter(([key]) => key !== 'permanencia_dias').map(([k, v]) => (
+              {Object.entries(summary).filter(([key]) => !['permanencia_dias', 'total_unidades', 'disponible', 'reservado'].includes(key)).map(([k, v]) => (
                 <div key={k} className="bg-surface border border-border rounded-lg p-4">
                   <p className="text-xs text-muted mb-1 capitalize">{k.replace(/_/g, ' ')}</p>
-                  <p className="text-2xl font-bold text-primary tabular-nums">{v ?? '—'}</p>
+                  <p className="text-xl font-bold text-primary tabular-nums break-words">{Array.isArray(v)
+                    ? v.map(({ quantity, unit }) => <span className="block" key={unit}>{Number(quantity).toLocaleString('es-CO', { maximumFractionDigits: 4 })} {unit}</span>)
+                    : (v ?? '—')}</p>
                 </div>
               ))}
             </div>
