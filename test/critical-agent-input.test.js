@@ -31,7 +31,7 @@ test('N1-05: model omission cannot turn a partial request into a full dispatch',
   assert.throws(() => dispatchConfirmationInput('Confirma despacho ID 60.', { parcial: true }), e => e.status === 409);
 });
 
-const text = 'Para la recepcion ID 18 llegaron 5 unidades: 3 disponibles, 1 cuarentena y 1 rechazada.';
+const text = 'Para la recepcion OC ID 18 llegaron 5 unidades: 3 disponibles, 1 cuarentena y 1 rechazada.';
 function envelope() {
   return { kw: 'g0m@s', '@ction': 'CONFIRMAR_RECEPCION_OC', body: text,
     params: { orden_compra_id: 18, confirmacion_final: false, items: [{
@@ -54,7 +54,7 @@ test('recovery fails closed for truncation, changed values, missing evidence or 
   const e = envelope();
   const damaged = x => JSON.stringify(x).replace(/\}\]\}\]\}\}$/, '}]}}}');
   assert.equal(recoverReceptionPreview(damaged(e), {}), null);
-  assert.equal(recoverReceptionPreview(damaged(e), { body: 'Confirmo la recepcion ID 18' }), null);
+  assert.equal(recoverReceptionPreview(damaged(e), { body: 'Confirmo la recepcion OC ID 18' }), null);
   e.params.confirmacion_final = true;
   assert.equal(recoverReceptionPreview(damaged(e), { body: text }), null);
   e.params.confirmacion_final = false; e.params.items[0].cantidad_recibida = 9;

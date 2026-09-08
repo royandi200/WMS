@@ -200,6 +200,30 @@ function confirmationMatchesReference(text, entity, idParam) {
   return Boolean(hasReference || hasShortId);
 }
 
+function purchaseOrderTextReference(rawText, order) {
+  const text = String(rawText || '').trim();
+  const number = String(order?.numero || (typeof order === 'string' ? order : '') || '').trim();
+  if (number && new RegExp(
+    `(^|[^A-Z0-9])${escapeRegExp(number)}([^A-Z0-9]|$)`,
+    'iu'
+  ).test(text)) return true;
+  const id = Number(order?.id || 0);
+  if (!Number.isSafeInteger(id) || id <= 0) return false;
+  const typedId = new RegExp(
+    `\\b(?:OC|O\\s*\\.?\\s*C\\.?|ORDEN\\s+DE\\s+COMPRA)\\s*(?:ID|#|NUMERO|NRO)?\\s*#?\\s*${escapeRegExp(id)}\\b`,
+    'iu'
+  );
+  return typedId.test(text);
+}
+
+function assertPurchaseOrderTextReference(rawText, order) {
+  if (purchaseOrderTextReference(rawText, order)) return;
+  throw inputError(
+    `El ID ${order.id} es ambiguo. Para una compra directa escribe \"OC ID ${order.id}\". Las ordenes \"MQ ID\" se reciben desde Producto desde 3Q en el dashboard.`,
+    409
+  );
+}
+
 function explicitPurchaseOrderConfirmation(rawText, draft, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
   const text = String(rawText || '').trim();
@@ -293,8 +317,15 @@ async function findCompletedReception(db, purchaseOrderId) {
   return rows[0] || null;
 }
 
-async function prepareReceptionFromPurchaseOrder({ db, params, userId }) {
+async function prepareReceptionFromPurchaseOrder({
+  db,
+  params,
+  userId,
+  rawText,
+  requireExplicitTextReference = false,
+}) {
   const order = await findPurchaseOrder(db, params);
+  if (requireExplicitTextReference) assertPurchaseOrderTextReference(rawText, order);
   const completed = await findCompletedReception(db, order.id);
   if (order.estado === 'CERRADA' && completed) {
     return { order, reception: completed, alreadyCompleted: true };
@@ -321,7 +352,7 @@ function explicitConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
   const text = String(rawText || '').trim();
   return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepci[oó]n\b/iu.test(text)
-    && confirmationMatchesReference(text, order, params.orden_compra_id);
+    && purchaseOrderTextReference(text, order);
 }
 
 function receptionConfirmationKey(orderId, receptionId, params = {}) {
@@ -554,7 +585,7 @@ function buildReceptionReview(order, reception, items) {
     comparesDocumentValues
       ? 'El PDF es una referencia. Confirma siempre los valores leidos en la etiqueta fisica; cualquier diferencia queda visible en este resumen.'
       : null,
-    `Si todo coincide, escribe: Confirmo la recepcion ID ${order.id}`,
+    `Si todo coincide, escribe: Confirmo la recepcion OC ID ${order.id}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -660,6 +691,7 @@ async function consumeReceptionDraft(db, receptionId, userId) {
 
 async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const order = await findPurchaseOrder(db, params);
+  assertPurchaseOrderTextReference(rawText, order);
   const isExplicitConfirmation = explicitConfirmation(rawText, order, params);
   const requestedReception = await findPreparedReception(db, order.id, params, {
     allowCompleted: order.estado === 'CERRADA' || isExplicitConfirmation,
@@ -765,6 +797,8 @@ module.exports = {
   findPurchaseOrderDocumentDraft,
   reviewPurchaseOrderDocumentDraft,
   explicitPurchaseOrderConfirmation,
+  purchaseOrderTextReference,
+  assertPurchaseOrderTextReference,
   confirmPurchaseOrderDocumentDraft,
   purchaseOrderReference,
   findPurchaseOrder,

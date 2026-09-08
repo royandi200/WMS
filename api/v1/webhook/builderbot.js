@@ -1344,7 +1344,7 @@ module.exports = async (req, res) => {
           const directLines = directGroups.flatMap(([label, orders]) => [
             `*${label} (${orders.length})*`,
             ...orders.flatMap(order => [
-              `ID ${order.id} | ${order.numero}`,
+              `OC ID ${order.id} | ${order.numero}`,
               `Proveedor: ${order.proveedor_nombre || 'N/A'}`,
               `Fecha: ${formatDateOnly(order.fecha_orden)}`,
               ...order.items.map(item =>
@@ -1373,7 +1373,7 @@ module.exports = async (req, res) => {
             ...directLines,
             ...outsourcingLines,
             '',
-            ...(available.length ? [`Para una OC directa responde, por ejemplo: prepara la recepcion ID ${available[0].id}.`] : []),
+            ...(available.length ? [`Para una OC directa responde, por ejemplo: prepara la recepcion OC ID ${available[0].id}.`] : []),
             '',
             'Produccion propia: el producto terminado ingresa al cerrar la orden de produccion, no mediante una recepcion.',
             '',
@@ -1444,6 +1444,8 @@ module.exports = async (req, res) => {
           db,
           params,
           userId: user.id,
+          rawText,
+          requireExplicitTextReference: true,
         });
         if (prepared.alreadyCompleted) {
           mensaje = `La OC ${prepared.order.numero} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;
@@ -1467,7 +1469,7 @@ module.exports = async (req, res) => {
           'Pendiente fisico:',
           ...pending,
           'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, condicion, lote, vencimiento y ubicacion para cada item. La ubicacion sugerida es flexible. Los datos del PDF son solo referencia y deben cotejarse contra la etiqueta fisica.',
-          `Antes de afectar inventario deberas escribir: Confirmo la recepcion ID ${prepared.order.id}`,
+          `Antes de afectar inventario deberas escribir: Confirmo la recepcion OC ID ${prepared.order.id}`,
         ].join('\n');
         responseContext.reception = {
           reception_id: prepared.reception.id,

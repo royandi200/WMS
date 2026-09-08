@@ -72,7 +72,7 @@ function replayDb({ active = [], completed = true } = {}) {
   } };
 }
 const replay = db => confirmReceptionFromWhatsApp({ db, params: { orden_compra_id: 6, confirmacion_final: true },
-  rawText: 'Confirmo la recepcion ID 6', user: { id: 5 } });
+  rawText: 'Confirmo la recepcion OC ID 6', user: { id: 5 } });
 
 test('explicit confirmation of partial OC without active reception reports completed using read-only queries', async () => {
   const conn = replayDb();
@@ -92,7 +92,7 @@ test('physical report or AI-only confirmation flag does not silently resolve to 
   const conn = replayDb();
   await assert.rejects(confirmReceptionFromWhatsApp({ db: conn,
     params: { orden_compra_id: 6, confirmacion_final: true, items: fragments() },
-    rawText: 'Llegaron otras cinco unidades para la recepcion ID 6', user: { id: 5 } }), /Prepara primero/);
+    rawText: 'Llegaron otras cinco unidades para la recepcion OC ID 6', user: { id: 5 } }), /Prepara primero/);
   assert.equal(conn.calls.some(s => s.includes("estado = 'completada'")), false);
 });
 

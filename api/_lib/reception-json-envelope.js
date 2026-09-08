@@ -16,7 +16,7 @@ function recoverReceptionPreview(candidate, rawBody) {
       || !/\brecepci[o\u00f3]n\b/i.test(text)
       || typeof value.body !== 'string' || legacyMessageText(value.body).trim() !== text.trim()
       || !Number.isSafeInteger(p.orden_compra_id) || p.orden_compra_id <= 0
-      || !new RegExp(`\\bID\\s+${p.orden_compra_id}\\b`, 'i').test(text)
+      || !new RegExp(`\\bOC\\s+ID\\s+${p.orden_compra_id}\\b`, 'i').test(text)
       || !Array.isArray(p.items) || p.items.length !== 1) return null;
   const item = p.items[0];
   const dist = item?.distribuciones;

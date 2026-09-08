@@ -89,7 +89,7 @@ test('N1-05 real webhook: partial intent never reaches dispatch; complete confir
 });
 
 test('N1-09 real webhook: malformed mixed receipt reaches preview only, with RBAC preserved', async () => {
-  const text = 'Para la recepcion ID 18 llegaron 5 unidades, 3 disponibles, 1 cuarentena y 1 rechazada.';
+  const text = 'Para la recepcion OC ID 18 llegaron 5 unidades, 3 disponibles, 1 cuarentena y 1 rechazada.';
   const info = { '@ction': 'CONFIRMAR_RECEPCION_OC', body: text, params: {
     orden_compra_id: 18, confirmacion_final: false, items: [{ sku: 'SKU-QA', cantidad_recibida: 5,
       distribuciones: [3, 1, 1].map((cantidad, i) => ({ cantidad,
@@ -130,7 +130,7 @@ test('flat reception traverses real webhook with permissions, totals and preview
       ubicacion: 'B13', fecha_vencimiento: '2027-11-30', motivo: 'QA' })) };
   for (const role of ['admin', 'recepcion_cierre', 'alistador']) {
     const h = harness({ role });
-    const result = await h.send('CONFIRMAR_RECEPCION_OC', 'Para la recepcion ID 21 llegaron 5 unidades', params);
+    const result = await h.send('CONFIRMAR_RECEPCION_OC', 'Para la recepcion OC ID 21 llegaron 5 unidades', params);
     assert.equal(result.ok, role !== 'alistador', result.mensaje);
     assert.equal(h.calls.length, role !== 'alistador' ? 1 : 0);
     if (h.calls.length) {
@@ -141,7 +141,7 @@ test('flat reception traverses real webhook with permissions, totals and preview
   for (const bad of [{ ...params, confirmacion_final: true }, { ...params, items: [] },
     { ...params, partidas: [{ ...params.partidas[0], cantidad: 6 }] }]) {
     const h = harness();
-    assert.equal((await h.send('CONFIRMAR_RECEPCION_OC', 'Confirmo la recepcion ID 21', bad)).ok, false);
+    assert.equal((await h.send('CONFIRMAR_RECEPCION_OC', 'Confirmo la recepcion OC ID 21', bad)).ok, false);
     assert.equal(h.calls.length, 0);
   }
 });

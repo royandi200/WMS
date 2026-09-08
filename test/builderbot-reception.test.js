@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   explicitConfirmation,
   explicitPurchaseOrderConfirmation,
+  purchaseOrderTextReference,
   receptionConfirmationKey,
   buildConfirmationItems,
   buildReceptionReview,
@@ -51,16 +52,28 @@ test('WhatsApp purchase order and reception require an exact explicit confirmati
     'Proceda con OC-123', 'OC-123', { confirmacion_final: true }
   ), false);
   assert.equal(explicitConfirmation(
-    'Confirmo la recepcion ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' },
+    'Confirmo la recepcion OC ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' },
     { confirmacion_final: true, orden_compra_id: 5 }
   ), true);
   assert.equal(explicitConfirmation(
-    'Confirmo la recepción de ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' },
+    'Confirmo la recepción OC ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' },
     { confirmacion_final: true, orden_compra_id: 5 }
   ), true);
   assert.equal(explicitConfirmation(
-    'Confirmo la recepcion ID 50', { id: 5, numero: 'OC-MUY-LARGA-456' },
+    'Confirmo la recepcion OC ID 50', { id: 5, numero: 'OC-MUY-LARGA-456' },
     { confirmacion_final: true, orden_compra_id: 5 }
+  ), false);
+  assert.equal(purchaseOrderTextReference(
+    'Prepara la recepcion OC ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
+  ), true);
+  assert.equal(purchaseOrderTextReference(
+    'Prepara la recepcion MQ ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
+  ), false);
+  assert.equal(purchaseOrderTextReference(
+    'Prepara la recepcion ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
+  ), false);
+  assert.equal(purchaseOrderTextReference(
+    'Prepara OC-MUY-LARGA-4567', { id: 5, numero: 'OC-MUY-LARGA-456' }
   ), false);
 });
 
@@ -131,7 +144,7 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
   assert.match(review, /Resumen de recepcion para OC OC-DEMO-5 \(ID 5\)/u);
   assert.match(review, /2000 gr \| DISPONIBLE \| PPAL-A-1-01 \| lote DEMO-GOMAS-001/u);
   assert.match(review, /No se modifico inventario/u);
-  assert.match(review, /Confirmo la recepcion ID 5/u);
+  assert.match(review, /Confirmo la recepcion OC ID 5/u);
 });
 
 test('WhatsApp requires physical lot, expiry and location instead of trusting PDF suggestions', async () => {
@@ -315,9 +328,8 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(reception, /confirmReceptionForUser/u);
   assert.match(purchaseOrders, /createPurchaseOrderForUser/u);
   assert.match(prompt, /Confirmo la orden de compra ID N/u);
-  assert.match(prompt, /Confirmo la recepcion ID N/u);
-  assert.match(prompt, /Confirmo la recepcion de ID N/u);
-  assert.match(prompt, /No aceptes confirmaciones vagas/u);
+  assert.match(prompt, /Confirmo la recepcion OC ID N/u);
+  assert.match(prompt, /confirmaciones vagas/u);
   assert.match(prompt, /no lo preguntes ni lo inventes/u);
   assert.match(prompt, /vista previa validada/u);
   assert.match(webhook, /confirmation\.requires_confirmation/u);
@@ -331,9 +343,11 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(receptionWorkflow, /estado = 'CONSUMIDO'/u);
   assert.match(prompt, /todos los\s+productos pendientes/u);
   assert.match(prompt, /valor exacto reportado por el operario.*obligatorio para todos/u);
-  assert.match(prompt, /prepara la recepcion ID 5/u);
-  assert.match(prompt, /`D11`.*respuesta inmediatamente anterior/su);
-  assert.match(prompt, /Esta tolerancia no reemplaza la confirmacion final estricta/u);
+  assert.match(prompt, /prepara la recepcion OC ID 5/u);
+  assert.match(prompt, /No aceptes `ID 11`.*`MQ ID 11`/su);
+  assert.match(webhook, /OC ID \$\{order\.id\}/u);
+  assert.match(webhook, /MQ ID \$\{order\.id\}/u);
+  assert.match(webhook, /requireExplicitTextReference: true/u);
   assert.match(prompt, /Llegaron completos.*NO son confirmaciones/su);
   assert.match(prompt, /NO emitas items ni distribuciones anidadas/u);
   assert.match(prompt, /NO envies partidas, items,/u);
