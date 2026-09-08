@@ -103,7 +103,7 @@ export default function OutsourcingPage() {
         ))}
       </div>
 
-      {toast && <div className={`mb-4 border px-4 py-3 text-sm ${toast.ok ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-danger/30 bg-danger/10 text-danger'}`}>{toast.message}</div>}
+      {toast && <div role="status" className={`fixed right-4 top-4 z-[70] max-w-md border px-4 py-3 text-sm shadow-2xl ${toast.ok ? 'border-green-500/30 bg-surface text-green-400' : 'border-danger/30 bg-surface text-danger'}`}>{toast.message}</div>}
 
       {tab === 'list' && (
         <TrackingPanel

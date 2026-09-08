@@ -200,7 +200,9 @@ test('a reviewed 3Q document prepares one linked remision while the OC remains m
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/OutsourcingPage.jsx'), 'utf8');
   assert.match(workflow, /createOutsourcingOrderFromDocument/u);
   assert.match(workflow, /validateDocumentMaterials/u);
+  assert.match(workflow, /documentDraftStatus\(storedWarnings\(draft\.advertencias\)\)/u);
   assert.match(workflow, /SET estado = 'VINCULADO', maquila_envio_id = \?/u);
+  assert.match(workflow, /estado IN \('PENDIENTE_REVISION', 'REQUIERE_CORRECCION'\)/u);
   assert.match(endpoint, /CREATE_FROM_DOCUMENT/u);
   assert.match(page, /Los materiales y cantidades se toman del documento/u);
   assert.match(page, /La OC no se vinculara automaticamente/u);

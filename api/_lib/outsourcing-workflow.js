@@ -4,6 +4,7 @@ const { resolvePrimaryWarehouse } = require('./warehouses');
 const { PRODUCT_MODES } = require('./product-modes');
 const { resolveProductReference } = require('./product-references');
 const { addPreferredLocations } = require('./product-locations');
+const { documentDraftStatus } = require('./document-draft-status');
 const {
   normalizeOutsourcingOrderInput,
   normalizePurchaseOrderLinkInput,
@@ -267,6 +268,17 @@ function unitKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function storedWarnings(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function addMaterialQuantity(target, row, quantity, unit) {
   const productId = Number(row.producto_id || row.insumo_id);
   const current = target.get(productId);
@@ -337,8 +349,12 @@ async function createOutsourcingOrderFromDocument({ body, userId }) {
       await conn.commit();
       return { ...linked[0], document_id: draft.id, document_reference: draft.referencia_documento, duplicate: true, picking: [] };
     }
-    if (draft.estado !== 'PENDIENTE_REVISION') {
-      throw httpError(409, `El documento esta ${draft.estado} y no puede preparar una salida`);
+    const reviewable = ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado);
+    const effectiveStatus = reviewable
+      ? documentDraftStatus(storedWarnings(draft.advertencias))
+      : draft.estado;
+    if (effectiveStatus !== 'PENDIENTE_REVISION') {
+      throw httpError(409, `El documento esta ${effectiveStatus} y no puede preparar una salida`);
     }
 
     const [documentRows] = await conn.execute(
@@ -476,7 +492,8 @@ async function createOutsourcingOrderFromDocument({ body, userId }) {
       `UPDATE documentos_bodega_borrador
           SET estado = 'VINCULADO', maquila_envio_id = ?, revisado_por = ?,
               revisado_en = NOW(), actualizado_en = NOW()
-        WHERE id = ? AND estado = 'PENDIENTE_REVISION' AND maquila_envio_id IS NULL`,
+        WHERE id = ? AND estado IN ('PENDIENTE_REVISION', 'REQUIERE_CORRECCION')
+          AND maquila_envio_id IS NULL`,
       [shipment.id, userId, draft.id]
     );
     if (linked.affectedRows !== 1) throw httpError(409, 'El documento cambio mientras se preparaba la salida');
