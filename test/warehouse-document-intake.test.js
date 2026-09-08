@@ -17,6 +17,17 @@ test('supplier matching warnings require review but not document correction', ()
   assert.equal(documentDraftStatus(['SKU no encontrado o inactivo: QA-1']), 'REQUIERE_CORRECCION');
   assert.equal(documentDraftStatus([]), 'PENDIENTE_REVISION');
 });
+
+test('demo legends are informative and do not block document preparation', () => {
+  assert.equal(
+    documentDraftStatus(['DOCUMENTO DE DEMOSTRACION - SIN VALIDEZ COMERCIAL']),
+    'PENDIENTE_REVISION'
+  );
+  assert.equal(
+    documentDraftStatus(['Documento de prueba/sin validez comercial.']),
+    'PENDIENTE_REVISION'
+  );
+});
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
 const { buildWarehouseExitPdf } = require('../scripts/qa/demo-pdf');
 

@@ -1,5 +1,6 @@
 const REVIEW_ONLY_WARNINGS = [
   /^Proveedor no encontrado de forma inequivoca en el catalogo sincronizado$/iu,
+  /^Documento de (?:demostracion|prueba)\s*(?:-|\/)\s*sin validez comercial\.?$/iu,
 ];
 
 function warningRequiresCorrection(value) {
