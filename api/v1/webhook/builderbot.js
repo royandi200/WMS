@@ -496,6 +496,13 @@ function sanitizeWebhookLogPayload(payload, action) {
   }
   if (!documentActions.has(normalizedAction)) {
     const sanitized = { ...source };
+    if (documentEventMessage(source.body || source.text || source.query)) {
+      sanitized.document_context = {
+        url_received: Boolean(builderBotDocumentValue(source.document_url)),
+        text_received: Boolean(builderBotDocumentValue(source.document_text)),
+        name_received: Boolean(builderBotDocumentValue(source.document_name)),
+      };
+    }
     delete sanitized.document_text;
     delete sanitized.document_url;
     delete sanitized.document_name;
@@ -527,7 +534,7 @@ async function recoverRejectedDocumentAction({ db, rawBody, action, params, rawT
   if (!['UNKNOWN', 'MODO_CHARLA'].includes(String(action || '').toUpperCase())) return null;
   if (!documentEventMessage(rawText)) return null;
   const documentUrl = builderBotDocumentValue(rawBody.document_url);
-  if (!documentUrl) return null;
+  if (!documentUrl) return { recovered: false, status: 'MISSING_DOCUMENT_URL' };
 
   try {
     const document = await downloadBuilderBotPdf(
@@ -540,7 +547,11 @@ async function recoverRejectedDocumentAction({ db, rawBody, action, params, rawT
       : evidence.body;
     const markers = detectDocumentTypeMarkers(evidence.text);
     if (Object.values(markers).filter(Boolean).length !== 1 || !Array.isArray(recovered?.items) || !recovered.items.length) {
-      return null;
+      return {
+        recovered: false,
+        status: 'NATIVE_DOCUMENT_INCOMPLETE',
+        diagnostics: evidence.diagnostics,
+      };
     }
 
     if (markers.purchaseOrder
@@ -549,6 +560,8 @@ async function recoverRejectedDocumentAction({ db, rawBody, action, params, rawT
       && recovered.fecha_documento
       && recovered.proveedor_nombre) {
       return {
+        recovered: true,
+        status: 'NATIVE_APPLIED',
         action: 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO',
         params: recovered,
         diagnostics: evidence.diagnostics,
@@ -561,15 +574,25 @@ async function recoverRejectedDocumentAction({ db, rawBody, action, params, rawT
       && recovered.fecha_documento
       && recovered.nombre_cliente) {
       return {
+        recovered: true,
+        status: 'NATIVE_APPLIED',
         action: 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
         params: recovered,
         diagnostics: evidence.diagnostics,
       };
     }
+    return {
+      recovered: false,
+      status: 'NATIVE_REQUIRED_FIELDS_MISSING',
+      diagnostics: evidence.diagnostics,
+    };
   } catch (error) {
     console.warn('[webhook] No se pudo recuperar el evento documental rechazado:', error.message);
+    return {
+      recovered: false,
+      status: error.documentDiagnostics?.status || 'NATIVE_DOCUMENT_READ_FAILED',
+    };
   }
-  return null;
 }
 
 async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload }) {
@@ -1359,14 +1382,17 @@ module.exports = async (req, res) => {
       rawText,
     });
     if (recoveredDocument) {
-      console.log(`[webhook] Documento recuperado por texto nativo: "${action}" → "${recoveredDocument.action}"`);
-      action = recoveredDocument.action;
-      params = recoveredDocument.params;
       responseContext.document_recovery = {
         source: 'PDF_TEXT_LAYER',
         original_action: info['@ction'] || info.action || 'UNKNOWN',
+        status: recoveredDocument.status,
         diagnostics: recoveredDocument.diagnostics,
       };
+      if (recoveredDocument.recovered) {
+        console.log(`[webhook] Documento recuperado por texto nativo: "${action}" → "${recoveredDocument.action}"`);
+        action = recoveredDocument.action;
+        params = recoveredDocument.params;
+      }
     }
 
     const bodegaId = await getDefaultBodega(db);
