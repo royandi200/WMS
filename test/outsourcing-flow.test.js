@@ -177,6 +177,9 @@ test('3Q reception can be prepared from an active outsourcing order without Siig
   assert.match(reception, /action === 'PREPARAR_DESDE_MAQUILA'/u);
   assert.match(page, /Producto desde 3Q/u);
   assert.match(page, /orden_maquila_id: item\.outsourcingOrderId/u);
+  assert.match(page, /function canPrepareOutsourcingOrder/u);
+  assert.match(page, /Boolean\(order\.orden_compra_id\)/u);
+  assert.match(page, /outsourcingOrders\.filter\(canPrepareOutsourcingOrder\)/u);
 });
 
 test('3Q remision can precede its OC but reception remains fail-closed', () => {

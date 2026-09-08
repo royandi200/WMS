@@ -47,6 +47,17 @@ function totalsFromItems(items = []) {
     .map(([unit, quantity]) => ({ unit, quantity }))
 }
 
+function canPrepareDirectPurchaseOrder(order) {
+  if (!['CARGADA', 'RECIBIDA', 'RECIBIDA_PARCIAL'].includes(order.estado)) return false
+  return !(order.items || []).some((item) => ['PR', 'PT'].includes(String(item.modalidad_operativa || '').toUpperCase()))
+}
+
+function canPrepareOutsourcingOrder(order) {
+  return Boolean(order.orden_compra_id)
+    && ['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)
+    && Number(order.cantidad_objetivo) - Number(order.cantidad_recibida) > 0.0001
+}
+
 export default function RecepcionPage() {
   const [tab, setTab] = useState('orders')
   const [toast, setToast] = useState(null)
@@ -242,6 +253,8 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
   const [deliveryQuantity, setDeliveryQuantity] = useState('')
   const [receptionNumber, setReceptionNumber] = useState('')
   const [items, setItems] = useState([])
+  const directPurchaseOrders = purchaseOrders.filter(canPrepareDirectPurchaseOrder)
+  const receivableOutsourcingOrders = outsourcingOrders.filter(canPrepareOutsourcingOrder)
 
   const prepare = async () => {
     const result = source === 'outsourcing'
@@ -333,7 +346,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
             setItems([])
           }} className="input-field" required disabled={Boolean(receptionId)}>
             <option value="">Selecciona la OC</option>
-            {purchaseOrders.filter((order) => ['CARGADA', 'RECIBIDA', 'RECIBIDA_PARCIAL'].includes(order.estado)).map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}
+            {directPurchaseOrders.map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}
           </select>
         </Field> : <>
           <Field label="Orden de maquila 3Q *">
@@ -347,7 +360,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
               setItems([])
             }} className="input-field" required disabled={Boolean(receptionId)}>
               <option value="">Selecciona la orden 3Q</option>
-              {outsourcingOrders.filter((order) => ['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)).map((order) => (
+              {receivableOutsourcingOrders.map((order) => (
                 <option key={order.id} value={order.id}>{order.codigo} - {order.sku} - saldo {formatQuantity(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida))}</option>
               ))}
             </select>

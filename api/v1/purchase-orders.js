@@ -71,7 +71,8 @@ async function handleGet(req, res) {
   const orderIds = rows.map((row) => row.id);
   const quantities = orderIds.length ? await query(
     `SELECT oci.orden_compra_id, oci.producto_id, oci.cantidad_ordenada, oci.unidad,
-            p.siigo_code AS sku, p.nombre AS producto
+            p.siigo_code AS sku, p.nombre AS producto,
+            p.modalidad_operativa
        FROM orden_compra_proveedor_items oci
        JOIN productos p ON p.id = oci.producto_id
       WHERE oci.orden_compra_id IN (${orderIds.map(() => '?').join(',')})
@@ -88,6 +89,7 @@ async function handleGet(req, res) {
       producto_id: item.producto_id,
       sku: item.sku,
       producto: item.producto,
+      modalidad_operativa: item.modalidad_operativa,
       cantidad_ordenada: Number(item.cantidad_ordenada),
       unidad: item.unidad,
     }));
