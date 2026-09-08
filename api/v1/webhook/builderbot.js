@@ -131,6 +131,7 @@ const {
   confirmReceptionFromWhatsApp,
   prepareReceptionFromOutsourcing,
   confirmOutsourcingReceptionFromWhatsApp,
+  validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
 
 // BB Cloud API token y Bot ID
@@ -471,6 +472,7 @@ function sanitizeWebhookLogPayload(payload, action) {
     'CONFIRMAR_RECEPCION_OC',
     'PREPARAR_RECEPCION_MAQUILA',
     'CONFIRMAR_RECEPCION_MAQUILA',
+    'REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO',
   ]);
   const source = payload && typeof payload === 'object' ? payload : {};
   if (receptionActions.has(normalizedAction)) {
@@ -1604,6 +1606,30 @@ module.exports = async (req, res) => {
           ].join('\n');
           responseContext.reception = confirmation;
         }
+        break;
+      }
+
+      case 'REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO': {
+        const documentParams = validateOutsourcingReceiptDocument(
+          params,
+          builderBotDocumentValue(rawBody.document_text)
+        );
+        const confirmation = await confirmOutsourcingReceptionFromWhatsApp({
+          db,
+          params: receptionPartidas(documentParams),
+          rawText: documentParams.codigo_maquila,
+          user,
+        });
+        if (confirmation.already_completed) {
+          mensaje = `La recepcion ${confirmation.numero} para ${confirmation.orden_maquila_codigo} ya habia sido confirmada. No se modifico inventario.`;
+        } else {
+          mensaje = confirmation.message;
+        }
+        responseContext.reception = {
+          ...confirmation,
+          source: 'WHATSAPP_PDF',
+          inventory_changed: false,
+        };
         break;
       }
 

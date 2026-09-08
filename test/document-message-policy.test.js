@@ -54,6 +54,6 @@ test('document policy never recovers text from OCR and documents the provider li
   );
   assert.match(prompt, /Un texto enviado despues no recupera ni vincula el archivo anterior/u);
   assert.match(prompt, /no expone de forma confiable el texto adjunto/u);
-  assert.match(prompt, /solo puede crear un borrador sujeto a revision humana/u);
+  assert.match(prompt, /solo puede crear un borrador o una vista previa sujetos a revision humana/u);
   assert.doesNotMatch(prompt, /La API valida que exista texto adjunto/u);
 });

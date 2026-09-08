@@ -3,6 +3,7 @@ const { prepareOutsourcingReception } = require('./outsourcing-workflow');
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
 const { normalizeReceptionDistributions, validateReceptionItem } = require('./reception-distributions');
+const { DOCUMENT_TYPES, assertDocumentTypeMarker, normalizeMarkerText } = require('./document-type-markers');
 
 function inputError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -778,6 +779,45 @@ function requestedOutsourcingQuantity(params = {}) {
   return Number(quantity.toFixed(4));
 }
 
+function validateOutsourcingReceiptDocument(params = {}, evidenceText = '') {
+  const evidence = String(evidenceText || '').trim();
+  if (!evidence) throw inputError('No fue posible leer el texto del PDF de entrega 3Q');
+  if (evidence.length > 500_000) throw inputError('El texto del PDF de entrega 3Q supera el limite permitido');
+  assertDocumentTypeMarker(DOCUMENT_TYPES.OUTSOURCING_RECEIPT, evidence);
+  const code = String(
+    params.codigo_maquila || params.orden_maquila || params.outsourcing_order_code || ''
+  ).trim();
+  if (!code || !/^MQ-3Q-[A-Z0-9-]{6,70}$/iu.test(code)) {
+    throw inputError('El PDF de entrega debe incluir el codigo completo de la orden MQ-3Q');
+  }
+  const normalizedEvidence = ` ${normalizeMarkerText(evidence)} `;
+  const includesEvidence = value => {
+    const normalized = normalizeMarkerText(value);
+    return normalized && normalizedEvidence.includes(` ${normalized} `);
+  };
+  if (!includesEvidence(code)) {
+    throw inputError('El codigo de la orden de maquila no aparece literalmente en el PDF');
+  }
+  if (params.confirmacion_final === true || params.confirmacion_final === 'true') {
+    throw inputError('Subir el PDF solo puede crear una vista previa; la confirmacion debe enviarse despues');
+  }
+  if (!Array.isArray(params.partidas) || !params.partidas.length) {
+    throw inputError('El PDF de entrega 3Q no contiene partidas completas para revisar');
+  }
+  for (const row of params.partidas) {
+    for (const key of ['sku', 'cantidad', 'condicion', 'lote', 'fecha_vencimiento', 'ubicacion']) {
+      if (!includesEvidence(row?.[key])) {
+        throw inputError(`El valor ${key} de una partida no aparece literalmente en el PDF`);
+      }
+    }
+  }
+  return {
+    ...params,
+    codigo_maquila: code,
+    confirmacion_final: false,
+  };
+}
+
 function receptionDraftPayload(order, reception, items) {
   return {
     version: 1,
@@ -1143,6 +1183,7 @@ module.exports = {
   buildReceptionReview,
   buildOutsourcingReceptionReview,
   requestedOutsourcingQuantity,
+  validateOutsourcingReceiptDocument,
   canonicalJson,
   receptionDraftPayload,
   parseReceptionDraft,

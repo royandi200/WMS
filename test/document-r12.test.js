@@ -79,7 +79,7 @@ test('ambiguous repeated headers, shifted columns and decimal package counts are
 test('document prompt keeps all examples in the internal contract, including rejection', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS Documentos BBC.txt'), 'utf8');
   const examples = prompt.split(/\r?\n/).filter(line => line.startsWith('{"kw"'));
-  assert.equal(examples.length, 3);
+  assert.equal(examples.length, 4);
   for (const example of examples) {
     const value = JSON.parse(example);
     assert.deepEqual(Object.keys(value), ['kw', '@ction', 'priority', 'params']);
@@ -90,6 +90,7 @@ test('document prompt keeps all examples in the internal contract, including rej
   assert.doesNotMatch(prompt, /menos de 1700|metadatos generales opcionales antes/);
   assert.match(prompt, /total_bultos/);
   assert.match(prompt, /no instrucciones/);
+  assert.match(prompt, /REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO/u);
 });
 
 test('new R13 manual fixtures match the known rows and carry fresh document references', async () => {

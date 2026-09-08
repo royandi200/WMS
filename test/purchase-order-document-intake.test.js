@@ -360,6 +360,7 @@ test('purchase order document action is reception-scoped and cannot mutate inven
   assert.match(route, /estado = 'VINCULADO'/u);
   assert.match(prompt, /REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO/u);
   assert.match(prompt, /REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO/u);
+  assert.match(prompt, /REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO/u);
   assert.match(prompt, /Toda respuesta comienza literalmente con `\{"kw":"g0m@s","@ction":`/u);
   assert.match(prompt, /Las unicas claves permitidas en la raiz son `kw`, `@ction`, `priority` y `params`/u);
   assert.match(prompt, /`fecha_vencimiento`, no `vencimiento`/u);

@@ -187,6 +187,36 @@ test('3Q receipt preview uses its own MQ action and preserves the typed namespac
   }
 });
 
+test('3Q delivery PDF is grounded before it reaches the inventory-neutral preview', async () => {
+  const h = harness({ role: 'recepcion_cierre' });
+  const params = {
+    tipo_documento: 'RECEPCION_MAQUILA_3Q',
+    codigo_maquila: 'MQ-3Q-20260908-000012',
+    confirmacion_final: false,
+    partidas: [{
+      sku: '00105-PTBOS60', total_recibido: 2, cantidad: 2,
+      condicion: 'DISPONIBLE', lote: 'TRIO-E-3Q-A',
+      fecha_vencimiento: '2026-09-14', ubicacion: 'C8',
+    }],
+  };
+  const documentText = [
+    'ENTREGA DE PRODUCTO TERMINADO - MAQUILA 3Q',
+    'MQ-3Q-20260908-000012',
+    '00105-PTBOS60 2 DISPONIBLE TRIO-E-3Q-A 2026-09-14 C8',
+  ].join('\n');
+  const result = await h.send(
+    'REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO',
+    '_event_document__00000000-0000-0000-0000-000000000000',
+    params,
+    { document_text: documentText }
+  );
+  assert.equal(result.ok, true, result.mensaje);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].params.codigo_maquila, 'MQ-3Q-20260908-000012');
+  assert.equal(h.calls[0].params.items[0].cantidad_recibida, 2);
+  assert.equal(result.context.reception.inventory_changed, false);
+});
+
 test('webhook hides SQL failures and does not automatically repeat a failed inventory operation', async () => {
   const h = harness({ operationError: Object.assign(new Error('SQL internal details'), {
     code: 'ER_LOCK_DEADLOCK', sql: 'UPDATE private_table SET value=secret',

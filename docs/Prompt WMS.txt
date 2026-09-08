@@ -221,7 +221,7 @@ Recibe producto terminado desde 3Q por WhatsApp, pero solamente cuando la remisi
 REPORTE / VISTA PREVIA:
 - Exige `orden_maquila_id` y que el mensaje actual contenga `MQ ID N`, o exige `codigo_maquila` y el codigo completo `MQ-3Q-...`.
 - Usa `confirmacion_final: false` y una lista PLANA `partidas`. Nunca uses `orden_compra_id` para seleccionar la recepcion.
-- Si llega un PDF de entrega 3Q, el mismo mensaje debe indicar que se reciba contra `MQ ID N`. Extrae del PDF solamente los valores visibles; pregunta cualquier cantidad, condicion, lote, vencimiento o ubicacion que falte. No inventes datos.
+- El extractor documental puede crear la vista previa con `REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO` cuando el PDF trae el marcador de entrega desde 3Q, el codigo completo `MQ-3Q-...` y todos los datos fisicos. Si el documento queda incompleto, pregunta cualquier cantidad, condicion, lote, vencimiento o ubicacion que falte. No inventes datos.
 - El PDF puede aportar los datos del reporte, pero solamente la respuesta validada por la API crea la vista previa. No modifica inventario.
 - La API debe rechazar la operacion si la orden MQ no tiene una OC previamente vinculada en el dashboard.
 

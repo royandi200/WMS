@@ -13,6 +13,7 @@ const {
   buildConfirmationItems,
   buildReceptionReview,
   buildOutsourcingReceptionReview,
+  validateOutsourcingReceiptDocument,
   canonicalJson,
   receptionDraftPayload,
   parseReceptionDraft,
@@ -187,6 +188,37 @@ test('WhatsApp renders the 3Q order and its reconciled OC before confirmation', 
   assert.doesNotMatch(review, /Confirmo la recepcion OC ID/u);
 });
 
+test('3Q delivery PDF creates only a grounded preview payload', () => {
+  const params = {
+    tipo_documento: 'RECEPCION_MAQUILA_3Q',
+    codigo_maquila: 'MQ-3Q-20260908-000012',
+    confirmacion_final: false,
+    partidas: [{
+      sku: '00105-PTBOS60', total_recibido: 2, cantidad: 2,
+      condicion: 'DISPONIBLE', lote: 'TRIO-E-3Q-A',
+      fecha_vencimiento: '2026-09-14', ubicacion: 'C8',
+    }],
+  };
+  const evidence = [
+    'ENTREGA DE PRODUCTO TERMINADO - MAQUILA 3Q',
+    'MQ-3Q-20260908-000012',
+    '00105-PTBOS60 2 DISPONIBLE TRIO-E-3Q-A 2026-09-14 C8',
+  ].join('\n');
+  assert.deepEqual(validateOutsourcingReceiptDocument(params, evidence), params);
+  assert.throws(
+    () => validateOutsourcingReceiptDocument(params, evidence.replace('TRIO-E-3Q-A', 'OTRO-LOTE')),
+    /lote.*no aparece literalmente/u
+  );
+  assert.throws(
+    () => validateOutsourcingReceiptDocument({ ...params, confirmacion_final: true }, evidence),
+    /solo puede crear una vista previa/u
+  );
+  assert.throws(
+    () => validateOutsourcingReceiptDocument(params, evidence.replace('ENTREGA DE PRODUCTO TERMINADO - MAQUILA 3Q', 'REMISION A 3Q')),
+    /ENTREGA DE PRODUCTO TERMINADO/u
+  );
+});
+
 test('WhatsApp requires physical lot, expiry and location instead of trusting PDF suggestions', async () => {
   const db = {
     async execute(sql) {
@@ -356,6 +388,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
     'CONFIRMAR_RECEPCION_OC',
     'PREPARAR_RECEPCION_MAQUILA',
     'CONFIRMAR_RECEPCION_MAQUILA',
+    'REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO',
   ]) {
     assert.notEqual(capabilityForAction(action), null);
   }
