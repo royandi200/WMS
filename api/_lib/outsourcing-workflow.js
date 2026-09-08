@@ -1019,7 +1019,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
 
   const preparationKey = `MAQUILA_3Q:${order.id}`;
   const [preparedRows] = await conn.execute(
-    `SELECT r.id, r.numero, r.estado, ri.id AS item_id, ri.cantidad_esp
+    `SELECT r.id, r.numero, r.estado, r.bodega_id, ri.id AS item_id, ri.cantidad_esp
        FROM recepciones r
        JOIN recepcion_items ri ON ri.recepcion_id = r.id AND ri.producto_id = ?
       WHERE r.preparacion_clave = ? AND r.estado IN ('borrador','en_proceso')
@@ -1047,6 +1047,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
       orden_maquila_id: order.id,
       orden_maquila_codigo: order.codigo,
       proveedor_nombre: order.proveedor_nombre,
+      bodega_id: preparedRows[0].bodega_id,
       estado: preparedRows[0].estado,
       items: existingItems,
       duplicate: true,
@@ -1113,6 +1114,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
     orden_maquila_id: order.id,
     orden_maquila_codigo: order.codigo,
     proveedor_nombre: order.proveedor_nombre,
+    bodega_id: warehouseId,
     estado: 'borrador',
     cantidad_entrega: deliveryQuantity,
     saldo_orden_maquila: remaining,

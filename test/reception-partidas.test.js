@@ -74,9 +74,19 @@ test('adapter never bypasses domain validation (missing SKU or location still fa
 
 test('published receipt prompt examples parse; preview uses flat rows and confirmation carries no rows', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
-  const section = prompt.split('### 5. CONFIRMAR_RECEPCION_OC')[1].split('### 5. LIBERAR_ORDEN_PRODUCCION')[0];
+  const section = prompt.split('### 5. CONFIRMAR_RECEPCION_OC')[1].split('### 5B. CONFIRMAR_RECEPCION_MAQUILA')[0];
   const examples = [...section.matchAll(/^\{\r?\n[\s\S]*?^\}/gm)].map(m => JSON.parse(m[0]));
   assert.equal(examples.length, 2);
   assert.equal(receptionPartidas(examples[0]).items[0].cantidad_recibida, 5);
   assert.deepEqual(examples[1].params, { orden_compra_id: 5, confirmacion_final: true });
+});
+
+test('published 3Q receipt examples use MQ IDs, flat rows and a separate final confirmation', () => {
+  const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
+  const section = prompt.split('### 5B. CONFIRMAR_RECEPCION_MAQUILA')[1].split('### 5. LIBERAR_ORDEN_PRODUCCION')[0];
+  const examples = [...section.matchAll(/^\{\r?\n[\s\S]*?^\}/gm)].map(m => JSON.parse(m[0]));
+  assert.equal(examples.length, 2);
+  assert.equal(examples[0]['@ction'], 'CONFIRMAR_RECEPCION_MAQUILA');
+  assert.equal(receptionPartidas(examples[0].params).items[0].cantidad_recibida, 2);
+  assert.deepEqual(examples[1].params, { orden_maquila_id: 12, confirmacion_final: true });
 });

@@ -1,4 +1,5 @@
 const { preparePurchaseOrderReception } = require('./purchase-order-reception');
+const { prepareOutsourcingReception } = require('./outsourcing-workflow');
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
 const { normalizeReceptionDistributions, validateReceptionItem } = require('./reception-distributions');
@@ -200,6 +201,15 @@ function confirmationMatchesReference(text, entity, idParam) {
   return Boolean(hasReference || hasShortId);
 }
 
+function outsourcingOrderReference(params = {}) {
+  return {
+    id: Number(params.orden_maquila_id || params.outsourcing_order_id || 0) || null,
+    number: String(
+      params.codigo_maquila || params.orden_maquila || params.outsourcing_order_code || ''
+    ).trim(),
+  };
+}
+
 function purchaseOrderTextReference(rawText, order) {
   const text = String(rawText || '').trim();
   const number = String(order?.numero || (typeof order === 'string' ? order : '') || '').trim();
@@ -219,7 +229,31 @@ function purchaseOrderTextReference(rawText, order) {
 function assertPurchaseOrderTextReference(rawText, order) {
   if (purchaseOrderTextReference(rawText, order)) return;
   throw inputError(
-    `El ID ${order.id} es ambiguo. Para una compra directa escribe \"OC ID ${order.id}\". Las ordenes \"MQ ID\" se reciben desde Producto desde 3Q en el dashboard.`,
+    `El ID ${order.id} es ambiguo. Para una compra directa escribe \"OC ID ${order.id}\". Para una recepcion de maquila escribe \"MQ ID ${order.id}\".`,
+    409
+  );
+}
+
+function outsourcingTextReference(rawText, order) {
+  const text = String(rawText || '').trim();
+  const number = String(order?.codigo || (typeof order === 'string' ? order : '') || '').trim();
+  if (number && new RegExp(
+    `(^|[^A-Z0-9])${escapeRegExp(number)}([^A-Z0-9]|$)`,
+    'iu'
+  ).test(text)) return true;
+  const id = Number(order?.id || 0);
+  if (!Number.isSafeInteger(id) || id <= 0) return false;
+  const typedId = new RegExp(
+    `\\b(?:MQ|MAQUILA|ORDEN\\s+(?:DE\\s+)?MAQUILA)\\s*(?:ID|#|NUMERO|NRO)?\\s*#?\\s*${escapeRegExp(id)}\\b`,
+    'iu'
+  );
+  return typedId.test(text);
+}
+
+function assertOutsourcingTextReference(rawText, order) {
+  if (outsourcingTextReference(rawText, order)) return;
+  throw inputError(
+    `El ID ${order.id} es ambiguo. Para recibir producto terminado de maquila escribe \"MQ ID ${order.id}\". Una referencia \"OC ID\" corresponde a compra directa.`,
     409
   );
 }
@@ -348,11 +382,140 @@ async function prepareReceptionFromPurchaseOrder({
   }
 }
 
+async function findOutsourcingOrder(db, params = {}) {
+  const reference = outsourcingOrderReference(params);
+  if (!reference.id && !reference.number) {
+    throw inputError('Indica la orden de maquila como MQ ID N o con su codigo completo');
+  }
+  const [rows] = reference.id
+    ? await db.execute(
+        `SELECT om.id, om.codigo, om.estado, om.orden_compra_id,
+                om.tercero_id, om.proveedor_nombre, om.producto_id,
+                om.cantidad_objetivo, om.cantidad_recibida,
+                oc.numero AS orden_compra_numero,
+                p.siigo_code AS sku, p.nombre AS producto,
+                p.requiere_lote, COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad
+           FROM ordenes_maquila om
+           LEFT JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
+           JOIN productos p ON p.id = om.producto_id
+          WHERE om.id = ? LIMIT 1`,
+        [reference.id]
+      )
+    : await db.execute(
+        `SELECT om.id, om.codigo, om.estado, om.orden_compra_id,
+                om.tercero_id, om.proveedor_nombre, om.producto_id,
+                om.cantidad_objetivo, om.cantidad_recibida,
+                oc.numero AS orden_compra_numero,
+                p.siigo_code AS sku, p.nombre AS producto,
+                p.requiere_lote, COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad
+           FROM ordenes_maquila om
+           LEFT JOIN ordenes_compra_proveedor oc ON oc.id = om.orden_compra_id
+           JOIN productos p ON p.id = om.producto_id
+          WHERE UPPER(om.codigo) = UPPER(?) LIMIT 1`,
+        [reference.number]
+      );
+  if (!rows.length) throw inputError('Orden de maquila no encontrada', 404);
+  const order = rows[0];
+  if (!order.orden_compra_id) {
+    throw inputError(
+      `La orden ${order.codigo} aun no tiene una OC conciliada. Vinculala primero en el dashboard.`,
+      409
+    );
+  }
+  return {
+    ...order,
+    cantidad_pendiente: Number(
+      Math.max(Number(order.cantidad_objetivo) - Number(order.cantidad_recibida), 0).toFixed(4)
+    ),
+  };
+}
+
+async function findCompletedOutsourcingReception(db, outsourcingOrderId) {
+  const [rows] = await db.execute(
+    `SELECT r.id, r.numero, r.estado, r.completado_en
+       FROM maquila_recepciones mr
+       JOIN recepciones r ON r.id = mr.recepcion_id
+      WHERE mr.orden_maquila_id = ? AND r.estado = 'completada'
+      ORDER BY r.completado_en DESC, r.id DESC
+      LIMIT 1`,
+    [outsourcingOrderId]
+  );
+  return rows[0] || null;
+}
+
+async function findPreparedOutsourcingReception(db, outsourcingOrderId, options = {}) {
+  const preparationKey = `MAQUILA_3Q:${Number(outsourcingOrderId)}`;
+  const [active] = await db.execute(
+    `SELECT id, numero, estado
+       FROM recepciones
+      WHERE preparacion_clave = ? AND estado IN ('borrador', 'en_proceso')
+      ORDER BY id DESC LIMIT 2`,
+    [preparationKey]
+  );
+  if (active.length === 1) return active[0];
+  if (active.length > 1) {
+    throw inputError('Hay varias recepciones activas para la orden 3Q; revisalas en el dashboard', 409);
+  }
+  if (options.allowCompleted) {
+    return findCompletedOutsourcingReception(db, outsourcingOrderId);
+  }
+  return null;
+}
+
+async function prepareReceptionFromOutsourcing({
+  db,
+  params,
+  userId,
+  rawText,
+  requireExplicitTextReference = false,
+}) {
+  const order = await findOutsourcingOrder(db, params);
+  if (requireExplicitTextReference) assertOutsourcingTextReference(rawText, order);
+  const completed = order.estado === 'COMPLETADA'
+    ? await findCompletedOutsourcingReception(db, order.id)
+    : null;
+  if (completed) return { order, reception: completed, alreadyCompleted: true };
+  if (!['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado)) {
+    throw inputError(`La orden ${order.codigo} esta ${order.estado} y no puede recibir producto`, 409);
+  }
+  const requestedQuantity = params.cantidad_entrega ?? params.delivery_quantity;
+
+  await db.beginTransaction();
+  try {
+    const reception = await prepareOutsourcingReception(db, {
+      orderId: order.id,
+      quantity: requestedQuantity,
+      userId,
+    });
+    if (requestedQuantity != null && requestedQuantity !== '') {
+      const preparedQuantity = Number(reception.items?.[0]?.cantidad_pendiente ?? reception.cantidad_entrega);
+      if (Math.abs(preparedQuantity - Number(requestedQuantity)) > 0.0001) {
+        throw inputError(
+          `Ya existe una recepcion activa por ${preparedQuantity} ${order.unidad}. Termina esa recepcion antes de preparar otra cantidad.`,
+          409
+        );
+      }
+    }
+    await db.commit();
+    return { order, reception, alreadyCompleted: false };
+  } catch (error) {
+    await db.rollback().catch(() => {});
+    throw error;
+  }
+}
+
 function explicitConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
   const text = String(rawText || '').trim();
   return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepci[oó]n\b/iu.test(text)
     && purchaseOrderTextReference(text, order);
+}
+
+function explicitOutsourcingConfirmation(rawText, order, params = {}) {
+  if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
+  const text = String(rawText || '').trim();
+  return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepci[oó]n\b/iu.test(text)
+    && outsourcingTextReference(text, order);
 }
 
 function receptionConfirmationKey(orderId, receptionId, params = {}) {
@@ -372,8 +535,9 @@ function receptionConfirmationKey(orderId, receptionId, params = {}) {
       distribuciones: distributions,
     };
   }).sort((left, right) => left.sku.localeCompare(right.sku));
+  const orderIdentity = typeof orderId === 'string' ? orderId : Number(orderId);
   const hash = createHash('sha256').update(JSON.stringify({
-    orderId: Number(orderId),
+    orderId: orderIdentity,
     receptionId: Number(receptionId),
     items,
   })).digest('hex');
@@ -589,6 +753,31 @@ function buildReceptionReview(order, reception, items) {
   ].filter(Boolean).join('\n');
 }
 
+function buildOutsourcingReceptionReview(order, reception, items) {
+  const directReview = buildReceptionReview(
+    { id: order.orden_compra_id, numero: order.orden_compra_numero },
+    reception,
+    items
+  );
+  const lines = directReview.split('\n');
+  lines[0] = `Resumen de recepcion para MQ ID ${order.id} | ${order.codigo}.`;
+  lines[lines.length - 1] = `Si todo coincide, escribe: Confirmo la recepcion MQ ID ${order.id}`;
+  lines.splice(1, 0, `OC conciliada: ${order.orden_compra_numero}`);
+  return lines.join('\n');
+}
+
+function requestedOutsourcingQuantity(params = {}) {
+  const items = suppliedItems(params);
+  const quantity = items.reduce((itemTotal, item) => itemTotal + itemDistributions(item).reduce(
+    (distributionTotal, entry) => distributionTotal + Number(entry.cantidad ?? entry.quantity),
+    0
+  ), 0);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw inputError('La cantidad de la entrega 3Q debe ser positiva');
+  }
+  return Number(quantity.toFixed(4));
+}
+
 function receptionDraftPayload(order, reception, items) {
   return {
     version: 1,
@@ -791,6 +980,143 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   return { ...result, orden_compra_numero: prepared.order.numero };
 }
 
+async function confirmOutsourcingReceptionFromWhatsApp({ db, params, rawText, user }) {
+  const order = await findOutsourcingOrder(db, params);
+  assertOutsourcingTextReference(rawText, order);
+  const isExplicitConfirmation = explicitOutsourcingConfirmation(rawText, order, params);
+
+  if (isExplicitConfirmation) {
+    const existing = await findPreparedOutsourcingReception(db, order.id, { allowCompleted: true });
+    if (!existing) {
+      throw inputError('No hay una vista previa vigente. Registra primero los datos fisicos de la recepcion 3Q', 409);
+    }
+    if (existing.estado === 'completada') {
+      return {
+        recepcion_id: existing.id,
+        numero: existing.numero,
+        estado: existing.estado,
+        already_completed: true,
+        orden_compra_id: order.orden_compra_id,
+        orden_compra_numero: order.orden_compra_numero,
+        orden_maquila_id: order.id,
+        orden_maquila_codigo: order.codigo,
+      };
+    }
+  }
+
+  const deliveryQuantity = isExplicitConfirmation
+    ? undefined
+    : requestedOutsourcingQuantity(params);
+  const prepared = await prepareReceptionFromOutsourcing({
+    db,
+    params: {
+      orden_maquila_id: order.id,
+      cantidad_entrega: deliveryQuantity,
+    },
+    userId: user.id,
+  });
+  if (prepared.alreadyCompleted) {
+    return {
+      recepcion_id: prepared.reception.id,
+      numero: prepared.reception.numero,
+      estado: prepared.reception.estado,
+      already_completed: true,
+      orden_compra_id: order.orden_compra_id,
+      orden_compra_numero: order.orden_compra_numero,
+      orden_maquila_id: order.id,
+      orden_maquila_codigo: order.codigo,
+    };
+  }
+
+  let items;
+  if (!isExplicitConfirmation) {
+    items = await buildConfirmationItems(
+      db,
+      prepared.reception.items,
+      params,
+      { warehouseId: prepared.reception.bodega_id }
+    );
+    await saveReceptionDraft(db, {
+      order: { id: order.orden_compra_id },
+      reception: prepared.reception,
+      items,
+      userId: user.id,
+    });
+    return {
+      requires_confirmation: true,
+      inventory_changed: false,
+      recepcion_id: prepared.reception.id,
+      numero: prepared.reception.numero,
+      orden_compra_id: order.orden_compra_id,
+      orden_compra_numero: order.orden_compra_numero,
+      orden_maquila_id: order.id,
+      orden_maquila_codigo: order.codigo,
+      item_count: items.length,
+      message: buildOutsourcingReceptionReview(order, prepared.reception, items),
+    };
+  }
+
+  const draft = await loadReceptionDraft(db, {
+    orderId: order.orden_compra_id,
+    receptionId: prepared.reception.id,
+    userId: user.id,
+  });
+  if (!draft) {
+    throw inputError('No hay una vista previa vigente. Registra primero los datos fisicos de la recepcion 3Q', 409);
+  }
+  items = await buildConfirmationItems(
+    db,
+    prepared.reception.items,
+    { items: draft.items },
+    { warehouseId: prepared.reception.bodega_id }
+  );
+  const confirmationKey = receptionConfirmationKey(
+    `MQ:${order.id}`,
+    prepared.reception.id,
+    { items }
+  );
+  const [previous] = await db.execute(
+    `SELECT id, numero, estado FROM recepciones WHERE confirmacion_clave = ? LIMIT 1`,
+    [confirmationKey]
+  );
+  if (previous.length) {
+    if (previous[0].estado !== 'completada') {
+      throw inputError('La misma confirmacion de recepcion 3Q ya esta en proceso', 409);
+    }
+    return {
+      recepcion_id: previous[0].id,
+      numero: previous[0].numero,
+      estado: previous[0].estado,
+      already_completed: true,
+      orden_compra_id: order.orden_compra_id,
+      orden_compra_numero: order.orden_compra_numero,
+      orden_maquila_id: order.id,
+      orden_maquila_codigo: order.codigo,
+    };
+  }
+
+  const { confirmReceptionForUser } = require('../v1/reception');
+  const result = await confirmReceptionForUser({
+    user: { id: user.id, rol: user.rol_nombre || user.rol },
+    body: {
+      recepcion_id: prepared.reception.id,
+      orden_compra_id: order.orden_compra_id,
+      orden_maquila_id: order.id,
+      confirmation_key: confirmationKey,
+      notes: params.notas || params.observaciones || 'Recepcion de maquila 3Q confirmada por WhatsApp',
+      items,
+    },
+  });
+  await consumeReceptionDraft(db, prepared.reception.id, user.id);
+  return {
+    ...result,
+    orden_compra_id: order.orden_compra_id,
+    orden_compra_numero: order.orden_compra_numero,
+    orden_maquila_id: order.id,
+    orden_maquila_codigo: order.codigo,
+  };
+}
+
 module.exports = {
   listAvailablePurchaseOrderReceptions,
   listAvailableOutsourcingReceptions,
@@ -799,19 +1125,29 @@ module.exports = {
   explicitPurchaseOrderConfirmation,
   purchaseOrderTextReference,
   assertPurchaseOrderTextReference,
+  outsourcingOrderReference,
+  outsourcingTextReference,
+  assertOutsourcingTextReference,
   confirmPurchaseOrderDocumentDraft,
   purchaseOrderReference,
   findPurchaseOrder,
   prepareReceptionFromPurchaseOrder,
   explicitConfirmation,
+  explicitOutsourcingConfirmation,
   receptionConfirmationKey,
   findPreparedReception,
+  findOutsourcingOrder,
+  findPreparedOutsourcingReception,
+  prepareReceptionFromOutsourcing,
   buildConfirmationItems,
   buildReceptionReview,
+  buildOutsourcingReceptionReview,
+  requestedOutsourcingQuantity,
   canonicalJson,
   receptionDraftPayload,
   parseReceptionDraft,
   saveReceptionDraft,
   loadReceptionDraft,
   confirmReceptionFromWhatsApp,
+  confirmOutsourcingReceptionFromWhatsApp,
 };

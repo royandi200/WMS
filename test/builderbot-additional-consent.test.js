@@ -42,6 +42,19 @@ function harness({ operationError, role = 'admin' } = {}) {
         calls.push(input);
         return { requires_confirmation: true, inventory_changed: false, message: 'Resumen QA; confirma despues.' };
       },
+      confirmOutsourcingReceptionFromWhatsApp: async input => {
+        calls.push(input);
+        return {
+          requires_confirmation: true,
+          inventory_changed: false,
+          message: 'Resumen 3Q QA; confirma despues.',
+          recepcion_id: 80,
+          numero: 'REC-3Q-12-001',
+          orden_compra_id: 25,
+          orden_maquila_id: 12,
+          item_count: 1,
+        };
+      },
     },
     '../../_lib/db': { createConnection: async () => db },
     '../../_lib/auth': { requireWebhookSecret() {} },
@@ -143,6 +156,34 @@ test('flat reception traverses real webhook with permissions, totals and preview
     const h = harness();
     assert.equal((await h.send('CONFIRMAR_RECEPCION_OC', 'Confirmo la recepcion OC ID 21', bad)).ok, false);
     assert.equal(h.calls.length, 0);
+  }
+});
+
+test('3Q receipt preview uses its own MQ action and preserves the typed namespace', async () => {
+  const params = {
+    orden_maquila_id: 12,
+    confirmacion_final: false,
+    partidas: [{
+      sku: '00105-PTBOS60', total_recibido: 2, cantidad: 2,
+      condicion: 'DISPONIBLE', lote: 'TRIO-E-3Q-A',
+      fecha_vencimiento: '2026-09-14', ubicacion: 'C8',
+    }],
+  };
+  for (const role of ['admin', 'recepcion_cierre', 'alistador']) {
+    const h = harness({ role });
+    const result = await h.send(
+      'CONFIRMAR_RECEPCION_MAQUILA',
+      'Recibe el PDF adjunto contra MQ ID 12. Llegaron 2 unidades disponibles en C8.',
+      params,
+      { document_text: 'LOTE TRIO-E-3Q-A VENCE 2026-09-14' }
+    );
+    assert.equal(result.ok, role !== 'alistador', result.mensaje);
+    assert.equal(h.calls.length, role !== 'alistador' ? 1 : 0);
+    if (h.calls.length) {
+      assert.equal(h.calls[0].params.orden_maquila_id, 12);
+      assert.equal(h.calls[0].params.items[0].cantidad_recibida, 2);
+      assert.equal(result.context.reception.inventory_changed, false);
+    }
   }
 });
 

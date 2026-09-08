@@ -7,9 +7,12 @@ const {
   explicitConfirmation,
   explicitPurchaseOrderConfirmation,
   purchaseOrderTextReference,
+  explicitOutsourcingConfirmation,
+  outsourcingTextReference,
   receptionConfirmationKey,
   buildConfirmationItems,
   buildReceptionReview,
+  buildOutsourcingReceptionReview,
   canonicalJson,
   receptionDraftPayload,
   parseReceptionDraft,
@@ -96,6 +99,28 @@ test('WhatsApp reception confirmation key is stable across harmless ordering cha
   assert.notEqual(receptionConfirmationKey(7, 70, first), receptionConfirmationKey(7, 70, reordered));
 });
 
+test('WhatsApp keeps MQ references separate from purchase-order IDs', () => {
+  const order = { id: 12, codigo: 'MQ-3Q-20260908-000012' };
+  assert.equal(outsourcingTextReference('Prepara la recepcion MQ ID 12 por 2 unidades', order), true);
+  assert.equal(outsourcingTextReference('Recibe MQ-3Q-20260908-000012', order), true);
+  assert.equal(outsourcingTextReference('Prepara la recepcion OC ID 12', order), false);
+  assert.equal(outsourcingTextReference('Prepara la recepcion ID 12', order), false);
+  assert.equal(explicitOutsourcingConfirmation(
+    'Confirmo la recepcion MQ ID 12', order, { confirmacion_final: true }
+  ), true);
+  assert.equal(explicitOutsourcingConfirmation(
+    'Confirmo la recepcion OC ID 12', order, { confirmacion_final: true }
+  ), false);
+  const payload = { items: [{
+    sku: 'SKU-A',
+    distribuciones: [{ cantidad: 1, lote: 'L', condicion: 'DISPONIBLE', ubicacion: 'C8' }],
+  }] };
+  assert.notEqual(
+    receptionConfirmationKey('MQ:12', 70, payload),
+    receptionConfirmationKey(12, 70, payload)
+  );
+});
+
 test('WhatsApp resolves the only active receipt without asking for its REC code', async () => {
   const db = {
     execute: async (sql, params) => {
@@ -145,6 +170,21 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
   assert.match(review, /2000 gr \| DISPONIBLE \| PPAL-A-1-01 \| lote DEMO-GOMAS-001/u);
   assert.match(review, /No se modifico inventario/u);
   assert.match(review, /Confirmo la recepcion OC ID 5/u);
+});
+
+test('WhatsApp renders the 3Q order and its reconciled OC before confirmation', () => {
+  const review = buildOutsourcingReceptionReview(
+    { id: 12, codigo: 'MQ-3Q-20260908-000012', orden_compra_id: 25, orden_compra_numero: 'OC-3Q-25' },
+    { id: 80, numero: 'REC-3Q-12-001' },
+    [{
+      sku: '00105-PTBOS60', producto: 'BOOSTER X 60', unidad: 'und',
+      distributions: [{ cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'C8', lote: 'TRIO-E-3Q-A', fecha_venc: '2026-09-14' }],
+    }]
+  );
+  assert.match(review, /Resumen de recepcion para MQ ID 12 \| MQ-3Q-20260908-000012/u);
+  assert.match(review, /OC conciliada: OC-3Q-25/u);
+  assert.match(review, /Confirmo la recepcion MQ ID 12/u);
+  assert.doesNotMatch(review, /Confirmo la recepcion OC ID/u);
 });
 
 test('WhatsApp requires physical lot, expiry and location instead of trusting PDF suggestions', async () => {
@@ -314,6 +354,8 @@ test('BuilderBot reception actions share domain handlers and disable free receip
     'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
     'PREPARAR_RECEPCION_OC',
     'CONFIRMAR_RECEPCION_OC',
+    'PREPARAR_RECEPCION_MAQUILA',
+    'CONFIRMAR_RECEPCION_MAQUILA',
   ]) {
     assert.notEqual(capabilityForAction(action), null);
   }
@@ -325,10 +367,12 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   const idempotencyMigration = fs.readFileSync(path.join(__dirname, '../database/21_reception_confirmation_idempotency.sql'), 'utf8');
   assert.match(webhook, /workflowFlags\(\)\.allowManualReception/u);
   assert.match(webhook, /confirmReceptionFromWhatsApp/u);
+  assert.match(webhook, /confirmOutsourcingReceptionFromWhatsApp/u);
   assert.match(reception, /confirmReceptionForUser/u);
   assert.match(purchaseOrders, /createPurchaseOrderForUser/u);
   assert.match(prompt, /Confirmo la orden de compra ID N/u);
   assert.match(prompt, /Confirmo la recepcion OC ID N/u);
+  assert.match(prompt, /Confirmo la recepcion MQ ID N/u);
   assert.match(prompt, /confirmaciones vagas/u);
   assert.match(prompt, /no lo preguntes ni lo inventes/u);
   assert.match(prompt, /vista previa validada/u);

@@ -129,6 +129,8 @@ const {
   confirmPurchaseOrderDocumentDraft,
   prepareReceptionFromPurchaseOrder,
   confirmReceptionFromWhatsApp,
+  prepareReceptionFromOutsourcing,
+  confirmOutsourcingReceptionFromWhatsApp,
 } = require('../../_lib/builderbot-reception');
 
 // BB Cloud API token y Bot ID
@@ -467,6 +469,8 @@ function sanitizeWebhookLogPayload(payload, action) {
     'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
     'PREPARAR_RECEPCION_OC',
     'CONFIRMAR_RECEPCION_OC',
+    'PREPARAR_RECEPCION_MAQUILA',
+    'CONFIRMAR_RECEPCION_MAQUILA',
   ]);
   const source = payload && typeof payload === 'object' ? payload : {};
   if (receptionActions.has(normalizedAction)) {
@@ -475,8 +479,11 @@ function sanitizeWebhookLogPayload(payload, action) {
     return {
       reception_workflow: true,
       action: normalizedAction,
-      reference: params.numero_oc || params.referencia_documento || null,
-      item_count: Array.isArray(params.items) ? params.items.length : 0,
+      reference: params.numero_oc || params.referencia_documento
+        || params.codigo_maquila || params.orden_maquila_id || null,
+      item_count: Array.isArray(params.partidas)
+        ? params.partidas.length
+        : Array.isArray(params.items) ? params.items.length : 0,
       final_confirmation: params.confirmacion_final === true || params.confirmacion_final === 'true',
     };
   }
@@ -1364,8 +1371,8 @@ module.exports = async (req, res) => {
               '  Lote y vencimiento de 3Q requeridos al recibir',
               '',
             ]),
-            'Para preparar una entrega 3Q:',
-            'Recepciones > Confirmar recepcion > Producto desde 3Q.',
+            `Para recibir por WhatsApp responde, por ejemplo: prepara la recepcion MQ ID ${outsourcing[0].id} por ${outsourcing[0].cantidad_pendiente} ${outsourcing[0].unidad}.`,
+            'Tambien puedes usar Recepciones > Confirmar recepcion > Producto desde 3Q.',
           ] : [];
           mensaje = [
             `*Recepciones pendientes (${available.length + outsourcing.length})*`,
@@ -1510,6 +1517,90 @@ module.exports = async (req, res) => {
             confirmation.diferencia
               ? 'Se registraron diferencias para seguimiento.'
               : 'La recepcion coincide con las cantidades esperadas.',
+          ].join('\n');
+          responseContext.reception = confirmation;
+        }
+        break;
+      }
+
+      case 'PREPARAR_RECEPCION_MAQUILA': {
+        if (params.cantidad_entrega == null && params.delivery_quantity == null) {
+          throw Object.assign(new Error('Indica la cantidad de esta entrega 3Q. No se modifico inventario.'), { status: 400 });
+        }
+        const prepared = await prepareReceptionFromOutsourcing({
+          db,
+          params,
+          userId: user.id,
+          rawText,
+          requireExplicitTextReference: true,
+        });
+        if (prepared.alreadyCompleted) {
+          mensaje = `La orden ${prepared.order.codigo} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;
+          responseContext.reception = {
+            reception_id: prepared.reception.id,
+            purchase_order_id: prepared.order.orden_compra_id,
+            outsourcing_order_id: prepared.order.id,
+            already_completed: true,
+            inventory_changed: false,
+          };
+          break;
+        }
+        const pending = prepared.reception.items.map(item =>
+          `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
+          + `${item.ubicacion_sugerida ? ` | ubicacion sugerida ${item.ubicacion_sugerida}` : ''}`
+        );
+        mensaje = [
+          `Recepcion preparada para MQ ID ${prepared.order.id} | ${prepared.order.codigo}.`,
+          `OC conciliada: ${prepared.order.orden_compra_numero}`,
+          `Borrador: ${prepared.reception.numero}`,
+          `Proveedor: ${prepared.order.proveedor_nombre || '3Q'}`,
+          'Pendiente fisico:',
+          ...pending,
+          'Indica cantidad, condicion, lote, vencimiento y ubicacion. Puedes escribir los datos o adjuntar el PDF de entrega 3Q con la instruccion y el MQ ID.',
+          `Antes de afectar inventario deberas escribir: Confirmo la recepcion MQ ID ${prepared.order.id}`,
+        ].join('\n');
+        responseContext.reception = {
+          reception_id: prepared.reception.id,
+          reception_number: prepared.reception.numero,
+          purchase_order_id: prepared.order.orden_compra_id,
+          outsourcing_order_id: prepared.order.id,
+          inventory_changed: false,
+        };
+        break;
+      }
+
+      case 'CONFIRMAR_RECEPCION_MAQUILA': {
+        const confirmation = await confirmOutsourcingReceptionFromWhatsApp({
+          db,
+          params: receptionPartidas(params),
+          rawText,
+          user,
+        });
+        if (confirmation.requires_confirmation) {
+          mensaje = confirmation.message;
+          responseContext.reception = {
+            reception_id: confirmation.recepcion_id,
+            reception_number: confirmation.numero,
+            purchase_order_id: confirmation.orden_compra_id,
+            outsourcing_order_id: confirmation.orden_maquila_id,
+            item_count: confirmation.item_count,
+            requires_confirmation: true,
+            inventory_changed: false,
+          };
+        } else if (confirmation.already_completed) {
+          mensaje = `La recepcion ${confirmation.numero} para MQ ID ${confirmation.orden_maquila_id} ya habia sido confirmada. No se modifico inventario.`;
+          responseContext.reception = confirmation;
+        } else {
+          const lines = (confirmation.items || []).map(item =>
+            `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`
+          );
+          mensaje = [
+            `Recepcion ${confirmation.numero} confirmada para MQ ID ${confirmation.orden_maquila_id} | ${confirmation.orden_maquila_codigo}.`,
+            `OC conciliada: ${confirmation.orden_compra_numero}`,
+            ...lines,
+            confirmation.diferencia
+              ? 'Se registraron diferencias para seguimiento.'
+              : 'La recepcion coincide con la cantidad de esta entrega 3Q.',
           ].join('\n');
           responseContext.reception = confirmation;
         }
