@@ -121,7 +121,12 @@ const {
   productionReservationSummaries,
 } = require('../../_lib/traceability-presentation');
 const { registerWarehouseDocumentDraft } = require('../../_lib/warehouse-document-intake');
-const { registerPurchaseOrderDocumentDraft } = require('../../_lib/purchase-order-document-intake');
+const {
+  downloadBuilderBotPdf,
+  registerPurchaseOrderDocumentDraft,
+} = require('../../_lib/purchase-order-document-intake');
+const { nativePdfEvidence } = require('../../_lib/document-pdf-evidence');
+const { detectDocumentTypeMarkers } = require('../../_lib/document-type-markers');
 const {
   listAvailablePurchaseOrderReceptions,
   listAvailableOutsourcingReceptions,
@@ -512,6 +517,59 @@ function builderBotDocumentValue(value) {
   const normalized = typeof value === 'string' ? value.trim() : '';
   if (/^\{[^{}]+\}$/u.test(normalized)) return '';
   return normalized;
+}
+
+function documentEventMessage(value) {
+  return /^_event_document__[A-Za-z0-9-]+$/u.test(String(value || '').trim());
+}
+
+async function recoverRejectedDocumentAction({ db, rawBody, action, params, rawText }) {
+  if (!['UNKNOWN', 'MODO_CHARLA'].includes(String(action || '').toUpperCase())) return null;
+  if (!documentEventMessage(rawText)) return null;
+  const documentUrl = builderBotDocumentValue(rawBody.document_url);
+  if (!documentUrl) return null;
+
+  try {
+    const document = await downloadBuilderBotPdf(
+      documentUrl,
+      builderBotDocumentValue(rawBody.document_name) || params.nombre_archivo || ''
+    );
+    const evidence = await nativePdfEvidence(db, document, { params: { ...params } });
+    const recovered = evidence.body?.params && typeof evidence.body.params === 'object'
+      ? evidence.body.params
+      : evidence.body;
+    const markers = detectDocumentTypeMarkers(evidence.text);
+    if (Object.values(markers).filter(Boolean).length !== 1 || !Array.isArray(recovered?.items) || !recovered.items.length) {
+      return null;
+    }
+
+    if (markers.purchaseOrder
+      && recovered.tipo_documento === 'ORDEN_COMPRA'
+      && recovered.referencia_documento
+      && recovered.fecha_documento
+      && recovered.proveedor_nombre) {
+      return {
+        action: 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO',
+        params: recovered,
+        diagnostics: evidence.diagnostics,
+      };
+    }
+
+    if (markers.outsourcingExit
+      && recovered.tipo_documento === 'SALIDA_BODEGA_3Q'
+      && recovered.referencia_documento
+      && recovered.fecha_documento
+      && recovered.nombre_cliente) {
+      return {
+        action: 'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
+        params: recovered,
+        diagnostics: evidence.diagnostics,
+      };
+    }
+  } catch (error) {
+    console.warn('[webhook] No se pudo recuperar el evento documental rechazado:', error.message);
+  }
+  return null;
 }
 
 async function logSystemEvent(db, { nivel, modulo, mensaje, usuario_id, payload }) {
@@ -1291,6 +1349,24 @@ module.exports = async (req, res) => {
       // Retornar 200 para que BuilderBot Cloud pueda renderizar el mensaje en WhatsApp.
       // El 4xx impide que BBC lea el body y muestra el placeholder {mensaje} literal.
       return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
+    }
+
+    const recoveredDocument = await recoverRejectedDocumentAction({
+      db,
+      rawBody,
+      action,
+      params,
+      rawText,
+    });
+    if (recoveredDocument) {
+      console.log(`[webhook] Documento recuperado por texto nativo: "${action}" → "${recoveredDocument.action}"`);
+      action = recoveredDocument.action;
+      params = recoveredDocument.params;
+      responseContext.document_recovery = {
+        source: 'PDF_TEXT_LAYER',
+        original_action: info['@ction'] || info.action || 'UNKNOWN',
+        diagnostics: recoveredDocument.diagnostics,
+      };
     }
 
     const bodegaId = await getDefaultBodega(db);

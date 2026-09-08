@@ -106,3 +106,33 @@ test('new R13 manual fixtures match the known rows and carry fresh document refe
     if (count === 9) assert.equal(result.body.params.total_bultos, 9);
   }
 });
+
+test('R13 native recovery can replace an incorrect model rejection', async () => {
+  const directory13 = path.join(directory, '../20260906-r13');
+  const rejected = { params: { texto: 'No pude clasificar el PDF: la tabla parece incompleta.' } };
+
+  const purchase = await nativePdfEvidence(
+    db,
+    { content: fs.readFileSync(path.join(directory13, 'QA-DOC-20260906-R13-OC-SIN-CONTEO-NI-TOTAL.pdf')) },
+    rejected
+  );
+  assert.equal(purchase.diagnostics.status, 'NATIVE_APPLIED');
+  assert.equal(purchase.body.params.tipo_documento, 'ORDEN_COMPRA');
+  assert.equal(purchase.body.params.referencia_documento, 'QA-DOC-20260906-R13-OC-MULTI-001');
+  assert.equal(purchase.body.params.fecha_documento, '2026-09-05');
+  assert.equal(purchase.body.params.proveedor_nombre, 'PROVEEDOR QA MULTISKU SAS');
+  assert.equal(purchase.body.params.items.length, 11);
+
+  const shipment = await nativePdfEvidence(
+    db,
+    { content: fs.readFileSync(path.join(directory13, 'QA-DOC-20260906-R13-REMISION-3Q.pdf')) },
+    rejected
+  );
+  assert.equal(shipment.diagnostics.status, 'NATIVE_APPLIED');
+  assert.equal(shipment.body.params.tipo_documento, 'SALIDA_BODEGA_3Q');
+  assert.equal(shipment.body.params.referencia_documento, 'QA-DOC-20260906-R13-SALIDA-3Q-001');
+  assert.equal(shipment.body.params.fecha_documento, '2026-09-05');
+  assert.equal(shipment.body.params.nombre_cliente, '3Q - MAQUILA EXTERNA QA');
+  assert.equal(shipment.body.params.total_bultos, 9);
+  assert.equal(shipment.body.params.items.length, 9);
+});
