@@ -47,6 +47,30 @@ function normalizeAdditionalShipmentInput(body = {}) {
   return { orderId, product, quantity: roundQty(quantity), reason, idempotencyKey };
 }
 
+function normalizeDocumentOutsourcingInput(body = {}) {
+  const documentId = Number(body.documento_borrador_id || body.document_draft_id || 0);
+  const supplierId = Number(body.tercero_id || body.supplier_id || 0);
+  const product = String(body.producto_id || body.product_id || body.sku || '').trim();
+  const quantity = Number(body.cantidad_objetivo ?? body.quantity ?? body.cantidad);
+  if (!Number.isInteger(documentId) || documentId <= 0) {
+    throw inputError('documento_borrador_id es obligatorio');
+  }
+  if (!Number.isInteger(supplierId) || supplierId <= 0) {
+    throw inputError('Debes confirmar el maquilador');
+  }
+  if (!product) throw inputError('Debes confirmar el producto terminado tercerizado');
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw inputError('La cantidad objetivo debe ser positiva');
+  }
+  return {
+    documentId,
+    supplierId,
+    product,
+    quantity: roundQty(quantity),
+    notes: String(body.notas || body.notes || '').trim() || null,
+  };
+}
+
 function outsourcingStateForReceipt(accepted, target) {
   const received = roundQty(accepted);
   const expected = roundQty(target);
@@ -69,6 +93,7 @@ module.exports = {
   normalizeOutsourcingOrderInput,
   normalizePurchaseOrderLinkInput,
   normalizeAdditionalShipmentInput,
+  normalizeDocumentOutsourcingInput,
   outsourcingStateForReceipt,
   roundQty,
 };

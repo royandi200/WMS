@@ -4,6 +4,7 @@ import {
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
   createOutsourcingOrder,
+  createOutsourcingOrderFromDocument,
   discardWarehouseDocumentDraft,
   downloadWarehouseDocument,
   linkOutsourcingPurchaseOrder,
@@ -83,7 +84,7 @@ export default function OutsourcingPage() {
   const tabs = [
     ['list', 'Seguimiento'],
     ['documents', 'Documentos leidos'],
-    ...(canManage ? [['create', 'Nueva remision'], ['link', 'Vincular OC'], ['additional', 'Material adicional']] : []),
+    ...(canManage ? [['create', 'Remision manual'], ['link', 'Vincular OC'], ['additional', 'Material adicional']] : []),
   ]
 
   return (
@@ -125,10 +126,15 @@ export default function OutsourcingPage() {
       {tab === 'documents' && (
         <DocumentDraftsPanel
           rows={data.document_drafts || []}
+          suppliers={suppliers}
           loading={loading}
           canManage={canManage}
           onUpdate={(body) => run(() => updateWarehouseDocumentDraft(body), 'Borrador 3Q corregido')}
           onDiscard={(id, motivo) => run(() => discardWarehouseDocumentDraft(id, motivo), 'Borrador 3Q descartado')}
+          onPrepare={(body) => run(
+            () => createOutsourcingOrderFromDocument(body),
+            'Orden, remision y picking preparados desde el documento'
+          ).then((ok) => { if (ok) setTab('list'); return ok })}
         />
       )}
       {tab === 'create' && canManage && (
@@ -158,9 +164,10 @@ export default function OutsourcingPage() {
   )
 }
 
-function DocumentDraftsPanel({ rows, loading, canManage, onUpdate, onDiscard }) {
+function DocumentDraftsPanel({ rows, suppliers, loading, canManage, onUpdate, onDiscard, onPrepare }) {
   const [reviewTarget, setReviewTarget] = useState(null)
   const [discardTarget, setDiscardTarget] = useState(null)
+  const [prepareTarget, setPrepareTarget] = useState(null)
   const pendingRows = rows.filter((row) => !['VINCULADO', 'DESCARTADO'].includes(row.estado))
   const download = async (row) => {
     if (!row.archivo_id) return
@@ -176,7 +183,7 @@ function DocumentDraftsPanel({ rows, loading, canManage, onUpdate, onDiscard }) 
     <div className="border-y border-border py-4">
       <div className="flex items-start gap-3">
         <FileText size={19} className="mt-0.5 text-primary" />
-        <div><h2 className="text-sm font-semibold text-foreground">Lecturas documentales pendientes</h2><p className="mt-1 max-w-3xl text-xs text-muted">El PDF completa este borrador. Antes de descontar inventario, Sofi debe validar las referencias y vincularlo con una remision 3Q.</p></div>
+        <div><h2 className="text-sm font-semibold text-foreground">Lecturas documentales pendientes</h2><p className="mt-1 max-w-3xl text-xs text-muted">Revisa el documento y prepara la salida directamente desde sus materiales. Esta accion reserva el picking; el inventario solo se descuenta al confirmar la salida.</p></div>
       </div>
     </div>
     {loading && !rows.length && <p className="py-12 text-center text-sm text-muted">Cargando documentos...</p>}
@@ -185,12 +192,13 @@ function DocumentDraftsPanel({ rows, loading, canManage, onUpdate, onDiscard }) 
       const needsCorrection = row.estado === 'REQUIERE_CORRECCION'
       return <article key={row.id} className="border border-border bg-surface/40">
         <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px_auto] lg:items-center">
-          <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere correccion' : 'Pendiente de revision'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {row.origen} | Leido por {row.creado_por_nombre}</p></div>
+          <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className="font-mono text-xs text-muted">Borrador #{row.id}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere correccion' : 'Pendiente de revision'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {documentOriginLabel(row.origen)} | Leido por {row.creado_por_nombre}</p></div>
           <div><p className="text-xs uppercase text-muted">Fecha documento</p><p className="mt-1 text-sm text-foreground">{formatDateOnly(row.fecha_documento)}</p></div>
-          <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} bultos` : ''}</p></div>
+          <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} ${Number(row.total_bultos) === 1 ? 'bulto logistico' : 'bultos logisticos'}` : ''}</p></div>
           <div className="flex justify-end gap-1">
             <button type="button" disabled={!row.archivo_id} onClick={() => download(row)} title={row.archivo_id ? 'Descargar PDF original' : 'PDF no conservado'} className="inline-flex h-10 w-10 items-center justify-center border border-border text-primary disabled:cursor-not-allowed disabled:text-muted"><Download size={16} /></button>
             {canManage && <button type="button" onClick={() => setReviewTarget(row)} title="Corregir datos extraidos" aria-label={`Corregir borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-foreground hover:border-primary hover:text-primary"><Pencil size={16} /></button>}
+            {canManage && <button type="button" disabled={needsCorrection || (row.items || []).some((item) => !item.producto_id)} onClick={() => setPrepareTarget(row)} title={needsCorrection ? 'Corrige el documento antes de preparar la salida' : 'Preparar salida desde este documento'} className="btn-primary inline-flex h-10 items-center gap-2 px-3 disabled:cursor-not-allowed disabled:opacity-40"><Send size={15} /><span className="hidden xl:inline">Preparar salida</span></button>}
             {canManage && <button type="button" onClick={() => setDiscardTarget(row)} title="Descartar borrador" aria-label={`Descartar borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger hover:text-danger"><Trash2 size={16} /></button>}
           </div>
         </header>
@@ -212,6 +220,49 @@ function DocumentDraftsPanel({ rows, loading, canManage, onUpdate, onDiscard }) 
     })}
     {reviewTarget && <DocumentDraftReviewModal row={reviewTarget} onClose={() => setReviewTarget(null)} onSave={async (body) => { const ok = await onUpdate(body); if (ok) setReviewTarget(null) }} />}
     {discardTarget && <DocumentDraftDiscardModal row={discardTarget} onClose={() => setDiscardTarget(null)} onDiscard={async (reason) => { const ok = await onDiscard(discardTarget.id, reason); if (ok) setDiscardTarget(null) }} />}
+    {prepareTarget && <DocumentPrepareModal row={prepareTarget} suppliers={suppliers} loading={loading} onClose={() => setPrepareTarget(null)} onPrepare={async (body) => { const ok = await onPrepare(body); if (ok) setPrepareTarget(null) }} />}
+  </div>
+}
+
+function DocumentPrepareModal({ row, suppliers, loading, onClose, onPrepare }) {
+  const [form, setForm] = useState({
+    tercero_id: suggestedSupplierId(row, suppliers),
+    sku: '',
+    cantidad_objetivo: '',
+    notas: '',
+  })
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+  const submit = (event) => {
+    event.preventDefault()
+    onPrepare({
+      documento_borrador_id: row.id,
+      tercero_id: Number(form.tercero_id),
+      sku: form.sku.trim(),
+      cantidad_objetivo: Number(form.cantidad_objetivo),
+      notas: form.notas.trim() || null,
+    })
+  }
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-labelledby="prepare-3q-title">
+    <form onSubmit={submit} className="flex max-h-[92vh] w-full max-w-3xl flex-col border border-border bg-surface shadow-2xl">
+      <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div><h2 id="prepare-3q-title" className="text-base font-semibold text-foreground">Preparar salida desde {row.referencia_documento}</h2><p className="mt-1 text-xs text-muted">Borrador #{row.id}. Los materiales y cantidades se toman del documento; no debes digitarlos otra vez.</p></div>
+        <button type="button" onClick={onClose} title="Cerrar" className="inline-flex h-8 w-8 items-center justify-center text-muted hover:text-foreground"><X size={18} /></button>
+      </header>
+      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label="Maquilador *"><select value={form.tercero_id} onChange={set('tercero_id')} className="input-field" required><option value="">Selecciona el maquilador</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select></Field>
+          <Field label="SKU producto terminado esperado *"><input value={form.sku} onChange={set('sku')} placeholder="Ej. 00105-PTBOS60" className="input-field" required /></Field>
+          <Field label="Cantidad terminada esperada *"><input type="number" min="0.0001" step="any" value={form.cantidad_objetivo} onChange={set('cantidad_objetivo')} className="input-field" required /></Field>
+        </div>
+        <div className="border border-border">
+          <div className="border-b border-border bg-white/[0.02] px-4 py-3"><p className="text-xs font-semibold uppercase text-muted">Materiales que se reservaran por FEFO</p></div>
+          <div className="divide-y divide-border/60">{(row.items || []).map((item, index) => <div key={`${item.sku_extraido}-${index}`} className="grid gap-1 px-4 py-3 md:grid-cols-[150px_minmax(0,1fr)_140px]"><span className="font-mono text-xs text-foreground">{item.sku_catalogo || item.sku_extraido}</span><span className="text-xs text-muted">{item.producto_catalogo || item.descripcion_extraida}</span><span className="text-xs tabular-nums text-foreground">{Number(item.cantidad)} {item.unidad || ''}</span></div>)}</div>
+        </div>
+        <Field label="Notas opcionales"><textarea value={form.notas} onChange={set('notas')} rows={2} className="input-field resize-none" /></Field>
+        <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-200">Al confirmar se validara que el documento coincida exactamente con el BOM y la cantidad objetivo. Se crearan la orden, la remision y las reservas. La OC no se vinculara automaticamente y el inventario no se descontara hasta confirmar la salida.</div>
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={loading} className="px-4 py-2 text-sm text-muted hover:text-foreground">Cancelar</button><button type="submit" disabled={loading} className="btn-primary inline-flex items-center gap-2"><Send size={15} /> {loading ? 'Preparando...' : 'Confirmar y preparar'}</button></footer>
+    </form>
   </div>
 }
 
@@ -393,7 +444,15 @@ function LinkPurchaseOrderForm({ orders, purchaseOrders, loading, onSubmit }) {
   const [form, setForm] = useState({ orden_maquila_id: '', orden_compra_id: '' })
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
   const selectedOrder = orders.find((order) => String(order.id) === form.orden_maquila_id)
-  const compatible = purchaseOrders.filter((order) => !selectedOrder || Number(order.tercero_id) === Number(selectedOrder.tercero_id))
+  const compatible = purchaseOrders.filter((order) => {
+    if (!selectedOrder) return true
+    if (Number(order.tercero_id) !== Number(selectedOrder.tercero_id)) return false
+    const productQuantity = (order.items || [])
+      .filter((item) => Number(item.producto_id) === Number(selectedOrder.producto_id))
+      .reduce((sum, item) => sum + Number(item.cantidad_ordenada || 0), 0)
+    return productQuantity + 0.0001 >= Number(selectedOrder.cantidad_objetivo)
+  })
+  const selectedPurchaseOrder = compatible.find((order) => String(order.id) === form.orden_compra_id)
   const submit = (event) => {
     event.preventDefault()
     onSubmit({ orden_maquila_id: Number(form.orden_maquila_id), orden_compra_id: Number(form.orden_compra_id) })
@@ -401,10 +460,11 @@ function LinkPurchaseOrderForm({ orders, purchaseOrders, loading, onSubmit }) {
   return <form onSubmit={submit} className="max-w-2xl space-y-5 border-y border-border py-5">
     <p className="text-xs text-muted">La vinculacion valida PDF, maquilador, producto y cantidad. Solo entonces se habilita la recepcion del producto terminado.</p>
     <div className="grid gap-4 md:grid-cols-2">
-      <Field label="Remision / orden 3Q sin OC *"><select value={form.orden_maquila_id} onChange={set('orden_maquila_id')} className="input-field" required><option value="">Selecciona una orden 3Q</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.codigo} - {order.sku} ({Number(order.cantidad_objetivo)})</option>)}</select></Field>
+      <Field label="Remision / orden 3Q sin OC *"><select value={form.orden_maquila_id} onChange={(event) => setForm({ orden_maquila_id: event.target.value, orden_compra_id: '' })} className="input-field" required><option value="">Selecciona una orden 3Q</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.codigo} - {order.sku} ({Number(order.cantidad_objetivo)})</option>)}</select></Field>
       <Field label="Orden de compra con PDF *"><select value={form.orden_compra_id} onChange={set('orden_compra_id')} className="input-field" required><option value="">Selecciona una OC compatible</option>{compatible.map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}</select></Field>
     </div>
-    <button type="submit" disabled={loading || !orders.length} className="btn-primary inline-flex items-center gap-2"><FileText size={15} /> Validar y vincular OC</button>
+    {selectedOrder && selectedPurchaseOrder && <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-100"><p className="font-semibold">Confirma el enlace manual</p><p className="mt-1"><span className="font-mono">{selectedOrder.codigo}</span> espera {Number(selectedOrder.cantidad_objetivo)} de <span className="font-mono">{selectedOrder.sku}</span> con {selectedOrder.proveedor_nombre}. Se vinculara a la OC <span className="font-mono">{selectedPurchaseOrder.numero}</span>.</p></div>}
+    <button type="submit" disabled={loading || !selectedOrder || !selectedPurchaseOrder} className="btn-primary inline-flex items-center gap-2"><FileText size={15} /> Validar y vincular OC</button>
   </form>
 }
 
@@ -437,4 +497,26 @@ function formatDate(value) {
 
 function formatDateOnly(value) {
   return formatCalendarDate(value)
+}
+
+function documentOriginLabel(value) {
+  return String(value || '').toUpperCase() === 'BUILDERBOT' ? 'WhatsApp' : 'Dashboard'
+}
+
+function suggestedSupplierId(row, suppliers) {
+  const destination = normalizedName(row?.destinatario_nombre)
+  if (!destination) return ''
+  const candidates = suppliers.filter((supplier) => {
+    const name = normalizedName(supplier.nombre)
+    return name === destination || name.includes(destination) || destination.includes(name)
+  })
+  return candidates.length === 1 ? String(candidates[0].id) : ''
+}
+
+function normalizedName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
 }

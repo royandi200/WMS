@@ -8,6 +8,7 @@ const {
   normalizeOutsourcingOrderInput,
   normalizePurchaseOrderLinkInput,
   normalizeAdditionalShipmentInput,
+  normalizeDocumentOutsourcingInput,
   outsourcingStateForReceipt,
   roundQty,
 } = require('./outsourcing-domain');
@@ -262,6 +263,252 @@ async function createOutsourcingOrder({ body, userId }) {
   }
 }
 
+function unitKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function addMaterialQuantity(target, row, quantity, unit) {
+  const productId = Number(row.producto_id || row.insumo_id);
+  const current = target.get(productId);
+  if (current && unitKey(current.unit) !== unitKey(unit)) {
+    throw httpError(409, `El SKU ${row.sku} aparece con unidades incompatibles`);
+  }
+  target.set(productId, {
+    productId,
+    sku: row.sku,
+    name: row.nombre,
+    unit: unit || current?.unit || null,
+    quantity: roundQty(Number(current?.quantity || 0) + Number(quantity)),
+  });
+}
+
+function validateDocumentMaterials(documentMaterials, bomMaterials) {
+  const differences = [];
+  for (const expected of bomMaterials.values()) {
+    const documented = documentMaterials.get(expected.productId);
+    if (!documented) {
+      differences.push(`${expected.sku}: falta en el documento (${expected.quantity} ${expected.unit || ''})`);
+      continue;
+    }
+    if (unitKey(documented.unit) !== unitKey(expected.unit)) {
+      differences.push(`${expected.sku}: unidad ${documented.unit || '-'}; BOM ${expected.unit || '-'}`);
+    }
+    if (Math.abs(documented.quantity - expected.quantity) > 0.0001) {
+      differences.push(`${expected.sku}: documento ${documented.quantity}; BOM ${expected.quantity}`);
+    }
+  }
+  for (const documented of documentMaterials.values()) {
+    if (!bomMaterials.has(documented.productId)) {
+      differences.push(`${documented.sku}: no pertenece al BOM de envio del producto terminado`);
+    }
+  }
+  if (differences.length) {
+    throw httpError(409, 'El documento no coincide con el BOM y la cantidad objetivo', { diferencias: differences });
+  }
+}
+
+async function createOutsourcingOrderFromDocument({ body, userId }) {
+  const input = normalizeDocumentOutsourcingInput(body);
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    const [drafts] = await conn.execute(
+      `SELECT id, origen, referencia_documento, destinatario_nombre, estado,
+              maquila_envio_id, advertencias
+         FROM documentos_bodega_borrador
+        WHERE id = ? AND tipo_documento = 'SALIDA_BODEGA_3Q'
+        LIMIT 1 FOR UPDATE`,
+      [input.documentId]
+    );
+    if (!drafts.length) throw httpError(404, 'Borrador de salida 3Q no encontrado');
+    const draft = drafts[0];
+    if (draft.maquila_envio_id) {
+      const [linked] = await conn.execute(
+        `SELECT me.id AS shipment_id, me.numero AS shipment_number, me.estado AS shipment_status,
+                om.id AS order_id, om.codigo AS order_code, om.estado AS status,
+                om.cantidad_objetivo AS quantity, p.siigo_code AS sku, p.nombre AS product_name
+           FROM maquila_envios me
+           JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
+           JOIN productos p ON p.id = om.producto_id
+          WHERE me.id = ? LIMIT 1`,
+        [draft.maquila_envio_id]
+      );
+      if (!linked.length) throw httpError(409, 'El documento apunta a una remision inexistente');
+      await conn.commit();
+      return { ...linked[0], document_id: draft.id, document_reference: draft.referencia_documento, duplicate: true, picking: [] };
+    }
+    if (draft.estado !== 'PENDIENTE_REVISION') {
+      throw httpError(409, `El documento esta ${draft.estado} y no puede preparar una salida`);
+    }
+
+    const [documentRows] = await conn.execute(
+      `SELECT i.producto_id, i.sku_extraido AS sku, i.cantidad, i.unidad,
+              p.nombre, p.activo
+         FROM documento_bodega_borrador_items i
+         LEFT JOIN productos p ON p.id = i.producto_id
+        WHERE i.documento_id = ?
+        ORDER BY i.id FOR UPDATE`,
+      [draft.id]
+    );
+    if (!documentRows.length) throw httpError(409, 'El documento no tiene materiales');
+    const unresolved = documentRows.filter((row) => !row.producto_id || Number(row.activo) !== 1);
+    if (unresolved.length) {
+      throw httpError(409, 'Todos los SKU del documento deben existir y estar activos', {
+        sku_pendientes: unresolved.map((row) => row.sku),
+      });
+    }
+
+    const [suppliers] = await conn.execute(
+      `SELECT id, COALESCE(NULLIF(nombre_comercial, ''), nombre) AS nombre
+         FROM terceros
+        WHERE id = ? AND tipo = 'Supplier' AND activo = 1
+          AND siigo_id IS NOT NULL AND siigo_id <> ''
+        LIMIT 1 FOR UPDATE`,
+      [input.supplierId]
+    );
+    if (!suppliers.length) throw httpError(404, 'Maquilador sincronizado y activo no encontrado');
+    const supplier = suppliers[0];
+    const finalProduct = await resolveProductReference(conn, input.product, { modes: [PRODUCT_MODES.OUTSOURCED] });
+    if (finalProduct.modalidad_operativa !== PRODUCT_MODES.OUTSOURCED) {
+      throw httpError(409, `${finalProduct.siigo_code} no es un producto de maquila tercerizada`);
+    }
+
+    const [bom] = await conn.execute(
+      `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
+              p.siigo_code AS sku, p.nombre
+         FROM bom b
+         JOIN productos p ON p.id = b.insumo_id AND p.activo = 1
+        WHERE b.producto_final_id = ? AND b.etapa = 'ENVIO'
+        ORDER BY b.id`,
+      [finalProduct.id]
+    );
+    if (!bom.length) throw httpError(422, `No existe BOM de envio para ${finalProduct.siigo_code}`);
+
+    const documentMaterials = new Map();
+    for (const row of documentRows) {
+      addMaterialQuantity(documentMaterials, row, row.cantidad, row.unidad);
+    }
+    const bomMaterials = new Map();
+    for (const row of bom) {
+      addMaterialQuantity(
+        bomMaterials,
+        row,
+        Number(row.cantidad_por_unidad) * input.quantity,
+        row.unidad
+      );
+    }
+    validateDocumentMaterials(documentMaterials, bomMaterials);
+
+    const warehouseId = await resolvePrimaryWarehouse(conn);
+    const plan = [];
+    for (const material of documentMaterials.values()) {
+      const allocations = await allocateFefo(conn, {
+        productId: material.productId,
+        warehouseId,
+        quantity: material.quantity,
+      });
+      plan.push({ material, allocations });
+    }
+
+    const temporary = `TMP-MQ-${crypto.randomBytes(8).toString('hex')}`;
+    const documentNote = `Preparada desde documento ${draft.referencia_documento}`;
+    const notes = input.notes ? `${documentNote}. ${input.notes}` : documentNote;
+    const [created] = await conn.execute(
+      `INSERT INTO ordenes_maquila
+         (codigo, orden_compra_id, tercero_id, proveedor_nombre, producto_id,
+          cantidad_objetivo, estado, notas, creado_por, creado_en, actualizado_en)
+       VALUES (?, NULL, ?, ?, ?, ?, 'MATERIALES_RESERVADOS', ?, ?, NOW(), NOW())`,
+      [temporary, supplier.id, supplier.nombre, finalProduct.id, input.quantity, notes, userId]
+    );
+    const orderCode = codeForId('MQ-3Q', created.insertId);
+    await conn.execute(`UPDATE ordenes_maquila SET codigo = ? WHERE id = ?`, [orderCode, created.insertId]);
+    const shipment = await insertShipment(conn, {
+      orderId: created.insertId,
+      type: 'INICIAL',
+      reason: `Salida tomada del documento ${draft.referencia_documento}`,
+      userId,
+    });
+
+    const picking = [];
+    for (const item of plan) {
+      const [material] = await conn.execute(
+        `INSERT INTO maquila_materiales
+           (orden_maquila_id, producto_id, cantidad_teorica, cantidad_reservada,
+            unidad, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+        [created.insertId, item.material.productId, item.material.quantity,
+         item.material.quantity, item.material.unit]
+      );
+      for (const allocation of item.allocations) {
+        const [reserved] = await conn.execute(
+          `UPDATE stock SET reservada = reservada + ?, actualizado_en = NOW()
+            WHERE id = ? AND (cantidad - reservada) >= ?`,
+          [allocation.quantity, allocation.id, allocation.quantity]
+        );
+        if (reserved.affectedRows !== 1) throw httpError(409, 'El inventario cambio durante la reserva');
+        const [lot] = await conn.execute(
+          `INSERT INTO maquila_material_lotes
+             (maquila_material_id, stock_id, bodega_origen_id, ubicacion_origen_id,
+              lote, cantidad_reservada, es_adicional, estado, creado_en, actualizado_en)
+           VALUES (?, ?, ?, ?, ?, ?, 0, 'RESERVADO', NOW(), NOW())`,
+          [material.insertId, allocation.id, allocation.bodega_id,
+           allocation.ubicacion_id, allocation.lote, allocation.quantity]
+        );
+        await conn.execute(
+          `INSERT INTO maquila_envio_items
+             (maquila_envio_id, maquila_material_lote_id, cantidad, creado_en)
+           VALUES (?, ?, ?, NOW())`,
+          [shipment.id, lot.insertId, allocation.quantity]
+        );
+        picking.push({
+          sku: item.material.sku,
+          producto: item.material.name,
+          cantidad: allocation.quantity,
+          unidad: item.material.unit,
+          lote: allocation.lote,
+          ubicacion: allocation.ubicacion,
+          vence: allocation.fecha_venc,
+        });
+      }
+    }
+
+    const [linked] = await conn.execute(
+      `UPDATE documentos_bodega_borrador
+          SET estado = 'VINCULADO', maquila_envio_id = ?, revisado_por = ?,
+              revisado_en = NOW(), actualizado_en = NOW()
+        WHERE id = ? AND estado = 'PENDIENTE_REVISION' AND maquila_envio_id IS NULL`,
+      [shipment.id, userId, draft.id]
+    );
+    if (linked.affectedRows !== 1) throw httpError(409, 'El documento cambio mientras se preparaba la salida');
+    await conn.execute(
+      `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
+       VALUES ('outsourcing', 'INFO', ?, ?, ?, NOW())`,
+      [`Documento 3Q ${draft.referencia_documento} vinculado a ${shipment.number}`, userId,
+       JSON.stringify({ documento_id: draft.id, orden_maquila_id: created.insertId, maquila_envio_id: shipment.id })]
+    );
+    await conn.commit();
+    return {
+      document_id: draft.id,
+      document_reference: draft.referencia_documento,
+      order_id: created.insertId,
+      order_code: orderCode,
+      shipment_id: shipment.id,
+      shipment_number: shipment.number,
+      status: 'MATERIALES_RESERVADOS',
+      product: finalProduct,
+      quantity: input.quantity,
+      purchase_order_pending: true,
+      duplicate: false,
+      picking,
+    };
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
 async function linkOutsourcingPurchaseOrder({ body, userId }) {
   const input = normalizePurchaseOrderLinkInput(body);
   const conn = await createConnection();
@@ -504,6 +751,12 @@ async function cancelOutsourcingShipment({ shipmentId, userId }) {
       await conn.execute(
         `UPDATE ordenes_maquila SET estado = 'CANCELADA', actualizado_en = NOW() WHERE id = ?`,
         [shipment.orden_maquila_id]
+      );
+      await conn.execute(
+        `UPDATE documentos_bodega_borrador
+            SET maquila_envio_id = NULL, estado = 'PENDIENTE_REVISION', actualizado_en = NOW()
+          WHERE maquila_envio_id = ? AND tipo_documento = 'SALIDA_BODEGA_3Q'`,
+        [shipment.id]
       );
     }
     await conn.commit();
@@ -853,6 +1106,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
 
 module.exports = {
   createOutsourcingOrder,
+  createOutsourcingOrderFromDocument,
   linkOutsourcingPurchaseOrder,
   prepareAdditionalShipment,
   confirmOutsourcingShipment,

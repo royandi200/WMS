@@ -1564,11 +1564,12 @@ module.exports = async (req, res) => {
           draft.duplicate
             ? `El documento ${draft.referencia_documento} ya estaba registrado. No se duplico.`
             : `Documento ${draft.referencia_documento} leido y guardado como borrador.`,
+          `Borrador WMS: #${draft.id}`,
           `Items: ${draft.itemCount}\nTotales: ${await draftQuantitySummary(db, draft.id)}`,
           `Estado: ${draft.estado}`,
           warningLines.length ? 'Revisiones necesarias:' : null,
           ...warningLines,
-          'Sofi debe revisarlo y vincularlo con la remision 3Q antes de confirmar la salida. No se modifico inventario.',
+          'Revisalo en Maquila 3Q > Documentos leidos y usa Preparar salida. Los materiales se tomaran del documento; la OC se vincula manualmente despues. No se modifico inventario.',
         ].filter(Boolean).join('\n');
         responseContext.document_draft_id = draft.id;
         responseContext.document_extraction = draft.extractionDiagnostics;

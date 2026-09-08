@@ -3,6 +3,7 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const {
   createOutsourcingOrder,
+  createOutsourcingOrderFromDocument,
   linkOutsourcingPurchaseOrder,
   prepareAdditionalShipment,
   confirmOutsourcingShipment,
@@ -102,6 +103,10 @@ async function handlePost(req, res) {
   if (action === 'CREATE') {
     const data = await createOutsourcingOrder({ body: req.body || {}, userId: user.id });
     return res.status(201).json({ ok: true, data });
+  }
+  if (action === 'CREATE_FROM_DOCUMENT') {
+    const data = await createOutsourcingOrderFromDocument({ body: req.body || {}, userId: user.id });
+    return res.status(data.duplicate ? 200 : 201).json({ ok: true, data });
   }
   if (action === 'PREPARE_ADDITIONAL') {
     const data = await prepareAdditionalShipment({ body: req.body || {}, userId: user.id });

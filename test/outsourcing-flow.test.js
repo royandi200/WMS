@@ -12,6 +12,7 @@ const {
   normalizeOutsourcingOrderInput,
   normalizePurchaseOrderLinkInput,
   normalizeAdditionalShipmentInput,
+  normalizeDocumentOutsourcingInput,
   outsourcingStateForReceipt,
 } = require('../api/_lib/outsourcing-domain');
 const { CAPABILITIES, hasCapability } = require('../api/_lib/capabilities');
@@ -104,6 +105,33 @@ test('additional material requires reason and idempotency key', () => {
   assert.throws(() => normalizeAdditionalShipmentInput({ orden_maquila_id: 1, sku: '00006-TRP', cantidad: 2, motivo: 'x' }), /clave_idempotencia/u);
 });
 
+test('document-based outsourcing requires only the data absent from the dispatch document', () => {
+  assert.deepEqual(
+    normalizeDocumentOutsourcingInput({
+      documento_borrador_id: 32,
+      tercero_id: 9,
+      sku: '00105-PTBOS60',
+      cantidad_objetivo: 4,
+      notas: 'Entrega demostracion',
+    }),
+    {
+      documentId: 32,
+      supplierId: 9,
+      product: '00105-PTBOS60',
+      quantity: 4,
+      notes: 'Entrega demostracion',
+    }
+  );
+  assert.throws(
+    () => normalizeDocumentOutsourcingInput({ tercero_id: 9, sku: '00105-PTBOS60', cantidad_objetivo: 4 }),
+    /documento_borrador_id/u
+  );
+  assert.throws(
+    () => normalizeDocumentOutsourcingInput({ documento_borrador_id: 32, tercero_id: 9, sku: '00105-PTBOS60', cantidad_objetivo: 0 }),
+    /positiva/u
+  );
+});
+
 test('outsourcing receipt state remains partial until accepted target is reached', () => {
   assert.equal(outsourcingStateForReceipt(0, 10), 'EN_3Q');
   assert.equal(outsourcingStateForReceipt(9.999, 10), 'RECIBIDA_PARCIAL');
@@ -164,6 +192,19 @@ test('3Q remision can precede its OC but reception remains fail-closed', () => {
   assert.match(migration, /orden_compra_id INT UNSIGNED NULL/u);
   assert.match(migration, /ENVIO_MAQUILA_3Q/u);
   assert.match(page, /Pendiente de cargar o vincular/u);
+});
+
+test('a reviewed 3Q document prepares one linked remision while the OC remains manual', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../api/_lib/outsourcing-workflow.js'), 'utf8');
+  const endpoint = fs.readFileSync(path.join(__dirname, '../api/v1/outsourcing.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/OutsourcingPage.jsx'), 'utf8');
+  assert.match(workflow, /createOutsourcingOrderFromDocument/u);
+  assert.match(workflow, /validateDocumentMaterials/u);
+  assert.match(workflow, /SET estado = 'VINCULADO', maquila_envio_id = \?/u);
+  assert.match(endpoint, /CREATE_FROM_DOCUMENT/u);
+  assert.match(page, /Los materiales y cantidades se toman del documento/u);
+  assert.match(page, /La OC no se vinculara automaticamente/u);
+  assert.match(workflow, /VALUES \(\?, NULL, \?, \?, \?, \?, 'MATERIALES_RESERVADOS'/u);
 });
 
 test('purchase orders fail closed to active Siigo suppliers', () => {

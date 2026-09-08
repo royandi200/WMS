@@ -70,10 +70,12 @@ async function handleGet(req, res) {
   );
   const orderIds = rows.map((row) => row.id);
   const quantities = orderIds.length ? await query(
-    `SELECT orden_compra_id, cantidad_ordenada, unidad
-       FROM orden_compra_proveedor_items
-      WHERE orden_compra_id IN (${orderIds.map(() => '?').join(',')})
-      ORDER BY orden_compra_id, id`,
+    `SELECT oci.orden_compra_id, oci.producto_id, oci.cantidad_ordenada, oci.unidad,
+            p.siigo_code AS sku, p.nombre AS producto
+       FROM orden_compra_proveedor_items oci
+       JOIN productos p ON p.id = oci.producto_id
+      WHERE oci.orden_compra_id IN (${orderIds.map(() => '?').join(',')})
+      ORDER BY oci.orden_compra_id, oci.id`,
     orderIds
   ) : [];
   const byOrder = new Map();
@@ -82,6 +84,13 @@ async function handleGet(req, res) {
     byOrder.get(quantity.orden_compra_id).push(quantity);
   }
   for (const row of rows) {
+    row.items = (byOrder.get(row.id) || []).map((item) => ({
+      producto_id: item.producto_id,
+      sku: item.sku,
+      producto: item.producto,
+      cantidad_ordenada: Number(item.cantidad_ordenada),
+      unidad: item.unidad,
+    }));
     row.totales_por_unidad = groupQuantitiesByUnit(byOrder.get(row.id) || []);
   }
   return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
