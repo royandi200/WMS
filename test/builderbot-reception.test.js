@@ -424,6 +424,10 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /No aceptes `ID 11`.*`MQ ID 11`/su);
   assert.match(webhook, /OC ID \$\{order\.id\}/u);
   assert.match(webhook, /MQ ID \$\{order\.id\}/u);
+  assert.doesNotMatch(
+    webhook,
+    /Produccion propia: el producto terminado ingresa al cerrar la orden de produccion/u
+  );
   assert.match(webhook, /requireExplicitTextReference: true/u);
   assert.match(prompt, /Llegaron completos.*NO son confirmaciones/su);
   assert.match(prompt, /NO emitas items ni distribuciones anidadas/u);

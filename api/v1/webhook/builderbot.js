@@ -1442,10 +1442,7 @@ module.exports = async (req, res) => {
           listAvailableOutsourcingReceptions({ db, limit: 10 }),
         ]);
         if (!available.length && !outsourcing.length) {
-          mensaje = [
-            'No hay recepciones pendientes disponibles.',
-            'Produccion propia: el producto terminado ingresa al cerrar la orden de produccion, no mediante una recepcion.',
-          ].join('\n');
+          mensaje = 'No hay recepciones pendientes disponibles.';
         } else {
           const directGroups = [
             ['Materia prima e insumos', available.filter(order => order.tipo_recepcion === 'INSUMOS_MP')],
@@ -1485,10 +1482,6 @@ module.exports = async (req, res) => {
             ...outsourcingLines,
             '',
             ...(available.length ? [`Para una OC directa responde, por ejemplo: prepara la recepcion OC ID ${available[0].id}.`] : []),
-            '',
-            'Produccion propia: el producto terminado ingresa al cerrar la orden de produccion, no mediante una recepcion.',
-            '',
-            'Esta consulta no modifica inventario.',
           ].join('\n');
         }
         responseContext.available_receptions = available.map(order => ({
