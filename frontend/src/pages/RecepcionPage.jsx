@@ -58,6 +58,11 @@ function canPrepareOutsourcingOrder(order) {
     && Number(order.cantidad_objetivo) - Number(order.cantidad_recibida) > 0.0001
 }
 
+function purchaseOrderIdentifier(order) {
+  const outsourcingId = Number(order.orden_maquila_id || 0)
+  return outsourcingId > 0 ? `MQ ID ${outsourcingId}` : `OC ID ${order.id}`
+}
+
 export default function RecepcionPage() {
   const [tab, setTab] = useState('orders')
   const [toast, setToast] = useState(null)
@@ -346,7 +351,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
             setItems([])
           }} className="input-field" required disabled={Boolean(receptionId)}>
             <option value="">Selecciona la OC</option>
-            {directPurchaseOrders.map((order) => <option key={order.id} value={order.id}>{order.numero} - {order.proveedor_nombre}</option>)}
+            {directPurchaseOrders.map((order) => <option key={order.id} value={order.id}>OC ID {order.id} - {order.numero} - {order.proveedor_nombre}</option>)}
           </select>
         </Field> : <>
           <Field label="Orden de maquila 3Q *">
@@ -772,7 +777,7 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
       <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full text-sm min-w-[960px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
+          {['ID / Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
@@ -781,7 +786,12 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
           {!loading && rows.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Sin ordenes de compra cargadas</td></tr>}
           {!loading && rows.map((row) => (
             <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
-              <td className="px-4 py-3 font-mono text-xs text-foreground">{row.numero}</td>
+              <td className="px-4 py-3 text-xs text-foreground">
+                <span className="block font-mono font-semibold text-primary">{purchaseOrderIdentifier(row)}</span>
+                {row.orden_maquila_id && <span className="block font-mono text-muted">OC ID {row.id}</span>}
+                <span className="block font-mono mt-1">{row.numero}</span>
+                {row.ordenes_maquila && <span className="block mt-1 text-primary">{row.ordenes_maquila}</span>}
+              </td>
               <td className="px-4 py-3">
                 {row.documento_id ? (
                   <button type="button" title="Descargar PDF" onClick={() => downloadPurchaseOrderDocument(row.documento_id, row.documento_nombre)} className="inline-flex h-8 w-8 items-center justify-center text-primary hover:bg-primary/10">

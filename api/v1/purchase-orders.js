@@ -48,6 +48,7 @@ async function handleGet(req, res) {
     `SELECT oc.id, oc.numero, oc.tercero_id, oc.proveedor_nombre, oc.fecha_orden,
             oc.estado, oc.archivo_nombre, oc.creado_en, oc.actualizado_en,
             oc.motivo_cancelacion, oc.cancelada_en, oc.cancelada_por,
+            mq.orden_maquila_id, mq.ordenes_maquila,
             d.id AS documento_id, d.nombre_original AS documento_nombre,
             d.tamano_bytes AS documento_tamano, d.sha256 AS documento_sha256,
             u.nombre AS creado_por_nombre,
@@ -59,10 +60,18 @@ async function handleGet(req, res) {
      LEFT JOIN usuarios cu ON cu.id = oc.cancelada_por
      LEFT JOIN orden_compra_proveedor_items oci ON oci.orden_compra_id = oc.id
      LEFT JOIN orden_compra_documentos d ON d.orden_compra_id = oc.id AND d.activo = 1
+     LEFT JOIN (
+       SELECT orden_compra_id, MIN(id) AS orden_maquila_id,
+              GROUP_CONCAT(DISTINCT codigo ORDER BY id SEPARATOR ', ') AS ordenes_maquila
+         FROM ordenes_maquila
+        WHERE orden_compra_id IS NOT NULL AND estado <> 'CANCELADA'
+        GROUP BY orden_compra_id
+     ) mq ON mq.orden_compra_id = oc.id
      ${where}
      GROUP BY oc.id, oc.numero, oc.tercero_id, oc.proveedor_nombre, oc.fecha_orden,
               oc.estado, oc.archivo_nombre, oc.creado_en, oc.actualizado_en,
               oc.motivo_cancelacion, oc.cancelada_en, oc.cancelada_por,
+              mq.orden_maquila_id, mq.ordenes_maquila,
               d.id, d.nombre_original, d.tamano_bytes, d.sha256, u.nombre, cu.nombre
      ORDER BY oc.creado_en DESC
      LIMIT ?`,
