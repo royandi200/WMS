@@ -102,6 +102,23 @@ module.exports = async (req, res) => {
       balance_after: movement.balance_after == null ? null : Number(movement.balance_after),
     }));
 
+    const externalCustody = await query(
+      `SELECT om.id AS orden_maquila_id, om.codigo AS orden_codigo,
+              om.proveedor_nombre, me.numero AS remision, me.confirmado_en,
+              mml.lote, SUM(mei.cantidad) AS cantidad
+         FROM maquila_envio_items mei
+         JOIN maquila_envios me ON me.id = mei.maquila_envio_id
+         JOIN maquila_material_lotes mml ON mml.id = mei.maquila_material_lote_id
+         JOIN maquila_materiales mm ON mm.id = mml.maquila_material_id
+         JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
+        WHERE mm.producto_id = ? AND me.estado = 'CONFIRMADO'
+          AND om.estado IN ('EN_3Q_PENDIENTE_OC','EN_3Q','RECIBIDA_PARCIAL')
+        GROUP BY om.id, om.codigo, om.proveedor_nombre, me.id, me.numero,
+                 me.confirmado_en, mml.lote
+        ORDER BY me.confirmado_en DESC, me.id DESC`,
+      [product.id]
+    );
+
     const totals = lotes.reduce((acc, row) => {
       acc.cantidad += row.cantidad;
       acc.reservada += row.reservada;
@@ -109,6 +126,11 @@ module.exports = async (req, res) => {
       acc.bloqueada += row.bloqueada;
       return acc;
     }, { cantidad: 0, reservada: 0, disponible: 0, bloqueada: 0 });
+    totals.en_custodia_3q = externalCustody.reduce(
+      (sum, row) => sum + Number(row.cantidad || 0),
+      0
+    );
+    totals.total_bajo_control = totals.cantidad + totals.en_custodia_3q;
 
     return res.status(200).json({
       ok: true,
@@ -118,6 +140,10 @@ module.exports = async (req, res) => {
         rows: lotes,
         total: lotes.length,
         movements,
+        external_custody: externalCustody.map((row) => ({
+          ...row,
+          cantidad: Number(row.cantidad || 0),
+        })),
       },
     });
   } catch (err) {

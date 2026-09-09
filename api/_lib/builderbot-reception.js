@@ -544,15 +544,6 @@ async function prepareReceptionFromOutsourcing({
       quantity: requestedQuantity,
       userId,
     });
-    if (requestedQuantity != null && requestedQuantity !== '') {
-      const preparedQuantity = Number(reception.items?.[0]?.cantidad_pendiente ?? reception.cantidad_entrega);
-      if (Math.abs(preparedQuantity - Number(requestedQuantity)) > 0.0001) {
-        throw inputError(
-          `Ya existe una recepcion activa por ${preparedQuantity} ${order.unidad}. Termina esa recepcion antes de preparar otra cantidad.`,
-          409
-        );
-      }
-    }
     await db.commit();
     return { order, reception, alreadyCompleted: false };
   } catch (error) {

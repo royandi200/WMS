@@ -193,6 +193,19 @@ Los 39 identificadores quedan cubiertos en la matriz. P-032, P-033, P-038 y P-03
 
 La mejor practica es conservar el material enviado como existencia controlada en una ubicacion logica de custodia externa, no como inventario disponible de la bodega ni como material desaparecido. La ficha por SKU debe presentar al menos `Disponible en bodega`, `Reservado`, `Bloqueado`, `En custodia 3Q` y `Total bajo control`. `En custodia 3Q` debe enlazar cantidad y lote con la remision/despacho y la orden MQ. Cuando 3Q reporte consumo o devolucion, el saldo se concilia mediante movimientos auditables; nunca se infiere consumo proporcional desde el PT recibido.
 
+### Implementacion de la barrida - 2026-09-09
+
+- P-031: formato comun aplicado a respuestas, notificaciones de flujo y aprobaciones enviadas por WhatsApp.
+- P-032: `OP ID N` visible y aceptado en produccion; cierres, alistamientos, reposiciones y avisos conservan tambien el codigo largo. Despachos muestran `DSP ID`.
+- P-033: las remisiones de materiales 3Q aparecen en la bandeja e historico de Despachos, reutilizan su hoja imprimible, segunda confirmacion e idempotencia; la confirmacion delega al movimiento 3Q existente para descontar exactamente una vez.
+- P-034 y P-038: lote completo, SKU y ubicacion visibles; la ficha de lote incorpora su linea de tiempo Kardex, incluida la salida a 3Q.
+- P-035: cada OP muestra mermas con tipo, cantidad/unidad, motivo, actor y fecha.
+- P-036: preparar `MQ ID N` ya no exige cantidad; el saldo esperado se carga y la cantidad fisica se declara en el reporte posterior.
+- P-037: la ficha por SKU separa inventario de bodega y custodia externa 3Q, enlazada con MQ, remision y lote.
+- P-039: implementado previamente con los espacios `OC ID`, `IO ID` y `MQ ID`.
+
+Estos puntos requieren aun la regresion manual de canal y dashboard antes de considerarlos aceptados por usuario; la suite automatizada no sustituye esa prueba operativa.
+
 ### Pendientes previos que continúan abiertos
 
 - Reactivar de forma controlada un PDF identico cuyo borrador fue descartado, o devolver una accion de restauracion clara; no responder que puede revisarse mientras permanece invisible.

@@ -232,7 +232,7 @@ async function releaseProductionOrder({
       text: [
         '*Nueva orden para alistamiento*',
         '',
-        `Orden: ${code}`,
+        `Orden: OP ID ${created.insertId} | ${code}`,
         `Producto: ${finalProduct.nombre}`,
         `SKU: ${finalProduct.siigo_code}`,
         `Cantidad a producir: ${qty} und`,
@@ -276,7 +276,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
     const order = orders[0];
     if (order.estado === 'EN_PROCESO' && order.materiales_conf_en) {
       await conn.commit();
-      return { order_code: order.codigo_orden, phase: order.fase, already_confirmed: true, consumed: [] };
+      return { order_id: order.id, order_code: order.codigo_orden, phase: order.fase, already_confirmed: true, consumed: [] };
     }
     if (order.estado !== 'APROBADA' || order.fase !== 'F0') {
       throw httpError(409, `La orden esta ${order.estado} en fase ${order.fase} y no puede iniciar`);
@@ -375,7 +375,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
     );
     const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
-    const result = { order_code: order.codigo_orden, phase: 'F1', already_confirmed: false, consumed };
+    const result = { order_id: order.id, order_code: order.codigo_orden, phase: 'F1', already_confirmed: false, consumed };
     const startedAt = new Date().toLocaleString('es-CO', {
       timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short',
     });
@@ -387,7 +387,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
       text: [
         '*Produccion iniciada*',
         '',
-        `Orden: ${order.codigo_orden}`,
+        `Orden: OP ID ${order.id} | ${order.codigo_orden}`,
         `Producto: ${order.producto_nombre}`,
         `SKU: ${order.producto_sku}`,
         `Cantidad planeada: ${Number(order.cantidad_planeada)} und`,

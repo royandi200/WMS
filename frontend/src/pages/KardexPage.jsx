@@ -30,8 +30,10 @@ const NEGATIVE_TYPES = new Set([
 const norm = (r) => ({
   fecha: r.fecha ?? r.created_at ?? r.creado_en ?? '',
   tipo: r.tipo ?? r.type ?? r.action ?? '',
-  producto: r.producto ?? r.product_name ?? r.product_sku ?? r.sku ?? r.product_id ?? r.producto_id ?? '—',
+  sku: r.sku ?? r.product_sku ?? '—',
+  producto: r.producto ?? r.product_name ?? r.product_id ?? r.producto_id ?? '—',
   lote: r.lote ?? r.lot_lpn ?? r.lote_id ?? r.lot_id ?? '—',
+  ubicacion: r.ubicacion ?? r.location ?? '—',
   cantidad: r.cantidad ?? r.qty ?? r.quantity ?? 0,
   saldo: r.saldo ?? r.balance_after ?? r.balance ?? '—',
   referencia: r.referencia ?? r.reference ?? r.ref ?? '—',
@@ -97,10 +99,10 @@ export default function KardexPage() {
       {!loading && rows.length > 0 && (
         <>
           <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm min-w-[600px]">
+            <table className="w-full text-sm min-w-[760px]">
               <thead>
                 <tr className="bg-surface border-b border-border">
-                  {['Fecha', 'Tipo', 'Producto', 'Lote', 'Cantidad', 'Saldo', 'Referencia'].map((c) => (
+                  {['Fecha', 'Tipo', 'SKU', 'Producto', 'Lote', 'Ubicacion', 'Cantidad', 'Saldo', 'Referencia'].map((c) => (
                     <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
                   ))}
                 </tr>
@@ -118,8 +120,10 @@ export default function KardexPage() {
                       <td className="px-4 py-3">
                         <span className={`text-xs font-semibold ${MOV_COLOR[r.tipo] || 'text-muted'}`}>{r.tipo || '—'}</span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-primary">{r.producto}</td>
-                      <td className="px-4 py-3 text-muted text-xs">{r.lote && r.lote !== '—' ? String(r.lote).slice(0, 24) : '—'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-primary">{r.sku}</td>
+                      <td className="px-4 py-3 text-xs text-foreground">{r.producto}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted break-all">{r.lote || '—'}</td>
+                      <td className="px-4 py-3 text-xs text-muted">{r.ubicacion}</td>
                       <td className={`px-4 py-3 tabular-nums font-semibold ${isNegative ? 'text-danger' : 'text-green-400'}`}>
                         {`${isNegative ? '-' : '+'}${cantidadAbs}`}
                       </td>

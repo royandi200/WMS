@@ -45,6 +45,29 @@ module.exports = async (req, res) => {
     args.push(Number(limit), offset);
 
     const rows = await query(sql, args);
+    const orderIds = rows.map((row) => Number(row.id)).filter(Number.isInteger);
+    const wasteRows = orderIds.length
+      ? await query(
+        `SELECT m.id, m.numero, m.tipo, m.orden_produccion_id, m.cantidad,
+                m.motivo, m.estado, m.creado_en,
+                p.siigo_code AS sku, p.nombre AS producto,
+                COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad,
+                u.nombre AS registrado_por
+           FROM mermas m
+           JOIN productos p ON p.id = m.producto_id
+           LEFT JOIN usuarios u ON u.id = m.usuario_id
+          WHERE m.orden_produccion_id IN (${orderIds.map(() => '?').join(',')})
+          ORDER BY m.creado_en, m.id`,
+        orderIds
+      )
+      : [];
+    const wasteByOrder = new Map();
+    for (const waste of wasteRows) {
+      const orderId = Number(waste.orden_produccion_id);
+      if (!wasteByOrder.has(orderId)) wasteByOrder.set(orderId, []);
+      wasteByOrder.get(orderId).push({ ...waste, cantidad: Number(waste.cantidad || 0) });
+    }
+    for (const row of rows) row.mermas = wasteByOrder.get(Number(row.id)) || [];
     const countRows = await query(
       `SELECT COUNT(*) AS total FROM ordenes_produccion${estado ? ' WHERE estado=?' : ''}`,
       estado ? [estado] : []

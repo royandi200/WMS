@@ -1,5 +1,6 @@
 const https = require('https');
 const { createConnection } = require('./db');
+const { formatWhatsAppMessage } = require('./whatsapp-message');
 
 function normalizePhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -28,7 +29,7 @@ function sendMessage(phone, text) {
   const token = process.env.BUILDERBOT_API_TOKEN;
   const botId = process.env.BUILDERBOT_BOT_ID;
   if (!token || !botId) return Promise.reject(new Error('BuilderBot no configurado'));
-  const body = JSON.stringify({ number: phone, messages: { content: text } });
+  const body = JSON.stringify({ number: phone, messages: { content: formatWhatsAppMessage(text) } });
   return new Promise((resolve, reject) => {
     const request = https.request({
       hostname: 'app.builderbot.cloud',
@@ -84,6 +85,7 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
       ).catch(() => {});
       return [{ status: 'no_recipient' }];
     }
+    const formattedText = formatWhatsAppMessage(text);
     const results = [];
     for (const phone of phones) {
       let notificationId;
@@ -92,7 +94,7 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
           `INSERT INTO notificaciones_salida
              (evento, canal, destinatario, mensaje, estado, intentos, creado_en)
            VALUES (?, 'WHATSAPP', ?, ?, 'PENDIENTE', 0, NOW())`,
-          [event, phone, text]
+          [event, phone, formattedText]
         );
         notificationId = created.insertId;
       } catch (error) {
@@ -112,7 +114,7 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
         }
       }
       try {
-        await sendMessage(phone, text);
+        await sendMessage(phone, formattedText);
         await conn.execute(
           `UPDATE notificaciones_salida SET estado = 'ENVIADA', intentos = intentos + 1,
                enviado_en = NOW(), ultimo_error = NULL WHERE id = ?`,

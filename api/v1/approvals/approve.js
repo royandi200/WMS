@@ -1,6 +1,7 @@
 // POST /api/v1/approvals/approve
 const crypto = require('crypto');
 const https = require('https');
+const { formatWhatsAppMessage } = require('../../_lib/whatsapp-message');
 const { createConnection, query } = require('../../_lib/db');
 const { cors, requireCapability } = require('../../_lib/auth');
 const { CAPABILITIES } = require('../../_lib/capabilities');
@@ -50,7 +51,7 @@ async function pushWA(phone, text) {
       const number = normalizeWhatsAppPhone(phone);
       if (!number || !BB_TOKEN || !BB_BOT_ID) return resolve(null);
 
-      const body = JSON.stringify({ number, messages: { content: text } });
+      const body = JSON.stringify({ number, messages: { content: formatWhatsAppMessage(text) } });
       const req = https.request({
         hostname: 'app.builderbot.cloud',
         path: `/api/v2/${BB_BOT_ID}/messages`,

@@ -44,6 +44,10 @@ module.exports = async (req, res) => {
          p.siigo_code   AS sku,
          p.nombre       AS product_name,
          l.lpn          AS lot_lpn,
+         COALESCE((SELECT GROUP_CONCAT(DISTINCT ub.codigo ORDER BY ub.codigo SEPARATOR ', ')
+                     FROM stock s
+                     JOIN ubicaciones ub ON ub.id = s.ubicacion_id
+                    WHERE s.producto_id = k.product_id AND BINARY s.lote = BINARY l.lpn), '-') AS ubicacion,
          u.nombre       AS usuario,
          a.nombre       AS aprobado_por
        FROM kardex k

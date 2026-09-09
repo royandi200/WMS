@@ -295,6 +295,15 @@ test('production close text keeps reason and short location while expiry stays s
   assert.equal(normalizeExpiryDate('29 de febrero de 2028'), '2028-02-29');
 });
 
+test('production close accepts the typed short OP ID', () => {
+  const parsed = parseProductionCloseFromText(
+    'cerramos OP ID 88 con 3 conformes y 1 merma por etiqueta dañada, dejar en C2'
+  );
+  assert.equal(parsed.params.id_orden, 88);
+  assert.equal(parsed.params.cantidad_real, 3);
+  assert.equal(parsed.params.merma, 1);
+});
+
 test('production close normalizes LLM aliases', () => {
   const normalized = normalizeProductionCloseParams({
     conformes: 2,

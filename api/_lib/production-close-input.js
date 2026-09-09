@@ -39,7 +39,7 @@ function parseProductionCloseFromText(text) {
   const raw = String(text || '');
   if (!hasProductionCloseIntent(raw)) return null;
   const orderCodeMatch = raw.match(/\b(?:OP|ORD|P)-[A-Z0-9-]+\b/i);
-  const shortOrderMatch = raw.match(/\borden(?:\s+id)?\s*#?\s*(\d+)\b/i);
+  const shortOrderMatch = raw.match(/\b(?:op|orden(?:\s+de\s+producci[oó]n)?)\s+(?:id\s*)?#?\s*(\d+)\b/i);
   if (!orderCodeMatch && !shortOrderMatch) return null;
   const normalized = raw.toLowerCase().replace(/,/g, '.');
   const conforming =

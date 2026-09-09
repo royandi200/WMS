@@ -71,10 +71,10 @@ export default function ProduccionPage() {
           {!loading && list.length === 0 && <EmptyState text="Sin ordenes de produccion" />}
           {list.length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-sm min-w-[980px]">
+              <table className="w-full text-sm min-w-[1240px]">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['Codigo orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Lote PT', 'Fase', 'Estado', 'Fecha', 'Hora'].map((c) => (
+                    {['Orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Mermas', 'Lote PT', 'Fase', 'Estado', 'Fecha', 'Hora'].map((c) => (
                       <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
                     ))}
                   </tr>
@@ -84,12 +84,18 @@ export default function ProduccionPage() {
                     const st = STATUS_LABEL[r.status] || { label: r.status ?? empty, css: 'text-muted bg-white/5' }
                     return (
                       <tr key={r.id} className="border-b border-border/50 hover:bg-white/[0.02]">
-                        <td className="px-4 py-3 font-mono text-xs text-foreground">{r.codigo_orden ?? r.id}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-foreground"><span className="block font-semibold text-primary">OP ID {r.id}</span><span className="block">{r.codigo_orden ?? empty}</span></td>
                         <td className="px-4 py-3 text-foreground">{r.product_name ?? empty}</td>
                         <td className="px-4 py-3 font-mono text-xs text-muted">{r.sku ?? empty}</td>
                         <td className="px-4 py-3 text-xs">{r.origen_tipo === 'OC_CLIENTE' ? `${r.referencia_cliente || 'OC'} / ${r.cliente_final || '-'}` : r.origen_tipo === 'STOCK_SEGURIDAD' ? 'Stock seguridad' : '-'}</td>
                         <td className="px-4 py-3 tabular-nums">{r.qty_planned ?? empty}</td>
                         <td className="px-4 py-3 tabular-nums">{r.qty_real ?? empty}</td>
+                        <td className="px-4 py-3 text-xs">{r.mermas?.length ? r.mermas.map((merma) => (
+                          <span key={merma.id} className="mb-1 block text-orange-400">
+                            <span className="font-mono">{merma.numero || `MER ID ${merma.id}`}</span>: {Number(merma.cantidad)} {merma.unidad || ''} · {merma.tipo}
+                            <span className="block max-w-[220px] text-muted">{merma.motivo || 'Sin motivo'}{merma.registrado_por ? ` · ${merma.registrado_por}` : ''}{merma.creado_en ? ` · ${safeDate(merma.creado_en)}` : ''}</span>
+                          </span>
+                        )) : empty}</td>
                         <td className="px-4 py-3 font-mono text-xs text-foreground">{r.output_lot ?? empty}</td>
                         <td className="px-4 py-3">{r.current_phase ?? empty}</td>
                         <td className="px-4 py-3">
@@ -195,7 +201,7 @@ function ConfirmMaterialsForm({ loading, onSubmit }) {
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
       <Field label="Orden de produccion *">
-        <input value={orderId} onChange={(event) => setOrderId(event.target.value)} placeholder="OP-..." className="input-field" required />
+        <input value={orderId} onChange={(event) => setOrderId(event.target.value)} placeholder="OP ID 88 u OP-..." className="input-field" required />
       </Field>
       <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Confirmar materiales e iniciar'}</button>
     </form>
@@ -233,7 +239,7 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
     <form onSubmit={handle} className="max-w-xl bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
       <div className="grid md:grid-cols-2 gap-4">
-        <Field label="Orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP-..." className="input-field" required /></Field>
+        <Field label="Orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
         <Field label="Tipo *"><select value={form.tipo} onChange={set('tipo')} className="input-field"><option>ENTREGA_ADICIONAL</option><option>DEVOLUCION</option></select></Field>
         <Field label="SKU de materia prima *"><input value={form.sku} onChange={set('sku')} className="input-field" required /></Field>
         <Field label="Lote *"><input value={form.lote} onChange={set('lote')} className="input-field" required /></Field>
@@ -282,7 +288,7 @@ function PrepareReplenishmentForm({ loading, onSubmit, onCancel }) {
     <div className="max-w-xl space-y-4">
       {toast && <ToastInline toast={toast} />}
       <form onSubmit={handle} className="bg-surface border border-border rounded-lg p-6 space-y-4">
-        <Field label="Orden en proceso *"><input value={form.order_id} onChange={set('order_id')} placeholder="ID u OP-..." className="input-field" required /></Field>
+        <Field label="Orden en proceso *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
         <Field label="Unidades conformes faltantes *"><input type="number" min="1" step="1" value={form.cantidad_unidades} onChange={set('cantidad_unidades')} className="input-field" required /></Field>
         <Field label="Motivo *"><textarea value={form.motivo} onChange={set('motivo')} rows={2} placeholder="Ej. unidad no conforme por dano de empaque" className="input-field resize-none" required /></Field>
         <label className="flex items-start gap-3 text-sm text-foreground">
@@ -336,7 +342,7 @@ function AdvanceForm({ loading, onSubmit }) {
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="ID de la orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="ID u OP-..." className="input-field" required /></Field>
+      <Field label="OP ID *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
       <Field label="Fase destino *">
         <select value={form.phase} onChange={set('phase')} className="input-field">
           {PHASES.map((p) => <option key={p}>{p}</option>)}
@@ -386,7 +392,7 @@ function CloseForm({ loading, onSubmit, locations }) {
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="ID de la orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="ID u OP-..." className="input-field" required /></Field>
+      <Field label="OP ID *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
       <Field label="Unidades conformes terminadas *"><input type="number" min="0" value={form.qty_real} onChange={set('qty_real')} placeholder="0" className="input-field" required /></Field>
       <Field label="Merma / no conforme *"><input type="number" min="0" value={form.qty_waste} onChange={set('qty_waste')} placeholder="0" className="input-field" required /></Field>
       <Field label="Ubicacion del producto terminado *">

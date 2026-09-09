@@ -144,6 +144,7 @@ const {
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
 const { receptionPartidas } = require('../../_lib/reception-partidas');
 const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
+const { formatWhatsAppMessage } = require('../../_lib/whatsapp-message');
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
@@ -155,7 +156,7 @@ function normalizeWhatsAppPhone(phone) {
 }
 
 function builderbotResponse(res, status, body) {
-  const msg = body.mensaje || body.message || '';
+  const msg = formatWhatsAppMessage(body.mensaje || body.message || '');
   return res.status(status).json({
     ...body,
     message: msg,
@@ -814,7 +815,7 @@ async function pushWA(phone, text) {
 
       const body = JSON.stringify({
         number,
-        messages: { content: text },
+        messages: { content: formatWhatsAppMessage(text) },
       });
 
       console.log(`[pushWA]   body JSON: ${body.slice(0, 300)}`);
@@ -1627,9 +1628,6 @@ module.exports = async (req, res) => {
       }
 
       case 'PREPARAR_RECEPCION_MAQUILA': {
-        if (params.cantidad_entrega == null && params.delivery_quantity == null) {
-          throw Object.assign(new Error('Indica la cantidad de esta entrega 3Q. No se modifico inventario.'), { status: 400 });
-        }
         const prepared = await prepareReceptionFromOutsourcing({
           db,
           params,
@@ -2611,7 +2609,7 @@ module.exports = async (req, res) => {
             `Despachos pendientes (${dispatches.length}):`,
             ...dispatches.flatMap(dispatch => [
               '',
-              `- ID ${dispatch.id} | ${dispatch.numero}`,
+              `- DSP ID ${dispatch.id} | ${dispatch.numero}`,
               `  Factura: ${dispatch.siigo_invoice_name || 'N/A'} | Cliente: ${dispatch.cliente_nombre || 'Cliente N/A'}`,
               `  Estado: ${readiness.get(Number(dispatch.id)) ? 'LISTO PARA CONFIRMAR' : 'PENDIENTE_STOCK'}`,
               ...(demandByDispatch.get(Number(dispatch.id)) || []).map(item =>
@@ -2687,7 +2685,7 @@ module.exports = async (req, res) => {
         if (productionResult.requires_confirmation) {
           mensaje = [
             `Ya existe la orden ${productionResult.order_code} con el mismo producto, cantidad y destino. No se modifico inventario.`,
-            `Si necesitas una orden adicional identica, responde: confirma una nueva produccion adicional para la orden ID ${productionResult.order_id}.`,
+            `Si necesitas una orden adicional identica, responde: confirma una nueva produccion adicional para OP ID ${productionResult.order_id}.`,
           ].join('\n');
           responseContext.production = productionResult;
           break;
@@ -2707,7 +2705,7 @@ module.exports = async (req, res) => {
         mensaje = [
           '*Orden de produccion liberada*',
           '',
-          `Orden: ID ${productionResult.order_id} | ${productionResult.order_code}`,
+          `Orden: OP ID ${productionResult.order_id} | ${productionResult.order_code}`,
           `Producto: ${productionResult.product.nombre}`,
           `SKU: ${productionResult.product.siigo_code}`,
           `Cantidad planeada interpretada: ${productionResult.planned_quantity} und`,
@@ -2716,7 +2714,7 @@ module.exports = async (req, res) => {
           '*Alistamiento FEFO*',
           ...picking,
           '*Siguiente paso*',
-          `El alistador fue notificado. La orden ID ${productionResult.order_id} quedara EN_PROCESO cuando confirme los materiales.`,
+          `El alistador fue notificado. OP ID ${productionResult.order_id} quedara EN_PROCESO cuando confirme los materiales.`,
         ].join('\n');
         responseContext.production = productionResult;
         break;
@@ -2736,9 +2734,9 @@ module.exports = async (req, res) => {
           ? new Date(closure.closed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })
           : null;
         mensaje = closure.already_closed
-          ? `La orden ${closure.order_code} ya estaba cerrada${closure.closed_by ? ` por ${closure.closed_by}` : ''}${closedWhen ? ` el ${closedWhen}` : ''}. No se modifico inventario.`
+          ? `OP ID ${closure.order_id} | ${closure.order_code} ya estaba cerrada${closure.closed_by ? ` por ${closure.closed_by}` : ''}${closedWhen ? ` el ${closedWhen}` : ''}. No se modifico inventario.`
           : [
-              `Orden ${closure.order_code} cerrada.`,
+              `OP ID ${closure.order_id} | ${closure.order_code} cerrada.`,
               `Producto conforme: ${closure.qty_real}`,
               `Merma: ${closure.qty_waste}`,
               `Lote PT: ${closure.lpn_terminado || 'Sin lote conforme'}`,
@@ -3032,9 +3030,9 @@ module.exports = async (req, res) => {
             ? [
                 `Ordenes de produccion activas (${activeOrders.length}):`,
                 ...activeOrders.map(order =>
-                  `- ID ${order.id} | ${order.codigo_orden} | ${order.siigo_code} - ${order.producto} | ${Number(order.cantidad_planeada)} und | ${order.estado}`
+                  `- OP ID ${order.id} | ${order.codigo_orden} | ${order.siigo_code} - ${order.producto} | ${Number(order.cantidad_planeada)} und | ${order.estado}`
                 ),
-                `Para continuar usa el ID corto; por ejemplo: consulta la orden ID ${activeOrders[0].id}.`,
+                `Para continuar usa el ID corto; por ejemplo: consulta OP ID ${activeOrders[0].id}.`,
                 'Esta consulta no modifica inventario.',
               ].join('\n')
             : 'No hay ordenes de produccion activas.';
@@ -3054,7 +3052,7 @@ module.exports = async (req, res) => {
         if (!rows.length) throw { status: 404, message: `Orden ${params.id_orden} no encontrada` };
         const o = rows[0];
         mensaje = [
-          `🔍 *Orden ID ${o.id} | ${o.codigo_orden || o.id}*`,
+          `🔍 *OP ID ${o.id} | ${o.codigo_orden || o.id}*`,
           `Producto: ${o.producto} (${o.siigo_code})`,
           `Estado: ${o.estado}  |  Fase: ${o.fase || 'F0'}`,
           `Planeado: ${o.cantidad_planeada} und`,
@@ -3527,9 +3525,9 @@ module.exports = async (req, res) => {
       case 'CONFIRMAR_MATERIALES_PRODUCCION': {
         const confirmation = await confirmProductionMaterials({ orderId: params.id_orden, userId: user.id });
         mensaje = confirmation.already_confirmed
-          ? `Los materiales de ${confirmation.order_code} ya estaban confirmados. No se modifico inventario.`
+          ? `Los materiales de OP ID ${confirmation.order_id} | ${confirmation.order_code} ya estaban confirmados. No se modifico inventario.`
           : [
-              `Materiales confirmados para ${confirmation.order_code}.`,
+              `Materiales confirmados para OP ID ${confirmation.order_id} | ${confirmation.order_code}.`,
               'Orden en proceso.',
               ...confirmation.consumed.map(item => `- ${item.product} (${item.sku}): ${item.qty_taken} ${item.unit || ''} | lote ${item.lpn} | ubicacion ${item.location || 'N/A'}`),
             ].join('\n');

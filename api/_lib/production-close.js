@@ -117,6 +117,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       await conn.commit();
       return {
         already_closed: true,
+        order_id: order.id,
         order_code: order.codigo_orden,
         qty_real: Number(order.cantidad_real),
         lpn_terminado: existingLots[0]?.lpn || null,
@@ -252,6 +253,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     await conn.commit();
     const result = {
       already_closed: false,
+      order_id: order.id,
       order_code: order.codigo_orden,
       qty_planned: Number(order.cantidad_planeada),
       qty_real: conforming,
@@ -280,7 +282,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       fallbackRoles: [],
       excludeUserIds: [userId],
       text: [
-        `Produccion cerrada: ${order.codigo_orden}`,
+        `Produccion cerrada: OP ID ${order.id} | ${order.codigo_orden}`,
         `${order.producto_sku} - ${order.producto_nombre}`,
         `Plan: ${Number(order.cantidad_planeada)} | Conformes: ${conforming} | Merma: ${waste}`,
         `Cumplimiento del plan: ${planCompliance}% | Tasa no conforme: ${nonconformityRate}%`,

@@ -365,7 +365,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
     <div className="space-y-7">
       {shipments.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-foreground">Remisiones pendientes de salida</h2>
+          <h2 className="mb-3 text-sm font-semibold text-foreground">Despachos pendientes hacia 3Q</h2>
           <div className="divide-y divide-border border-y border-border">
             {shipments.map((shipment) => (
               <div key={shipment.id} className="grid gap-3 py-4 lg:grid-cols-[180px_170px_minmax(0,1fr)_150px] lg:items-center">
@@ -375,7 +375,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
                   {shipment.items.map((item, index) => <p key={`${item.sku}-${item.lote}-${index}`} className="text-xs text-muted"><span className="font-mono text-foreground">{item.sku}</span> - {item.producto}: {item.cantidad} {item.unidad || ''} | lote {item.lote} | sale de {item.ubicacion_origen}</p>)}
                   {shipment.motivo && <p className="text-xs text-yellow-400">Motivo: {shipment.motivo}</p>}
                 </div>
-                {canManage && <div className="flex gap-2"><button type="button" disabled={loading} onClick={() => onConfirm(shipment)} className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Confirmar salida</button><button type="button" title="Cancelar remision" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
+                {canManage && <div className="flex gap-2"><a href="/despachos" className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Gestionar despacho</a><button type="button" title="Cancelar remision" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
               </div>
             ))}
           </div>

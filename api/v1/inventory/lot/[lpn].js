@@ -62,6 +62,16 @@ module.exports = async (req, res) => {
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
     const expiryDate = row.expiry_date ? new Date(row.expiry_date) : null;
+    const movements = await query(
+      `SELECT k.id, k.action, k.qty, k.balance_after, k.reference, k.notes,
+              k.created_at, p.siigo_code AS sku
+         FROM kardex k
+         JOIN productos p ON p.id = k.product_id
+        WHERE k.lot_id = ?
+        ORDER BY k.created_at DESC, k.id DESC
+        LIMIT 100`,
+      [row.lot_id]
+    ).catch(() => []);
 
     return res.status(200).json({
       ok: true,
@@ -70,6 +80,11 @@ module.exports = async (req, res) => {
         lote_consultado: lpn,
         lote_proveedor: selected?.lote_proveedor || lpn,
         partidas_recepcion: partitions,
+        movements: movements.map((movement) => ({
+          ...movement,
+          qty: Number(movement.qty || 0),
+          balance_after: movement.balance_after == null ? null : Number(movement.balance_after),
+        })),
         qty_initial: Number(row.qty_initial || 0),
         qty_current: Number(row.qty_current || 0),
         stock_cantidad: row.stock_cantidad == null ? null : Number(row.stock_cantidad),

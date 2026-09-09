@@ -182,6 +182,7 @@ function ProductResult({ data }) {
   const totals = data.totals || {}
   const rows = Array.isArray(data.rows) ? data.rows : []
   const movements = Array.isArray(data.movements) ? data.movements : []
+  const externalCustody = Array.isArray(data.external_custody) ? data.external_custody : []
   const blockedRows = rows.filter((r) => Number(r.bloqueada || 0) > 0)
   const displayRows = [...rows].sort((a, b) => Number(b.disponible || 0) - Number(a.disponible || 0))
 
@@ -194,11 +195,13 @@ function ProductResult({ data }) {
             <h2 className="text-lg font-semibold text-foreground">{product.name || '-'}</h2>
             <p className="text-xs font-mono text-muted mt-1">{product.sku || product.id || '-'}</p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 min-w-[280px]">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-[360px]">
             <Metric label="Disponible" value={totals.disponible} tone="text-green-400" />
             <Metric label="Reservado" value={totals.reservada} tone="text-yellow-400" />
             <Metric label="Bloqueado" value={totals.bloqueada} tone="text-red-400" />
             <Metric label="Total" value={totals.cantidad} tone="text-primary" />
+            <Metric label="En custodia 3Q" value={totals.en_custodia_3q} tone="text-blue-400" />
+            <Metric label="Total bajo control" value={totals.total_bajo_control} tone="text-primary" />
           </div>
         </div>
         {blockedRows.length > 0 && (
@@ -207,6 +210,25 @@ function ProductResult({ data }) {
           </div>
         )}
       </div>
+
+      {externalCustody.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-blue-400/30">
+          <div className="border-b border-blue-400/20 bg-blue-400/5 px-4 py-3">
+            <h3 className="text-sm font-semibold text-blue-300">Material en custodia externa 3Q</h3>
+            <p className="mt-0.5 text-xs text-muted">No esta disponible para despachos de bodega y permanece bajo control hasta la conciliacion de la maquila.</p>
+          </div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b border-border bg-background/30">
+            {['MQ', 'Remision', 'Lote', 'Cantidad', 'Maquilador', 'Salida'].map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{column}</th>)}
+          </tr></thead><tbody>{externalCustody.map((row, index) => <tr key={`${row.orden_maquila_id}-${row.lote}-${index}`} className="border-b border-border/50 last:border-0">
+            <td className="px-4 py-3 font-mono text-xs">MQ ID {row.orden_maquila_id}<span className="block text-muted">{row.orden_codigo}</span></td>
+            <td className="px-4 py-3 font-mono text-xs">{row.remision}</td>
+            <td className="px-4 py-3 font-mono text-xs break-all">{row.lote}</td>
+            <td className="px-4 py-3 font-semibold tabular-nums text-blue-400">{row.cantidad} {product.unit}</td>
+            <td className="px-4 py-3">{row.proveedor_nombre || '3Q'}</td>
+            <td className="px-4 py-3 text-xs text-muted">{formatDateTime(row.confirmado_en)}</td>
+          </tr>)}</tbody></table></div>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm min-w-[780px]">
@@ -275,16 +297,18 @@ function ProductResult({ data }) {
 
 function LotResult({ data }) {
   const lot = data.lot || data
+  const movements = Array.isArray(lot.movements) ? lot.movements : []
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted mb-1">Lote</p>
       <h2 className="text-lg font-semibold font-mono text-foreground break-all">{lot.lote_proveedor || lot.lpn || lot.lote || '-'}</h2>
       {lot.lote_proveedor && lot.lpn !== lot.lote_proveedor && <p className="text-xs text-muted break-all">Partida consultada: {lot.lpn}</p>}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
         <Metric label="SKU" value={lot.sku || lot.siigo_code || '-'} />
         <Metric label="Saldo de la partida" value={lot.qty_current ?? lot.cantidad ?? '-'} />
         <Metric label="Estado" value={lot.status || lot.estado_calculado || '-'} />
         <Metric label="Vence" value={formatDate(lot.expiry_date || lot.fecha_venc)} />
+        <Metric label="Ubicacion actual" value={[lot.bodega_codigo || lot.bodega_nombre, lot.ubicacion_codigo || lot.ubicacion_zona].filter(Boolean).join(' / ') || 'Sin ubicacion'} />
       </div>
       {lot.partidas_recepcion?.length > 0 && <Table
         cols={['Lote proveedor', 'Partida', 'Recepcion', 'Recibido', 'Condicion al recibir', 'Ubicacion', 'Vence', 'Motivo']}
@@ -293,6 +317,17 @@ function LotResult({ data }) {
           <StatusBadge value={part.condicion} />, part.ubicacion || '-', formatDate(part.fecha_venc), part.motivo || '-',
         ])}
       />}
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="border-b border-border bg-surface px-4 py-3"><h3 className="text-sm font-semibold text-foreground">Historico del lote</h3><p className="mt-0.5 text-xs text-muted">Incluye recepciones, movimientos internos, produccion, despachos y salidas a maquila 3Q.</p></div>
+        {movements.length ? <Table
+          cols={['Fecha y hora', 'SKU', 'Movimiento', 'Cantidad', 'Saldo', 'Referencia', 'Detalle']}
+          rows={movements.map((movement) => [
+            formatDateTime(movement.created_at), movement.sku || lot.sku || '-',
+            formatMovement(movement.action), formatSignedQuantity(movement.qty, lot.unit),
+            formatQuantity(movement.balance_after, lot.unit), movement.reference || '-', movement.notes || '-',
+          ])}
+        /> : <p className="px-4 py-8 text-center text-sm text-muted">No hay movimientos auditables para este lote.</p>}
+      </div>
     </div>
   )
 }
@@ -342,6 +377,7 @@ function formatMovement(action) {
     MERMA_PROCESO: 'Merma de proceso',
     AJUSTE_MANUAL: 'Ajuste manual',
     AJUSTE_DEMO_MAPA: 'Ajuste de inventario demo',
+    ENVIO_MAQUILA_3Q: 'Despacho a maquila 3Q',
   }
   return labels[action] || String(action || 'Movimiento').replace(/_/g, ' ')
 }

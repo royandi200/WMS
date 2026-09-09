@@ -4,6 +4,7 @@ const { createConnection, query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
 const { confirmImportedDispatch } = require('../_lib/dispatch-workflow');
+const { confirmOutsourcingShipment } = require('../_lib/outsourcing-workflow');
 const { pushFacturaToSiigo } = require('../_lib/siigo.invoices');
 const { workflowFlags } = require('../_lib/feature-flags');
 
@@ -187,8 +188,54 @@ async function handleGet(req, res) {
      ORDER BY COALESCE(d.despachado_en, d.creado_en) DESC, di.id ASC`
   );
 
-  const total = new Set(rows.map((row) => row.id)).size;
-  return res.status(200).json({ ok: true, data: { rows, total } });
+  const outsourcingRows = await query(
+    `SELECT CONCAT('3q-', me.id) AS id,
+            me.id AS source_id, 'MAQUILA_3Q' AS source_type,
+            me.numero, om.proveedor_nombre AS cliente_nombre,
+            CASE me.estado WHEN 'BORRADOR' THEN 'picking'
+                 WHEN 'CONFIRMADO' THEN 'despachado'
+                 WHEN 'CANCELADO' THEN 'anulado' ELSE LOWER(me.estado) END AS estado,
+            NULL AS siigo_invoice_id, CONCAT('MQ ID ', om.id) AS siigo_invoice_name,
+            NULL AS total_factura, me.creado_en, me.confirmado_en AS despachado_en,
+            me.creado_por AS usuario_id,
+            (SELECT COALESCE(SUM(x.cantidad), 0) FROM maquila_envio_items x WHERE x.maquila_envio_id = me.id) AS cantidad_facturada,
+            (SELECT COALESCE(SUM(x.cantidad), 0) FROM maquila_envio_items x WHERE x.maquila_envio_id = me.id) AS cantidad_reservada,
+            (SELECT COALESCE(SUM(x.cantidad), 0) FROM maquila_envio_items x WHERE x.maquila_envio_id = me.id) AS cantidad_asignada,
+            CASE WHEN me.estado = 'BORRADOR' THEN
+              (SELECT COALESCE(SUM(x.cantidad), 0) FROM maquila_envio_items x WHERE x.maquila_envio_id = me.id)
+              ELSE 0 END AS reserva_activa,
+            CASE WHEN me.estado = 'CONFIRMADO' THEN
+              (SELECT COALESCE(SUM(x.cantidad), 0) FROM maquila_envio_items x WHERE x.maquila_envio_id = me.id)
+              ELSE 0 END AS cantidad_despachada_total,
+            0 AS cantidad_pendiente,
+            CASE me.estado WHEN 'BORRADOR' THEN 'LISTO_PARA_DESPACHO'
+                 WHEN 'CONFIRMADO' THEN 'DESPACHADO' ELSE me.estado END AS estados_demanda,
+            creator.nombre AS usuario_nombre,
+            mm.producto_id, p.siigo_code AS sku, p.nombre AS producto_nombre,
+            mml.lote, ub.codigo AS ubicacion, mei.cantidad,
+            mei.cantidad AS cantidad_solicitada,
+            CASE WHEN me.estado = 'CONFIRMADO' THEN mei.cantidad ELSE 0 END AS cantidad_despachada
+       FROM maquila_envios me
+       JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
+       JOIN maquila_envio_items mei ON mei.maquila_envio_id = me.id
+       JOIN maquila_material_lotes mml ON mml.id = mei.maquila_material_lote_id
+       JOIN maquila_materiales mm ON mm.id = mml.maquila_material_id
+       JOIN productos p ON p.id = mm.producto_id
+       LEFT JOIN ubicaciones ub ON ub.id = mml.ubicacion_origen_id
+       LEFT JOIN usuarios creator ON creator.id = me.creado_por
+      WHERE me.estado IN ('BORRADOR','CONFIRMADO','CANCELADO')
+      ORDER BY COALESCE(me.confirmado_en, me.creado_en) DESC, me.id DESC, mei.id ASC
+      LIMIT ${limit}`
+  );
+  const combinedRows = [...rows, ...outsourcingRows].sort((a, b) => {
+    const aDate = new Date(a.despachado_en || a.creado_en || 0).getTime();
+    const bDate = new Date(b.despachado_en || b.creado_en || 0).getTime();
+    return bDate - aDate;
+  });
+  const baseTotal = new Set(rows.map((row) => row.id)).size;
+  const outsourcingTotal = new Set(outsourcingRows.map((row) => row.id)).size;
+  const total = baseTotal + outsourcingTotal;
+  return res.status(200).json({ ok: true, data: { rows: combinedRows, total } });
 }
 
 async function handlePost(req, res) {
@@ -325,8 +372,17 @@ async function handlePost(req, res) {
 async function handlePut(req, res) {
   const user = await requireCapability(req, CAPABILITIES.DISPATCH_CONFIRM);
   const body = req.body || {};
+  const sourceType = String(body.source_type || '').trim().toUpperCase();
+  const dispatchReference = String(body.despacho_id || body.dispatch_id || body.id || '').trim();
+  if (sourceType === 'MAQUILA_3Q' || dispatchReference.startsWith('3q-')) {
+    const data = await confirmOutsourcingShipment({
+      shipmentId: body.source_id || dispatchReference.replace(/^3q-/i, ''),
+      userId: user.id,
+    });
+    return res.status(200).json({ ok: true, data: { ...data, despacho_tipo: 'MAQUILA_3Q' } });
+  }
   const data = await confirmImportedDispatch({
-    dispatchId: body.despacho_id || body.dispatch_id || body.id,
+    dispatchId: dispatchReference,
     invoiceId: body.siigo_invoice_id,
     userId: user.id,
   });
