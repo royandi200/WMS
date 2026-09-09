@@ -16,6 +16,22 @@ function purchaseOrderReference(params = {}) {
   };
 }
 
+function purchaseOrderReceptionType(order = {}) {
+  const explicitType = String(order.tipo_recepcion || '').trim().toUpperCase();
+  if (['IN_OUT', 'MIXTA', 'INSUMOS_MP'].includes(explicitType)) return explicitType;
+  const modes = (order.items || [])
+    .map(item => String(item.modalidad_operativa || '').trim().toUpperCase())
+    .filter(Boolean);
+  if (modes.length && modes.every(mode => mode === 'IO')) return 'IN_OUT';
+  if (modes.includes('IO')) return 'MIXTA';
+  return 'INSUMOS_MP';
+}
+
+function purchaseOrderReceptionIdentifier(order = {}) {
+  const prefix = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
+  return `${prefix} ID ${Number(order.id)}`;
+}
+
 async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
   const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
   const [orders] = await db.execute(
@@ -220,8 +236,11 @@ function purchaseOrderTextReference(rawText, order) {
   ).test(text)) return true;
   const id = Number(order?.id || 0);
   if (!Number.isSafeInteger(id) || id <= 0) return false;
+  const prefix = purchaseOrderReceptionType(order) === 'IN_OUT'
+    ? String.raw`(?:IO|I\s*\.?\s*O\.?|IN\s*(?:&|AND|Y)\s*OUT)`
+    : String.raw`(?:OC|O\s*\.?\s*C\.?|ORDEN\s+DE\s+COMPRA)`;
   const typedId = new RegExp(
-    `\\b(?:OC|O\\s*\\.?\\s*C\\.?|ORDEN\\s+DE\\s+COMPRA)\\s*(?:ID|#|NUMERO|NRO)?\\s*#?\\s*${escapeRegExp(id)}\\b`,
+    `\\b${prefix}\\s*(?:ID|#|NUMERO|NRO)?\\s*#?\\s*${escapeRegExp(id)}\\b`,
     'iu'
   );
   return typedId.test(text);
@@ -229,8 +248,9 @@ function purchaseOrderTextReference(rawText, order) {
 
 function assertPurchaseOrderTextReference(rawText, order) {
   if (purchaseOrderTextReference(rawText, order)) return;
+  const expected = purchaseOrderReceptionIdentifier(order);
   throw inputError(
-    `El ID ${order.id} es ambiguo. Para una compra directa escribe \"OC ID ${order.id}\". Para una recepcion de maquila escribe \"MQ ID ${order.id}\".`,
+    `El ID ${order.id} es ambiguo. Para esta recepcion escribe \"${expected}\". Los prefijos OC, IO y MQ identifican flujos distintos.`,
     409
   );
 }
@@ -324,13 +344,49 @@ async function findPurchaseOrder(db, params = {}) {
   }
   const [rows] = reference.id
     ? await db.execute(
-        `SELECT id, numero, estado, proveedor_nombre
-           FROM ordenes_compra_proveedor WHERE id = ? LIMIT 1`,
+        `SELECT oc.id, oc.numero, oc.estado, oc.proveedor_nombre,
+                CASE
+                  WHEN EXISTS (
+                    SELECT 1 FROM orden_compra_proveedor_items oi
+                    JOIN productos p ON p.id = oi.producto_id
+                    WHERE oi.orden_compra_id = oc.id AND p.modalidad_operativa = 'IO'
+                  ) AND NOT EXISTS (
+                    SELECT 1 FROM orden_compra_proveedor_items oi
+                    JOIN productos p ON p.id = oi.producto_id
+                    WHERE oi.orden_compra_id = oc.id
+                      AND COALESCE(p.modalidad_operativa, '') <> 'IO'
+                  ) THEN 'IN_OUT'
+                  WHEN EXISTS (
+                    SELECT 1 FROM orden_compra_proveedor_items oi
+                    JOIN productos p ON p.id = oi.producto_id
+                    WHERE oi.orden_compra_id = oc.id AND p.modalidad_operativa = 'IO'
+                  ) THEN 'MIXTA'
+                  ELSE 'INSUMOS_MP'
+                END AS tipo_recepcion
+           FROM ordenes_compra_proveedor oc WHERE oc.id = ? LIMIT 1`,
         [reference.id]
       )
     : await db.execute(
-        `SELECT id, numero, estado, proveedor_nombre
-           FROM ordenes_compra_proveedor WHERE UPPER(numero) = UPPER(?) LIMIT 1`,
+        `SELECT oc.id, oc.numero, oc.estado, oc.proveedor_nombre,
+                CASE
+                  WHEN EXISTS (
+                    SELECT 1 FROM orden_compra_proveedor_items oi
+                    JOIN productos p ON p.id = oi.producto_id
+                    WHERE oi.orden_compra_id = oc.id AND p.modalidad_operativa = 'IO'
+                  ) AND NOT EXISTS (
+                    SELECT 1 FROM orden_compra_proveedor_items oi
+                    JOIN productos p ON p.id = oi.producto_id
+                    WHERE oi.orden_compra_id = oc.id
+                      AND COALESCE(p.modalidad_operativa, '') <> 'IO'
+                  ) THEN 'IN_OUT'
+                  WHEN EXISTS (
+                    SELECT 1 FROM orden_compra_proveedor_items oi
+                    JOIN productos p ON p.id = oi.producto_id
+                    WHERE oi.orden_compra_id = oc.id AND p.modalidad_operativa = 'IO'
+                  ) THEN 'MIXTA'
+                  ELSE 'INSUMOS_MP'
+                END AS tipo_recepcion
+           FROM ordenes_compra_proveedor oc WHERE UPPER(oc.numero) = UPPER(?) LIMIT 1`,
         [reference.number]
       );
   if (!rows.length) throw inputError('Orden de compra no encontrada', 404);
@@ -710,6 +766,7 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
 }
 
 function buildReceptionReview(order, reception, items) {
+  const identifier = purchaseOrderReceptionIdentifier(order);
   const lines = items.flatMap(item => {
     const total = item.distributions.reduce(
       (sum, entry) => sum + Number(entry.cantidad || 0),
@@ -743,14 +800,14 @@ function buildReceptionReview(order, reception, items) {
     entry => entry.lote_documento || entry.fecha_vencimiento_documento
   ));
   return [
-    `Resumen de recepcion para OC ${order.numero} (ID ${order.id}).`,
+    `Resumen de recepcion para ${identifier} | ${order.numero}.`,
     `Borrador interno: ${reception.numero}`,
     ...lines,
     'No se modifico inventario.',
     comparesDocumentValues
       ? 'El PDF es una referencia. Confirma siempre los valores leidos en la etiqueta fisica; cualquier diferencia queda visible en este resumen.'
       : null,
-    `Si todo coincide, escribe: Confirmo la recepcion OC ID ${order.id}`,
+    `Si todo coincide, escribe: Confirmo la recepcion ${identifier}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -931,7 +988,9 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       numero: requestedReception.numero,
       estado: requestedReception.estado,
       already_completed: true,
+      orden_compra_id: order.id,
       orden_compra_numero: order.numero,
+      tipo_recepcion: purchaseOrderReceptionType(order),
     };
   }
   if (!['borrador', 'en_proceso'].includes(requestedReception.estado)) {
@@ -948,7 +1007,9 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       numero: prepared.reception.numero,
       estado: prepared.reception.estado,
       already_completed: true,
+      orden_compra_id: prepared.order.id,
       orden_compra_numero: prepared.order.numero,
+      tipo_recepcion: purchaseOrderReceptionType(prepared.order),
     };
   }
   if (Number(prepared.reception.id) !== Number(requestedReception.id)) {
@@ -970,6 +1031,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       numero: prepared.reception.numero,
       orden_compra_id: order.id,
       orden_compra_numero: order.numero,
+      tipo_recepcion: purchaseOrderReceptionType(order),
       item_count: items.length,
       message: buildReceptionReview(order, prepared.reception, items),
     };
@@ -1002,7 +1064,9 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
       numero: previous[0].numero,
       estado: previous[0].estado,
       already_completed: true,
+      orden_compra_id: order.id,
       orden_compra_numero: order.numero,
+      tipo_recepcion: purchaseOrderReceptionType(order),
     };
   }
   const { confirmReceptionForUser } = require('../v1/reception');
@@ -1017,7 +1081,12 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
     },
   });
   await consumeReceptionDraft(db, prepared.reception.id, user.id);
-  return { ...result, orden_compra_numero: prepared.order.numero };
+  return {
+    ...result,
+    orden_compra_id: prepared.order.id,
+    orden_compra_numero: prepared.order.numero,
+    tipo_recepcion: purchaseOrderReceptionType(prepared.order),
+  };
 }
 
 async function confirmOutsourcingReceptionFromWhatsApp({ db, params, rawText, user }) {
@@ -1158,6 +1227,8 @@ async function confirmOutsourcingReceptionFromWhatsApp({ db, params, rawText, us
 }
 
 module.exports = {
+  purchaseOrderReceptionType,
+  purchaseOrderReceptionIdentifier,
   listAvailablePurchaseOrderReceptions,
   listAvailableOutsourcingReceptions,
   findPurchaseOrderDocumentDraft,

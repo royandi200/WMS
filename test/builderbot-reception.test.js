@@ -7,6 +7,7 @@ const {
   explicitConfirmation,
   explicitPurchaseOrderConfirmation,
   purchaseOrderTextReference,
+  purchaseOrderReceptionIdentifier,
   explicitOutsourcingConfirmation,
   outsourcingTextReference,
   receptionConfirmationKey,
@@ -78,6 +79,13 @@ test('WhatsApp purchase order and reception require an exact explicit confirmati
   ), false);
   assert.equal(purchaseOrderTextReference(
     'Prepara OC-MUY-LARGA-4567', { id: 5, numero: 'OC-MUY-LARGA-456' }
+  ), false);
+  const inOutOrder = { id: 8, numero: 'IO-DEMO-8', tipo_recepcion: 'IN_OUT' };
+  assert.equal(purchaseOrderReceptionIdentifier(inOutOrder), 'IO ID 8');
+  assert.equal(purchaseOrderTextReference('Prepara la recepcion IO ID 8', inOutOrder), true);
+  assert.equal(purchaseOrderTextReference('Prepara la recepcion OC ID 8', inOutOrder), false);
+  assert.equal(purchaseOrderTextReference(
+    'Prepara la recepcion IO ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
   ), false);
 });
 
@@ -167,10 +175,24 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
       }],
     }]
   );
-  assert.match(review, /Resumen de recepcion para OC OC-DEMO-5 \(ID 5\)/u);
+  assert.match(review, /Resumen de recepcion para OC ID 5 \| OC-DEMO-5/u);
   assert.match(review, /2000 gr \| DISPONIBLE \| PPAL-A-1-01 \| lote DEMO-GOMAS-001/u);
   assert.match(review, /No se modifico inventario/u);
   assert.match(review, /Confirmo la recepcion OC ID 5/u);
+});
+
+test('WhatsApp uses IO ID throughout an In & Out reception review', () => {
+  const review = buildReceptionReview(
+    { id: 8, numero: 'OC-IO-DEMO-8', tipo_recepcion: 'IN_OUT' },
+    { id: 81, numero: 'REC-OC-8-001' },
+    [{
+      sku: '00276-PTZNASHWA', producto: 'ZENOVA ASHWAGANDHA', unidad: 'und',
+      distributions: [{ cantidad: 5, condicion: 'DISPONIBLE', ubicacion: 'B13', lote: 'IO-L1', fecha_venc: '2027-11-30' }],
+    }]
+  );
+  assert.match(review, /Resumen de recepcion para IO ID 8 \| OC-IO-DEMO-8/u);
+  assert.match(review, /Confirmo la recepcion IO ID 8/u);
+  assert.doesNotMatch(review, /Confirmo la recepcion OC ID 8/u);
 });
 
 test('WhatsApp renders the 3Q order and its reconciled OC before confirmation', () => {
@@ -405,6 +427,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(purchaseOrders, /createPurchaseOrderForUser/u);
   assert.match(prompt, /Confirmo la orden de compra ID N/u);
   assert.match(prompt, /Confirmo la recepcion OC ID N/u);
+  assert.match(prompt, /Confirmo la recepcion IO ID N/u);
   assert.match(prompt, /Confirmo la recepcion MQ ID N/u);
   assert.match(prompt, /confirmaciones vagas/u);
   assert.match(prompt, /no lo preguntes ni lo inventes/u);
@@ -421,8 +444,8 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /todos los\s+productos pendientes/u);
   assert.match(prompt, /valor exacto reportado por el operario.*obligatorio para todos/u);
   assert.match(prompt, /prepara la recepcion OC ID 5/u);
-  assert.match(prompt, /No aceptes `ID 11`.*`MQ ID 11`/su);
-  assert.match(webhook, /OC ID \$\{order\.id\}/u);
+  assert.match(prompt, /pueden coexistir `OC ID 11`, `IO ID 11` y `MQ ID 11`/u);
+  assert.match(webhook, /purchaseOrderReceptionIdentifier\(order\)/u);
   assert.match(webhook, /MQ ID \$\{order\.id\}/u);
   assert.doesNotMatch(
     webhook,

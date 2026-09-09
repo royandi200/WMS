@@ -1,6 +1,10 @@
 # Plan de implementacion de pendientes post-QA
 
-**Fecha de revision:** 2026-09-05
+**Fecha de revision:** 2026-09-09
+
+Actualizacion de evidencia2026-09-06: consultar [consolidado de pruebas y pendientes](consolidado-pruebas-y-pendientes-2026-09-06.md) antes de priorizar. Este plan conserva su estado historico2026-09-05; implementado/cubierto automaticamente no significa aceptado en los recorridos posteriores. El consolidado agrupa11 hallazgos nuevos o recurrentes sin reabrir automaticamente todo el alcance de auditoria.
+
+Actualizacion post-demo con cliente 2026-09-09: se agregan P-031 a P-039. Los puntos que amplian requisitos ya conocidos conservan referencia explicita al pendiente anterior; no se consideran resueltos por haber funcionado en un recorrido parcial.
 **Base revisada:** `main` en `c1bd4f4`
 **Fuentes:** bitacora manual P-001 a P-030, guia funcional integral, auditoria independiente F-01 a F-10 y codigo actual.
 
@@ -106,8 +110,10 @@ Este estado es local: no equivale a despliegue ni a aceptacion manual. La valida
 6. En cierre sin conformes omitir lote/ubicacion o mostrar `Sin lote conforme` y `No aplica`; nunca `null`.
 7. Mostrar dos indicadores distintos: cumplimiento contra plan y tasa de no conformidad sobre resultado fisico. No llamar a ambos `porcentaje de merma`.
 8. Aplicar limites conservadores: sobreproduccion o sobre-recepcion no entra directamente a disponible; queda como excepcion bloqueada hasta aprobacion.
+9. Usar el ID corto de la OP durante todo el recorrido de WhatsApp: consulta, alistamiento, novedades, reposicion y cierre. El codigo largo permanece visible como trazabilidad, pero no debe ser obligatorio para el operario cuando `OP ID N` sea inequivoco.
+10. En `Produccion > Ordenes de produccion`, mostrar las mermas asociadas a cada OP con ID de merma, producto/SKU, cantidad, unidad, motivo, actor y fecha. Distinguir merma de PT, merma de proceso y material repuesto.
 
-**Aceptacion:** no se ofrece confirmar un despacho incompleto; cada destinatario recibe solo su siguiente accion; cancelar elimina reservas y avisa al ejecutor; cierres de cero conformes no exponen nulos; excesos nunca inflan disponible sin aprobacion.
+**Aceptacion:** no se ofrece confirmar un despacho incompleto; cada destinatario recibe solo su siguiente accion; cancelar elimina reservas y avisa al ejecutor; cierres de cero conformes no exponen nulos; excesos nunca inflan disponible sin aprobacion; una OP puede operarse de inicio a cierre con `OP ID N`; sus mermas quedan visibles y conciliadas en dashboard.
 
 ### Fase 5 - Evidencia y trazabilidad de maquila 3Q
 
@@ -119,10 +125,13 @@ Este estado es local: no equivale a despliegue ni a aceptacion manual. La valida
 4. Agregar nombre corto y unidad al picking sin retirar SKU, lote o ubicacion.
 5. Durante recepciones parciales mostrar por separado `enviado`, `PT recibido`, `material pendiente de conciliacion` y `merma reportada`. No afirmar existencia fisica exacta en 3Q ni inferir consumo proporcional.
 6. Extender trazabilidad del PT tercerizado: recepcion 3Q -> orden de maquila -> remision -> lotes y ubicaciones de materiales enviados -> recepcion parcial/final -> despachos y clientes.
+7. Convertir la salida de materiales hacia 3Q en una tarea del mismo dominio de despacho usado para cliente final: estado pendiente, picking FEFO, solicitado/reservado/faltante, vista previa, doble confirmacion, idempotencia, historico y documento exportable. La diferencia es el destinatario maquilador y el tipo de documento `REMISION_3Q`, no un flujo de salida paralelo.
+8. Al preparar por WhatsApp una recepcion 3Q, no exigir cantidad anticipada. `Prepara la recepcion MQ ID N` debe abrir o reutilizar el borrador contra el saldo pendiente; la cantidad fisica pertenece al reporte posterior de partidas. Solo debe pedirse cantidad en ese reporte o cuando el usuario declare expresamente una entrega parcial.
+9. Exponer el material enviado a 3Q en la consulta por SKU y en dashboard como `EN CUSTODIA 3Q` o `ENVIADO A 3Q PENDIENTE DE CONCILIACION`. Debe verse separado del disponible, reservado y bloqueado en bodega, con cantidad, lote, orden MQ, remision, maquilador y fecha.
 
 **Decision reversible propuesta para P-026:** cambiar la etiqueta `Custodia 3Q` por `Material enviado pendiente de conciliacion` hasta que el cliente confirme si reportara consumos parciales.
 
-**Aceptacion:** el PDF se descarga con autorizacion y hash verificable; archivo y texto separados no duplican ni cruzan remitentes; el picking FEFO determina lotes; la trazabilidad distingue maquila externa de produccion propia y usa evidencia real, no BOM teorico como sustituto.
+**Aceptacion:** el PDF se descarga con autorizacion y hash verificable; archivo y texto separados no duplican ni cruzan remitentes; el picking FEFO determina lotes; la trazabilidad distingue maquila externa de produccion propia y usa evidencia real, no BOM teorico como sustituto; la salida 3Q cumple los mismos controles que un despacho; preparar una MQ no exige una cantidad prematura; la custodia 3Q es visible pero nunca suma disponible de bodega.
 
 ### Fase 6 - Consistencia de consultas y dashboard
 
@@ -134,8 +143,11 @@ Este estado es local: no equivale a despliegue ni a aceptacion manual. La valida
 4. Hacer que trazabilidad muestre solo secciones aplicables y ofrezca detalle adicional cuando el canal pueda truncar el mensaje.
 5. Resolver consultas por alias mostrando tipo maestro real, ubicaciones solicitadas y hasta cinco candidatos cuando exista ambiguedad. Mantener fallo cerrado para acciones destructivas.
 6. Investigar P-001 con version de bundle y cache. Añadir recuperacion controlada para errores de carga de chunks una sola vez, telemetria de version y mensaje de actualizacion; evitar bucles de recarga.
+7. Formatear todos los mensajes de WhatsApp para lectura operativa: titulo corto, linea en blanco entre secciones, una partida por bloque y jerarquia consistente. No enviar parrafos compactos ni pegar items consecutivos. Preservar nombres, SKU, cantidades, unidades, lotes, vencimientos y ubicaciones.
+8. Mostrar siempre el identificador corto y tipado del proceso en consultas, vistas previas, confirmaciones, errores e idempotencia: `OC ID N` para insumos, `IO ID N` para producto terminado In & Out, `REC ID N` o numero de recepcion, `OP ID N`, `DSP ID N` y `MQ ID N`, segun corresponda. No usar un `ID N` desnudo ni `OC ID N` para In & Out cuando existan espacios de nombres distintos.
+9. En toda busqueda de dashboard por lote, mostrar tambien SKU, producto, condicion, cantidad y ubicacion actual. En Kardex, mostrar siempre el SKU en cada fila sin reemplazar el nombre del producto ni recortar el lote.
 
-**Aceptacion:** dashboard y WhatsApp muestran la misma hora local; documentos convertidos no parecen pendientes; las consultas no incluyen secciones vacias; un alias ambiguo pide elegir; un chunk obsoleto se recupera una vez y deja evidencia diagnostica.
+**Aceptacion:** dashboard y WhatsApp muestran la misma hora local; documentos convertidos no parecen pendientes; las consultas no incluyen secciones vacias; un alias ambiguo pide elegir; un chunk obsoleto se recupera una vez y deja evidencia diagnostica; los mensajes son escaneables; cada proceso conserva su ID; lote, SKU y ubicacion son visibles juntos.
 
 ### Fase 7 - Endurecimiento preproductivo y certificacion
 
@@ -159,8 +171,38 @@ Este estado es local: no equivale a despliegue ni a aceptacion manual. La valida
 | Despacho y produccion | P-008, P-016, P-017, P-019, P-020, P-021, P-028 |
 | Maquila 3Q | P-022, P-023, P-024, P-025, P-026, P-027 |
 | Consultas y dashboard | P-001, P-003, P-004, P-005, P-007, P-029 |
+| Barrida post-demo cliente | P-031, P-032, P-033, P-034, P-035, P-036, P-037, P-038, P-039 |
 
-Los 30 identificadores quedan cubiertos exactamente una vez en la matriz. Las ampliaciones de la bitacora se validan dentro del mismo trabajo y no generan implementaciones duplicadas.
+Los 39 identificadores quedan cubiertos en la matriz. P-032, P-033, P-038 y P-039 formalizan y amplian pendientes que ya aparecian en la bateria del demo; deben implementarse una sola vez en el paquete indicado. Las ampliaciones de la bitacora se validan dentro del mismo trabajo y no generan implementaciones duplicadas.
+
+## Barrida post-demo con cliente - 2026-09-09
+
+| ID | Pendiente consolidado | Paquete | Criterio de aceptacion resumido |
+|---|---|---|---|
+| P-031 | Legibilidad de todos los mensajes de WhatsApp. | Fase 6 | Separacion visual entre secciones y partidas; ningun listado aparece como lineas pegadas. |
+| P-032 | ID corto y tipado visible durante todo proceso, especialmente novedades, reposicion y cierre de produccion. Amplia el pendiente previo de referencia corta de OP. | Fases 4 y 6 | El operario completa una OP usando `OP ID N`; recepciones, despachos y MQ muestran siempre su ID correspondiente. |
+| P-033 | Salida de material a 3Q como despacho normal, no como salida paralela. Reafirma la prioridad ya acordada para maquila. | Fase 5 | Misma maquina de estados, FEFO, doble confirmacion, idempotencia, historico y exportacion; destinatario y documento distinguen 3Q. |
+| P-034 | Busqueda por lote en dashboard con ubicacion. | Fase 6 | Cada resultado muestra lote completo, SKU, producto, cantidad, condicion y ubicacion actual. |
+| P-035 | Mermas visibles dentro de las ordenes de produccion. | Fase 4 | La OP lista sus mermas conciliadas con tipo, cantidad/unidad, motivo, actor y fecha. |
+| P-036 | Preparar recepcion 3Q por WhatsApp sin exigir unidades anticipadamente. | Fase 5 | `Prepara la recepcion MQ ID N` funciona igual que preparar una OC; la cantidad se captura al reportar la entrega fisica. |
+| P-037 | Consulta por SKU incluye material enviado a maquila. | Fase 5 | Dashboard separa disponible, reservado, bloqueado y custodia 3Q; lo enviado no es despachable desde bodega. |
+| P-038 | SKU visible en Kardex. Formaliza el pendiente transversal ya documentado. | Fase 6 | Cada fila y resultado de Kardex muestra SKU, producto, lote completo, ubicacion, movimiento y referencia. |
+| P-039 | Prefijo propio para recepciones de producto terminado In & Out. | Fase 6 | La bandeja y todo el recorrido por WhatsApp muestran y exigen `IO ID N`; `OC ID N` queda reservado para compras de materia prima e insumos y `MQ ID N` para maquila 3Q. Los números pueden coincidir sin seleccionar el flujo equivocado. |
+
+### Recomendacion de modelo para inventario en 3Q
+
+La mejor practica es conservar el material enviado como existencia controlada en una ubicacion logica de custodia externa, no como inventario disponible de la bodega ni como material desaparecido. La ficha por SKU debe presentar al menos `Disponible en bodega`, `Reservado`, `Bloqueado`, `En custodia 3Q` y `Total bajo control`. `En custodia 3Q` debe enlazar cantidad y lote con la remision/despacho y la orden MQ. Cuando 3Q reporte consumo o devolucion, el saldo se concilia mediante movimientos auditables; nunca se infiere consumo proporcional desde el PT recibido.
+
+### Pendientes previos que continúan abiertos
+
+- Reactivar de forma controlada un PDF identico cuyo borrador fue descartado, o devolver una accion de restauracion clara; no responder que puede revisarse mientras permanece invisible.
+- Segunda confirmacion real en dashboard antes de descontar un despacho.
+- Exportar el PDF de un despacho desde el historico.
+- Bandeja de recepciones pendientes y borradores reanudables equivalente a la de despachos.
+- Busqueda y linea de tiempo completa por lote, incluidos eventos de maquila y partidas internas `RECBLK-*` sin truncar el identificador.
+- Definir con el cliente las ubicaciones oficiales para cuarentena y devolucion.
+- Resolver la decision de negocio sobre una remision 3Q con varios SKU de producto terminado.
+- Rotular el origen visible como `WhatsApp`, no `BuilderBot`, conservando el origen tecnico solo para auditoria.
 
 ## Decisiones que deben confirmarse con el cliente
 

@@ -79,7 +79,7 @@ Formato obligatorio:
 
 - El usuario puede decir un SKU exacto o un nombre común, por ejemplo `gomas ashwa`, `tarro 60` o `creagums 120`. Conserva literalmente esa referencia en el campo de producto; la API la resolverá contra el catálogo y el contexto de la operación.
 - No sustituyas por tu cuenta un nombre ambiguo. Si la API devuelve varias opciones, muéstralas y pregunta solo cuál presentación corresponde.
-- Para recepciones conserva siempre el espacio de nombres mostrado: `OC ID N` identifica compra directa y `MQ ID N` identifica maquila 3Q. Para órdenes de producción y despachos, conserva el código o ID tipado devuelto por la consulta previa.
+- Para recepciones conserva siempre el espacio de nombres mostrado: `OC ID N` identifica compras de materia prima e insumos, `IO ID N` identifica producto terminado In & Out y `MQ ID N` identifica maquila 3Q. Para órdenes de producción y despachos, conserva el código o ID tipado devuelto por la consulta previa.
 - No inventes IDs ni interpretes `la primera`, `esa` o `la de arriba` si la lista correspondiente no aparece en el historial inmediato.
 - Los PDF, BOM, facturas Siigo, lotes y movimientos se registran siempre con el SKU canónico resuelto por la API; un alias nunca reemplaza el SKU maestro.
 
@@ -99,9 +99,9 @@ Formato obligatorio:
 
 ### 1. CONSULTAR_RECEPCIONES_PENDIENTES | baja
 
-Lista hasta diez recepciones aptas: órdenes de compra directas y productos terminados desde maquila 3Q. Devuelve las primeras como `OC ID N` y las segundas como `MQ ID N`; son espacios de nombres distintos y sus números pueden coincidir.
+Lista hasta diez recepciones aptas: compras de materia prima e insumos, producto terminado In & Out y producto terminado desde maquila 3Q. Devuelve cada grupo como `OC ID N`, `IO ID N` y `MQ ID N`, respectivamente; son espacios de nombres distintos y sus números pueden coincidir.
 
-No requiere parámetros, no prepara una recepción y nunca modifica inventario. Para una compra directa, conserva el `orden_compra_id` solamente si el usuario escribe `OC ID N` o el número completo de la OC. Un número solo (`2`, `ID 2`, `la 2`) es ambiguo y debes pedir que indique `OC ID 2` o `MQ ID 2`. Una referencia `MQ ID` nunca debe producir `PREPARAR_RECEPCION_OC`: usa `PREPARAR_RECEPCION_MAQUILA` si el usuario indica la cantidad de la entrega, o pide solamente esa cantidad. También puede completar la recepción en `Recepciones > Confirmar recepción > Producto desde 3Q`. No conviertas expresiones posicionales como `la primera` si la lista no aparece en el historial inmediato.
+No requiere parámetros, no prepara una recepción y nunca modifica inventario. Conserva el `orden_compra_id` solamente cuando el usuario escriba el prefijo mostrado o el número documental completo: `OC ID N` para insumos y `IO ID N` para In & Out. Un número solo (`2`, `ID 2`, `la 2`) es ambiguo y debes pedir que indique `OC ID 2`, `IO ID 2` o `MQ ID 2`. `OC ID` no puede seleccionar una recepción In & Out, ni `IO ID` una compra de insumos. Una referencia `MQ ID` nunca debe producir `PREPARAR_RECEPCION_OC`: usa `PREPARAR_RECEPCION_MAQUILA`. También puede completar la recepción en `Recepciones > Confirmar recepción > Producto desde 3Q`. No conviertas expresiones posicionales como `la primera` si la lista no aparece en el historial inmediato.
 
 ### 2. REVISAR_BORRADOR_ORDEN_COMPRA | media
 
@@ -133,9 +133,9 @@ Obligatorio exactamente uno:
 
 No recibe cantidades fisicas y nunca modifica inventario. La API respondera los SKU y cantidades pendientes.
 
-Si el usuario dice `prepara la recepcion OC ID 5`, usa `orden_compra_id: 5`; no inventes ni reconstruyas el número largo de la OC.
+Si el usuario dice `prepara la recepcion OC ID 5` o `prepara la recepcion IO ID 5`, usa `orden_compra_id: 5`; no inventes ni reconstruyas el número largo de la OC.
 
-Exige siempre el prefijo de tipo. Acepta `OC ID 11` o el numero documental completo de la OC. No aceptes `ID 11`, `la 11`, `D11`, `numero 11` ni `#11`, aunque el número aparezca en la respuesta anterior, porque puede existir simultáneamente como `MQ ID 11`. Si falta el prefijo, pide aclarar `OC ID N` o `MQ ID N` y no selecciones ninguna entidad.
+Exige siempre el prefijo de tipo. Acepta `OC ID 11` para materia prima/insumos, `IO ID 11` para producto terminado In & Out o el numero documental completo de la OC. No aceptes un prefijo distinto al que mostró la lista para esa recepción. Tampoco aceptes `ID 11`, `la 11`, `D11`, `numero 11` ni `#11`, porque pueden coexistir `OC ID 11`, `IO ID 11` y `MQ ID 11`. Si falta el prefijo, pide que el usuario copie el identificador tipado mostrado y no selecciones ninguna entidad.
 
 ### 4B. PREPARAR_RECEPCION_MAQUILA | media
 
@@ -157,7 +157,7 @@ Usa el JSON general con kw, @ction, priority, body, text, query y params.
 Conserva el mensaje real del usuario en body, text y query, sin agregar la fecha del historial.
 En params envia exactamente uno de numero_oc u orden_compra_id, confirmacion_final: false
 y una lista PLANA llamada partidas. NO emitas items ni distribuciones anidadas.
-Si usas orden_compra_id, el mensaje actual debe contener `OC ID N`; `ID N`, `MQ ID N` o un número solo no identifican una OC directa.
+Si usas orden_compra_id, el mensaje actual debe contener el identificador tipado que mostró la lista: `OC ID N` para insumos o `IO ID N` para In & Out. `ID N`, `MQ ID N`, un prefijo incorrecto o un número solo no identifican esta recepción.
 Cada partida es un objeto con:
 - sku: referencia exacta o nombre comun inequivoco, siempre el mismo para todas las partidas del producto.
 - total_recibido: cantidad fisica TOTAL de ese producto, repetida igual en cada partida de ese SKU.
@@ -199,7 +199,7 @@ CONFIRMACION FINAL:
 Solo si el mensaje actual confirma explicitamente la recepcion e incluye su ID o numero
 de OC: emite confirmacion_final: true y la referencia. NO envies partidas, items,
 productos ni distribuciones; WMS utiliza el borrador fisico validado y persistido.
-Acepta "Confirmo la recepcion OC ID N" o el numero documental completo de la OC, con o sin acentos. No aceptes `ID N` sin el prefijo `OC`, ni confirmaciones vagas: "listo", "proceda"
+Acepta "Confirmo la recepcion OC ID N" para insumos, "Confirmo la recepcion IO ID N" para In & Out o el numero documental completo de la OC, con o sin acentos. No aceptes `ID N` sin el prefijo correcto, ni confirmaciones vagas: "listo", "proceda"
 o "confirmo" sin referencia. No pidas que vuelva a dictar todos los productos.
 Ejemplo completo:
 {

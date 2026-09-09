@@ -130,6 +130,7 @@ const { detectDocumentTypeMarkers } = require('../../_lib/document-type-markers'
 const {
   listAvailablePurchaseOrderReceptions,
   listAvailableOutsourcingReceptions,
+  purchaseOrderReceptionIdentifier,
   reviewPurchaseOrderDocumentDraft,
   confirmPurchaseOrderDocumentDraft,
   prepareReceptionFromPurchaseOrder,
@@ -1452,7 +1453,7 @@ module.exports = async (req, res) => {
           const directLines = directGroups.flatMap(([label, orders]) => [
             `*${label} (${orders.length})*`,
             ...orders.flatMap(order => [
-              `OC ID ${order.id} | ${order.numero}`,
+              `${purchaseOrderReceptionIdentifier(order)} | ${order.numero}`,
               `Proveedor: ${order.proveedor_nombre || 'N/A'}`,
               `Fecha: ${formatDateOnly(order.fecha_orden)}`,
               ...order.items.map(item =>
@@ -1481,7 +1482,12 @@ module.exports = async (req, res) => {
             ...directLines,
             ...outsourcingLines,
             '',
-            ...(available.length ? [`Para una OC directa responde, por ejemplo: prepara la recepcion OC ID ${available[0].id}.`] : []),
+            ...(available.some(order => order.tipo_recepcion !== 'IN_OUT') ? [
+              `Para una compra de insumos responde, por ejemplo: prepara la recepcion ${purchaseOrderReceptionIdentifier(available.find(order => order.tipo_recepcion !== 'IN_OUT'))}.`,
+            ] : []),
+            ...(available.some(order => order.tipo_recepcion === 'IN_OUT') ? [
+              `Para producto terminado In & Out responde, por ejemplo: prepara la recepcion ${purchaseOrderReceptionIdentifier(available.find(order => order.tipo_recepcion === 'IN_OUT'))}.`,
+            ] : []),
           ].join('\n');
         }
         responseContext.available_receptions = available.map(order => ({
@@ -1552,7 +1558,7 @@ module.exports = async (req, res) => {
           requireExplicitTextReference: true,
         });
         if (prepared.alreadyCompleted) {
-          mensaje = `La OC ${prepared.order.numero} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;
+          mensaje = `${purchaseOrderReceptionIdentifier(prepared.order)} | ${prepared.order.numero} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;
           responseContext.reception = {
             reception_id: prepared.reception.id,
             purchase_order_id: prepared.order.id,
@@ -1567,13 +1573,13 @@ module.exports = async (req, res) => {
           + `${item.ubicacion_sugerida ? ` | ubicacion sugerida ${item.ubicacion_sugerida}` : ''}`
         );
         mensaje = [
-          `Recepcion preparada para OC ${prepared.order.numero}.`,
+          `Recepcion preparada para ${purchaseOrderReceptionIdentifier(prepared.order)} | ${prepared.order.numero}.`,
           `Borrador: ${prepared.reception.numero}`,
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
           'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, condicion, lote, vencimiento y ubicacion para cada item. La ubicacion sugerida es flexible. Los datos del PDF son solo referencia y deben cotejarse contra la etiqueta fisica.',
-          `Antes de afectar inventario deberas escribir: Confirmo la recepcion OC ID ${prepared.order.id}`,
+          `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${purchaseOrderReceptionIdentifier(prepared.order)}`,
         ].join('\n');
         responseContext.reception = {
           reception_id: prepared.reception.id,
@@ -1602,14 +1608,14 @@ module.exports = async (req, res) => {
             inventory_changed: false,
           };
         } else if (confirmation.already_completed) {
-          mensaje = `La OC ${confirmation.orden_compra_numero} ya fue recibida en ${confirmation.numero}. No se modifico inventario.`;
+          mensaje = `${purchaseOrderReceptionIdentifier({ id: confirmation.orden_compra_id, tipo_recepcion: confirmation.tipo_recepcion })} | ${confirmation.orden_compra_numero} ya fue recibida en ${confirmation.numero}. No se modifico inventario.`;
           responseContext.reception = confirmation;
         } else {
           const lines = (confirmation.items || []).map(item =>
             `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`
           );
           mensaje = [
-            `Recepcion ${confirmation.numero} confirmada contra OC ${confirmation.orden_compra_numero}.`,
+            `Recepcion ${confirmation.numero} confirmada contra ${purchaseOrderReceptionIdentifier({ id: confirmation.orden_compra_id, tipo_recepcion: confirmation.tipo_recepcion })} | ${confirmation.orden_compra_numero}.`,
             ...lines,
             confirmation.diferencia
               ? 'Se registraron diferencias para seguimiento.'

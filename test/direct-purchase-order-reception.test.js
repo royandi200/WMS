@@ -80,7 +80,8 @@ test('dashboard starts physical reception from an open purchase order', () => {
   assert.match(page, /\['PR', 'PT'\]\.includes/u);
   assert.match(page, /purchaseOrders\.filter\(canPrepareDirectPurchaseOrder\)/u);
   assert.match(page, /function purchaseOrderIdentifier/u);
-  assert.match(page, /`MQ ID \$\{outsourcingId\}` : `OC ID \$\{order\.id\}`/u);
+  assert.match(page, /const prefix = modes\.length && modes\.every\(\(mode\) => mode === 'IO'\) \? 'IO' : 'OC'/u);
+  assert.match(page, /purchaseOrderIdentifier\(order\)/u);
   assert.match(page, /OC ID \{row\.id\}/u);
   assert.match(purchaseOrdersRoute, /mq\.orden_maquila_id/u);
   assert.match(purchaseOrdersRoute, /GROUP_CONCAT\(DISTINCT codigo/u);

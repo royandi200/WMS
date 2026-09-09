@@ -60,7 +60,10 @@ function canPrepareOutsourcingOrder(order) {
 
 function purchaseOrderIdentifier(order) {
   const outsourcingId = Number(order.orden_maquila_id || 0)
-  return outsourcingId > 0 ? `MQ ID ${outsourcingId}` : `OC ID ${order.id}`
+  if (outsourcingId > 0) return `MQ ID ${outsourcingId}`
+  const modes = (order.items || []).map((item) => String(item.modalidad_operativa || '').toUpperCase())
+  const prefix = modes.length && modes.every((mode) => mode === 'IO') ? 'IO' : 'OC'
+  return `${prefix} ID ${order.id}`
 }
 
 export default function RecepcionPage() {
@@ -351,7 +354,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
             setItems([])
           }} className="input-field" required disabled={Boolean(receptionId)}>
             <option value="">Selecciona la OC</option>
-            {directPurchaseOrders.map((order) => <option key={order.id} value={order.id}>OC ID {order.id} - {order.numero} - {order.proveedor_nombre}</option>)}
+            {directPurchaseOrders.map((order) => <option key={order.id} value={order.id}>{purchaseOrderIdentifier(order)} - {order.numero} - {order.proveedor_nombre}</option>)}
           </select>
         </Field> : <>
           <Field label="Orden de maquila 3Q *">
