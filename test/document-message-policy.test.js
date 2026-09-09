@@ -57,3 +57,22 @@ test('document policy never recovers text from OCR and documents the provider li
   assert.match(prompt, /solo puede crear un borrador o una vista previa sujetos a revision humana/u);
   assert.doesNotMatch(prompt, /La API valida que exista texto adjunto/u);
 });
+
+test('native PDF recovery uses the immutable transport event instead of the AI rejection text', () => {
+  const webhook = fs.readFileSync(
+    path.join(__dirname, '../api/v1/webhook/builderbot.js'),
+    'utf8'
+  );
+  assert.match(
+    webhook,
+    /recoverRejectedDocumentAction\(\{[\s\S]*?eventText: contractUserText,[\s\S]*?\}\);/u
+  );
+  assert.match(
+    webhook,
+    /async function recoverRejectedDocumentAction\(\{ db, rawBody, action, params, eventText \}\)[\s\S]*?documentEventMessage\(eventText\)/u
+  );
+  assert.doesNotMatch(
+    webhook,
+    /recoverRejectedDocumentAction\(\{ db, rawBody, action, params, rawText \}\)/u
+  );
+});

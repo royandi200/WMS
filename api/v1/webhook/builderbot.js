@@ -530,9 +530,9 @@ function documentEventMessage(value) {
   return /^_event_document__[A-Za-z0-9-]+$/u.test(String(value || '').trim());
 }
 
-async function recoverRejectedDocumentAction({ db, rawBody, action, params, rawText }) {
+async function recoverRejectedDocumentAction({ db, rawBody, action, params, eventText }) {
   if (!['UNKNOWN', 'MODO_CHARLA'].includes(String(action || '').toUpperCase())) return null;
-  if (!documentEventMessage(rawText)) return null;
+  if (!documentEventMessage(eventText)) return null;
   const documentUrl = builderBotDocumentValue(rawBody.document_url);
   if (!documentUrl) return { recovered: false, status: 'MISSING_DOCUMENT_URL' };
 
@@ -1379,7 +1379,7 @@ module.exports = async (req, res) => {
       rawBody,
       action,
       params,
-      rawText,
+      eventText: contractUserText,
     });
     if (recoveredDocument) {
       responseContext.document_recovery = {
