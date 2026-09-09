@@ -1587,7 +1587,7 @@ module.exports = async (req, res) => {
       case 'CONFIRMAR_RECEPCION_OC': {
         const confirmation = await confirmReceptionFromWhatsApp({
           db,
-          params: receptionPartidas(params),
+          params: receptionPartidas(params, { rawText }),
           rawText,
           user,
         });
@@ -1669,7 +1669,7 @@ module.exports = async (req, res) => {
       case 'CONFIRMAR_RECEPCION_MAQUILA': {
         const confirmation = await confirmOutsourcingReceptionFromWhatsApp({
           db,
-          params: receptionPartidas(params),
+          params: receptionPartidas(params, { rawText }),
           rawText,
           user,
         });

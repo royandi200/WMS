@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { receptionPartidas } = require('../api/_lib/reception-partidas');
+const { receptionPartidas, textReceptionPartidas } = require('../api/_lib/reception-partidas');
 const { buildConfirmationItems } = require('../api/_lib/builderbot-reception');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -89,4 +89,28 @@ test('published 3Q receipt examples use MQ IDs, flat rows and a separate final c
   assert.equal(examples[0]['@ction'], 'CONFIRMAR_RECEPCION_MAQUILA');
   assert.equal(receptionPartidas(examples[0].params).items[0].cantidad_recibida, 2);
   assert.deepEqual(examples[1].params, { orden_maquila_id: 12, confirmacion_final: true });
+});
+
+test('native text fallback recovers a complete multi-SKU receipt when the model omits rows', () => {
+  const rawText = `Para la recepcion OC ID 27 llegaron todos estos items:
+
+00001-TPBI: cantidad 12 und, condicion DISPONIBLE, lote CLI-260908-TPBI, vencimiento 2027-09-30, ubicacion A1.
+00006-TRP: cantidad 12 und, condicion DISPONIBLE, lote CLI-260908-TRP, vencimiento 2027-09-30, ubicacion A11.
+00017-ETASH60: cantidad 10 und, condicion DISPONIBLE, lote CLI-260908-ETASH, vencimiento 2027-09-30, ubicacion A1.
+00035-LNTP60: cantidad 12 und, condicion DISPONIBLE, lote CLI-260908-LINER, vencimiento 2027-09-30, ubicacion A14.
+00051-MPASH: cantidad 2000 g, condicion DISPONIBLE, lote CLI-260908-MPASH, vencimiento 30/09/2027, ubicacion B16.
+00018-ETBOS60: cantidad 10 und, condicion DISPONIBLE, lote CLI-260908-ETBOS, vencimiento 2027-09-30, ubicacion A1.`;
+  const result = receptionPartidas({ confirmacion_final: true, items: [] }, { rawText });
+  assert.equal(result.orden_compra_id, 27);
+  assert.equal(result.confirmacion_final, false);
+  assert.equal(result.items.length, 6);
+  assert.equal(result.items[4].cantidad_recibida, 2000);
+  assert.equal(result.items[4].distribuciones[0].fecha_vencimiento, '2027-09-30');
+  assert.equal(result.items[5].distribuciones[0].ubicacion, 'A1');
+});
+
+test('native text fallback fails closed on an incomplete SKU line', () => {
+  assert.throws(() => textReceptionPartidas(
+    '00001-TPBI: cantidad 12 und, condicion DISPONIBLE, lote LOT-1, ubicacion A1.'
+  ), /No pude leer todos los campos/u);
 });
