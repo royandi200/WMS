@@ -1905,7 +1905,7 @@ module.exports = async (req, res) => {
           );
           const disponible = parseFloat(st[0]?.disponible || 0);
           const ok = disponible >= needed;
-          picking.push(`  ${ok ? '✅' : '❌'} ${item.siigo_code} — ${item.nombre}: necesita ${needed}, disponible ${disponible} ${item.unidad}`);
+          picking.push(`  ${ok ? '🟢' : '⚠️'} ${item.siigo_code} — ${item.nombre}: necesita ${needed}, disponible ${disponible} ${item.unidad}`);
           if (!ok) faltantes.push(`${item.siigo_code} (falta ${roundQty(needed - disponible)} ${item.unidad})`);
         }
 
@@ -2146,7 +2146,7 @@ module.exports = async (req, res) => {
             ? `📉 *Merma: ${merma2.toFixed(1)} und (${((merma2 / cantPlan2) * 100).toFixed(1)}%) — REQUIERE REVISIÓN*`
             : merma2 < 0
               ? `📈 Excedente: ${Math.abs(merma2).toFixed(1)} und sobre lo planeado`
-              : `✅ Sin merma`;
+              : `ℹ️ Sin merma`;
           const textoWA2 = [
             `🏭 *Solicitud cierre de producción: ${codigo}*`,
             `Orden: ${orden.codigo_orden}`,
@@ -3649,7 +3649,7 @@ module.exports = async (req, res) => {
               ...checks,
             ].join('\n')
           : [
-              `${puedeProd ? '✅' : '❌'} *Capacidad para ${desired} uds de ${p.nombre} (${p.siigo_code}):*`,
+              `${puedeProd ? '🟢' : '⚠️'} *Capacidad para ${desired} uds de ${p.nombre} (${p.siigo_code}):*`,
               ...checks,
             ].join('\n');
         break;

@@ -174,8 +174,53 @@ function emphasizeProcessIds(value) {
   });
 }
 
+function decorateOperationalMessage(value) {
+  const lines = String(value || '').split('\n');
+  const firstContent = lines.findIndex(line => line.trim());
+  if (firstContent < 0) return lines.join('\n');
+
+  const line = lines[firstContent];
+  const normalized = line
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[*_`]/g, '')
+    .toLowerCase();
+  const normalizedMessage = lines.join('\n')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[*_`]/g, '')
+    .toLowerCase();
+  const hasCategory = /^[\s]*(?:📥|🏭|🚚|🧾)/u.test(line);
+  const hasStatus = /^[\s]*(?:(?:📥|🏭|🚚|🧾)\s+)?(?:✅|⏳|⚠️|❌)/u.test(line);
+
+  let category = '';
+  if (/recepcion|recibid[ao]s?/.test(normalized)) category = '📥';
+  else if (/despacho|salida a maquila/.test(normalized)) category = '🚚';
+  else if (/produccion|\bop id\b|orden .*op-|nueva orden para alistamiento|orden adicional|reposicion de materiales/.test(normalized)
+      || /\bop id\b/.test(normalizedMessage)) category = '🏭';
+  else if (/orden de compra|\boc id\b|^\s*oc\b|revision de oc/.test(normalized)) category = '🧾';
+
+  let status = '';
+  if (!hasStatus && /\b(confirmad[ao]s?|completad[ao]s?|cerrad[ao]s?|recibid[ao]s?|registrad[ao]s?|cread[ao]s?|aprobad[ao]s?)\b/.test(normalized)) {
+    status = '✅';
+  } else if (!hasStatus
+      && !/\bno hay\b/.test(normalized)
+      && /\b(pendientes?|preparad[ao]s?|list[ao]s? para confirmar)\b/.test(normalized)) {
+    status = '⏳';
+  }
+
+  if (hasCategory && status) {
+    lines[firstContent] = line.replace(/^(\s*)(📥|🏭|🚚|🧾)\s*/u, `$1$2 ${status} `);
+  } else {
+    const prefixes = [hasCategory ? '' : category, status].filter(Boolean);
+    if (prefixes.length) lines[firstContent] = `${prefixes.join(' ')} ${line}`;
+  }
+  return lines.join('\n');
+}
+
 function formatWhatsAppMessage(value) {
-  const source = emphasizeProcessIds(correctSpanishOrthography(value)).replace(/\r\n?/g, '\n').trim();
+  const corrected = emphasizeProcessIds(correctSpanishOrthography(value)).replace(/\r\n?/g, '\n');
+  const source = decorateOperationalMessage(corrected).trim();
   if (!source || !source.includes('\n')) return source;
 
   const output = [];
@@ -193,4 +238,9 @@ function formatWhatsAppMessage(value) {
   return output.join('\n');
 }
 
-module.exports = { correctSpanishOrthography, emphasizeProcessIds, formatWhatsAppMessage };
+module.exports = {
+  correctSpanishOrthography,
+  decorateOperationalMessage,
+  emphasizeProcessIds,
+  formatWhatsAppMessage,
+};

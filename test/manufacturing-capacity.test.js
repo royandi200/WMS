@@ -22,7 +22,10 @@ test('eligible stock excludes unavailable, expired and inactive-location lots', 
 test('capacity shortage states the missing quantity explicitly', () => {
   assert.deepEqual(formatCapacityCheck('00007-TRG', 5, 4), {
     ok: false,
-    line: '  ❌ 00007-TRG: necesita 5, disponible 4, faltan 1',
+    line: '  ⚠️ 00007-TRG: necesita 5, disponible 4, faltan 1',
   });
-  assert.equal(formatCapacityCheck('00004-TPALB', 5, 10).ok, true);
+  assert.deepEqual(formatCapacityCheck('00004-TPALB', 5, 10), {
+    ok: true,
+    line: '  🟢 00004-TPALB: necesita 5, disponible 10',
+  });
 });

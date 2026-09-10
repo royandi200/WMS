@@ -28,7 +28,7 @@ function formatCapacityCheck(component, needed, available, fallbackUnit = '') {
   const shortage = ok ? '' : `, faltan ${roundQty(needed - available)}${unitSuffix}`;
   return {
     ok,
-    line: `  ${ok ? '✅' : '❌'} ${name ? `${name} (${sku})` : sku}: necesita ${needed}${unitSuffix}, disponible ${available}${unitSuffix}${shortage}`,
+    line: `  ${ok ? '🟢' : '⚠️'} ${name ? `${name} (${sku})` : sku}: necesita ${needed}${unitSuffix}, disponible ${available}${unitSuffix}${shortage}`,
   };
 }
 

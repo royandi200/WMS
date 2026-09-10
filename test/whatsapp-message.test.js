@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   correctSpanishOrthography,
+  decorateOperationalMessage,
   emphasizeProcessIds,
   formatWhatsAppMessage,
 } = require('../api/_lib/whatsapp-message');
@@ -9,7 +10,7 @@ const {
 test('WhatsApp formatter separates top-level lines and keeps item details together', () => {
   assert.equal(
     formatWhatsAppMessage('Recepcion preparada\n- SKU-A\n  Lote LOT-A\nProveedor: 3Q'),
-    'Recepción preparada\n\n- SKU-A\n  Lote LOT-A\n\nProveedor: 3Q'
+    '📥 ⏳ Recepción preparada\n\n- SKU-A\n  Lote LOT-A\n\nProveedor: 3Q'
   );
 });
 
@@ -34,6 +35,36 @@ test('WhatsApp formatter emphasizes short process IDs without duplicating existi
     assert.match(formatted, new RegExp(`\\*${id}\\*`, 'u'));
   }
   assert.doesNotMatch(formatted, /\*\*/u);
+});
+
+test('WhatsApp formatter uses operational emojis and reserves checkmarks for completed states', () => {
+  const pendingCases = [
+    ['Recepciones pendientes (1)', '📥 ⏳ Recepciones pendientes (1)'],
+    ['Recepción preparada para OC ID 28', '📥 ⏳ Recepción preparada para OC ID 28'],
+    ['Nueva orden de producción OP ID 88', '🏭 Nueva orden de producción OP ID 88'],
+    ['Despachos pendientes (1)', '🚚 ⏳ Despachos pendientes (1)'],
+    ['Salida a maquila 3Q preparada', '🚚 ⏳ Salida a maquila 3Q preparada'],
+  ];
+  for (const [input, expected] of pendingCases) {
+    const decorated = decorateOperationalMessage(input);
+    assert.equal(decorated, expected);
+    assert.doesNotMatch(decorated, /✅/u);
+  }
+
+  assert.equal(decorateOperationalMessage('Recepción confirmada'), '📥 ✅ Recepción confirmada');
+  assert.equal(decorateOperationalMessage('Producción cerrada: OP ID 88'), '🏭 ✅ Producción cerrada: OP ID 88');
+  assert.equal(decorateOperationalMessage('Despacho confirmado'), '🚚 ✅ Despacho confirmado');
+  assert.equal(decorateOperationalMessage('No hay recepciones pendientes'), '📥 No hay recepciones pendientes');
+  assert.equal(decorateOperationalMessage('🏭 Producción cerrada'), '🏭 ✅ Producción cerrada');
+  assert.equal(decorateOperationalMessage('✅ Orden OP-88 APROBADA'), '🏭 ✅ Orden OP-88 APROBADA');
+  assert.equal(
+    decorateOperationalMessage('*Nueva orden para alistamiento*\nOrden: OP ID 88'),
+    '🏭 *Nueva orden para alistamiento*\nOrden: OP ID 88'
+  );
+  assert.doesNotMatch(
+    decorateOperationalMessage('*Nueva orden para alistamiento*\nOrden: OP ID 88'),
+    /✅/u
+  );
 });
 
 test('WhatsApp formatter corrects common Spanish copy without changing identifiers', () => {
