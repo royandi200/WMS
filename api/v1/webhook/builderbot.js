@@ -2638,16 +2638,29 @@ module.exports = async (req, res) => {
             ready: readiness.get(Number(dispatch.id)),
             confirmationReference: `ID ${dispatch.id}`,
             lines: [
-              `- DSP ID ${dispatch.id} | ${dispatch.numero}`,
-              `  Factura: ${dispatch.siigo_invoice_name || 'N/A'} | Cliente: ${dispatch.cliente_nombre || 'Cliente N/A'}`,
+              `*DSP ID ${dispatch.id} | ${dispatch.numero}*`,
+              '  Origen: Factura de Siigo',
+              `  Factura: ${dispatch.siigo_invoice_name || 'N/A'}`,
+              `  Cliente: ${dispatch.cliente_nombre || 'Cliente N/A'}`,
               `  Estado: ${readiness.get(Number(dispatch.id)) ? 'LISTO PARA CONFIRMAR' : 'PENDIENTE_STOCK'}`,
-              ...(demandByDispatch.get(Number(dispatch.id)) || []).map(item =>
-                `  ${item.sku} - ${item.producto}: solicitado ${Number(item.solicitada)} und | reservado ${Number(item.reservada)} | faltante ${Number(item.faltante)}`
-              ),
-              (itemsByDispatch.get(Number(dispatch.id)) || []).length ? '  Lotes asignados:' : '  Sin lotes asignados.',
-              ...(itemsByDispatch.get(Number(dispatch.id)) || []).map(item =>
-                `  - ${item.sku}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicación ${item.ubicacion || 'SIN ASIGNAR'}`
-              ),
+              '',
+              '*Productos solicitados*',
+              ...(demandByDispatch.get(Number(dispatch.id)) || []).flatMap((item, index) => [
+                `${index + 1}. *${item.sku}* - ${item.producto}`,
+                `   Solicitado: ${Number(item.solicitada)} und`,
+                `   Reservado: ${Number(item.reservada)} und`,
+                `   Faltante: ${Number(item.faltante)} und`,
+              ]),
+              '',
+              '*Picking FEFO*',
+              ...(itemsByDispatch.get(Number(dispatch.id)) || []).length
+                ? (itemsByDispatch.get(Number(dispatch.id)) || []).flatMap((item, index) => [
+                    `${index + 1}. *${item.sku}*`,
+                    `   Cantidad: ${Number(item.cantidad)} und`,
+                    `   Lote: ${item.lote || 'SIN ASIGNAR'}`,
+                    `   Ubicación: ${item.ubicacion || 'SIN ASIGNAR'}`,
+                  ])
+                : ['Sin lotes asignados.'],
             ],
           })),
           ...outsourcingDispatches.map(dispatch => {
@@ -2657,14 +2670,21 @@ module.exports = async (req, res) => {
               ready: assigned.length > 0,
               confirmationReference: `ID 3Q-${dispatch.id}`,
               lines: [
-                `- DSP ID 3Q-${dispatch.id} | ${dispatch.numero}`,
-                `  Origen: Maquila 3Q | Destino: ${dispatch.proveedor_nombre}`,
+                `*DSP ID 3Q-${dispatch.id} | ${dispatch.numero}*`,
+                '  Origen: Salida de materiales hacia maquila 3Q',
+                `  Maquilador: ${dispatch.proveedor_nombre}`,
                 `  Orden: MQ ID ${dispatch.orden_maquila_id} | ${dispatch.orden_codigo}`,
                 `  Estado: ${assigned.length ? 'LISTO PARA CONFIRMAR' : 'PENDIENTE_STOCK'}`,
-                assigned.length ? '  Lotes asignados:' : '  Sin lotes asignados.',
-                ...assigned.map(item =>
-                  `  - ${item.sku} - ${item.producto}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicación ${item.ubicacion || 'SIN ASIGNAR'}`
-                ),
+                '',
+                '*Picking FEFO*',
+                ...assigned.length
+                  ? assigned.flatMap((item, index) => [
+                      `${index + 1}. *${item.sku}* - ${item.producto}`,
+                      `   Cantidad: ${Number(item.cantidad)} und`,
+                      `   Lote: ${item.lote || 'SIN ASIGNAR'}`,
+                      `   Ubicación: ${item.ubicacion || 'SIN ASIGNAR'}`,
+                    ])
+                  : ['Sin lotes asignados.'],
               ],
             };
           }),
@@ -2674,11 +2694,14 @@ module.exports = async (req, res) => {
         } else {
           const firstReady = entries.find(entry => entry.ready);
           mensaje = [
-            `Despachos pendientes (${entries.length}):`,
+            `*Despachos pendientes (${entries.length})*`,
             ...entries.flatMap(entry => ['', ...entry.lines]),
+            '',
+            '*Siguiente paso*',
             firstReady
-              ? `Para confirmar responde, por ejemplo: confirma el despacho ${firstReady.confirmationReference}.`
+              ? `Escribe: confirma el despacho ${firstReady.confirmationReference}.`
               : 'Ningún despacho tiene cobertura completa; no debe confirmarse hasta reservar todo el stock.',
+            '',
             'Esta consulta no modifica inventario.',
           ].join('\n');
         }
@@ -2823,18 +2846,27 @@ module.exports = async (req, res) => {
             userId: user.id,
           });
           mensaje = shipment.already_confirmed
-            ? `El despacho DSP ID 3Q-${outsourcingShipmentId} | ${shipment.shipment_number} ya habia sido confirmado. No se modifico inventario.`
+            ? [
+                '*Despacho ya confirmado*',
+                '',
+                `Despacho: DSP ID 3Q-${outsourcingShipmentId} | ${shipment.shipment_number}`,
+                '',
+                'No se modificó inventario.',
+              ].join('\n')
             : [
                 '*Salida a maquila 3Q confirmada*',
                 '',
                 `Despacho: DSP ID 3Q-${outsourcingShipmentId} | ${shipment.shipment_number}`,
-                `Orden: ${shipment.order_code}`,
+                `Orden: MQ ID ${shipment.order_id} | ${shipment.order_code}`,
                 'Custodia externa: 3Q',
                 '',
                 '*Materiales enviados*',
-                ...shipment.dispatched.map(item =>
-                  `- ${item.sku}: ${item.cantidad} und | lote ${item.lote} | origen ${item.ubicacion_origen}`
-                ),
+                ...shipment.dispatched.flatMap((item, index) => [
+                  `${index + 1}. *${item.sku}*`,
+                  `   Cantidad: ${item.cantidad} und`,
+                  `   Lote: ${item.lote}`,
+                  `   Ubicación de origen: ${item.ubicacion_origen}`,
+                ]),
               ].join('\n');
           responseContext.dispatch = { ...shipment, dispatch_id: `3Q-${outsourcingShipmentId}` };
           break;
@@ -2845,14 +2877,26 @@ module.exports = async (req, res) => {
           userId: user.id,
           ...dispatchInput,
         });
-        const lots = (dispatchResult.lotes || []).map(item =>
-          `- ${item.sku}: ${item.cantidad} und del lote ${item.lote}`
-        );
+        const lots = (dispatchResult.lotes || []).flatMap((item, index) => [
+          `${index + 1}. *${item.sku}*`,
+          `   Cantidad: ${item.cantidad} und`,
+          `   Lote: ${item.lote}`,
+        ]);
         mensaje = dispatchResult.already_completed
-          ? `El despacho ${dispatchResult.numero} ya habia sido confirmado. No se modifico inventario.`
+          ? [
+              '*Despacho ya confirmado*',
+              '',
+              `Despacho: DSP ID ${dispatchResult.despacho_id} | ${dispatchResult.numero}`,
+              '',
+              'No se modificó inventario.',
+            ].join('\n')
           : [
-              `Despacho ${dispatchResult.numero} confirmado.`,
+              '*Despacho confirmado*',
+              '',
+              `Despacho: DSP ID ${dispatchResult.despacho_id} | ${dispatchResult.numero}`,
               `Factura: ${dispatchResult.siigo_invoice_name || dispatchResult.siigo_invoice_id}`,
+              '',
+              '*Productos despachados*',
               ...lots,
             ].join('\n');
         responseContext.dispatch = dispatchResult;

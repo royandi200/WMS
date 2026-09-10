@@ -804,7 +804,12 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
     const shipment = shipments[0];
     if (shipment.estado === 'CONFIRMADO') {
       await conn.commit();
-      return { shipment_number: shipment.numero, order_code: shipment.orden_codigo, already_confirmed: true };
+      return {
+        shipment_number: shipment.numero,
+        order_id: shipment.orden_maquila_id,
+        order_code: shipment.orden_codigo,
+        already_confirmed: true,
+      };
     }
     if (shipment.estado !== 'BORRADOR') throw httpError(409, `La remision esta ${shipment.estado}`);
     if (['COMPLETADA', 'CANCELADA'].includes(shipment.orden_estado)) {
@@ -907,6 +912,7 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
     await conn.commit();
     return {
       shipment_number: shipment.numero,
+      order_id: shipment.orden_maquila_id,
       order_code: shipment.orden_codigo,
       state: 'CONFIRMADO',
       order_state: shipment.orden_compra_id ? 'EN_3Q' : 'EN_3Q_PENDIENTE_OC',
