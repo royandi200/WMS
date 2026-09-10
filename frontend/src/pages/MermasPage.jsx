@@ -52,7 +52,7 @@ export default function MermasPage() {
       const result = response.data?.data || response.data
       if (result?.requires_confirmation) {
         setConfirmDuplicate(result.id || result.numero)
-        showToast('Ya existe una merma igual reciente. Revisa los datos y vuelve a enviar solo si es una perdida nueva.', false)
+        showToast('Ya existe una merma igual reciente. Revisa los datos y vuelve a enviar solo si es una pérdida nueva.', false)
         return
       }
       showToast(result?.already_completed

@@ -385,7 +385,7 @@ export default function DashboardPage() {
           </div>
           <div className="hidden sm:flex items-center gap-1 text-[11px] text-muted">
             <Radio size={12} className="text-emerald-400" />
-            {error || !metrics ? 'Pendiente de actualizar' : 'Actualizacion automatica'}
+            {error || !metrics ? 'Pendiente de actualizar' : 'Actualización automática'}
           </div>
         </div>
 
@@ -409,7 +409,7 @@ export default function DashboardPage() {
             />
             <StageCard
               icon={Warehouse}
-              title="Almacen"
+              title="Almacén"
               subtitle="Stock, reserva y riesgo"
               color="#3fb950"
               href="/inventario"
@@ -444,7 +444,7 @@ export default function DashboardPage() {
             <StageCard
               icon={Trash2}
               title="Mermas"
-              subtitle="Perdidas y causa raiz"
+              subtitle="Pérdidas y causa raíz"
               color="#f85149"
               href="/mermas"
               primary={fmtN(wasteCount)}
@@ -503,7 +503,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <Section
           icon={AlertTriangle}
-          title="Excepciones que requieren atencion"
+          title="Excepciones que requieren atención"
           action={<button onClick={() => navigate('/inventario')} className="text-xs text-primary hover:underline">Ver módulo</button>}
         >
           {!metrics ? <SpinnerBlock /> : exceptions.length === 0 ? (
