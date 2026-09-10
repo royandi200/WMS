@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, CheckCircle2, Download, Factory, FileText, Pencil, Plus, Save, Send, Trash2, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import {
   confirmOutsourcingShipment,
   cancelOutsourcingShipment,
@@ -28,6 +29,7 @@ const STATUS = {
 }
 
 export default function OutsourcingPage() {
+  const navigate = useNavigate()
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
   const canManage = capabilities.includes('*') || capabilities.includes('outsourcing.manage')
   const [tab, setTab] = useState('list')
@@ -134,7 +136,10 @@ export default function OutsourcingPage() {
           onPrepare={(body) => run(
             () => createOutsourcingOrderFromDocument(body),
             'Orden, remisión y picking preparados desde el documento'
-          ).then((ok) => { if (ok) setTab('list'); return ok })}
+          ).then((ok) => {
+            if (ok) navigate('/despachos')
+            return ok
+          })}
         />
       )}
       {tab === 'create' && canManage && (
