@@ -129,16 +129,16 @@ test('WhatsApp lists and confirms a pending 3Q dispatch through its typed ID', a
   assert.equal(pending.ok, true, pending.mensaje);
   assert.match(pending.mensaje, /DSP ID 3Q-17/u);
   assert.match(pending.mensaje, /REM-3Q-20260910-000017/u);
-  assert.match(pending.mensaje, /confirma el despacho ID 3Q-17/u);
+  assert.match(pending.mensaje, /confirma el despacho \*ID 3Q-17\*/u);
   assert.match(pending.mensaje, /\*Picking FEFO\*\n\n1\. \*00001-TPBI\* - TAPA TARRO\n   Cantidad: 4 und\n   Lote: LOT-3Q-QA\n   Ubicación: A8/u);
-  assert.match(pending.mensaje, /\*Siguiente paso\*\n\nEscribe: confirma el despacho ID 3Q-17\./u);
+  assert.match(pending.mensaje, /\*Siguiente paso\*\n\nEscribe: confirma el despacho \*ID 3Q-17\*\./u);
   assert.equal(h.calls.length, 0);
 
   const confirmed = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 3Q-17.', { id_despacho: 17 });
   assert.equal(confirmed.ok, true, confirmed.mensaje);
   assert.match(confirmed.mensaje, /Salida a maquila 3Q confirmada/u);
-  assert.match(confirmed.mensaje, /Despacho: DSP ID 3Q-17 \| REM-3Q-20260910-000017/u);
-  assert.match(confirmed.mensaje, /Orden: MQ ID 16 \| MQ-3Q-20260910-000016/u);
+  assert.match(confirmed.mensaje, /Despacho: \*DSP ID 3Q-17\* \| REM-3Q-20260910-000017/u);
+  assert.match(confirmed.mensaje, /Orden: \*MQ ID 16\* \| MQ-3Q-20260910-000016/u);
   assert.match(confirmed.mensaje, /\*Materiales enviados\*\n\n1\. \*00001-TPBI\*\n   Cantidad: 4 und\n   Lote: LOT-3Q-QA\n   Ubicación de origen: A8/u);
   assert.equal(h.calls[0].kind, 'outsourcing');
   assert.equal(h.calls[0].shipmentId, 17);

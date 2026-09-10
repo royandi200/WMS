@@ -163,8 +163,19 @@ function correctSpanishOrthography(value) {
   return result.replace(/\uE000(\d+)\uE001/g, (_, index) => protectedTokens[Number(index)]);
 }
 
+function emphasizeProcessIds(value) {
+  const source = String(value || '');
+  const processId = /\b(?:(?:OC|MQ|IO|OP|DSP|REC|DEV)\s+)?ID\s+(?:3Q-)?\d+\b/giu;
+  return source.replace(processId, (match, offset) => {
+    const lineStart = source.lastIndexOf('\n', offset) + 1;
+    const prefix = source.slice(lineStart, offset);
+    const boldMarkers = (prefix.match(/(?<!\\)\*/g) || []).length;
+    return boldMarkers % 2 === 1 ? match : `*${match}*`;
+  });
+}
+
 function formatWhatsAppMessage(value) {
-  const source = correctSpanishOrthography(value).replace(/\r\n?/g, '\n').trim();
+  const source = emphasizeProcessIds(correctSpanishOrthography(value)).replace(/\r\n?/g, '\n').trim();
   if (!source || !source.includes('\n')) return source;
 
   const output = [];
@@ -182,4 +193,4 @@ function formatWhatsAppMessage(value) {
   return output.join('\n');
 }
 
-module.exports = { correctSpanishOrthography, formatWhatsAppMessage };
+module.exports = { correctSpanishOrthography, emphasizeProcessIds, formatWhatsAppMessage };
