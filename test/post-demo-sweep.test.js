@@ -11,6 +11,9 @@ test('3Q outbound is exposed through dispatch with its existing atomic confirmat
   assert.match(route, /'MAQUILA_3Q'/u);
   assert.match(route, /confirmOutsourcingShipment/u);
   assert.match(page, /Segunda confirmación obligatoria/u);
+  assert.match(page, /xl:table-fixed/u);
+  assert.match(page, /sticky right-0/u);
+  assert.match(page, /> Imprimir/u);
 });
 
 test('post-demo inventory views expose custody, location, SKU and full lot history', () => {

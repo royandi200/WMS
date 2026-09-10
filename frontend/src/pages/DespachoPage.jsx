@@ -84,10 +84,10 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
   const formatDate = formatBogotaDateTime
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm min-w-[1100px]">
+      <table className="w-full min-w-[1050px] text-[11px] xl:min-w-0 xl:table-fixed">
         <thead><tr className="bg-surface border-b border-border">
           {['Origen', 'Despacho', 'Cliente / destino', 'SKU', 'Lote / ubicación', 'Solicitado', 'Asignado', 'Reserva activa', 'Despachado', 'Sin asignar', 'Estado', 'Fecha', 'Acción'].map((label) => (
-            <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
+            <th key={label} className={`px-2 py-2 text-left text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted ${label === 'Acción' ? 'sticky right-0 z-10 bg-surface' : ''}`}>{label}</th>
           ))}
         </tr></thead>
         <tbody>
@@ -98,37 +98,37 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
               && (row.siigo_invoice_id || row.source_type === 'MAQUILA_3Q')
             const items = row.items?.length ? row.items : [row]
             return (
-              <tr key={row.id || index} className="border-b border-border/50 hover:bg-white/[0.02] align-top">
-                <td className="px-4 py-3 font-mono text-xs">{row.source_type === 'MAQUILA_3Q' ? 'Salida a 3Q' : (row.siigo_invoice_name || '-')}</td>
-                <td className="px-4 py-3 font-mono text-xs"><span className="block font-semibold text-primary">DSP ID {row.source_type === 'MAQUILA_3Q' ? `3Q-${row.source_id}` : row.id}</span><span className="block">{row.numero}</span></td>
-                <td className="px-4 py-3">{row.cliente_nombre || 'Pendiente'}</td>
-                <td className="px-4 py-3 space-y-2">{items.map((item, itemIndex) => (
+              <tr key={row.id || index} className="group border-b border-border/50 align-top hover:bg-white/[0.02]">
+                <td className="break-words px-2 py-2 font-mono leading-tight">{row.source_type === 'MAQUILA_3Q' ? 'Salida a 3Q' : (row.siigo_invoice_name || '-')}</td>
+                <td className="px-2 py-2 font-mono leading-tight"><span className="block font-semibold text-primary">DSP ID {row.source_type === 'MAQUILA_3Q' ? `3Q-${row.source_id}` : row.id}</span><span className="block break-all">{row.numero}</span></td>
+                <td className="break-words px-2 py-2 leading-tight">{row.cliente_nombre || 'Pendiente'}</td>
+                <td className="space-y-2 px-2 py-2 leading-tight">{items.map((item, itemIndex) => (
                   <div key={`${item.sku || 'sku'}-${item.lote || 'lote'}-${itemIndex}`}>
-                    <span className="font-mono text-xs">{item.sku || '-'}</span>
-                    <span className="block text-xs text-muted">{item.producto_nombre || ''}</span>
+                    <span className="break-all font-mono">{item.sku || '-'}</span>
+                    <span className="block break-words text-muted">{item.producto_nombre || ''}</span>
                   </div>
                 ))}</td>
-                <td className="px-4 py-3 space-y-2">{items.map((item, itemIndex) => (
+                <td className="space-y-2 px-2 py-2 leading-tight">{items.map((item, itemIndex) => (
                   <div key={`${item.lote || 'lote'}-${itemIndex}`}>
-                    <span className="font-mono text-xs">{item.lote || '-'}</span>
-                    <span className="block text-xs text-muted">{item.ubicacion || 'Sin ubicación'} | {item.cantidad} u.</span>
+                    <span className="break-all font-mono">{item.lote || '-'}</span>
+                    <span className="block text-muted">{item.ubicacion || 'Sin ubicación'} | {item.cantidad} u.</span>
                   </div>
                 ))}</td>
-                <td className="px-4 py-3 tabular-nums">{row.cantidad_facturada ?? '-'}</td>
-                <td className="px-4 py-3 tabular-nums">{row.cantidad_asignada ?? row.cantidad_reservada ?? '-'}</td>
-                <td className="px-4 py-3 tabular-nums">{row.reserva_activa ?? '-'}</td>
-                <td className="px-4 py-3 tabular-nums">{row.cantidad_despachada_total ?? '-'}</td>
-                <td className={`px-4 py-3 tabular-nums ${Number(row.cantidad_pendiente) > 0 ? 'text-yellow-400' : 'text-green-400'}`}>{row.cantidad_pendiente ?? '-'}</td>
-                <td className="px-4 py-3"><span className="text-xs font-semibold">{row.estados_demanda || row.estado}</span></td>
-                <td className="px-4 py-3 text-muted text-xs">{formatDate(row.despachado_en || row.creado_en)}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => openDispatchSheet(row)} title="Abrir hoja imprimible del despacho" className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80">
-                      <FileText size={15} /> Hoja
+                <td className="px-2 py-2 tabular-nums">{row.cantidad_facturada ?? '-'}</td>
+                <td className="px-2 py-2 tabular-nums">{row.cantidad_asignada ?? row.cantidad_reservada ?? '-'}</td>
+                <td className="px-2 py-2 tabular-nums">{row.reserva_activa ?? '-'}</td>
+                <td className="px-2 py-2 tabular-nums">{row.cantidad_despachada_total ?? '-'}</td>
+                <td className={`px-2 py-2 tabular-nums ${Number(row.cantidad_pendiente) > 0 ? 'text-yellow-400' : 'text-green-400'}`}>{row.cantidad_pendiente ?? '-'}</td>
+                <td className="break-words px-2 py-2 font-semibold leading-tight">{row.estados_demanda || row.estado}</td>
+                <td className="px-2 py-2 leading-tight text-muted">{formatDate(row.despachado_en || row.creado_en)}</td>
+                <td className="sticky right-0 z-[1] bg-surface px-2 py-2 shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.9)]">
+                  <div className="flex flex-col items-start gap-2">
+                    <button type="button" onClick={() => openDispatchSheet(row)} title="Abrir hoja imprimible del despacho" className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80">
+                      <FileText size={14} /> Imprimir
                     </button>
                   {ready && canConfirm ? (
-                    <button type="button" onClick={() => onConfirm(row)} disabled={workingId === row.id} title="Confirmar despacho físico" className="inline-flex items-center gap-2 text-sm text-green-400 hover:text-green-300 disabled:opacity-50">
-                      <Check size={16} /> Confirmar
+                    <button type="button" onClick={() => onConfirm(row)} disabled={workingId === row.id} title="Confirmar despacho físico" className="inline-flex items-center gap-1 text-[11px] text-green-400 hover:text-green-300 disabled:opacity-50">
+                      <Check size={14} /> Confirmar
                     </button>
                   ) : pending ? <span className="text-xs text-muted">No disponible</span> : null}
                   </div>
