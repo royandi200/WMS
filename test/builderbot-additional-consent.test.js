@@ -18,6 +18,15 @@ function harness({ operationError, role = 'admin' } = {}) {
       if (sql.includes('INSERT INTO webhook_logs')) return [{ affectedRows: 1 }];
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];
+      if (sql.includes('FROM despachos d')) return [[]];
+      if (sql.includes('FROM maquila_envios me')) return [[{
+        id: 17, numero: 'REM-3Q-20260910-000017', creado_en: '2026-09-10 16:56:02',
+        orden_maquila_id: 16, orden_codigo: 'MQ-3Q-20260910-000016', proveedor_nombre: '3Q QA',
+      }]];
+      if (sql.includes('FROM maquila_envio_items mei')) return [[{
+        maquila_envio_id: 17, sku: '00001-TPBI', producto: 'TAPA TARRO',
+        cantidad: 4, lote: 'LOT-3Q-QA', ubicacion: 'A8',
+      }]];
       if (sql.includes('FROM ordenes_produccion o')) {
         baseReads.push(args);
         return [[{ id: 79, codigo_orden: 'OP-20260906-000079', cantidad_planeada: 3,
@@ -35,6 +44,15 @@ function harness({ operationError, role = 'admin' } = {}) {
   const mocks = {
     '../../_lib/dispatch-workflow': {
       confirmImportedDispatch: async input => { calls.push(input); return { numero: 'DSP-QA', lotes: [] }; },
+    },
+    '../../_lib/outsourcing-workflow': {
+      confirmOutsourcingShipment: async input => {
+        calls.push({ ...input, kind: 'outsourcing' });
+        return {
+          shipment_number: 'REM-3Q-20260910-000017', order_code: 'MQ-3Q-20260910-000016',
+          dispatched: [{ sku: '00001-TPBI', cantidad: 4, lote: 'LOT-3Q-QA', ubicacion_origen: 'A8' }],
+        };
+      },
     },
     '../../_lib/builderbot-reception': {
       ...nativeRequire('../../_lib/builderbot-reception'),
@@ -99,6 +117,22 @@ test('N1-05 real webhook: partial intent never reaches dispatch; complete confir
   assert.equal(h.calls.length, 1);
   await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60 con 2 unidades.', { id_despacho: 60 });
   assert.equal(h.calls[1].expectedQuantity, 2);
+});
+
+test('WhatsApp lists and confirms a pending 3Q dispatch through its typed ID', async () => {
+  const h = harness({ role: 'despacho' });
+  const pending = await h.send('CONSULTAR_DESPACHOS_PENDIENTES', 'despachos pendientes', {});
+  assert.equal(pending.ok, true, pending.mensaje);
+  assert.match(pending.mensaje, /DSP ID 3Q-17/u);
+  assert.match(pending.mensaje, /REM-3Q-20260910-000017/u);
+  assert.match(pending.mensaje, /confirma el despacho ID 3Q-17/u);
+  assert.equal(h.calls.length, 0);
+
+  const confirmed = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 3Q-17.', { id_despacho: 17 });
+  assert.equal(confirmed.ok, true, confirmed.mensaje);
+  assert.match(confirmed.mensaje, /Salida a maquila 3Q confirmada/u);
+  assert.equal(h.calls[0].kind, 'outsourcing');
+  assert.equal(h.calls[0].shipmentId, 17);
 });
 
 test('N1-09 real webhook: malformed mixed receipt reaches preview only, with RBAC preserved', async () => {

@@ -25,6 +25,7 @@ test('N1-05: model omission cannot turn a partial request into a full dispatch',
     'Confirma el despacho ID 60 enviando la mitad.',
   ]) assert.throws(() => dispatchConfirmationInput(text, { id_despacho: 60 }), e => e.status === 409);
   assert.deepEqual(dispatchConfirmationInput('Confirma el despacho ID 60.', {}), {});
+  assert.deepEqual(dispatchConfirmationInput('Confirma el despacho ID 3Q-17.', {}), {});
   assert.deepEqual(dispatchConfirmationInput('Confirma el despacho DSP-SIIGO-FV-DEMO-IO-001.', {}), {});
   assert.deepEqual(dispatchConfirmationInput('Confirma despacho ID 60 con 2 unidades.', {}), { expectedQuantity: 2 });
   assert.throws(() => dispatchConfirmationInput('', {}), e => e.status === 409);

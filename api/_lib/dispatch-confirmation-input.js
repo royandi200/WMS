@@ -11,7 +11,7 @@ function dispatchConfirmationInput(rawText, params = {}) {
   const quantities = [...text.matchAll(/\b(\d+(?:[.,]\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:unidades?|und|uds|tarros?|cajas?|paquetes?)\b/gi)];
   const words = { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
   if (quantities.length > 1) throw reject();
-  const withoutReferences = text.replace(/\b(?:ID\s*\d+|(?:DSP|FV)-[A-Z0-9-]+)\b/gi, '');
+  const withoutReferences = text.replace(/\b(?:ID\s*(?:3Q-)?\d+|(?:DSP|FV|REM)-[A-Z0-9-]+)\b/gi, '');
   const remainder = quantities.reduce((s, match) => s.replace(match[0], ''), withoutReferences);
   if (/\d|\b(?:uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|mitad)\b/i.test(remainder)) throw reject();
   // Units without an unambiguous quantity cannot be treated as consent to all.

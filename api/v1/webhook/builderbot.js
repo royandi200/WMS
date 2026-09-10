@@ -88,6 +88,7 @@ const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
 const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
+const { confirmOutsourcingShipment } = require('../../_lib/outsourcing-workflow');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
 const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document-message-policy');
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
@@ -2557,11 +2558,20 @@ module.exports = async (req, res) => {
             ORDER BY d.creado_en ASC, d.id ASC
             LIMIT 10`
         );
-        if (!dispatches.length) {
-          mensaje = 'No hay despachos pendientes importados desde facturas de Siigo.';
-        } else {
-          const ids = dispatches.map(dispatch => Number(dispatch.id));
-          const [items] = await db.execute(
+        const [outsourcingDispatches] = await db.execute(
+          `SELECT me.id, me.numero, me.creado_en,
+                  om.id AS orden_maquila_id, om.codigo AS orden_codigo,
+                  om.proveedor_nombre
+             FROM maquila_envios me
+             JOIN ordenes_maquila om ON om.id = me.orden_maquila_id
+            WHERE me.estado = 'BORRADOR'
+              AND om.estado NOT IN ('COMPLETADA', 'CANCELADA')
+            ORDER BY me.creado_en ASC, me.id ASC
+            LIMIT 10`
+        );
+        const ids = dispatches.map(dispatch => Number(dispatch.id));
+        const outsourcingIds = outsourcingDispatches.map(dispatch => Number(dispatch.id));
+        const [items] = ids.length ? await db.execute(
             `SELECT di.despacho_id, p.siigo_code AS sku, p.nombre AS producto,
                     di.lote, u.codigo AS ubicacion, SUM(di.cantidad_sol) AS cantidad
                FROM despacho_items di
@@ -2571,8 +2581,8 @@ module.exports = async (req, res) => {
               GROUP BY di.despacho_id, p.id, p.siigo_code, p.nombre, di.lote, u.id, u.codigo
               ORDER BY di.despacho_id, p.siigo_code, di.lote`,
             ids
-          );
-          const [demand] = await db.execute(
+          ) : [[]];
+        const [demand] = ids.length ? await db.execute(
             `SELECT ddi.despacho_id, p.siigo_code AS sku, p.nombre AS producto,
                     ddi.cantidad_facturada AS solicitada,
                     ddi.cantidad_reservada AS reservada,
@@ -2583,32 +2593,51 @@ module.exports = async (req, res) => {
               WHERE ddi.despacho_id IN (${ids.map(() => '?').join(',')})
               ORDER BY ddi.despacho_id, p.siigo_code`,
             ids
-          );
-          const itemsByDispatch = new Map();
-          for (const item of items) {
-            const list = itemsByDispatch.get(Number(item.despacho_id)) || [];
-            list.push(item);
-            itemsByDispatch.set(Number(item.despacho_id), list);
-          }
-          const demandByDispatch = new Map();
-          for (const item of demand) {
-            const list = demandByDispatch.get(Number(item.despacho_id)) || [];
-            list.push(item);
-            demandByDispatch.set(Number(item.despacho_id), list);
-          }
-          const readiness = new Map(dispatches.map(dispatch => {
+          ) : [[]];
+        const [outsourcingItems] = outsourcingIds.length ? await db.execute(
+          `SELECT mei.maquila_envio_id, p.siigo_code AS sku, p.nombre AS producto,
+                  mei.cantidad, mml.lote, u.codigo AS ubicacion
+             FROM maquila_envio_items mei
+             JOIN maquila_material_lotes mml ON mml.id = mei.maquila_material_lote_id
+             JOIN maquila_materiales mm ON mm.id = mml.maquila_material_id
+             JOIN productos p ON p.id = mm.producto_id
+             LEFT JOIN ubicaciones u ON u.id = mml.ubicacion_origen_id
+            WHERE mei.maquila_envio_id IN (${outsourcingIds.map(() => '?').join(',')})
+            ORDER BY mei.maquila_envio_id, p.siigo_code, mml.lote`,
+          outsourcingIds
+        ) : [[]];
+        const itemsByDispatch = new Map();
+        for (const item of items) {
+          const list = itemsByDispatch.get(Number(item.despacho_id)) || [];
+          list.push(item);
+          itemsByDispatch.set(Number(item.despacho_id), list);
+        }
+        const demandByDispatch = new Map();
+        for (const item of demand) {
+          const list = demandByDispatch.get(Number(item.despacho_id)) || [];
+          list.push(item);
+          demandByDispatch.set(Number(item.despacho_id), list);
+        }
+        const outsourcingItemsByDispatch = new Map();
+        for (const item of outsourcingItems) {
+          const list = outsourcingItemsByDispatch.get(Number(item.maquila_envio_id)) || [];
+          list.push(item);
+          outsourcingItemsByDispatch.set(Number(item.maquila_envio_id), list);
+        }
+        const readiness = new Map(dispatches.map(dispatch => {
             const requested = demandByDispatch.get(Number(dispatch.id)) || [];
             const allocations = itemsByDispatch.get(Number(dispatch.id)) || [];
             const ready = requested.length > 0
               && allocations.length > 0
               && requested.every(item => Number(item.faltante || 0) <= 0.000001);
             return [Number(dispatch.id), ready];
-          }));
-          const firstReady = dispatches.find(dispatch => readiness.get(Number(dispatch.id)));
-          mensaje = [
-            `Despachos pendientes (${dispatches.length}):`,
-            ...dispatches.flatMap(dispatch => [
-              '',
+        }));
+        const entries = [
+          ...dispatches.map(dispatch => ({
+            createdAt: dispatch.creado_en,
+            ready: readiness.get(Number(dispatch.id)),
+            confirmationReference: `ID ${dispatch.id}`,
+            lines: [
               `- DSP ID ${dispatch.id} | ${dispatch.numero}`,
               `  Factura: ${dispatch.siigo_invoice_name || 'N/A'} | Cliente: ${dispatch.cliente_nombre || 'Cliente N/A'}`,
               `  Estado: ${readiness.get(Number(dispatch.id)) ? 'LISTO PARA CONFIRMAR' : 'PENDIENTE_STOCK'}`,
@@ -2617,12 +2646,39 @@ module.exports = async (req, res) => {
               ),
               (itemsByDispatch.get(Number(dispatch.id)) || []).length ? '  Lotes asignados:' : '  Sin lotes asignados.',
               ...(itemsByDispatch.get(Number(dispatch.id)) || []).map(item =>
-                `  - ${item.sku}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicacion ${item.ubicacion || 'SIN ASIGNAR'}`
+                `  - ${item.sku}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicación ${item.ubicacion || 'SIN ASIGNAR'}`
               ),
-            ]),
+            ],
+          })),
+          ...outsourcingDispatches.map(dispatch => {
+            const assigned = outsourcingItemsByDispatch.get(Number(dispatch.id)) || [];
+            return {
+              createdAt: dispatch.creado_en,
+              ready: assigned.length > 0,
+              confirmationReference: `ID 3Q-${dispatch.id}`,
+              lines: [
+                `- DSP ID 3Q-${dispatch.id} | ${dispatch.numero}`,
+                `  Origen: Maquila 3Q | Destino: ${dispatch.proveedor_nombre}`,
+                `  Orden: MQ ID ${dispatch.orden_maquila_id} | ${dispatch.orden_codigo}`,
+                `  Estado: ${assigned.length ? 'LISTO PARA CONFIRMAR' : 'PENDIENTE_STOCK'}`,
+                assigned.length ? '  Lotes asignados:' : '  Sin lotes asignados.',
+                ...assigned.map(item =>
+                  `  - ${item.sku} - ${item.producto}: ${Number(item.cantidad)} und | lote ${item.lote || 'SIN ASIGNAR'} | ubicación ${item.ubicacion || 'SIN ASIGNAR'}`
+                ),
+              ],
+            };
+          }),
+        ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        if (!entries.length) {
+          mensaje = 'No hay despachos pendientes disponibles.';
+        } else {
+          const firstReady = entries.find(entry => entry.ready);
+          mensaje = [
+            `Despachos pendientes (${entries.length}):`,
+            ...entries.flatMap(entry => ['', ...entry.lines]),
             firstReady
-              ? `Para confirmar responde, por ejemplo: confirma el despacho ID ${firstReady.id}.`
-              : 'Ningun despacho tiene cobertura completa; no debe confirmarse hasta reservar todo el stock.',
+              ? `Para confirmar responde, por ejemplo: confirma el despacho ${firstReady.confirmationReference}.`
+              : 'Ningún despacho tiene cobertura completa; no debe confirmarse hasta reservar todo el stock.',
             'Esta consulta no modifica inventario.',
           ].join('\n');
         }
@@ -2748,7 +2804,41 @@ module.exports = async (req, res) => {
       }
 
       case 'CONFIRMAR_DESPACHO_SIIGO': {
-        const dispatchInput = dispatchConfirmationInput(currentText(rawBody, info), params);
+        const dispatchText = currentText(rawBody, info);
+        const dispatchInput = dispatchConfirmationInput(dispatchText, params);
+        const typedOutsourcing = dispatchText.match(/\b(?:DSP\s+)?ID\s+3Q-(\d+)\b/i);
+        const parameterReference = String(params.despacho_id || params.id_despacho || '').trim();
+        const parameterOutsourcing = parameterReference.match(/^(?:DSP\s+ID\s+)?3Q-(\d+)$/i);
+        if (typedOutsourcing && parameterOutsourcing
+            && Number(typedOutsourcing[1]) !== Number(parameterOutsourcing[1])) {
+          throw { status: 409, message: 'La referencia del despacho 3Q no coincide con el mensaje. No se modificó inventario.' };
+        }
+        const outsourcingShipmentId = typedOutsourcing?.[1] || parameterOutsourcing?.[1];
+        if (outsourcingShipmentId) {
+          if (dispatchInput.expectedQuantity != null) {
+            throw { status: 409, message: 'Confirma el despacho 3Q completo usando solo su ID, sin indicar cantidades. No se modifico inventario.' };
+          }
+          const shipment = await confirmOutsourcingShipment({
+            shipmentId: Number(outsourcingShipmentId),
+            userId: user.id,
+          });
+          mensaje = shipment.already_confirmed
+            ? `El despacho DSP ID 3Q-${outsourcingShipmentId} | ${shipment.shipment_number} ya habia sido confirmado. No se modifico inventario.`
+            : [
+                '*Salida a maquila 3Q confirmada*',
+                '',
+                `Despacho: DSP ID 3Q-${outsourcingShipmentId} | ${shipment.shipment_number}`,
+                `Orden: ${shipment.order_code}`,
+                'Custodia externa: 3Q',
+                '',
+                '*Materiales enviados*',
+                ...shipment.dispatched.map(item =>
+                  `- ${item.sku}: ${item.cantidad} und | lote ${item.lote} | origen ${item.ubicacion_origen}`
+                ),
+              ].join('\n');
+          responseContext.dispatch = { ...shipment, dispatch_id: `3Q-${outsourcingShipmentId}` };
+          break;
+        }
         const dispatchResult = await confirmImportedDispatch({
           dispatchId: params.despacho_id || params.id_despacho,
           invoiceId: params.siigo_invoice_id || params.id_factura,
