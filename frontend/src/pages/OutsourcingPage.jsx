@@ -380,7 +380,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
                   {shipment.items.map((item, index) => <p key={`${item.sku}-${item.lote}-${index}`} className="text-xs text-muted"><span className="font-mono text-foreground">{item.sku}</span> - {item.producto}: {item.cantidad} {item.unidad || ''} | lote {item.lote} | sale de {item.ubicacion_origen}</p>)}
                   {shipment.motivo && <p className="text-xs text-yellow-400">Motivo: {shipment.motivo}</p>}
                 </div>
-                {canManage && <div className="flex gap-2"><a href="/despachos" className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Gestionar despacho</a><button type="button" title="Cancelar remisión" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
+                {canManage && <div className="flex gap-2"><a href="/despachos" className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Ver despacho pendiente</a><button type="button" title="Cancelar remisión" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
               </div>
             ))}
           </div>

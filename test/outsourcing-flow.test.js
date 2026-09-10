@@ -210,6 +210,8 @@ test('a reviewed 3Q document prepares one linked remision while the OC remains m
   assert.match(page, /Los materiales y cantidades se toman del documento/u);
   assert.match(page, /La OC no se vinculará automáticamente/u);
   assert.match(page, /if \(ok\) navigate\('\/despachos'\)/u);
+  assert.match(page, /Ver despacho pendiente/u);
+  assert.doesNotMatch(page, /Gestionar despacho/u);
   assert.match(workflow, /VALUES \(\?, NULL, \?, \?, \?, \?, 'MATERIALES_RESERVADOS'/u);
 });
 
