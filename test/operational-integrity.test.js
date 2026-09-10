@@ -29,7 +29,7 @@ test('legacy approval actions fail closed instead of mutating inventory through 
   const api = fs.readFileSync(path.join(__dirname, '../api/v1/approvals.js'), 'utf8');
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/AprobacionesPage.jsx'), 'utf8');
   assert.match(api, /estado_operativo: isLegacyMutatingApprovalAction/u);
-  assert.match(page, /Conservada para auditoria/u);
+  assert.match(page, /Conservada para auditoría/u);
 });
 
 test('long similar Siigo invoices produce distinct stable dispatch numbers', () => {

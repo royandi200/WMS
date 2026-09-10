@@ -72,6 +72,12 @@ test('WhatsApp purchase order and reception require an exact explicit confirmati
     'Prepara la recepcion OC ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
   ), true);
   assert.equal(purchaseOrderTextReference(
+    'Prepara la recepción OC ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
+  ), true);
+  assert.equal(purchaseOrderTextReference(
+    'Prepara la recepción OC número 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
+  ), true);
+  assert.equal(purchaseOrderTextReference(
     'Prepara la recepcion MQ ID 5', { id: 5, numero: 'OC-MUY-LARGA-456' }
   ), false);
   assert.equal(purchaseOrderTextReference(
@@ -111,11 +117,15 @@ test('WhatsApp reception confirmation key is stable across harmless ordering cha
 test('WhatsApp keeps MQ references separate from purchase-order IDs', () => {
   const order = { id: 12, codigo: 'MQ-3Q-20260908-000012' };
   assert.equal(outsourcingTextReference('Prepara la recepcion MQ ID 12 por 2 unidades', order), true);
+  assert.equal(outsourcingTextReference('Prepara la recepción MQ número 12 por 2 unidades', order), true);
   assert.equal(outsourcingTextReference('Recibe MQ-3Q-20260908-000012', order), true);
   assert.equal(outsourcingTextReference('Prepara la recepcion OC ID 12', order), false);
   assert.equal(outsourcingTextReference('Prepara la recepcion ID 12', order), false);
   assert.equal(explicitOutsourcingConfirmation(
     'Confirmo la recepcion MQ ID 12', order, { confirmacion_final: true }
+  ), true);
+  assert.equal(explicitOutsourcingConfirmation(
+    'Confirmo la recepción MQ ID 12', order, { confirmacion_final: true }
   ), true);
   assert.equal(explicitOutsourcingConfirmation(
     'Confirmo la recepcion OC ID 12', order, { confirmacion_final: true }

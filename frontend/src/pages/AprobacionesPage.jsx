@@ -231,7 +231,7 @@ export default function AprobacionesPage() {
                   )
                 ) : tab === 'pending' ? (
                   <span className="max-w-[220px] text-right text-xs text-muted">
-                    Conservada para auditoria. Usa el flujo operativo actual.
+                    Conservada para auditoría. Usa el flujo operativo actual.
                   </span>
                 ) : null}
               </div>

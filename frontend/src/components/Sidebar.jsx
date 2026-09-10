@@ -13,7 +13,7 @@ const NAV = [
     { to: '/despachos', icon: Truck, label: 'Despachos', capability: 'dispatch.read' },
     { to: '/devoluciones', icon: RotateCcw, label: 'Devoluciones', capability: 'returns.read' },
     { to: '/inventario', icon: Boxes, label: 'Inventario', capability: 'inventory.read' },
-    { to: '/produccion', icon: Factory, label: 'Produccion', capability: 'production.read' },
+    { to: '/produccion', icon: Factory, label: 'Producción', capability: 'production.read' },
     { to: '/maquila', icon: PackageOpen, label: 'Maquila 3Q', capability: 'outsourcing.read' },
     { to: '/mermas', icon: Trash2, label: 'Mermas', capability: 'waste.read' },
   ] },
@@ -21,7 +21,7 @@ const NAV = [
     { to: '/kardex', icon: FileClock, label: 'Kardex', capability: 'inventory.read' },
     { to: '/aprobaciones', icon: ClipboardCheck, label: 'Aprobaciones', capability: 'approvals.read' },
   ] },
-  { group: 'Catalogos', items: [{ to: '/productos', icon: PackageSearch, label: 'Productos', capability: 'catalog.read' }] },
+  { group: 'Catálogos', items: [{ to: '/productos', icon: PackageSearch, label: 'Productos', capability: 'catalog.read' }] },
   { group: 'Sistema', items: [
     { to: '/usuarios', icon: Users, label: 'Usuarios', capability: 'users.manage' },
     { to: '/configuracion-alertas', icon: Settings2, label: 'Configurar alertas', capability: 'alert_settings.manage', adminOnly: true },
@@ -43,7 +43,7 @@ export default function Sidebar({ open, mobile = false, onClose }) {
       <div className="flex items-center gap-2 h-14 px-4 border-b border-border flex-shrink-0">
         <ClipboardList size={20} className="text-primary flex-shrink-0" />
         {(open || mobile) && <span className="text-foreground font-semibold text-sm uppercase flex-1">WMS</span>}
-        {mobile && onClose && <button onClick={onClose} title="Cerrar menu" className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-white/5"><X size={17} /></button>}
+        {mobile && onClose && <button onClick={onClose} title="Cerrar menú" className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-white/5"><X size={17} /></button>}
       </div>
       <nav className="flex-1 overflow-y-auto py-3">
         {NAV.map(({ group, items }) => {

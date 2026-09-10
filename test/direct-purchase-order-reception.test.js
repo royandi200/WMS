@@ -65,14 +65,14 @@ test('direct reception stays separate from outsourced 3Q receipts', () => {
 test('dashboard starts physical reception from an open purchase order', () => {
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/RecepcionPage.jsx'), 'utf8');
   const purchaseOrdersRoute = fs.readFileSync(path.join(__dirname, '../api/v1/purchase-orders.js'), 'utf8');
-  assert.match(page, /Iniciar recepcion fisica/u);
+  assert.match(page, /Iniciar recepción física/u);
   assert.match(page, /Pendiente de la OC/u);
   assert.match(page, /Lote proveedor \*/u);
   assert.match(page, /Vencimiento \*/u);
-  assert.match(page, /Ubicacion \*/u);
-  assert.match(page, /Cantidad fisica \*/u);
-  assert.match(page, /Selecciona condicion/u);
-  assert.match(page, /ubicacion preferida.*otra ubicacion activa/iu);
+  assert.match(page, /Ubicación \*/u);
+  assert.match(page, /Cantidad física \*/u);
+  assert.match(page, /Selecciona condición/u);
+  assert.match(page, /ubicación preferida.*otra ubicación activa/iu);
   assert.doesNotMatch(page, /Recepcion importada de Siigo/u);
   assert.doesNotMatch(page, /Factura\/compra Siigo/u);
   assert.match(purchaseOrdersRoute, /p\.modalidad_operativa/u);

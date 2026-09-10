@@ -3,8 +3,8 @@ import { ShieldCheck } from 'lucide-react'
 import { listUsers, updateUserRole } from '../api/users.api'
 
 const ROLE_LABELS = {
-  admin: 'Administracion y produccion',
-  recepcion_cierre: 'Recepcion y cierre',
+  admin: 'Administración y producción',
+  recepcion_cierre: 'Recepción y cierre',
   alistador: 'Alistamiento',
   despacho: 'Despacho',
   consulta: 'Solo consulta',
@@ -39,13 +39,13 @@ export default function UsuariosPage() {
     <div>
       <div className="mb-5">
         <h1 className="text-lg md:text-xl font-semibold text-foreground">Usuarios y roles</h1>
-        <p className="text-xs text-muted mt-1">Asignacion operativa. Las capacidades de cada rol estan versionadas en el sistema.</p>
+        <p className="text-xs text-muted mt-1">Asignación operativa. Las capacidades de cada rol están versionadas en el sistema.</p>
       </div>
       {message && <div className={`mb-4 px-4 py-3 border text-sm ${message.ok ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-danger/10 border-danger/30 text-danger'}`}>{message.text}</div>}
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm min-w-[760px]">
           <thead><tr className="bg-surface border-b border-border">
-            {['Usuario', 'Correo', 'Telefono', 'Estado', 'Rol'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
+            {['Usuario', 'Correo', 'Teléfono', 'Estado', 'Rol'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={5} className="px-4 py-10 text-center text-muted">Cargando usuarios...</td></tr>}

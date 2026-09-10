@@ -29,7 +29,7 @@ export default function DespachoPage() {
     try {
       const payload = await syncSiigoInvoices({})
       const errors = Number(payload?.errors || 0)
-      notify(errors ? `Sincronizacion terminada con ${errors} error(es)` : 'Facturas sincronizadas', errors === 0)
+      notify(errors ? `Sincronización terminada con ${errors} error(es)` : 'Facturas sincronizadas', errors === 0)
       await fetchList({ limit: 200 })
     } catch (error) {
       notify(error.response?.data?.error || 'No fue posible consultar Siigo', false)
@@ -65,7 +65,7 @@ export default function DespachoPage() {
         )}
       </div>
       <div className="flex gap-1 mb-4 md:mb-6 border-b border-border overflow-x-auto pb-px scrollbar-none">
-        {['Pendientes', 'Historico'].map((label, index) => (
+        {['Pendientes', 'Histórico'].map((label, index) => (
           <button key={label} onClick={() => setTab(index)} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === index ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-foreground'}`}>
             {label}
           </button>
@@ -86,13 +86,13 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[1100px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['Origen', 'Despacho', 'Cliente / destino', 'SKU', 'Lote / ubicacion', 'Solicitado', 'Asignado', 'Reserva activa', 'Despachado', 'Sin asignar', 'Estado', 'Fecha', 'Accion'].map((label) => (
+          {['Origen', 'Despacho', 'Cliente / destino', 'SKU', 'Lote / ubicación', 'Solicitado', 'Asignado', 'Reserva activa', 'Despachado', 'Sin asignar', 'Estado', 'Fecha', 'Acción'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
         <tbody>
           {loading && <tr><td colSpan={13} className="px-4 py-10 text-center text-muted">Cargando despachos...</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={13} className="px-4 py-10 text-center text-muted">{pending ? 'Sin despachos pendientes' : 'Sin despachos historicos'}</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={13} className="px-4 py-10 text-center text-muted">{pending ? 'Sin despachos pendientes' : 'Sin despachos históricos'}</td></tr>}
           {!loading && rows.map((row, index) => {
             const ready = row.estado === 'picking' && Number(row.cantidad_pendiente || 0) <= 0
               && (row.siigo_invoice_id || row.source_type === 'MAQUILA_3Q')
@@ -111,7 +111,7 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
                 <td className="px-4 py-3 space-y-2">{items.map((item, itemIndex) => (
                   <div key={`${item.lote || 'lote'}-${itemIndex}`}>
                     <span className="font-mono text-xs">{item.lote || '-'}</span>
-                    <span className="block text-xs text-muted">{item.ubicacion || 'Sin ubicacion'} | {item.cantidad} u.</span>
+                    <span className="block text-xs text-muted">{item.ubicacion || 'Sin ubicación'} | {item.cantidad} u.</span>
                   </div>
                 ))}</td>
                 <td className="px-4 py-3 tabular-nums">{row.cantidad_facturada ?? '-'}</td>
@@ -127,7 +127,7 @@ function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfir
                       <FileText size={15} /> Hoja
                     </button>
                   {ready && canConfirm ? (
-                    <button type="button" onClick={() => onConfirm(row)} disabled={workingId === row.id} title="Confirmar despacho fisico" className="inline-flex items-center gap-2 text-sm text-green-400 hover:text-green-300 disabled:opacity-50">
+                    <button type="button" onClick={() => onConfirm(row)} disabled={workingId === row.id} title="Confirmar despacho físico" className="inline-flex items-center gap-2 text-sm text-green-400 hover:text-green-300 disabled:opacity-50">
                       <Check size={16} /> Confirmar
                     </button>
                   ) : pending ? <span className="text-xs text-muted">No disponible</span> : null}
@@ -147,17 +147,17 @@ function DispatchConfirmationModal({ row, working, onCancel, onConfirm }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-dispatch-title">
       <div className="w-full max-w-lg border border-border bg-surface shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-          <div className="flex gap-3"><AlertTriangle className="mt-0.5 text-yellow-400" size={20} /><div><h2 id="confirm-dispatch-title" className="font-semibold text-foreground">Confirmar salida fisica</h2><p className="mt-1 text-xs text-muted">Segunda confirmacion obligatoria para evitar despachos involuntarios.</p></div></div>
+          <div className="flex gap-3"><AlertTriangle className="mt-0.5 text-yellow-400" size={20} /><div><h2 id="confirm-dispatch-title" className="font-semibold text-foreground">Confirmar salida física</h2><p className="mt-1 text-xs text-muted">Segunda confirmación obligatoria para evitar despachos involuntarios.</p></div></div>
           <button type="button" onClick={onCancel} disabled={working} className="text-muted hover:text-foreground"><X size={18} /></button>
         </header>
         <div className="space-y-3 px-5 py-5 text-sm">
           <p><span className="text-muted">Despacho:</span> <span className="font-mono font-semibold">{row.numero}</span></p>
           <p><span className="text-muted">Destino:</span> {row.source_type === 'MAQUILA_3Q' ? 'Maquila externa 3Q' : row.cliente_nombre}</p>
-          <p className="border border-danger/30 bg-danger/10 px-3 py-2 text-danger">Al confirmar se descontara el inventario reservado. Esta accion no se ejecuta al cerrar este modal.</p>
+          <p className="border border-danger/30 bg-danger/10 px-3 py-2 text-danger">Al confirmar se descontará el inventario reservado. Esta acción no se ejecuta al cerrar este modal.</p>
         </div>
         <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
           <button type="button" onClick={onCancel} disabled={working} className="px-4 py-2 text-sm text-muted hover:text-foreground">Volver</button>
-          <button type="button" onClick={onConfirm} disabled={working} className="btn-primary inline-flex items-center gap-2"><Check size={16} /> {working ? 'Confirmando...' : 'Si, confirmar salida'}</button>
+          <button type="button" onClick={onConfirm} disabled={working} className="btn-primary inline-flex items-center gap-2"><Check size={16} /> {working ? 'Confirmando...' : 'Sí, confirmar salida'}</button>
         </footer>
       </div>
     </div>

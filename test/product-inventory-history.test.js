@@ -19,7 +19,7 @@ test('product search renders movement date, quantity, lot, reference and lot bal
   for (const label of ['Fecha y hora', 'Cantidad', 'Lote', 'Referencia', 'Saldo del lote']) {
     assert.match(page, new RegExp(label, 'u'));
   }
-  assert.match(page, /CONSUMO_MATERIAL: 'Consumo de produccion'/u);
+  assert.match(page, /CONSUMO_MATERIAL: 'Consumo de producción'/u);
   assert.match(page, /AJUSTE_MANUAL: 'Ajuste manual'/u);
   assert.match(page, /timeZone: 'America\/Bogota'/u);
 });

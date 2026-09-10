@@ -131,7 +131,7 @@ test('RI-006/009: webhook blocks a customer return substituted for production ma
       id_item: 'SKU-QA', cantidad: 1, estado: 'CUARENTENA', lote_origen: 'LOT-QA',
     });
     assert.equal(result.ok, false);
-    assert.match(result.mensaje, /No se (?:modifico inventario|registro otra operacion)/);
+    assert.match(result.mensaje, /No se (?:modificó inventario|registró otra operación)/);
     assert.equal(h.calls.length, 0);
   }
 });

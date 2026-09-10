@@ -22,7 +22,7 @@ const STATUS = {
   MATERIALES_RESERVADOS: ['Materiales reservados', 'text-yellow-400 bg-yellow-400/10'],
   EN_3Q: ['En 3Q', 'text-blue-400 bg-blue-400/10'],
   EN_3Q_PENDIENTE_OC: ['En 3Q - OC pendiente', 'text-yellow-400 bg-yellow-400/10'],
-  RECIBIDA_PARCIAL: ['Recepcion parcial', 'text-orange-400 bg-orange-400/10'],
+  RECIBIDA_PARCIAL: ['Recepción parcial', 'text-orange-400 bg-orange-400/10'],
   COMPLETADA: ['Completada', 'text-green-400 bg-green-400/10'],
   CANCELADA: ['Cancelada', 'text-muted bg-white/5'],
 }
@@ -74,7 +74,7 @@ export default function OutsourcingPage() {
       await load()
       return true
     } catch (error) {
-      showToast(error.response?.data?.error || 'No fue posible completar la operacion', false)
+      showToast(error.response?.data?.error || 'No fue posible completar la operación', false)
       return false
     } finally {
       setLoading(false)
@@ -84,7 +84,7 @@ export default function OutsourcingPage() {
   const tabs = [
     ['list', 'Seguimiento'],
     ['documents', 'Documentos leidos'],
-    ...(canManage ? [['create', 'Remision manual'], ['link', 'Vincular OC'], ['additional', 'Material adicional']] : []),
+    ...(canManage ? [['create', 'Remisión manual'], ['link', 'Vincular OC'], ['additional', 'Material adicional']] : []),
   ]
 
   return (
@@ -112,14 +112,14 @@ export default function OutsourcingPage() {
           loading={loading}
           canManage={canManage}
           onConfirm={(shipment) => {
-            const approved = window.confirm(`Confirmar salida fisica de ${shipment.numero}. Esta accion descuenta inventario de las ubicaciones indicadas.`)
+            const approved = window.confirm(`Confirmar salida física de ${shipment.numero}. Esta acción descuenta inventario de las ubicaciones indicadas.`)
             if (!approved) return Promise.resolve(false)
-            return run(() => confirmOutsourcingShipment(shipment.id), `Remision ${shipment.numero} enviada a 3Q`)
+            return run(() => confirmOutsourcingShipment(shipment.id), `Remisión ${shipment.numero} enviada a 3Q`)
           }}
           onCancel={(shipment) => {
             const approved = window.confirm(`Cancelar ${shipment.numero} y liberar sus reservas de inventario.`)
             if (!approved) return Promise.resolve(false)
-            return run(() => cancelOutsourcingShipment(shipment.id), `Remision ${shipment.numero} cancelada`)
+            return run(() => cancelOutsourcingShipment(shipment.id), `Remisión ${shipment.numero} cancelada`)
           }}
         />
       )}
@@ -133,7 +133,7 @@ export default function OutsourcingPage() {
           onDiscard={(id, motivo) => run(() => discardWarehouseDocumentDraft(id, motivo), 'Borrador 3Q descartado')}
           onPrepare={(body) => run(
             () => createOutsourcingOrderFromDocument(body),
-            'Orden, remision y picking preparados desde el documento'
+            'Orden, remisión y picking preparados desde el documento'
           ).then((ok) => { if (ok) setTab('list'); return ok })}
         />
       )}
@@ -150,14 +150,14 @@ export default function OutsourcingPage() {
           orders={(data.rows || []).filter((order) => !order.orden_compra_id && ['MATERIALES_RESERVADOS', 'EN_3Q_PENDIENTE_OC'].includes(order.estado))}
           purchaseOrders={purchaseOrders.filter((order) => order.documento_id && !['CANCELADA', 'CERRADA'].includes(order.estado))}
           loading={loading}
-          onSubmit={(body) => run(() => linkOutsourcingPurchaseOrder(body), 'OC vinculada a la remision 3Q').then((ok) => { if (ok) setTab('list') })}
+          onSubmit={(body) => run(() => linkOutsourcingPurchaseOrder(body), 'OC vinculada a la remisión 3Q').then((ok) => { if (ok) setTab('list') })}
         />
       )}
       {tab === 'additional' && canManage && (
         <AdditionalForm
           orders={(data.rows || []).filter((order) => ['EN_3Q', 'RECIBIDA_PARCIAL'].includes(order.estado))}
           loading={loading}
-          onSubmit={(body) => run(() => prepareAdditionalOutsourcingShipment(body), 'Remision adicional preparada').then((ok) => { if (ok) setTab('list') })}
+          onSubmit={(body) => run(() => prepareAdditionalOutsourcingShipment(body), 'Remisión adicional preparada').then((ok) => { if (ok) setTab('list') })}
         />
       )}
     </div>
@@ -183,21 +183,21 @@ function DocumentDraftsPanel({ rows, suppliers, loading, canManage, onUpdate, on
     <div className="border-y border-border py-4">
       <div className="flex items-start gap-3">
         <FileText size={19} className="mt-0.5 text-primary" />
-        <div><h2 className="text-sm font-semibold text-foreground">Lecturas documentales pendientes</h2><p className="mt-1 max-w-3xl text-xs text-muted">Revisa el documento y prepara la salida directamente desde sus materiales. Esta accion reserva el picking; el inventario solo se descuenta al confirmar la salida.</p></div>
+        <div><h2 className="text-sm font-semibold text-foreground">Lecturas documentales pendientes</h2><p className="mt-1 max-w-3xl text-xs text-muted">Revisa el documento y prepara la salida directamente desde sus materiales. Esta acción reserva el picking; el inventario solo se descuenta al confirmar la salida.</p></div>
       </div>
     </div>
     {loading && !rows.length && <p className="py-12 text-center text-sm text-muted">Cargando documentos...</p>}
-    {!loading && !pendingRows.length && <p className="py-12 text-center text-sm text-muted">No hay documentos pendientes de revision</p>}
+    {!loading && !pendingRows.length && <p className="py-12 text-center text-sm text-muted">No hay documentos pendientes de revisión</p>}
     {pendingRows.map((row) => {
       const needsCorrection = row.estado === 'REQUIERE_CORRECCION'
       return <article key={row.id} className="border border-border bg-surface/40">
         <header className="grid gap-4 border-b border-border px-4 py-4 lg:grid-cols-[minmax(0,1fr)_160px_180px_auto] lg:items-center">
-          <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className="font-mono text-xs text-muted">Borrador #{row.id}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere correccion' : 'Pendiente de revision'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {documentOriginLabel(row.origen)} | Leido por {row.creado_por_nombre}</p></div>
+          <div><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span><span className="font-mono text-xs text-muted">Borrador #{row.id}</span><span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold ${needsCorrection ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>{needsCorrection ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}{needsCorrection ? 'Requiere corrección' : 'Pendiente de revisión'}</span></div><p className="mt-1 text-xs text-muted">{row.tipo_documento} | Origen {documentOriginLabel(row.origen)} | Leído por {row.creado_por_nombre}</p></div>
           <div><p className="text-xs uppercase text-muted">Fecha documento</p><p className="mt-1 text-sm text-foreground">{formatDateOnly(row.fecha_documento)}</p></div>
-          <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} ${Number(row.total_bultos) === 1 ? 'bulto logistico' : 'bultos logisticos'}` : ''}</p></div>
+          <div><p className="text-xs uppercase text-muted">Totales</p><p className="mt-1 text-sm text-foreground">{Number(row.total_unidades)} unidades{row.total_bultos != null ? ` | ${Number(row.total_bultos)} ${Number(row.total_bultos) === 1 ? 'bulto logístico' : 'bultos logísticos'}` : ''}</p></div>
           <div className="flex justify-end gap-1">
             <button type="button" disabled={!row.archivo_id} onClick={() => download(row)} title={row.archivo_id ? 'Descargar PDF original' : 'PDF no conservado'} className="inline-flex h-10 w-10 items-center justify-center border border-border text-primary disabled:cursor-not-allowed disabled:text-muted"><Download size={16} /></button>
-            {canManage && <button type="button" onClick={() => setReviewTarget(row)} title="Corregir datos extraidos" aria-label={`Corregir borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-foreground hover:border-primary hover:text-primary"><Pencil size={16} /></button>}
+            {canManage && <button type="button" onClick={() => setReviewTarget(row)} title="Corregir datos extraídos" aria-label={`Corregir borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-foreground hover:border-primary hover:text-primary"><Pencil size={16} /></button>}
             {canManage && <button type="button" disabled={needsCorrection || (row.items || []).some((item) => !item.producto_id)} onClick={() => setPrepareTarget(row)} title={needsCorrection ? 'Corrige el documento antes de preparar la salida' : 'Preparar salida desde este documento'} className="btn-primary inline-flex h-10 items-center gap-2 px-3 disabled:cursor-not-allowed disabled:opacity-40"><Send size={15} /><span className="hidden xl:inline">Preparar salida</span></button>}
             {canManage && <button type="button" onClick={() => setDiscardTarget(row)} title="Descartar borrador" aria-label={`Descartar borrador ${row.referencia_documento}`} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger hover:text-danger"><Trash2 size={16} /></button>}
           </div>
@@ -205,15 +205,15 @@ function DocumentDraftsPanel({ rows, suppliers, loading, canManage, onUpdate, on
         <div className="grid gap-4 border-b border-border px-4 py-4 md:grid-cols-2 xl:grid-cols-4">
           <DocumentField label="Destinatario" value={row.destinatario_nombre} />
           <DocumentField label="Ciudad / departamento" value={row.ciudad_departamento} />
-          <DocumentField label="Direccion" value={row.direccion} />
+          <DocumentField label="Dirección" value={row.direccion} />
           <DocumentField label="NIT / documento" value={row.nit} />
-          <DocumentField label="Telefono" value={row.telefono} />
+          <DocumentField label="Teléfono" value={row.telefono} />
           <DocumentField label="Entrega" value={row.entrega} />
           <DocumentField label="Recibe" value={row.recibe} />
-          <DocumentField label="Remision WMS" value={row.remision_numero || 'Sin vincular'} emphasis={!row.remision_numero} />
+          <DocumentField label="Remisión WMS" value={row.remision_numero || 'Sin vincular'} emphasis={!row.remision_numero} />
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-sm"><thead><tr className="border-b border-border bg-surface">{['Codigo / SKU', 'Producto leido', 'Cantidad', 'Vencimiento', 'Lote', 'Catalogo WMS'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}</tr></thead><tbody>{(row.items || []).map((item, index) => <tr key={`${row.id}-${item.sku_extraido}-${index}`} className="border-b border-border/50"><td className="px-4 py-3 font-mono text-xs text-foreground">{item.sku_extraido}</td><td className="px-4 py-3 text-xs">{item.descripcion_extraida}</td><td className="px-4 py-3 tabular-nums">{Number(item.cantidad)} {item.unidad || ''}</td><td className="px-4 py-3 text-xs">{formatDateOnly(item.fecha_vencimiento)}</td><td className="px-4 py-3 font-mono text-xs">{item.lote || '-'}</td><td className={`px-4 py-3 text-xs ${item.producto_id ? 'text-green-400' : 'text-red-400'}`}>{item.producto_id ? `${item.sku_catalogo} - ${item.producto_catalogo}` : 'SKU no encontrado'}</td></tr>)}</tbody></table>
+          <table className="w-full min-w-[920px] text-sm"><thead><tr className="border-b border-border bg-surface">{['Código / SKU', 'Producto leído', 'Cantidad', 'Vencimiento', 'Lote', 'Catálogo WMS'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}</tr></thead><tbody>{(row.items || []).map((item, index) => <tr key={`${row.id}-${item.sku_extraido}-${index}`} className="border-b border-border/50"><td className="px-4 py-3 font-mono text-xs text-foreground">{item.sku_extraido}</td><td className="px-4 py-3 text-xs">{item.descripcion_extraida}</td><td className="px-4 py-3 tabular-nums">{Number(item.cantidad)} {item.unidad || ''}</td><td className="px-4 py-3 text-xs">{formatDateOnly(item.fecha_vencimiento)}</td><td className="px-4 py-3 font-mono text-xs">{item.lote || '-'}</td><td className={`px-4 py-3 text-xs ${item.producto_id ? 'text-green-400' : 'text-red-400'}`}>{item.producto_id ? `${item.sku_catalogo} - ${item.producto_catalogo}` : 'SKU no encontrado'}</td></tr>)}</tbody></table>
         </div>
         {(row.advertencias || []).length > 0 && <div className={`border-t border-border px-4 py-3 ${needsCorrection ? 'bg-red-500/5' : 'bg-yellow-400/5'}`}><p className={`mb-1 text-xs font-semibold ${needsCorrection ? 'text-red-400' : 'text-yellow-400'}`}>Validaciones pendientes</p>{row.advertencias.map((warning) => <p key={warning} className="text-xs text-muted">- {warning}</p>)}</div>}
       </article>
@@ -255,11 +255,11 @@ function DocumentPrepareModal({ row, suppliers, loading, onClose, onPrepare }) {
           <Field label="Cantidad terminada esperada *"><input type="number" min="0.0001" step="any" value={form.cantidad_objetivo} onChange={set('cantidad_objetivo')} className="input-field" required /></Field>
         </div>
         <div className="border border-border">
-          <div className="border-b border-border bg-white/[0.02] px-4 py-3"><p className="text-xs font-semibold uppercase text-muted">Materiales que se reservaran por FEFO</p></div>
+          <div className="border-b border-border bg-white/[0.02] px-4 py-3"><p className="text-xs font-semibold uppercase text-muted">Materiales que se reservarán por FEFO</p></div>
           <div className="divide-y divide-border/60">{(row.items || []).map((item, index) => <div key={`${item.sku_extraido}-${index}`} className="grid gap-1 px-4 py-3 md:grid-cols-[150px_minmax(0,1fr)_140px]"><span className="font-mono text-xs text-foreground">{item.sku_catalogo || item.sku_extraido}</span><span className="text-xs text-muted">{item.producto_catalogo || item.descripcion_extraida}</span><span className="text-xs tabular-nums text-foreground">{Number(item.cantidad)} {item.unidad || ''}</span></div>)}</div>
         </div>
         <Field label="Notas opcionales"><textarea value={form.notas} onChange={set('notas')} rows={2} className="input-field resize-none" /></Field>
-        <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-200">Al confirmar se validara que el documento coincida exactamente con el BOM y la cantidad objetivo. Se crearan la orden, la remision y las reservas. La OC no se vinculara automaticamente y el inventario no se descontara hasta confirmar la salida.</div>
+        <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-200">Al confirmar se validará que el documento coincida exactamente con el BOM y la cantidad objetivo. Se crearán la orden, la remisión y las reservas. La OC no se vinculará automáticamente y el inventario no se descontará hasta confirmar la salida.</div>
       </div>
       <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={loading} className="px-4 py-2 text-sm text-muted hover:text-foreground">Cancelar</button><button type="submit" disabled={loading} className="btn-primary inline-flex items-center gap-2"><Send size={15} /> {loading ? 'Preparando...' : 'Confirmar y preparar'}</button></footer>
     </form>
@@ -301,7 +301,7 @@ function DocumentDraftReviewModal({ row, onClose, onSave }) {
         items: form.items.map((item) => ({ ...item, cantidad: Number(item.cantidad) })),
       })
     } catch (submitError) {
-      setError(submitError.message || 'No fue posible guardar la correccion')
+      setError(submitError.message || 'No fue posible guardar la corrección')
     } finally {
       setSaving(false)
     }
@@ -321,7 +321,7 @@ function DocumentDraftReviewModal({ row, onClose, onSave }) {
         <div className="space-y-2">
           {form.items.map((item, index) => <div key={`${index}-${item.sku}`} className="grid gap-2 border-b border-border/60 pb-2 lg:grid-cols-[150px_minmax(220px,1fr)_100px_90px_150px_150px_36px]">
             <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" className="input-field font-mono" required />
-            <input value={item.descripcion} onChange={(event) => setItem(index, 'descripcion', event.target.value)} placeholder="Descripcion" className="input-field" required />
+            <input value={item.descripcion} onChange={(event) => setItem(index, 'descripcion', event.target.value)} placeholder="Descripción" className="input-field" required />
             <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} className="input-field" required />
             <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" required />
             <input value={item.lote} onChange={(event) => setItem(index, 'lote', event.target.value)} placeholder="Lote opcional" className="input-field font-mono" />
@@ -330,10 +330,10 @@ function DocumentDraftReviewModal({ row, onClose, onSave }) {
           </div>)}
           <button type="button" onClick={() => setForm((current) => ({ ...current, items: [...current.items, { sku: '', descripcion: '', cantidad: '', unidad: 'und', lote: '', fecha_vencimiento: '' }] }))} className="inline-flex items-center gap-2 border border-border px-3 py-2 text-sm text-foreground hover:border-primary"><Plus size={15} /> Agregar fila</button>
         </div>
-        <Field label="Motivo de la correccion"><textarea value={form.motivo} onChange={setHeader('motivo')} minLength={5} maxLength={300} rows={3} className="input-field resize-y" placeholder="Ej. OCR omitio la ultima referencia" required /></Field>
+        <Field label="Motivo de la corrección"><textarea value={form.motivo} onChange={setHeader('motivo')} minLength={5} maxLength={300} rows={3} className="input-field resize-y" placeholder="Ej. OCR omitió la última referencia" required /></Field>
         {error && <div role="alert" className="border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>}
       </div>
-      <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-muted hover:text-foreground">Cancelar</button><button type="submit" disabled={saving || form.motivo.trim().length < 5} className="btn-primary inline-flex items-center gap-2"><Save size={15} /> {saving ? 'Guardando...' : 'Guardar correccion'}</button></footer>
+      <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-muted hover:text-foreground">Cancelar</button><button type="submit" disabled={saving || form.motivo.trim().length < 5} className="btn-primary inline-flex items-center gap-2"><Save size={15} /> {saving ? 'Guardando...' : 'Guardar corrección'}</button></footer>
     </form>
   </div>
 }
@@ -349,8 +349,8 @@ function DocumentDraftDiscardModal({ row, onClose, onDiscard }) {
   }
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-labelledby="discard-3q-title">
     <form onSubmit={submit} className="w-full max-w-lg border border-border bg-surface shadow-2xl">
-      <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4"><div><h2 id="discard-3q-title" className="text-base font-semibold text-foreground">Descartar {row.referencia_documento}</h2><p className="mt-1 text-xs text-muted">El PDF y la auditoria se conservaran. El borrador dejara de aparecer como pendiente.</p></div><button type="button" onClick={onClose} title="Cerrar" className="inline-flex h-8 w-8 items-center justify-center text-muted hover:text-foreground"><X size={18} /></button></header>
-      <div className="space-y-4 px-5 py-5"><Field label="Motivo"><textarea value={reason} onChange={(event) => setReason(event.target.value)} minLength={5} maxLength={300} rows={4} className="input-field resize-y" required /></Field><label className="flex items-start gap-3 text-sm text-foreground"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" /><span>Confirmo que este borrador no debe vincularse a una remision 3Q.</span></label></div>
+      <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4"><div><h2 id="discard-3q-title" className="text-base font-semibold text-foreground">Descartar {row.referencia_documento}</h2><p className="mt-1 text-xs text-muted">El PDF y la auditoría se conservarán. El borrador dejará de aparecer como pendiente.</p></div><button type="button" onClick={onClose} title="Cerrar" className="inline-flex h-8 w-8 items-center justify-center text-muted hover:text-foreground"><X size={18} /></button></header>
+      <div className="space-y-4 px-5 py-5"><Field label="Motivo"><textarea value={reason} onChange={(event) => setReason(event.target.value)} minLength={5} maxLength={300} rows={4} className="input-field resize-y" required /></Field><label className="flex items-start gap-3 text-sm text-foreground"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" /><span>Confirmo que este borrador no debe vincularse a una remisión 3Q.</span></label></div>
       <footer className="flex justify-end gap-2 border-t border-border px-5 py-4"><button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-muted">Volver</button><button type="submit" disabled={saving || !confirmed || reason.trim().length < 5} className="inline-flex items-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-50"><Trash2 size={15} /> {saving ? 'Descartando...' : 'Descartar borrador'}</button></footer>
     </form>
   </div>
@@ -375,7 +375,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
                   {shipment.items.map((item, index) => <p key={`${item.sku}-${item.lote}-${index}`} className="text-xs text-muted"><span className="font-mono text-foreground">{item.sku}</span> - {item.producto}: {item.cantidad} {item.unidad || ''} | lote {item.lote} | sale de {item.ubicacion_origen}</p>)}
                   {shipment.motivo && <p className="text-xs text-yellow-400">Motivo: {shipment.motivo}</p>}
                 </div>
-                {canManage && <div className="flex gap-2"><a href="/despachos" className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Gestionar despacho</a><button type="button" title="Cancelar remision" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
+                {canManage && <div className="flex gap-2"><a href="/despachos" className="btn-primary inline-flex flex-1 items-center justify-center gap-2"><Send size={15} /> Gestionar despacho</a><button type="button" title="Cancelar remisión" disabled={loading} onClick={() => onCancel(shipment)} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:text-danger"><X size={16} /></button></div>}
               </div>
             ))}
           </div>
@@ -383,15 +383,15 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
       )}
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-foreground">Ordenes de maquila</h2>
+        <h2 className="mb-3 text-sm font-semibold text-foreground">Órdenes de maquila</h2>
         <div className="overflow-x-auto border border-border">
           <table className="w-full min-w-[1040px] text-sm">
             <thead><tr className="border-b border-border bg-surface">
-              {['Orden 3Q', 'OC', 'Producto', 'Objetivo', 'Recibido disponible', 'Material enviado pendiente de conciliacion', 'Merma material', 'Estado', 'Creada'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}
+              {['Orden 3Q', 'OC', 'Producto', 'Objetivo', 'Recibido disponible', 'Material enviado pendiente de conciliación', 'Merma material', 'Estado', 'Creada'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}
             </tr></thead>
             <tbody>
               {loading && !rows.length && <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Cargando...</td></tr>}
-              {!loading && !rows.length && <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Sin ordenes de maquila</td></tr>}
+              {!loading && !rows.length && <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Sin órdenes de maquila</td></tr>}
               {rows.map((row) => {
                 const status = STATUS[row.estado] || [row.estado, 'text-muted bg-white/5']
                 return <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
@@ -428,7 +428,7 @@ function CreateForm({ purchaseOrders, suppliers, loading, onSubmit }) {
     })
   }
   return <form onSubmit={submit} className="max-w-2xl space-y-5 border-y border-border py-5">
-    <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-200">Puedes preparar y enviar materiales antes de recibir la OC. El producto terminado no podra recibirse hasta vincular una OC con PDF, proveedor, producto y cantidad coincidentes.</div>
+    <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-200">Puedes preparar y enviar materiales antes de recibir la OC. El producto terminado no podrá recibirse hasta vincular una OC con PDF, proveedor, producto y cantidad coincidentes.</div>
     <div className="grid gap-4 md:grid-cols-2">
       <Field label="OC del producto esperado (opcional)"><select value={form.orden_compra_id} onChange={set('orden_compra_id')} className="input-field"><option value="">Pendiente de cargar o vincular</option>{purchaseOrders.map((order) => <option key={order.id} value={order.id}>OC ID {order.id} - {order.numero} - {order.proveedor_nombre}</option>)}</select></Field>
       {!form.orden_compra_id && <Field label="Maquilador *"><select value={form.tercero_id} onChange={set('tercero_id')} className="input-field" required><option value="">Selecciona el maquilador</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select></Field>}
@@ -436,7 +436,7 @@ function CreateForm({ purchaseOrders, suppliers, loading, onSubmit }) {
       <Field label="Cantidad esperada de 3Q *"><input type="number" min="0.0001" step="any" value={form.cantidad_objetivo} onChange={set('cantidad_objetivo')} className="input-field" required /></Field>
     </div>
     <Field label="Notas"><textarea value={form.notas} onChange={set('notas')} rows={2} className="input-field resize-none" /></Field>
-    <button type="submit" disabled={loading} className="btn-primary inline-flex items-center gap-2"><Plus size={15} /> Preparar remision y picking</button>
+    <button type="submit" disabled={loading} className="btn-primary inline-flex items-center gap-2"><Plus size={15} /> Preparar remisión y picking</button>
   </form>
 }
 
@@ -458,12 +458,12 @@ function LinkPurchaseOrderForm({ orders, purchaseOrders, loading, onSubmit }) {
     onSubmit({ orden_maquila_id: Number(form.orden_maquila_id), orden_compra_id: Number(form.orden_compra_id) })
   }
   return <form onSubmit={submit} className="max-w-2xl space-y-5 border-y border-border py-5">
-    <p className="text-xs text-muted">La vinculacion valida PDF, maquilador, producto y cantidad. Solo entonces se habilita la recepcion del producto terminado.</p>
+    <p className="text-xs text-muted">La vinculación valida PDF, maquilador, producto y cantidad. Solo entonces se habilita la recepción del producto terminado.</p>
     <div className="grid gap-4 md:grid-cols-2">
-      <Field label="Remision / orden 3Q sin OC *"><select value={form.orden_maquila_id} onChange={(event) => setForm({ orden_maquila_id: event.target.value, orden_compra_id: '' })} className="input-field" required><option value="">Selecciona una orden 3Q</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.codigo} - {order.sku} ({Number(order.cantidad_objetivo)})</option>)}</select></Field>
+      <Field label="Remisión / orden 3Q sin OC *"><select value={form.orden_maquila_id} onChange={(event) => setForm({ orden_maquila_id: event.target.value, orden_compra_id: '' })} className="input-field" required><option value="">Selecciona una orden 3Q</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.codigo} - {order.sku} ({Number(order.cantidad_objetivo)})</option>)}</select></Field>
       <Field label="Orden de compra con PDF *"><select value={form.orden_compra_id} onChange={set('orden_compra_id')} className="input-field" required><option value="">Selecciona una OC compatible</option>{compatible.map((order) => <option key={order.id} value={order.id}>OC ID {order.id} - {order.numero} - {order.proveedor_nombre}</option>)}</select></Field>
     </div>
-    {selectedOrder && selectedPurchaseOrder && <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-100"><p className="font-semibold">Confirma el enlace manual</p><p className="mt-1"><span className="font-mono">{selectedOrder.codigo}</span> espera {Number(selectedOrder.cantidad_objetivo)} de <span className="font-mono">{selectedOrder.sku}</span> con {selectedOrder.proveedor_nombre}. Se vinculara a la OC <span className="font-mono">{selectedPurchaseOrder.numero}</span>.</p></div>}
+    {selectedOrder && selectedPurchaseOrder && <div className="border border-yellow-400/30 bg-yellow-400/5 px-4 py-3 text-xs text-yellow-100"><p className="font-semibold">Confirma el enlace manual</p><p className="mt-1"><span className="font-mono">{selectedOrder.codigo}</span> espera {Number(selectedOrder.cantidad_objetivo)} de <span className="font-mono">{selectedOrder.sku}</span> con {selectedOrder.proveedor_nombre}. Se vinculará a la OC <span className="font-mono">{selectedPurchaseOrder.numero}</span>.</p></div>}
     <button type="submit" disabled={loading || !selectedOrder || !selectedPurchaseOrder} className="btn-primary inline-flex items-center gap-2"><FileText size={15} /> Validar y vincular OC</button>
   </form>
 }
@@ -476,14 +476,14 @@ function AdditionalForm({ orders, loading, onSubmit }) {
     onSubmit({ ...form, cantidad: Number(form.cantidad), clave_idempotencia: crypto.randomUUID() })
   }
   return <form onSubmit={submit} className="max-w-2xl space-y-5 border-y border-border py-5">
-    <p className="text-xs text-yellow-400">El material adicional quedara separado para la conciliacion de merma de la maquila.</p>
+    <p className="text-xs text-yellow-400">El material adicional quedará separado para la conciliación de merma de la maquila.</p>
     <div className="grid gap-4 md:grid-cols-2">
       <Field label="Orden 3Q *"><select value={form.orden_maquila_id} onChange={set('orden_maquila_id')} className="input-field" required><option value="">Selecciona una orden</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.codigo} - {order.sku}</option>)}</select></Field>
       <Field label="SKU del material *"><input value={form.sku} onChange={set('sku')} className="input-field" required /></Field>
       <Field label="Cantidad adicional *"><input type="number" min="0.0001" step="any" value={form.cantidad} onChange={set('cantidad')} className="input-field" required /></Field>
       <Field label="Motivo *"><input value={form.motivo} onChange={set('motivo')} className="input-field" required /></Field>
     </div>
-    <button type="submit" disabled={loading} className="btn-primary inline-flex items-center gap-2"><ArrowRight size={15} /> Preparar remision adicional</button>
+    <button type="submit" disabled={loading} className="btn-primary inline-flex items-center gap-2"><ArrowRight size={15} /> Preparar remisión adicional</button>
   </form>
 }
 

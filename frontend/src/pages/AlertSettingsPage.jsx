@@ -55,11 +55,11 @@ export default function AlertSettingsPage() {
     const minimum = Number(draft?.stock_minimo)
     const dwellDays = Number(draft?.permanencia_max_dias)
     if (!Number.isFinite(minimum) || minimum < 0) {
-      setMessage({ ok: false, text: `Stock minimo invalido para ${row.sku}` })
+      setMessage({ ok: false, text: `Stock mínimo inválido para ${row.sku}` })
       return
     }
     if (!Number.isInteger(dwellDays) || dwellDays < 1 || dwellDays > 3650) {
-      setMessage({ ok: false, text: `La permanencia de ${row.sku} debe estar entre 1 y 3650 dias` })
+      setMessage({ ok: false, text: `La permanencia de ${row.sku} debe estar entre 1 y 3650 días` })
       return
     }
     setSavingId(row.id)
@@ -84,7 +84,7 @@ export default function AlertSettingsPage() {
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-lg md:text-xl font-semibold text-foreground">Configuracion de alertas</h1>
+        <h1 className="text-lg md:text-xl font-semibold text-foreground">Configuración de alertas</h1>
         <p className="text-xs text-muted mt-1">Umbrales operativos por SKU. Estos cambios no modifican saldos ni movimientos de inventario.</p>
       </div>
 
@@ -105,20 +105,20 @@ export default function AlertSettingsPage() {
 
       <div className="mb-4 flex items-start gap-2 text-xs text-muted">
         <AlertTriangle size={15} className="mt-0.5 text-yellow-400 flex-shrink-0" />
-        <p>Stock minimo se expresa en la unidad del SKU. Permanencia maxima genera alerta cuando un lote conserva saldo durante ese numero de dias.</p>
+        <p>El stock mínimo se expresa en la unidad del SKU. La permanencia máxima genera una alerta cuando un lote conserva saldo durante ese número de días.</p>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[920px] text-sm">
           <thead>
             <tr className="bg-surface border-b border-border">
-              {['SKU', 'Producto', 'Disponible', 'Stock minimo', 'Permanencia maxima', 'Accion'].map((label) => (
+              {['SKU', 'Producto', 'Disponible', 'Stock mínimo', 'Permanencia máxima', 'Acción'].map((label) => (
                 <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={6} className="px-4 py-10 text-center text-muted">Cargando configuracion...</td></tr>}
+            {loading && <tr><td colSpan={6} className="px-4 py-10 text-center text-muted">Cargando configuración...</td></tr>}
             {!loading && visibleRows.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-muted">No hay productos para este filtro</td></tr>}
             {!loading && visibleRows.map((row) => {
               const draft = drafts[row.id] || normalizeDraft(row)
@@ -132,12 +132,12 @@ export default function AlertSettingsPage() {
                   </td>
                   <td className="px-4 py-3 tabular-nums">{row.disponible} {row.unidad}</td>
                   <td className="px-4 py-3">
-                    <input type="number" min="0" step="0.0001" value={draft.stock_minimo} onChange={(event) => setField(row.id, 'stock_minimo', event.target.value)} className="input-field w-36 tabular-nums" aria-label={`Stock minimo de ${row.sku}`} />
+                    <input type="number" min="0" step="0.0001" value={draft.stock_minimo} onChange={(event) => setField(row.id, 'stock_minimo', event.target.value)} className="input-field w-36 tabular-nums" aria-label={`Stock mínimo de ${row.sku}`} />
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <input type="number" min="1" max="3650" step="1" value={draft.permanencia_max_dias} onChange={(event) => setField(row.id, 'permanencia_max_dias', event.target.value)} className="input-field w-28 tabular-nums" aria-label={`Permanencia maxima de ${row.sku}`} />
-                      <span className="text-xs text-muted">dias</span>
+                      <input type="number" min="1" max="3650" step="1" value={draft.permanencia_max_dias} onChange={(event) => setField(row.id, 'permanencia_max_dias', event.target.value)} className="input-field w-28 tabular-nums" aria-label={`Permanencia máxima de ${row.sku}`} />
+                      <span className="text-xs text-muted">días</span>
                     </div>
                   </td>
                   <td className="px-4 py-3">

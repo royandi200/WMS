@@ -58,6 +58,6 @@ test('dashboard keeps alert settings in an admin-only section', () => {
   assert.match(app, /role === 'admin'/u);
   assert.match(sidebar, /alert_settings\.manage', adminOnly: true/u);
   assert.match(sidebar, /item\.adminOnly[\s\S]*!== 'admin'/u);
-  assert.match(page, /Stock minimo/u);
-  assert.match(page, /Permanencia maxima/u);
+  assert.match(page, /Stock mínimo/u);
+  assert.match(page, /Permanencia máxima/u);
 });

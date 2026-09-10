@@ -24,7 +24,7 @@ export default function NotificacionesPage() {
     setWorking(id)
     try {
       await retryNotification(id)
-      setMessage({ ok: true, text: 'Notificacion reenviada' })
+      setMessage({ ok: true, text: 'Notificación reenviada' })
       await load()
     } catch (error) {
       setMessage({ ok: false, text: error.response?.data?.error || 'No fue posible reenviar' })
@@ -48,7 +48,7 @@ export default function NotificacionesPage() {
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm min-w-[980px]">
           <thead><tr className="bg-surface border-b border-border">
-            {['Evento', 'Canal', 'Destino', 'Mensaje', 'Estado', 'Intentos', 'Fecha', 'Accion'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
+            {['Evento', 'Canal', 'Destino', 'Mensaje', 'Estado', 'Intentos', 'Fecha', 'Acción'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={8} className="px-4 py-10 text-center text-muted">Cargando notificaciones...</td></tr>}
@@ -61,7 +61,7 @@ export default function NotificacionesPage() {
               <td className={`px-4 py-3 text-xs font-semibold ${row.estado === 'ENVIADA' ? 'text-green-400' : row.estado === 'ERROR' ? 'text-danger' : 'text-yellow-400'}`}>{row.estado}</td>
               <td className="px-4 py-3 tabular-nums">{row.intentos}</td>
               <td className="px-4 py-3 text-xs text-muted">{formatDate(row.enviado_en || row.creado_en)}</td>
-              <td className="px-4 py-3">{row.estado === 'ERROR' ? <button type="button" onClick={() => retry(row.id)} disabled={working === row.id} title="Reintentar envio" className="w-8 h-8 inline-flex items-center justify-center text-primary hover:bg-primary/10"><RotateCw size={15} className={working === row.id ? 'animate-spin' : ''} /></button> : '-'}</td>
+              <td className="px-4 py-3">{row.estado === 'ERROR' ? <button type="button" onClick={() => retry(row.id)} disabled={working === row.id} title="Reintentar envío" className="w-8 h-8 inline-flex items-center justify-center text-primary hover:bg-primary/10"><RotateCw size={15} className={working === row.id ? 'animate-spin' : ''} /></button> : '-'}</td>
             </tr>)}
           </tbody>
         </table>

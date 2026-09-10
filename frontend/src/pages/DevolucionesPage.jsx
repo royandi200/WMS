@@ -76,18 +76,18 @@ export default function DevolucionesPage() {
       const data = res?.data || res
       if (data.requires_confirmation) {
         setConfirmDuplicate(data.id || data.numero)
-        showToast('Ya existe una devolucion igual reciente. Revisa los datos y vuelve a enviar solo si es un retorno nuevo.', false)
+        showToast('Ya existe una devolución igual reciente. Revisa los datos y vuelve a enviar solo si es un retorno nuevo.', false)
         return
       }
       showToast(data.already_completed
-        ? `La devolucion ${data.numero || ''} ya estaba registrada. No se modifico inventario.`
-        : `Devolucion ${data.numero || ''} registrada. ${data.destino || ''}`, true)
+        ? `La devolución ${data.numero || ''} ya estaba registrada. No se modificó inventario.`
+        : `Devolución ${data.numero || ''} registrada. ${data.destino || ''}`, true)
       setForm(EMPTY)
       setConfirmDuplicate(false)
       await fetchRows()
       setTab('historial')
     } catch (e) {
-      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al registrar devolucion'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al registrar devolución'
       showToast(msg, false)
     } finally {
       setSaving(false)
@@ -99,7 +99,7 @@ export default function DevolucionesPage() {
       <div className="flex items-center justify-between gap-3 mb-4 md:mb-6">
         <div>
           <h1 className="text-lg md:text-xl font-semibold text-foreground">Devoluciones</h1>
-          <p className="text-xs text-muted mt-1">Registra retornos, cuarentena y recuperacion de stock.</p>
+          <p className="text-xs text-muted mt-1">Registra retornos, cuarentena y recuperación de stock.</p>
         </div>
         <button
           onClick={fetchRows}
@@ -112,8 +112,8 @@ export default function DevolucionesPage() {
 
       <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
         {[
-          ['crear', 'Registrar devolucion'],
-          ['historial', `Historico (${rows.length})`],
+          ['crear', 'Registrar devolución'],
+          ['historial', `Histórico (${rows.length})`],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -208,7 +208,7 @@ export default function DevolucionesPage() {
             </Field>
 
             {form.estado === 'RECUPERABLE' && (
-              <Field label="Ubicacion de reintegro *">
+              <Field label="Ubicación de reintegro *">
                 <input
                   value={form.ubicacion}
                   onChange={set('ubicacion')}
@@ -224,13 +224,13 @@ export default function DevolucionesPage() {
                 value={form.observaciones}
                 onChange={set('observaciones')}
                 rows={3}
-                placeholder="Motivo, condicion del producto o decision de calidad"
+                placeholder="Motivo, condición del producto o decisión de calidad"
                 className="input-field resize-none"
               />
             </Field>
 
             <button type="submit" disabled={saving} className="btn-primary flex items-center justify-center gap-2">
-              {saving ? <><Spin /> Registrando...</> : confirmDuplicate ? 'Registrar como devolucion nueva' : 'Registrar devolucion'}
+              {saving ? <><Spin /> Registrando...</> : confirmDuplicate ? 'Registrar como devolución nueva' : 'Registrar devolución'}
             </button>
           </form>
 
@@ -248,7 +248,7 @@ export default function DevolucionesPage() {
               ))}
             </div>
             <p className="mt-4 text-xs text-muted">
-              Toda devolucion crea registro de recepcion y trazabilidad. Solo recuperable queda disponible para despacho.
+              Toda devolución crea un registro de recepción y trazabilidad. Solo lo recuperable queda disponible para despacho.
             </p>
           </div>
         </div>
@@ -265,7 +265,7 @@ function ReturnsTable({ rows, loading }) {
       <table className="w-full text-sm min-w-[920px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Devolucion', 'Origen', 'Fecha', 'Cliente', 'SKU', 'Producto', 'Lotes', 'Ubicacion', 'Cantidad', 'Estado', 'Usuario'].map((c) => (
+            {['Devolución', 'Origen', 'Fecha', 'Cliente', 'SKU', 'Producto', 'Lotes', 'Ubicación', 'Cantidad', 'Estado', 'Usuario'].map((c) => (
               <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
             ))}
           </tr>

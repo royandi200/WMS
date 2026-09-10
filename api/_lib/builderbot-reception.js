@@ -206,15 +206,23 @@ function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizeCommandText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
 function confirmationMatchesReference(text, entity, idParam) {
+  const normalizedText = normalizeCommandText(text);
   const reference = typeof entity === 'object'
     ? entity.referencia_documento || entity.numero
     : entity;
   const id = Number(typeof entity === 'object' ? entity.id : idParam);
   const hasReference = reference
-    && text.toUpperCase().includes(String(reference).toUpperCase());
+    && normalizedText.toUpperCase().includes(normalizeCommandText(reference).toUpperCase());
   const hasShortId = Number.isSafeInteger(id) && id > 0
-    && new RegExp(`\\bid\\s*#?\\s*${escapeRegExp(id)}\\b`, 'iu').test(text);
+    && new RegExp(`\\bid\\s*#?\\s*${escapeRegExp(id)}\\b`, 'iu').test(normalizedText);
   return Boolean(hasReference || hasShortId);
 }
 
@@ -228,7 +236,7 @@ function outsourcingOrderReference(params = {}) {
 }
 
 function purchaseOrderTextReference(rawText, order) {
-  const text = String(rawText || '').trim();
+  const text = normalizeCommandText(rawText);
   const number = String(order?.numero || (typeof order === 'string' ? order : '') || '').trim();
   if (number && new RegExp(
     `(^|[^A-Z0-9])${escapeRegExp(number)}([^A-Z0-9]|$)`,
@@ -256,7 +264,7 @@ function assertPurchaseOrderTextReference(rawText, order) {
 }
 
 function outsourcingTextReference(rawText, order) {
-  const text = String(rawText || '').trim();
+  const text = normalizeCommandText(rawText);
   const number = String(order?.codigo || (typeof order === 'string' ? order : '') || '').trim();
   if (number && new RegExp(
     `(^|[^A-Z0-9])${escapeRegExp(number)}([^A-Z0-9]|$)`,
@@ -281,7 +289,7 @@ function assertOutsourcingTextReference(rawText, order) {
 
 function explicitPurchaseOrderConfirmation(rawText, draft, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
-  const text = String(rawText || '').trim();
+  const text = normalizeCommandText(rawText);
   return /\bconfirm(?:o|amos)\s+(?:la\s+)?orden\s+de\s+compra\b/iu.test(text)
     && confirmationMatchesReference(text, draft, params.documento_borrador_id);
 }
@@ -554,15 +562,15 @@ async function prepareReceptionFromOutsourcing({
 
 function explicitConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
-  const text = String(rawText || '').trim();
-  return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepci[oó]n\b/iu.test(text)
+  const text = normalizeCommandText(rawText);
+  return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepcion\b/iu.test(text)
     && purchaseOrderTextReference(text, order);
 }
 
 function explicitOutsourcingConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
-  const text = String(rawText || '').trim();
-  return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepci[oó]n\b/iu.test(text)
+  const text = normalizeCommandText(rawText);
+  return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepcion\b/iu.test(text)
     && outsourcingTextReference(text, order);
 }
 

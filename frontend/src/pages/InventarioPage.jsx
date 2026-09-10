@@ -104,17 +104,17 @@ export default function InventarioPage() {
           <div>
             <div>
               <h2 className="text-sm font-semibold text-foreground">Lotes con permanencia prolongada</h2>
-              <p className="text-xs text-muted mt-1">Cada lote se compara con el umbral configurado para su SKU. El valor predeterminado es {aging.default_days || 90} dias.</p>
+              <p className="text-xs text-muted mt-1">Cada lote se compara con el umbral configurado para su SKU. El valor predeterminado es {aging.default_days || 90} días.</p>
             </div>
           </div>
           {loadingAging && <Spinner />}
           {!loadingAging && aging.rows.length === 0 && <EmptyState icon="◷" text="No hay lotes que superen su permanencia configurada" />}
           {!loadingAging && aging.rows.length > 0 && <Table
-            cols={['SKU', 'Producto', 'Lote', 'Estado', 'Ubicacion', 'Ingreso', 'Permanencia', 'Umbral', 'Exceso', 'Saldo fisico', 'Disponible', 'Vence']}
+            cols={['SKU', 'Producto', 'Lote', 'Estado', 'Ubicación', 'Ingreso', 'Permanencia', 'Umbral', 'Exceso', 'Saldo físico', 'Disponible', 'Vence']}
             rows={aging.rows.map((row) => [
-              row.sku, row.producto, row.lpn, <StatusBadge value={row.estado} />, `${row.bodega} / ${row.ubicacion || 'Sin ubicacion'}`,
-              formatDate(row.fecha_ingreso), <span className="font-semibold text-yellow-400">{row.dias_permanencia} dias</span>,
-              `${row.dias_limite} dias`, <span className="text-danger font-semibold">+{row.dias_exceso} dias</span>,
+              row.sku, row.producto, row.lpn, <StatusBadge value={row.estado} />, `${row.bodega} / ${row.ubicacion || 'Sin ubicación'}`,
+              formatDate(row.fecha_ingreso), <span className="font-semibold text-yellow-400">{row.dias_permanencia} días</span>,
+              `${row.dias_limite} días`, <span className="text-danger font-semibold">+{row.dias_exceso} días</span>,
               formatQuantity(row.cantidad, row.unidad), formatQuantity(row.disponible, row.unidad), formatDate(row.fecha_vencimiento),
             ])}
           />}
@@ -206,7 +206,7 @@ function ProductResult({ data }) {
         </div>
         {blockedRows.length > 0 && (
           <div className="mt-4 px-3 py-2 rounded border border-danger/30 bg-danger/10 text-danger text-sm">
-            {blockedRows.length} lote(s) no estan disponibles: revisa estado, vencimiento y ubicacion.
+            {blockedRows.length} lote(s) no están disponibles: revisa estado, vencimiento y ubicación.
           </div>
         )}
       </div>
@@ -215,10 +215,10 @@ function ProductResult({ data }) {
         <div className="overflow-hidden rounded-lg border border-blue-400/30">
           <div className="border-b border-blue-400/20 bg-blue-400/5 px-4 py-3">
             <h3 className="text-sm font-semibold text-blue-300">Material en custodia externa 3Q</h3>
-            <p className="mt-0.5 text-xs text-muted">No esta disponible para despachos de bodega y permanece bajo control hasta la conciliacion de la maquila.</p>
+            <p className="mt-0.5 text-xs text-muted">No está disponible para despachos de bodega y permanece bajo control hasta la conciliación de la maquila.</p>
           </div>
           <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b border-border bg-background/30">
-            {['MQ', 'Remision', 'Lote', 'Cantidad', 'Maquilador', 'Salida'].map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{column}</th>)}
+            {['MQ', 'Remisión', 'Lote', 'Cantidad', 'Maquilador', 'Salida'].map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{column}</th>)}
           </tr></thead><tbody>{externalCustody.map((row, index) => <tr key={`${row.orden_maquila_id}-${row.lote}-${index}`} className="border-b border-border/50 last:border-0">
             <td className="px-4 py-3 font-mono text-xs">MQ ID {row.orden_maquila_id}<span className="block text-muted">{row.orden_codigo}</span></td>
             <td className="px-4 py-3 font-mono text-xs">{row.remision}</td>
@@ -234,7 +234,7 @@ function ProductResult({ data }) {
         <table className="w-full text-sm min-w-[780px]">
           <thead>
             <tr className="bg-surface border-b border-border">
-              {['Lote', 'Bodega', 'Ubicacion', 'Estado', 'Vence', 'Cantidad', 'Reservado', 'Disponible'].map((c) => (
+              {['Lote', 'Bodega', 'Ubicación', 'Estado', 'Vence', 'Cantidad', 'Reservado', 'Disponible'].map((c) => (
                 <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
               ))}
             </tr>
@@ -259,7 +259,7 @@ function ProductResult({ data }) {
       <div className="overflow-hidden rounded-lg border border-border">
         <div className="border-b border-border bg-surface px-4 py-3">
           <h3 className="text-sm font-semibold text-foreground">Movimientos recientes</h3>
-          <p className="mt-0.5 text-xs text-muted">Ultimos registros auditables del Kardex para este producto.</p>
+          <p className="mt-0.5 text-xs text-muted">Últimos registros auditables del Kardex para este producto.</p>
         </div>
         {movements.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-muted">No hay movimientos registrados.</div>
@@ -308,17 +308,17 @@ function LotResult({ data }) {
         <Metric label="Saldo de la partida" value={lot.qty_current ?? lot.cantidad ?? '-'} />
         <Metric label="Estado" value={lot.status || lot.estado_calculado || '-'} />
         <Metric label="Vence" value={formatDate(lot.expiry_date || lot.fecha_venc)} />
-        <Metric label="Ubicacion actual" value={[lot.bodega_codigo || lot.bodega_nombre, lot.ubicacion_codigo || lot.ubicacion_zona].filter(Boolean).join(' / ') || 'Sin ubicacion'} />
+        <Metric label="Ubicación actual" value={[lot.bodega_codigo || lot.bodega_nombre, lot.ubicacion_codigo || lot.ubicacion_zona].filter(Boolean).join(' / ') || 'Sin ubicación'} />
       </div>
       {lot.partidas_recepcion?.length > 0 && <Table
-        cols={['Lote proveedor', 'Partida', 'Recepcion', 'Recibido', 'Condicion al recibir', 'Ubicacion', 'Vence', 'Motivo']}
+        cols={['Lote proveedor', 'Partida', 'Recepción', 'Recibido', 'Condición al recibir', 'Ubicación', 'Vence', 'Motivo']}
         rows={lot.partidas_recepcion.map(part => [
           part.lote_proveedor, part.lote, part.recepcion, formatQuantity(part.cantidad, lot.unit),
           <StatusBadge value={part.condicion} />, part.ubicacion || '-', formatDate(part.fecha_venc), part.motivo || '-',
         ])}
       />}
       <div className="overflow-hidden rounded-lg border border-border">
-        <div className="border-b border-border bg-surface px-4 py-3"><h3 className="text-sm font-semibold text-foreground">Historico del lote</h3><p className="mt-0.5 text-xs text-muted">Incluye recepciones, movimientos internos, produccion, despachos y salidas a maquila 3Q.</p></div>
+        <div className="border-b border-border bg-surface px-4 py-3"><h3 className="text-sm font-semibold text-foreground">Histórico del lote</h3><p className="mt-0.5 text-xs text-muted">Incluye recepciones, movimientos internos, producción, despachos y salidas a maquila 3Q.</p></div>
         {movements.length ? <Table
           cols={['Fecha y hora', 'SKU', 'Movimiento', 'Cantidad', 'Saldo', 'Referencia', 'Detalle']}
           rows={movements.map((movement) => [
@@ -369,9 +369,9 @@ function formatDateTime(value) {
 
 function formatMovement(action) {
   const labels = {
-    CONSUMO_MATERIAL: 'Consumo de produccion',
-    CIERRE_PRODUCCION: 'Cierre de produccion',
-    INGRESO_RECEPCION: 'Ingreso por recepcion',
+    CONSUMO_MATERIAL: 'Consumo de producción',
+    CIERRE_PRODUCCION: 'Cierre de producción',
+    INGRESO_RECEPCION: 'Ingreso por recepción',
     DESPACHO: 'Despacho',
     MERMA_BODEGA: 'Merma de bodega',
     MERMA_PROCESO: 'Merma de proceso',

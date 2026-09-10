@@ -554,7 +554,7 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
               <div className="border-b border-border/50 px-4 py-3">
                 <div className="mb-2 flex items-center gap-2">
                   <Package size={12} className="text-primary"/>
-                  <p className="text-[10px] font-semibold uppercase text-muted">Asignacion prevista</p>
+                  <p className="text-[10px] font-semibold uppercase text-muted">Asignación prevista</p>
                 </div>
                 {selected.uso_reservado && <p className="mb-2 text-xs font-medium text-primary">{selected.uso_reservado}</p>}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -570,7 +570,7 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
 
             {/* Items de stock */}
             <div>
-              <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock fisico</p>
+              <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock físico</p>
               {selected.items.length === 0 ? (
                 <div className="flex flex-col items-center py-6 gap-1">
                   <Box size={18} className="text-muted opacity-30"/>

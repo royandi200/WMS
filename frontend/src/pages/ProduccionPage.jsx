@@ -12,7 +12,7 @@ const STATUS_LABEL = {
   CERRADA: { label: 'Cerrada', css: 'text-green-400 bg-green-400/10' },
   CANCELADA: { label: 'Cancelada', css: 'text-muted bg-white/5' },
 }
-const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Preparar reposicion', 'Confirmar reposicion', 'Avanzar fase', 'Cerrar orden']
+const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Preparar reposición', 'Confirmar reposición', 'Avanzar fase', 'Cerrar orden']
 const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.pick', 'production.pick', 'production.release', 'production.pick', 'production.advance', 'production.close']
 
 const empty = '-'
@@ -47,7 +47,7 @@ export default function ProduccionPage() {
 
   return (
     <div>
-      <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Produccion</h1>
+      <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Producción</h1>
 
       <div className="flex gap-1 mb-4 md:mb-6 border-b border-border overflow-x-auto pb-px scrollbar-none">
         {visibleTabs.map(({ label, index }) => (
@@ -68,7 +68,7 @@ export default function ProduccionPage() {
       {tab === 0 && (
         <div>
           {loading && <Spinner />}
-          {!loading && list.length === 0 && <EmptyState text="Sin ordenes de produccion" />}
+          {!loading && list.length === 0 && <EmptyState text="Sin órdenes de producción" />}
           {list.length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-sm min-w-[1240px]">
@@ -157,7 +157,7 @@ function StartForm({ loading, onSubmit, onDone }) {
         setToast({ msg: `Ya existe ${res.data.order_code} con los mismos datos. Vuelve a enviar solo si necesitas otra orden igual.`, ok: false })
         return
       }
-      setToast({ msg: res.data?.already_released ? 'La orden adicional ya estaba liberada. No se modifico inventario.' : 'Orden liberada', ok: true })
+      setToast({ msg: res.data?.already_released ? 'La orden adicional ya estaba liberada. No se modificó inventario.' : 'Orden liberada', ok: true })
       setTimeout(() => { setToast(null); onDone() }, 1500)
     } else {
       setToast({ msg: res.message, ok: false })
@@ -169,7 +169,7 @@ function StartForm({ loading, onSubmit, onDone }) {
       {toast && <ToastInline toast={toast} />}
       <Field label="ID del producto *"><input value={form.product_id} onChange={set('product_id')} placeholder="ID o SKU" className="input-field" required /></Field>
       <Field label="Cantidad planificada *"><input type="number" min="1" value={form.qty_planned} onChange={set('qty_planned')} placeholder="0" className="input-field" required /></Field>
-      <Field label="Destino de la produccion *">
+      <Field label="Destino de la producción *">
         <select value={form.origin_type} onChange={set('origin_type')} className="input-field">
           <option value="STOCK_SEGURIDAD">Stock de seguridad</option>
           <option value="OC_CLIENTE">Orden de cliente</option>
@@ -194,13 +194,13 @@ function ConfirmMaterialsForm({ loading, onSubmit }) {
     event.preventDefault()
     const result = await onSubmit({ order_id: orderId.trim() })
     setToast(result.ok
-      ? { msg: result.data?.already_confirmed ? 'Los materiales ya estaban confirmados' : 'Materiales confirmados; produccion iniciada', ok: true }
+      ? { msg: result.data?.already_confirmed ? 'Los materiales ya estaban confirmados' : 'Materiales confirmados; producción iniciada', ok: true }
       : { msg: result.message, ok: false })
   }
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="Orden de produccion *">
+      <Field label="Orden de producción *">
         <input value={orderId} onChange={(event) => setOrderId(event.target.value)} placeholder="OP ID 88 u OP-..." className="input-field" required />
       </Field>
       <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Confirmar materiales e iniciar'}</button>
@@ -231,7 +231,7 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
       return
     }
     setToast(result.ok ? {
-      msg: result.data?.already_recorded ? 'El movimiento adicional ya estaba registrado. No se modifico inventario.' : `${form.tipo} registrada`,
+      msg: result.data?.already_recorded ? 'El movimiento adicional ya estaba registrado. No se modificó inventario.' : `${form.tipo} registrada`,
       ok: true,
     } : { msg: result.message, ok: false })
   }
@@ -243,7 +243,7 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
         <Field label="Tipo *"><select value={form.tipo} onChange={set('tipo')} className="input-field"><option>ENTREGA_ADICIONAL</option><option>DEVOLUCION</option></select></Field>
         <Field label="SKU de materia prima *"><input value={form.sku} onChange={set('sku')} className="input-field" required /></Field>
         <Field label="Lote *"><input value={form.lote} onChange={set('lote')} className="input-field" required /></Field>
-        <Field label="Ubicacion *"><select value={form.ubicacion_id} onChange={set('ubicacion_id')} className="input-field" required><option value="">Selecciona ubicacion</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
+        <Field label="Ubicación *"><select value={form.ubicacion_id} onChange={set('ubicacion_id')} className="input-field" required><option value="">Selecciona ubicación</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
         <Field label="Cantidad *"><input type="number" min="0.0001" step="any" value={form.cantidad} onChange={set('cantidad')} className="input-field" required /></Field>
       </div>
       <Field label="Motivo"><input value={form.motivo} onChange={set('motivo')} className="input-field" /></Field>
@@ -281,7 +281,7 @@ function PrepareReplenishmentForm({ loading, onSubmit, onCancel }) {
       : { order_id: value }
     const result = await onCancel(body)
     setToast(result.ok
-      ? { msg: result.data?.already_cancelled ? 'La reposicion ya estaba cancelada' : 'Reposicion cancelada; reservas liberadas', ok: true }
+      ? { msg: result.data?.already_cancelled ? 'La reposición ya estaba cancelada' : 'Reposición cancelada; reservas liberadas', ok: true }
       : { msg: result.message, ok: false })
   }
   return (
@@ -299,7 +299,7 @@ function PrepareReplenishmentForm({ loading, onSubmit, onCancel }) {
       </form>
       <form onSubmit={handleCancel} className="border-t border-border pt-4 flex gap-3">
         <input value={cancelReference} onChange={(event) => setCancelReference(event.target.value)} placeholder="REP-... o ID/OP-..." className="input-field" required />
-        <button type="submit" disabled={loading} className="btn-secondary whitespace-nowrap">Cancelar reposicion</button>
+        <button type="submit" disabled={loading} className="btn-secondary whitespace-nowrap">Cancelar reposición</button>
       </form>
     </div>
   )
@@ -316,13 +316,13 @@ function ConfirmReplenishmentForm({ loading, onSubmit }) {
       : { order_id: value }
     const result = await onSubmit(body)
     setToast(result.ok
-      ? { msg: result.data?.already_confirmed ? 'La reposicion ya estaba confirmada' : 'Reposicion confirmada; materiales entregados a produccion', ok: true }
+      ? { msg: result.data?.already_confirmed ? 'La reposición ya estaba confirmada' : 'Reposición confirmada; materiales entregados a producción', ok: true }
       : { msg: result.message, ok: false })
   }
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="Reposicion u orden *"><input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="REP-... o ID/OP-..." className="input-field" required /></Field>
+      <Field label="Reposición u orden *"><input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="REP-... o ID/OP-..." className="input-field" required /></Field>
       <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Confirmar entrega adicional'}</button>
     </form>
   )
@@ -374,7 +374,7 @@ function CloseForm({ loading, onSubmit, locations }) {
       return
     }
     if (qtyReal > 0 && !form.ubicacion_id) {
-      setToast({ msg: 'Selecciona la ubicacion del producto terminado', ok: false })
+      setToast({ msg: 'Selecciona la ubicación del producto terminado', ok: false })
       return
     }
 
@@ -395,9 +395,9 @@ function CloseForm({ loading, onSubmit, locations }) {
       <Field label="OP ID *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
       <Field label="Unidades conformes terminadas *"><input type="number" min="0" value={form.qty_real} onChange={set('qty_real')} placeholder="0" className="input-field" required /></Field>
       <Field label="Merma / no conforme *"><input type="number" min="0" value={form.qty_waste} onChange={set('qty_waste')} placeholder="0" className="input-field" required /></Field>
-      <Field label="Ubicacion del producto terminado *">
+      <Field label="Ubicación del producto terminado *">
         <select value={form.ubicacion_id} onChange={set('ubicacion_id')} className="input-field" required={Number(form.qty_real) > 0}>
-          <option value="">Selecciona ubicacion</option>
+          <option value="">Selecciona ubicación</option>
           {locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}
         </select>
       </Field>

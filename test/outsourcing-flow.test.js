@@ -208,7 +208,7 @@ test('a reviewed 3Q document prepares one linked remision while the OC remains m
   assert.match(workflow, /estado IN \('PENDIENTE_REVISION', 'REQUIERE_CORRECCION'\)/u);
   assert.match(endpoint, /CREATE_FROM_DOCUMENT/u);
   assert.match(page, /Los materiales y cantidades se toman del documento/u);
-  assert.match(page, /La OC no se vinculara automaticamente/u);
+  assert.match(page, /La OC no se vinculará automáticamente/u);
   assert.match(workflow, /VALUES \(\?, NULL, \?, \?, \?, \?, 'MATERIALES_RESERVADOS'/u);
 });
 

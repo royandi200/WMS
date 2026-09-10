@@ -24,7 +24,7 @@ export function buildDispatchSheetHtml(dispatch) {
       <td>${escapeHtml(item.sku || '-')}</td>
       <td>${escapeHtml(item.producto_nombre || '-')}</td>
       <td>${escapeHtml(item.lote || '-')}</td>
-      <td>${escapeHtml(item.ubicacion || 'Sin ubicacion')}</td>
+      <td>${escapeHtml(item.ubicacion || 'Sin ubicación')}</td>
       <td class="number">${escapeHtml(Number(item.cantidad || 0).toLocaleString('es-CO', { maximumFractionDigits: 4 }))}</td>
     </tr>`).join('');
   return `<!doctype html>
@@ -35,14 +35,14 @@ export function buildDispatchSheetHtml(dispatch) {
 </style></head><body><div class="actions"><button onclick="window.print()">Imprimir o guardar PDF</button></div><main class="sheet">
 <div class="head"><div><h1>Hoja de despacho</h1><div class="muted">Documento operativo de alistamiento y entrega</div></div><div><strong>${escapeHtml(dispatch.numero || '-')}</strong><div class="muted">Estado: ${escapeHtml(dispatch.estado || '-')}</div></div></div>
 <section class="meta"><div><span class="label">Factura</span>${escapeHtml(dispatch.siigo_invoice_name || '-')}</div><div><span class="label">Cliente</span>${escapeHtml(dispatch.cliente_nombre || '-')}</div><div><span class="label">Fecha</span>${escapeHtml(String(dispatch.despachado_en || dispatch.creado_en || '-').replace('T', ' ').slice(0, 16))}</div><div><span class="label">Referencia WMS</span>${escapeHtml(dispatch.numero || '-')}</div></section>
-<table><thead><tr><th>SKU</th><th>Producto</th><th>Lote</th><th>Ubicacion</th><th class="number">Cantidad</th></tr></thead><tbody>${rows}</tbody></table>
+<table><thead><tr><th>SKU</th><th>Producto</th><th>Lote</th><th>Ubicación</th><th class="number">Cantidad</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="total">Total: ${escapeHtml(total.toLocaleString('es-CO', { maximumFractionDigits: 4 }))}</div>
 <section class="signatures"><div class="signature">Preparado por</div><div class="signature">Recibido por</div></section>
 </main></body></html>`;
 }
 
 export function buildDispatchCsv(dispatch) {
-  const header = ['Despacho', 'Factura', 'Cliente', 'SKU', 'Producto', 'Lote', 'Ubicacion', 'Cantidad'];
+  const header = ['Despacho', 'Factura', 'Cliente', 'SKU', 'Producto', 'Lote', 'Ubicación', 'Cantidad'];
   const rows = dispatchItems(dispatch).map((item) => [
     dispatch.numero, dispatch.siigo_invoice_name, dispatch.cliente_nombre, item.sku,
     item.producto_nombre, item.lote, item.ubicacion, Number(item.cantidad || 0),

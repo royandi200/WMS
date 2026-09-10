@@ -111,6 +111,6 @@ test('dashboard exposes an admin-only confirmed discard action', () => {
   const api = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'api', 'purchaseOrders.api.js'), 'utf8');
   assert.match(page, /canDiscardDraft=\{allowed\('purchase_order\.cancel'\)\}/u);
   assert.match(page, /Confirmo que este borrador no debe convertirse en una orden de compra/u);
-  assert.match(page, /El PDF y el registro se conservaran para auditoria/u);
+  assert.match(page, /El PDF y el registro se conservarán para auditoría/u);
   assert.match(api, /\.delete\('\/warehouse-documents'/u);
 });

@@ -23,8 +23,8 @@ import { formatBogotaDateTime } from '../utils/dateTime'
 
 const PERIODS = [
   { key: 'today', label: 'Hoy' },
-  { key: 'week', label: '7 dias' },
-  { key: 'month', label: '30 dias' },
+  { key: 'week', label: '7 días' },
+  { key: 'month', label: '30 días' },
 ]
 
 const STATUS_LABEL = {
@@ -36,12 +36,12 @@ const STATUS_LABEL = {
 }
 
 const APPROVAL_LABEL = {
-  SOLICITAR_INICIO_PRODUCCION: 'Inicio produccion',
-  SOLICITAR_CIERRE_PRODUCCION: 'Cierre produccion',
+  SOLICITAR_INICIO_PRODUCCION: 'Inicio producción',
+  SOLICITAR_CIERRE_PRODUCCION: 'Cierre producción',
   SOLICITAR_DESPACHO: 'Despacho',
   REPORTAR_MERMA: 'Merma',
   REPORTE_MERMA: 'Merma',
-  INGRESO_RECEPCION: 'Recepcion',
+  INGRESO_RECEPCION: 'Recepción',
 }
 
 function fmtN(value, decimals = 0) {
@@ -271,7 +271,7 @@ export default function DashboardPage() {
   const metrics = current?.metrics
   const summary = current?.summary
   const safeLowStock = current?.lowStock || []
-  const periodLabel = PERIODS.find(p => p.key === period)?.label || 'Periodo'
+  const periodLabel = PERIODS.find(p => p.key === period)?.label || 'Período'
   const lastUpdate = current?.updatedAt
   const isLoadingCore = !metrics
   const receptionLoading = isLoadingCore
@@ -298,14 +298,14 @@ export default function DashboardPage() {
   const exceptions = [
     ...safeLowStock.slice(0, 3).map((item) => ({
       severity: Number(item.disponible ?? item.stock ?? 0) <= Number(item.min_stock ?? 0) * 0.35 ? 'alta' : 'media',
-      title: `${item.sku || item.iditem || 'SKU'} bajo minimo`,
+      title: `${item.sku || item.iditem || 'SKU'} bajo mínimo`,
       detail: `${item.name || item.nombre || 'Producto'}: ${fmtN(item.disponible ?? item.stock)} / min ${fmtN(item.min_stock)}`,
       to: '/inventario',
     })),
     ...(approvalCount ? [{
       severity: oldestApprovalHours >= 6 ? 'alta' : 'media',
       title: `${approvalCount} aprobaciones pendientes`,
-      detail: oldestApprovalHours ? `Mas antigua: ${oldestApprovalHours} h` : 'Requieren decision del supervisor',
+      detail: oldestApprovalHours ? `Más antigua: ${oldestApprovalHours} h` : 'Requieren decisión del supervisor',
       to: '/aprobaciones',
     }] : []),
     ...(expiringLots ? [{
@@ -317,7 +317,7 @@ export default function DashboardPage() {
     ...(dwellAlerts ? [{
       severity: 'media',
       title: `${dwellAlerts} lotes con permanencia prolongada`,
-      detail: `Segun el umbral de cada SKU (predeterminado: ${dwellDays} dias)`,
+      detail: `Según el umbral de cada SKU (predeterminado: ${dwellDays} días)`,
       to: '/inventario',
     }] : []),
     ...(wasteCount ? [{
@@ -336,7 +336,7 @@ export default function DashboardPage() {
   }))
 
   const greetingHour = new Date().getHours()
-  const greeting = greetingHour < 12 ? 'Buenos dias' : greetingHour < 18 ? 'Buenas tardes' : 'Buenas noches'
+  const greeting = greetingHour < 12 ? 'Buenos días' : greetingHour < 18 ? 'Buenas tardes' : 'Buenas noches'
 
   return (
     <div className="px-4 md:px-6 py-5 space-y-5">
@@ -374,7 +374,7 @@ export default function DashboardPage() {
       </header>
 
       {error && <div role="alert" className="border border-red-500/50 bg-red-500/10 p-3 text-sm text-red-300">
-        {error}. {current ? 'Se muestran los ultimos datos obtenidos.' : 'No hay datos disponibles para este periodo.'}
+        {error}. {current ? 'Se muestran los últimos datos obtenidos.' : 'No hay datos disponibles para este período.'}
       </div>}
       <section className="bg-surface border border-border rounded-lg overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border">
@@ -427,12 +427,12 @@ export default function DashboardPage() {
             />
             <StageCard
               icon={Factory}
-              title="Produccion"
-              subtitle="Ordenes y cierre"
+              title="Producción"
+              subtitle="Órdenes y cierre"
               color="#f0883e"
               href="/produccion"
               primary={fmtN(activeProductions)}
-              primaryLabel="ordenes activas"
+              primaryLabel="órdenes activas"
               loading={productionLoading}
               alert={(productionByStatus.EN_PROCESO || 0) > 0}
               metrics={[
@@ -453,9 +453,9 @@ export default function DashboardPage() {
               alert={wasteCount > 0}
               metrics={[
                 { label: 'Cantidad', value: totalsText(metrics?.waste.quantities) },
-                { label: 'Ordenes afectadas', value: fmtN(metrics?.waste.orders) },
+                { label: 'Órdenes afectadas', value: fmtN(metrics?.waste.orders) },
               ]}
-              footer={wasteCount ? 'Bodega y produccion' : 'Sin mermas en periodo'}
+              footer={wasteCount ? 'Bodega y producción' : 'Sin mermas en el período'}
             />
             <StageCard
               icon={ClipboardList}
@@ -468,8 +468,8 @@ export default function DashboardPage() {
               loading={loadingPending}
               alert={approvalCount > 0}
               metrics={[
-                { label: 'Mas antigua', value: oldestApprovalHours ? `${oldestApprovalHours} h` : '-' },
-                { label: 'Produccion', value: fmtN((approvalByType.SOLICITAR_INICIO_PRODUCCION || 0) + (approvalByType.SOLICITAR_CIERRE_PRODUCCION || 0)) },
+                { label: 'Más antigua', value: oldestApprovalHours ? `${oldestApprovalHours} h` : '-' },
+                { label: 'Producción', value: fmtN((approvalByType.SOLICITAR_INICIO_PRODUCCION || 0) + (approvalByType.SOLICITAR_CIERRE_PRODUCCION || 0)) },
               ]}
               footer={metrics?.approvals ? 'Solicitudes pendientes actuales' : 'Sin permiso para consultar aprobaciones'}
             />
@@ -504,7 +504,7 @@ export default function DashboardPage() {
         <Section
           icon={AlertTriangle}
           title="Excepciones que requieren atencion"
-          action={<button onClick={() => navigate('/inventario')} className="text-xs text-primary hover:underline">Ver modulo</button>}
+          action={<button onClick={() => navigate('/inventario')} className="text-xs text-primary hover:underline">Ver módulo</button>}
         >
           {!metrics ? <SpinnerBlock /> : exceptions.length === 0 ? (
             <div className="py-10 text-center">
@@ -544,7 +544,7 @@ export default function DashboardPage() {
             <div className="py-10 text-center">
               <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
               <p className="text-sm text-foreground">Nada pendiente</p>
-              <p className="text-xs text-muted">No hay solicitudes bloqueando la operacion</p>
+              <p className="text-xs text-muted">No hay solicitudes bloqueando la operación</p>
             </div>
           ) : (
             <div className="space-y-3">

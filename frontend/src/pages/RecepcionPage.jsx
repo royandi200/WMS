@@ -22,9 +22,9 @@ import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 
 const RECEPTION_TABS = [
-  { key: 'orders', label: 'Ordenes de compra', capability: 'reception.create' },
-  { key: 'confirm', label: 'Confirmar recepcion', capability: 'reception.confirm' },
-  { key: 'history', label: 'Historico', capability: 'reception.read' },
+  { key: 'orders', label: 'Órdenes de compra', capability: 'reception.create' },
+  { key: 'confirm', label: 'Confirmar recepción', capability: 'reception.confirm' },
+  { key: 'history', label: 'Histórico', capability: 'reception.read' },
 ]
 
 function formatQuantity(value) {
@@ -91,7 +91,7 @@ export default function RecepcionPage() {
       setPurchaseLoading(true)
       listPurchaseOrders({ limit: 100 })
         .then((payload) => setPurchaseOrders(payload?.data?.rows || []))
-        .catch((error) => showToast(error.response?.data?.error || 'Error al cargar ordenes de compra', false))
+        .catch((error) => showToast(error.response?.data?.error || 'Error al cargar órdenes de compra', false))
         .finally(() => setPurchaseLoading(false))
       if (tab === 'orders') {
         listPurchaseOrderDocumentDrafts({ limit: 100 })
@@ -213,7 +213,7 @@ export default function RecepcionPage() {
               await fetchList({ limit: 200 })
               return { ok: true, data: payload?.data }
             } catch (error) {
-              const message = error.response?.data?.error || 'Error al preparar la recepcion desde la OC'
+              const message = error.response?.data?.error || 'Error al preparar la recepción desde la OC'
               showToast(message, false)
               return { ok: false, message }
             }
@@ -224,7 +224,7 @@ export default function RecepcionPage() {
               await fetchList({ limit: 200 })
               return { ok: true, data: payload?.data }
             } catch (error) {
-              const message = error.response?.data?.error || 'Error al preparar la recepcion desde 3Q'
+              const message = error.response?.data?.error || 'Error al preparar la recepción desde 3Q'
               showToast(message, false)
               return { ok: false, message }
             }
@@ -232,7 +232,7 @@ export default function RecepcionPage() {
           onConfirm={async (body) => {
             try {
               const payload = await confirmReception(body)
-              showToast(`Recepcion ${payload?.data?.numero || ''} confirmada`, true)
+              showToast(`Recepción ${payload?.data?.numero || ''} confirmada`, true)
               const [outsourcingPayload] = await Promise.all([
                 listOutsourcingOrders({ limit: 200 }),
                 fetchList({ limit: 200 }),
@@ -240,7 +240,7 @@ export default function RecepcionPage() {
               setOutsourcingOrders(outsourcingPayload?.data?.rows || [])
               return { ok: true }
             } catch (error) {
-              const message = error.response?.data?.error || 'Error al confirmar la recepcion'
+              const message = error.response?.data?.error || 'Error al confirmar la recepción'
               showToast(message, false)
               return { ok: false, message }
             }
@@ -334,7 +334,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      <div className="inline-flex border border-border p-1" aria-label="Origen de la recepcion">
+      <div className="inline-flex border border-border p-1" aria-label="Origen de la recepción">
         <button type="button" onClick={() => {
           setSource('purchase')
           setOutsourcingOrderId('')
@@ -378,31 +378,31 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
           </Field>
         </>}
         <button type="button" onClick={prepare} disabled={(source === 'purchase' ? !purchaseOrderId : !outsourcingOrderId || !Number(deliveryQuantity)) || loading || Boolean(receptionId)} className="btn-primary h-10 disabled:opacity-40">
-          {loading ? 'Preparando...' : 'Iniciar recepcion fisica'}
+          {loading ? 'Preparando...' : 'Iniciar recepción física'}
         </button>
       </div>
-      {receptionId && <p className="text-xs text-muted">Recepcion preparada: <span className="font-mono text-foreground">{receptionNumber}</span>. El inventario solo cambiara al aprobar.</p>}
+      {receptionId && <p className="text-xs text-muted">Recepción preparada: <span className="font-mono text-foreground">{receptionNumber}</span>. El inventario solo cambiará al aprobar.</p>}
       {items.map((item, itemIndex) => (
         <section key={item.item_id} className="border-y border-border py-4 space-y-3">
           <div>
             <p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p>
             <p className="text-xs text-muted">{item.outsourcingOrderId ? 'Cantidad de esta entrega 3Q' : 'Pendiente de la OC'}: {formatQuantity(item.expected)} {item.unit}</p>
-            {item.suggestedLocation && <p className="text-xs text-primary">Ubicacion preferida: {item.suggestedLocation}. Puedes seleccionar otra ubicacion activa si la operacion lo requiere.</p>}
-            {(item.documentLot || item.documentExpiry) && <p className="text-xs text-muted">Referencia del PDF: lote {item.documentLot || 'no informado'} | vence {item.documentExpiry || 'no informado'}. Coteja ambos contra la etiqueta fisica.</p>}
-            <p className="text-xs text-muted">Registra los datos fisicos completos. El PDF y la ubicacion preferida no se confirman automaticamente.</p>
+            {item.suggestedLocation && <p className="text-xs text-primary">Ubicación preferida: {item.suggestedLocation}. Puedes seleccionar otra ubicación activa si la operación lo requiere.</p>}
+            {(item.documentLot || item.documentExpiry) && <p className="text-xs text-muted">Referencia del PDF: lote {item.documentLot || 'no informado'} | vence {item.documentExpiry || 'no informado'}. Coteja ambos contra la etiqueta física.</p>}
+            <p className="text-xs text-muted">Registra los datos físicos completos. El PDF y la ubicación preferida no se confirman automáticamente.</p>
           </div>
           {item.distributions.map((distribution, distributionIndex) => (
             <div key={distributionIndex} className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-[150px_110px_minmax(150px,1fr)_minmax(170px,1fr)_140px_36px] gap-2 items-end">
-                <Field label="Condicion *"><select value={distribution.condicion} onChange={(event) => {
+                <Field label="Condición *"><select value={distribution.condicion} onChange={(event) => {
                   const condition = event.target.value
                   setDistribution(itemIndex, distributionIndex, 'condicion', condition)
-                }} className="input-field" required><option value="">Selecciona condicion</option><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
-                <Field label="Cantidad fisica *"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
+                }} className="input-field" required><option value="">Selecciona condición</option><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
+                <Field label="Cantidad física *"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
                 <Field label="Lote proveedor *"><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" required /></Field>
-                <Field label="Ubicacion *"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required><option value="">Selecciona ubicacion</option>{locations.map((location) => <option key={location.id} value={location.id}>{item.suggestedLocations.some((suggested) => Number(suggested.id) === Number(location.id)) ? 'Preferida - ' : ''}{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
+                <Field label="Ubicación *"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required><option value="">Selecciona ubicación</option>{locations.map((location) => <option key={location.id} value={location.id}>{item.suggestedLocations.some((suggested) => Number(suggested.id) === Number(location.id)) ? 'Preferida - ' : ''}{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
                 <Field label="Vencimiento *"><input type="date" value={distribution.fecha_venc} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'fecha_venc', event.target.value)} className="input-field" required /></Field>
-                <button type="button" title="Eliminar distribucion" onClick={() => removeDistribution(itemIndex, distributionIndex)} disabled={item.distributions.length === 1} className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
+                <button type="button" title="Eliminar distribución" onClick={() => removeDistribution(itemIndex, distributionIndex)} disabled={item.distributions.length === 1} className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
               </div>
               {distribution.condicion !== 'DISPONIBLE' && <Field label="Motivo *"><input value={distribution.motivo} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'motivo', event.target.value)} className="input-field max-w-2xl" required /></Field>}
             </div>
@@ -410,12 +410,12 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
           {Math.abs(item.distributions.reduce((sum, distribution) => sum + Number(distribution.cantidad || 0), 0) - item.expected) > 0.0001 && (
             <Field label="Motivo de la diferencia *"><input value={item.reason} onChange={(event) => setItems((current) => current.map((entry, index) => index === itemIndex ? { ...entry, reason: event.target.value } : entry))} className="input-field max-w-2xl" required /></Field>
           )}
-          <button type="button" onClick={() => addDistribution(itemIndex)} className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80"><Plus size={15} /> Otra ubicacion o condicion</button>
+          <button type="button" onClick={() => addDistribution(itemIndex)} className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80"><Plus size={15} /> Otra ubicación o condición</button>
         </section>
       ))}
       {receptionId && (
         <div className="flex flex-wrap gap-2">
-          <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Aprobar recepcion fisica'}</button>
+          <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Aprobar recepción física'}</button>
           <button type="button" onClick={() => {
             setReceptionId('')
             setReceptionNumber('')
@@ -426,7 +426,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
           }} disabled={loading} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground disabled:opacity-40">Cambiar origen</button>
         </div>
       )}
-      {!receptionId && !loading && <div className="py-10 text-center text-sm text-muted">Selecciona una orden abierta para registrar lo que llego fisicamente.</div>}
+      {!receptionId && !loading && <div className="py-10 text-center text-sm text-muted">Selecciona una orden abierta para registrar lo que llegó físicamente.</div>}
     </form>
   )
 }
@@ -530,8 +530,8 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
       />
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-foreground">Ordenes esperadas</p>
-          <p className="text-xs text-muted">No generan stock hasta confirmar la recepcion fisica.</p>
+          <p className="text-sm font-medium text-foreground">Órdenes esperadas</p>
+          <p className="text-xs text-muted">No generan stock hasta confirmar la recepción física.</p>
         </div>
         <button type="button" onClick={() => creating ? closeForm() : setCreating(true)} className="btn-primary inline-flex items-center gap-2">
           <Plus size={16} /> Nueva OC
@@ -541,7 +541,7 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
       {creating && (
         <form onSubmit={submit} className="border-y border-border py-5 space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Numero de OC *"><input value={form.numero} onChange={setHeader('numero')} readOnly={Boolean(form.document_draft_id)} className="input-field read-only:opacity-70" required /></Field>
+            <Field label="Número de OC *"><input value={form.numero} onChange={setHeader('numero')} readOnly={Boolean(form.document_draft_id)} className="input-field read-only:opacity-70" required /></Field>
             <Field label="Proveedor sincronizado *">
               <select value={form.tercero_id} onChange={setHeader('tercero_id')} className="input-field" required>
                 <option value="">Seleccionar proveedor</option>
@@ -557,14 +557,14 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
           {form.document_draft_id ? (
             <div className="flex items-center gap-3 border border-border bg-surface/40 px-4 py-3 text-sm text-foreground">
               <FileText size={20} className="text-primary" />
-              PDF recibido por WhatsApp. Revisa los datos extraidos antes de crear la OC operativa.
+              PDF recibido por WhatsApp. Revisa los datos extraídos antes de crear la OC operativa.
             </div>
           ) : <Field label="Orden de compra en PDF *">
             <label className="flex min-h-20 cursor-pointer items-center gap-3 border border-dashed border-border px-4 py-3 hover:border-primary/60">
               <FileText size={20} className="text-primary" />
               <span className="min-w-0 flex-1 text-sm text-foreground">
                 {form.documento_pdf ? form.documento_pdf.name : 'Seleccionar PDF'}
-                <span className="block text-xs text-muted">Maximo 2.5 MB. Los items se transcriben para permitir la conciliacion.</span>
+                <span className="block text-xs text-muted">Máximo 2.5 MB. Los ítems se transcriben para permitir la conciliación.</span>
               </span>
               <input
                 type="file"
@@ -584,14 +584,14 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
             </label>
           </Field>}
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted">Items</p>
+            <p className="text-xs font-medium text-muted">Ítems</p>
             {form.items.map((item, index) => (
               <div key={index} className="space-y-1">
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_120px_100px_36px] gap-2">
-                  <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, numeros, punto, guion, guion bajo o &amp;" className="input-field" required />
+                  <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, números, punto, guion, guion bajo o &amp;" className="input-field" required />
                   <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} placeholder="Cantidad" className="input-field" required />
                   <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" />
-                  <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar item" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
+                  <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar ítem" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
                     <Trash2 size={16} />
                   </button>
                 </div>
@@ -662,7 +662,7 @@ function PurchaseOrderDrafts({ rows = [], loading, canDiscard, onReview, onDisca
       <section className="border-y border-border py-4 space-y-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">PDF recibidos por WhatsApp</h2>
-          <p className="text-xs text-muted">Son borradores. No habilitan recepciones ni modifican inventario hasta su revision.</p>
+          <p className="text-xs text-muted">Son borradores. No habilitan recepciones ni modifican inventario hasta su revisión.</p>
         </div>
         {loading && !pending.length && <p className="text-sm text-muted">Cargando borradores...</p>}
         {pending.map((row) => (
@@ -671,10 +671,10 @@ function PurchaseOrderDrafts({ rows = [], loading, canDiscard, onReview, onDisca
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-sm font-semibold text-foreground">{row.referencia_documento}</span>
                 <span className={`px-2 py-1 text-xs font-semibold ${row.estado === 'REQUIERE_CORRECCION' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>
-                  {row.estado === 'REQUIERE_CORRECCION' ? 'Requiere correccion' : 'Pendiente de revision'}
+                  {row.estado === 'REQUIERE_CORRECCION' ? 'Requiere corrección' : 'Pendiente de revisión'}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} items | {formatUnitTotals(totalsFromItems(row.items))}</p>
+              <p className="mt-1 text-xs text-muted">{row.destinatario_nombre} | {(row.items || []).length} ítems | {formatUnitTotals(totalsFromItems(row.items))}</p>
               {(row.advertencias || []).slice(0, 2).map((warning) => <p key={warning} className={`mt-1 text-xs ${row.estado === 'REQUIERE_CORRECCION' ? 'text-red-400' : 'text-yellow-400'}`}>{warning}</p>)}
             </div>
             <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(row.fecha_documento || '').slice(0, 10)}</p></div>
@@ -710,7 +710,7 @@ function PurchaseOrderDrafts({ rows = [], loading, canDiscard, onReview, onDisca
               </button>
             </div>
             <div className="space-y-4 px-5 py-5">
-              <p className="text-sm text-muted">Se retirara de los borradores pendientes. El PDF y el registro se conservaran para auditoria; esta accion no modifica inventario.</p>
+              <p className="text-sm text-muted">Se retirará de los borradores pendientes. El PDF y el registro se conservarán para auditoría; esta acción no modifica inventario.</p>
               <Field label="Motivo *">
                 <textarea
                   value={discardReason}
@@ -780,13 +780,13 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
       <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full text-sm min-w-[960px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['ID / Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Items', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
+          {['ID / Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Ítems', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
           ))}
         </tr></thead>
         <tbody>
-          {loading && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Cargando ordenes...</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Sin ordenes de compra cargadas</td></tr>}
+          {loading && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Cargando órdenes...</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Sin órdenes de compra cargadas</td></tr>}
           {!loading && rows.map((row) => (
             <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 text-xs text-foreground">
@@ -842,14 +842,14 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
             <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
               <div>
                 <h2 id="cancel-po-title" className="text-base font-semibold text-foreground">Cancelar {cancelTarget.numero}</h2>
-                <p className="mt-1 text-sm text-muted">La orden dejara de estar disponible para recepcion o procesos 3Q. El PDF y su historial se conservaran.</p>
+                <p className="mt-1 text-sm text-muted">La orden dejará de estar disponible para recepción o procesos 3Q. El PDF y su historial se conservarán.</p>
               </div>
               <button type="button" onClick={closeCancel} title="Cerrar" className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted hover:text-foreground">
                 <X size={18} />
               </button>
             </div>
             <div className="space-y-4 px-5 py-5">
-              <Field label="Motivo de cancelacion *">
+              <Field label="Motivo de cancelación *">
                 <textarea
                   value={cancelReason}
                   onChange={(event) => setCancelReason(event.target.value)}
@@ -887,7 +887,7 @@ function ReceptionTable({ rows, loading }) {
       <table className="w-full text-sm min-w-[860px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Recepcion', 'OC / Maquila', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Documento / Aceptado', 'Conciliacion', 'Usuario'].map((c) => (
+            {['Recepción', 'OC / Maquila', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Documento / Aceptado', 'Conciliación', 'Usuario'].map((c) => (
               <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
             ))}
           </tr>
@@ -921,7 +921,7 @@ function ReceptionTable({ rows, loading }) {
                     </div>)
                   : (r.lote || '-')}</td>
               <td className="px-4 py-3 tabular-nums text-xs">{r.cantidad_oc ?? '-'} / {documentQuantity ?? '-'} / {r.cantidad_aceptada_acumulada ?? r.cantidad_fisica ?? r.cantidad_rec ?? '-'}</td>
-              <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.saldo_oc) > 0 ? 'text-yellow-400' : 'text-green-400'}>Saldo OC: {r.saldo_oc ?? '-'}</span><span className={`block ${Number(documentDifference) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>{usesSiigoInvoice ? 'Factura-Fisico' : 'Documento-Fisico'}: {documentDifference ?? '-'}</span></td>
+              <td className="px-4 py-3 tabular-nums text-xs"><span className={Number(r.saldo_oc) > 0 ? 'text-yellow-400' : 'text-green-400'}>Saldo OC: {r.saldo_oc ?? '-'}</span><span className={`block ${Number(documentDifference) !== 0 ? 'text-yellow-400' : 'text-muted'}`}>{usesSiigoInvoice ? 'Factura-Físico' : 'Documento-Físico'}: {documentDifference ?? '-'}</span></td>
               <td className="px-4 py-3">{r.usuario_nombre || '-'}</td>
             </tr>
             )

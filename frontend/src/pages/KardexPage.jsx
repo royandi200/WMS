@@ -102,7 +102,7 @@ export default function KardexPage() {
             <table className="w-full text-sm min-w-[760px]">
               <thead>
                 <tr className="bg-surface border-b border-border">
-                  {['Fecha', 'Tipo', 'SKU', 'Producto', 'Lote', 'Ubicacion', 'Cantidad', 'Saldo', 'Referencia'].map((c) => (
+                  {['Fecha', 'Tipo', 'SKU', 'Producto', 'Lote', 'Ubicación', 'Cantidad', 'Saldo', 'Referencia'].map((c) => (
                     <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
                   ))}
                 </tr>

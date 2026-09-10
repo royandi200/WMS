@@ -117,7 +117,7 @@ export const useProductionStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data: payload?.data ?? payload }
     } catch (e) {
-      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al preparar reposicion'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al preparar reposición'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
@@ -130,7 +130,7 @@ export const useProductionStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data: payload?.data ?? payload }
     } catch (e) {
-      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al confirmar reposicion'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al confirmar reposición'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
@@ -143,7 +143,7 @@ export const useProductionStore = create((set) => ({
       set({ loading: false })
       return { ok: true, data: payload?.data ?? payload }
     } catch (e) {
-      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cancelar reposicion'
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cancelar reposición'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }

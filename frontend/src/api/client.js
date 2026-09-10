@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
+import { correctApiMessageFields, correctSpanishCopy } from '../utils/spanishCopy'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -17,13 +18,16 @@ client.interceptors.response.use(
   (response) => {
     const contentType = String(response.headers?.['content-type'] || '')
     if (contentType.includes('text/html') || (typeof response.data === 'string' && response.data.trim().startsWith('<!doctype html'))) {
-      const err = new Error('La API devolvio HTML en vez de JSON')
+      const err = new Error('La API devolvió HTML en vez de JSON')
       err.response = { ...response, data: { error: 'Ruta de API no encontrada o mal configurada' } }
       return Promise.reject(err)
     }
+    correctApiMessageFields(response.data)
     return response
   },
   (error) => {
+    correctApiMessageFields(error.response?.data)
+    if (typeof error.message === 'string') error.message = correctSpanishCopy(error.message)
     // Solo cerrar sesión si el 401 viene con mensaje de token inválido/expirado
     // NOT en 404 de endpoints no implementados aún
     if (

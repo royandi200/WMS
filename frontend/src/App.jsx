@@ -66,7 +66,7 @@ class ErrorBoundary extends Component {
       return (
         <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
           <span className="text-4xl">⚠️</span>
-          <p className="text-foreground font-semibold">{chunkError ? 'Hay una nueva version del dashboard' : 'Error al cargar esta pagina'}</p>
+          <p className="text-foreground font-semibold">{chunkError ? 'Hay una nueva versión del dashboard' : 'Error al cargar esta página'}</p>
           <p className="text-muted text-sm max-w-sm">{chunkError ? 'Actualiza para cargar los archivos vigentes.' : this.state.error?.message}</p>
           <button
             onClick={() => chunkError ? window.location.reload() : this.setState({ hasError: false, error: null })}
