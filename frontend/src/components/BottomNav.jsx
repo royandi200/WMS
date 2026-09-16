@@ -5,7 +5,6 @@ const MAIN_NAV = [
   { to: '/recepciones',  icon: '↓', label: 'Recepciones' },
   { to: '/inventario',   icon: '▦', label: 'Inventario'  },
   { to: '/produccion',   icon: '⚙', label: 'Producción'  },
-  { to: '/aprobaciones', icon: '✓', label: 'Aprobac.'    },
 ]
 
 export default function BottomNav() {

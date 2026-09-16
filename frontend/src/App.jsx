@@ -17,7 +17,6 @@ const InventarioPage   = lazy(() => import('./pages/InventarioPage'))
 const ProduccionPage   = lazy(() => import('./pages/ProduccionPage'))
 const MermasPage       = lazy(() => import('./pages/MermasPage'))
 const KardexPage       = lazy(() => import('./pages/KardexPage'))
-const AprobacionesPage = lazy(() => import('./pages/AprobacionesPage'))
 const WebhookLogsPage  = lazy(() => import('./pages/WebhookLogsPage'))
 const UsuariosPage     = lazy(() => import('./pages/UsuariosPage'))
 const NotificacionesPage = lazy(() => import('./pages/NotificacionesPage'))
@@ -105,7 +104,6 @@ export default function App() {
             <Route path="maquila"      element={<CapabilityRoute capability="outsourcing.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><OutsourcingPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="mermas"       element={<CapabilityRoute capability="waste.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><MermasPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="kardex"       element={<CapabilityRoute capability="inventory.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><KardexPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
-            <Route path="aprobaciones" element={<CapabilityRoute capability="approvals.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><AprobacionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="productos"    element={<CapabilityRoute capability="catalog.read"><ErrorBoundary><ProductosPage /></ErrorBoundary></CapabilityRoute>} />
             <Route path="webhook-logs" element={<CapabilityRoute capability="webhook.logs.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><WebhookLogsPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="usuarios" element={<CapabilityRoute capability="users.manage"><ErrorBoundary><Suspense fallback={<PageLoader />}><UsuariosPage /></Suspense></ErrorBoundary></CapabilityRoute>} />

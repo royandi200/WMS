@@ -5,8 +5,6 @@ import {
   ArrowRight,
   BarChart3,
   CheckCircle2,
-  ClipboardList,
-  Clock3,
   Factory,
   PackageCheck,
   Radio,
@@ -35,29 +33,9 @@ const STATUS_LABEL = {
   CANCELADA: 'Canceladas',
 }
 
-const APPROVAL_LABEL = {
-  SOLICITAR_INICIO_PRODUCCION: 'Inicio producción',
-  SOLICITAR_CIERRE_PRODUCCION: 'Cierre producción',
-  SOLICITAR_DESPACHO: 'Despacho',
-  REPORTAR_MERMA: 'Merma',
-  REPORTE_MERMA: 'Merma',
-  INGRESO_RECEPCION: 'Recepción',
-}
-
 function fmtN(value, decimals = 0) {
   if (value == null || Number.isNaN(Number(value))) return '-'
   return Number(value).toLocaleString('es-CO', { maximumFractionDigits: decimals })
-}
-
-function toDate(value) {
-  const d = value ? new Date(value) : null
-  return d && !Number.isNaN(d.getTime()) ? d : null
-}
-
-function hoursSince(value) {
-  const d = toDate(value)
-  if (!d) return null
-  return Math.max(0, Math.round((Date.now() - d.getTime()) / 36e5))
 }
 
 function totalsText(rows) {
@@ -70,18 +48,6 @@ function SpinnerBlock({ rows = 3 }) {
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="h-9 rounded-lg bg-white/5 animate-pulse" />
       ))}
-    </div>
-  )
-}
-
-function MiniBar({ value, max, color }) {
-  const pct = max > 0 && Number(value) > 0 ? Math.max(4, Math.min(100, (Number(value) / max) * 100)) : 0
-  return (
-    <div className="h-1.5 rounded-full bg-border/70 overflow-hidden">
-      <div
-        className="h-full rounded-full transition-all duration-700"
-        style={{ width: `${pct}%`, background: color }}
-      />
     </div>
   )
 }
@@ -277,16 +243,12 @@ export default function DashboardPage() {
   const receptionLoading = isLoadingCore
   const productionLoading = isLoadingCore
   const wasteLoading = isLoadingCore
-  const loadingPending = isLoadingCore
   const loadingKardex = isLoadingCore
   const scopedReceptionCount = metrics?.reception.count || 0
   const productionByStatus = metrics?.production.byStatus || {}
   const activeProductions = ['PLANEADA', 'APROBADA', 'EN_PROCESO']
     .reduce((n, state) => n + (productionByStatus[state] || 0), 0)
   const closedInPeriod = metrics?.production.closed || 0
-  const approvalByType = metrics?.approvals?.byType || {}
-  const approvalCount = metrics?.approvals?.count || 0
-  const oldestApprovalHours = hoursSince(metrics?.approvals?.oldest) || 0
   const stockAlerts = Number(summary?.bajo_stock || 0)
   const expiringLots = Number(summary?.vencimientos_proximos || 0)
   const dwellAlerts = Number(summary?.permanencia_alertas || 0)
@@ -302,12 +264,6 @@ export default function DashboardPage() {
       detail: `${item.name || item.nombre || 'Producto'}: ${fmtN(item.disponible ?? item.stock)} / min ${fmtN(item.min_stock)}`,
       to: '/inventario',
     })),
-    ...(approvalCount ? [{
-      severity: oldestApprovalHours >= 6 ? 'alta' : 'media',
-      title: `${approvalCount} aprobaciones pendientes`,
-      detail: oldestApprovalHours ? `Más antigua: ${oldestApprovalHours} h` : 'Requieren decisión del supervisor',
-      to: '/aprobaciones',
-    }] : []),
     ...(expiringLots ? [{
       severity: 'media',
       title: `${expiringLots} lotes proximos a vencer`,
@@ -390,7 +346,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="p-4 overflow-x-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 min-w-0">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 min-w-0">
             <StageCard
               icon={Truck}
               title="Recepciones"
@@ -457,25 +413,9 @@ export default function DashboardPage() {
               ]}
               footer={wasteCount ? 'Bodega y producción' : 'Sin mermas en el período'}
             />
-            <StageCard
-              icon={ClipboardList}
-              title="Aprobaciones"
-              subtitle="Bloqueos operativos"
-              color="#d2a8ff"
-              href="/aprobaciones"
-              primary={metrics?.approvals ? fmtN(approvalCount) : '-'}
-              primaryLabel="pendientes"
-              loading={loadingPending}
-              alert={approvalCount > 0}
-              metrics={[
-                { label: 'Más antigua', value: oldestApprovalHours ? `${oldestApprovalHours} h` : '-' },
-                { label: 'Producción', value: fmtN((approvalByType.SOLICITAR_INICIO_PRODUCCION || 0) + (approvalByType.SOLICITAR_CIERRE_PRODUCCION || 0)) },
-              ]}
-              footer={metrics?.approvals ? 'Solicitudes pendientes actuales' : 'Sin permiso para consultar aprobaciones'}
-            />
           </div>
 
-          <div className="mt-5 pt-4 border-t border-border/50 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="mt-5 pt-4 border-t border-border/50 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <p className="text-[10px] text-muted uppercase">Entradas</p>
               <p className="text-sm font-semibold text-foreground break-words">{metrics ? totalsText(metrics.flows.entry.quantities) : '-'}</p>
@@ -491,16 +431,11 @@ export default function DashboardPage() {
               <p className="text-sm font-semibold text-foreground break-words">{metrics ? totalsText(metrics.waste.quantities) : '-'}</p>
               <p className="text-xs text-muted">{metrics?.waste.count ?? '-'} registros</p>
             </div>
-            <div>
-              <p className="text-[10px] text-muted uppercase">Pendientes</p>
-              <p className="text-sm font-semibold text-foreground">{metrics?.approvals ? fmtN(approvalCount) : '-'} aprobaciones</p>
-              <MiniBar value={approvalCount} max={Math.max(approvalCount, 10)} color="#d2a8ff" />
-            </div>
           </div>
         </div>
       </section>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Section
           icon={AlertTriangle}
           title="Excepciones que requieren atención"
@@ -510,7 +445,7 @@ export default function DashboardPage() {
             <div className="py-10 text-center">
               <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
               <p className="text-sm text-foreground">Sin excepciones criticas</p>
-              <p className="text-xs text-muted">Stock, aprobaciones y mermas bajo control</p>
+              <p className="text-xs text-muted">Stock y mermas bajo control</p>
             </div>
           ) : (
             <div>
@@ -533,42 +468,14 @@ export default function DashboardPage() {
           )}
         </Section>
 
-        <Section
-          icon={Clock3}
-          title="Aprobaciones por tipo"
-          action={<button onClick={() => navigate('/aprobaciones')} className="text-xs text-primary hover:underline">Gestionar</button>}
-        >
-          {loadingPending && !approvalCount ? (
-            <SpinnerBlock rows={4} />
-          ) : !metrics?.approvals ? <p className="text-sm text-muted">Sin permiso para consultar aprobaciones</p> : approvalCount === 0 ? (
-            <div className="py-10 text-center">
-              <CheckCircle2 size={24} className="mx-auto text-emerald-400/70 mb-2" />
-              <p className="text-sm text-foreground">Nada pendiente</p>
-              <p className="text-xs text-muted">No hay solicitudes bloqueando la operación</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {Object.entries(approvalByType).map(([type, count]) => (
-                <div key={type}>
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <p className="text-xs text-foreground truncate">{APPROVAL_LABEL[type] || type.replace(/_/g, ' ')}</p>
-                    <p className="text-xs font-semibold text-muted">{count}</p>
-                  </div>
-                  <MiniBar value={count} max={approvalCount} color="#d2a8ff" />
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {[
           { icon: PackageCheck, label: 'Recepciones', to: '/recepciones', color: '#58a6ff' },
           { icon: Truck, label: 'Despachos', to: '/despachos', color: '#f0883e' },
           { icon: Warehouse, label: 'Inventario', to: '/inventario', color: '#3fb950' },
-          { icon: ClipboardList, label: 'Aprobaciones', to: '/aprobaciones', color: '#d2a8ff', badge: approvalCount },
-        ].map(({ icon: Icon, label, to, color, badge }) => (
+        ].map(({ icon: Icon, label, to, color }) => (
           <button
             key={to}
             type="button"
@@ -579,11 +486,7 @@ export default function DashboardPage() {
               <Icon size={14} style={{ color }} />
             </span>
             <span className="text-xs font-medium flex-1 text-left">{label}</span>
-            {badge ? (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: `${color}20`, color }}>{badge}</span>
-            ) : (
-              <ArrowRight size={12} className="text-muted" />
-            )}
+            <ArrowRight size={12} className="text-muted" />
           </button>
         ))}
       </div>

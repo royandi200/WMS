@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
-  Bell, Boxes, ClipboardCheck, ClipboardList, Factory, FileClock, LayoutDashboard,
+  Bell, Boxes, ClipboardList, Factory, FileClock, LayoutDashboard,
   PackageCheck, PackageOpen, PackageSearch, RefreshCcw, RotateCcw, Settings2, Trash2,
   Truck, Users, X,
 } from 'lucide-react'
@@ -19,7 +19,6 @@ const NAV = [
   ] },
   { group: 'Trazabilidad', items: [
     { to: '/kardex', icon: FileClock, label: 'Kardex', capability: 'inventory.read' },
-    { to: '/aprobaciones', icon: ClipboardCheck, label: 'Aprobaciones', capability: 'approvals.read' },
   ] },
   { group: 'Catálogos', items: [{ to: '/productos', icon: PackageSearch, label: 'Productos', capability: 'catalog.read' }] },
   { group: 'Sistema', items: [
