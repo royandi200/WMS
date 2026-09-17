@@ -3,12 +3,16 @@ const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES } = require('../_lib/capabilities');
 const { normalizeApprovalPayload } = require('../_lib/approval-view');
 const { isLegacyMutatingApprovalAction } = require('../_lib/approval-policy');
+const { approvalsWorkflowEnabled, APPROVALS_ENDPOINT_MESSAGE } = require('../_lib/retired-flows');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  if (!approvalsWorkflowEnabled()) {
+    return res.status(410).json({ ok: false, error: APPROVALS_ENDPOINT_MESSAGE });
+  }
 
   try {
     await requireCapability(req, CAPABILITIES.APPROVALS_READ);

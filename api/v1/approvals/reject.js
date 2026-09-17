@@ -2,11 +2,15 @@
 const { query } = require('../../_lib/db');
 const { cors, requireCapability } = require('../../_lib/auth');
 const { CAPABILITIES } = require('../../_lib/capabilities');
+const { approvalsWorkflowEnabled, APPROVALS_ENDPOINT_MESSAGE } = require('../../_lib/retired-flows');
 
 module.exports = async (req, res) => {
   cors(res, 'POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  if (!approvalsWorkflowEnabled()) {
+    return res.status(410).json({ ok: false, error: APPROVALS_ENDPOINT_MESSAGE });
+  }
 
   let user;
   try {

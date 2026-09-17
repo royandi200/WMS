@@ -7,6 +7,7 @@ const { cors, requireCapability } = require('../../_lib/auth');
 const { CAPABILITIES } = require('../../_lib/capabilities');
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
+const { approvalsWorkflowEnabled, APPROVALS_ENDPOINT_MESSAGE } = require('../../_lib/retired-flows');
 
 const BB_TOKEN = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
@@ -559,6 +560,9 @@ module.exports = async (req, res) => {
   cors(res, 'POST');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  if (!approvalsWorkflowEnabled()) {
+    return res.status(410).json({ ok: false, error: APPROVALS_ENDPOINT_MESSAGE });
+  }
 
   let user;
   try {
