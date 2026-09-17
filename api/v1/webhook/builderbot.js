@@ -110,6 +110,7 @@ const {
   parseProductionCloseFromText: parseProductionCloseInput,
 } = require('../../_lib/production-close-input');
 const { workflowFlags } = require('../../_lib/feature-flags');
+const { retiredActionMessage } = require('../../_lib/retired-flows');
 const { formatPendingApprovals } = require('../../_lib/pending-approvals');
 const { formatCapacityCheck, getEligibleStock } = require('../../_lib/manufacturing-capacity');
 const { assertInternalProductionProduct } = require('../../_lib/product-modes');
@@ -1422,6 +1423,15 @@ module.exports = async (req, res) => {
       params = {
         texto: 'El despacho debe originarse en una factura de venta de Siigo. Puedo consultar nuevas facturas o confirmar una tarea de despacho existente.',
       };
+    }
+
+    // Flujos retirados (depuracion 2026-09-17): se responde con la guia hacia
+    // el flujo vigente y no se ejecuta ninguna operacion.
+    const retiredMessage = retiredActionMessage(action);
+    if (retiredMessage) {
+      const msg = `⚠️ ${retiredMessage}`;
+      await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RETIRED_FLOW' }, status: 'REJECTED' });
+      return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'RETIRED_FLOW' });
     }
 
     const rolRaw = user.rol_nombre || '';
