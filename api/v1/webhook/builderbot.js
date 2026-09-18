@@ -1343,7 +1343,7 @@ module.exports = async (req, res) => {
     params = {
       ...params,
       texto: isGreeting(rawText)
-        ? 'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos, trazabilidad y aprobaciones. ¿Que necesitas?'
+        ? 'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos y trazabilidad. ¿Que necesitas?'
         : (params.texto || params.mensaje || params.message || 'No entendi tu mensaje. ¿Puedes ser mas especifico?'),
     };
   }
@@ -3725,7 +3725,7 @@ module.exports = async (req, res) => {
                   info.texto ||
                   info.mensaje ||
                   info.message ||
-                  'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos, trazabilidad y aprobaciones. ¿Que necesitas?';
+                  'Hola. Soy el asistente del WMS. Puedo ayudarte con stock, recepcion, produccion, despachos y trazabilidad. ¿Que necesitas?';
         break;
       }
 

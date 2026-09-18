@@ -22,6 +22,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/api/v1/products/:id/toggle", "destination": "/api/v1/products/[id]/toggle" },
     { "source": "/api/v1/products/:id", "destination": "/api/v1/products/[id]" },
     { "source": "/api/v1/inventory/product/:id", "destination": "/api/v1/inventory/product/[id]" },
     { "source": "/api/v1/inventory/lot/:lpn", "destination": "/api/v1/inventory/lot/[lpn]" },

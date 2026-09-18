@@ -260,11 +260,18 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
   const [outsourcingOrderId, setOutsourcingOrderId] = useState('')
   const [deliveryQuantity, setDeliveryQuantity] = useState('')
   const [receptionNumber, setReceptionNumber] = useState('')
+  const [warehouseId, setWarehouseId] = useState(null)
+  const [confirmError, setConfirmError] = useState('')
   const [items, setItems] = useState([])
   const directPurchaseOrders = purchaseOrders.filter(canPrepareDirectPurchaseOrder)
   const receivableOutsourcingOrders = outsourcingOrders.filter(canPrepareOutsourcingOrder)
+  // El servidor solo acepta ubicaciones activas de la bodega de la recepcion.
+  const receptionLocations = warehouseId
+    ? locations.filter((location) => Number(location.bodega_id) === warehouseId)
+    : locations
 
   const prepare = async () => {
+    setConfirmError('')
     const result = source === 'outsourcing'
       ? await onPrepareOutsourcing(Number(outsourcingOrderId), Number(deliveryQuantity))
       : await onPrepare(Number(purchaseOrderId))
@@ -272,6 +279,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
     const reception = result.data
     setReceptionId(String(reception.id))
     setReceptionNumber(reception.numero)
+    setWarehouseId(Number(reception.bodega_id) || null)
     setPurchaseOrderId(String(reception.orden_compra_id || purchaseOrderId))
     setItems((reception.items || []).map((item) => ({
       item_id: item.item_id,
@@ -321,6 +329,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
         })),
       })),
     }
+    setConfirmError('')
     const result = await onConfirm(body)
     if (result.ok) {
       setReceptionId('')
@@ -328,7 +337,10 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
       setOutsourcingOrderId('')
       setDeliveryQuantity('')
       setReceptionNumber('')
+      setWarehouseId(null)
       setItems([])
+    } else {
+      setConfirmError(result.message || 'No fue posible confirmar la recepción')
     }
   }
 
@@ -400,7 +412,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
                 }} className="input-field" required><option value="">Selecciona condición</option><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
                 <Field label="Cantidad física *"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
                 <Field label="Lote proveedor *"><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" required /></Field>
-                <Field label="Ubicación *"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required><option value="">Selecciona ubicación</option>{locations.map((location) => <option key={location.id} value={location.id}>{item.suggestedLocations.some((suggested) => Number(suggested.id) === Number(location.id)) ? 'Preferida - ' : ''}{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
+                <Field label="Ubicación *"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required><option value="">Selecciona ubicación</option>{receptionLocations.map((location) => <option key={location.id} value={location.id}>{item.suggestedLocations.some((suggested) => Number(suggested.id) === Number(location.id)) ? 'Preferida - ' : ''}{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
                 <Field label="Vencimiento *"><input type="date" value={distribution.fecha_venc} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'fecha_venc', event.target.value)} className="input-field" required /></Field>
                 <button type="button" title="Eliminar distribución" onClick={() => removeDistribution(itemIndex, distributionIndex)} disabled={item.distributions.length === 1} className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
               </div>
@@ -413,10 +425,15 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
           <button type="button" onClick={() => addDistribution(itemIndex)} className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80"><Plus size={15} /> Otra ubicación o condición</button>
         </section>
       ))}
+      {receptionId && confirmError && (
+        <div role="alert" className="px-4 py-3 rounded-lg border text-sm bg-danger/10 border-danger/30 text-danger">{confirmError}</div>
+      )}
       {receptionId && (
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Aprobar recepción física'}</button>
           <button type="button" onClick={() => {
+            setConfirmError('')
+            setWarehouseId(null)
             setReceptionId('')
             setReceptionNumber('')
             setPurchaseOrderId('')

@@ -2,6 +2,14 @@
 
 Última actualización: 2026-09-17
 
+## 2026-09-18 - Bateria integral y correcciones
+
+- Se ejecuto la bateria integral sobre produccion (sistema aun no en operacion) con el metodo de sesion del navegador: cada accion por una via y verificacion por otra. Registro: `docs/ejecucion-pruebas-integrales-2026-09-17.md`.
+- Correcciones: activar/inactivar producto (ruta en `vercel.json`), error visible al confirmar recepcion, ubicaciones filtradas por bodega de la recepcion, ubicacion y lote proveedor de partidas en cuarentena, stock bajo por minimo configurado, saludo del agente.
+- Nuevas pruebas: notificaciones con BuilderBot simulado, webhook completo con base simulada para flujos retirados y autenticacion, y protecciones de las correcciones. Suite `409/409`.
+- Riesgo abierto S-01: el webhook acepta la palabra clave publica como autenticacion y el repositorio es publico. Requiere decision del propietario.
+- Bloqueos de entorno: llave Siigo vencida en Vercel (H-02) y notificaciones reales activas (H-01).
+
 ## 2026-09-17 - Depuracion de flujos retirados (etapa 1)
 
 - Se apago el circuito de aprobaciones acordado con el cliente: la produccion se libera y se cierra directamente. El panel ya lo habia retirado en `a9a3868`; ahora sus endpoints tambien responden HTTP 410.

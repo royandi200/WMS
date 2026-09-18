@@ -242,7 +242,11 @@ function ProductResult({ data }) {
           <tbody>
             {displayRows.map((r) => (
               <tr key={r.stock_id || r.lote || r.lpn} className="border-b border-border/50 hover:bg-white/[0.02]">
-                <td className="px-4 py-3 font-mono text-xs">{r.lote || r.lpn || '-'}</td>
+                <td className="px-4 py-3 font-mono text-xs">
+                  {r.lote_proveedor && r.lote_proveedor !== (r.lote || r.lpn)
+                    ? <>{r.lote_proveedor}<span className="block text-[10px] text-muted break-all">Partida {r.lote || r.lpn}</span></>
+                    : (r.lote || r.lpn || '-')}
+                </td>
                 <td className="px-4 py-3">{r.bodega_codigo || r.bodega_nombre || '-'}</td>
                 <td className="px-4 py-3">{r.ubicacion_codigo || r.ubicacion_zona || '-'}</td>
                 <td className="px-4 py-3"><StatusBadge value={r.estado_calculado || r.lot_status || 'DISPONIBLE'} /></td>

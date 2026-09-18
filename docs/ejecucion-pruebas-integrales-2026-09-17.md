@@ -92,6 +92,19 @@ Referencia de IDs: `docs/inventario-detallado-plataforma-wms.md`.
 | Suite automatica completa | APROBADO | `npm test` 402/402 |
 | A8-07 Cancelar remision (pantalla) | APROBADO | Confirmacion "Cancelar REM-3Q-20260918-000018 y liberar sus reservas"; orden CANCELADA, remision anulada, las 4 reservas vuelven a 0 y los disponibles a los valores iniciales |
 
+## Correcciones aplicadas (2026-09-18)
+
+| ID | Correccion | Archivos | Estado |
+| --- | --- | --- | --- |
+| B-01 | Rewrite `/api/v1/products/:id/toggle` antes de `/products/:id`; mensaje de error de respaldo si la respuesta viene vacia. | `vercel.json`, `frontend/src/store/productsStore.js` | Pendiente de verificar desplegado |
+| B-02 | El error de confirmacion se muestra junto al boton "Aprobar recepcion fisica" y permanece hasta el siguiente intento. Nota: el aviso superior existente si mostraba el motivo, pero desaparecia a los 4 s y quedaba fuera de la vista del usuario. | `frontend/src/pages/RecepcionPage.jsx` | Pendiente de verificar desplegado |
+| B-03 | La lista de ubicaciones se filtra por la bodega de la recepcion preparada. | `frontend/src/pages/RecepcionPage.jsx` | Pendiente de verificar desplegado |
+| B-04 | La consulta de producto toma ubicacion y lote proveedor desde `recepcion_distribuciones` cuando la partida bloqueada no tiene fila en `stock`; la pantalla muestra el lote proveedor y la partida interna. El lote tecnico `RECBLK-` es intencional (separa lo bloqueado del lote disponible). | `api/v1/inventory/product/[id].js`, `frontend/src/pages/InventarioPage.jsx` | Pendiente de verificar desplegado |
+| B-05 | Stock bajo y resumen dependen de `stock_minimo > 0`, sin exigir `control_stock = 1`. Cubre productos creados en el panel y el catalogo cargado por acta. | `api/v1/inventory/low-stock.js`, `api/v1/inventory/summary.js` | Pendiente de verificar desplegado |
+| O-06 | Saludo del agente sin "aprobaciones". | `api/v1/webhook/builderbot.js` | Aplicado |
+
+Pruebas: `test/qa-fixes-2026-09-18.test.js`; suite completa 409/409 y build de Vite aprobados.
+
 ## Defectos y observaciones
 
 | ID | Tipo | Descripcion | Evidencia | Correccion propuesta |

@@ -33,7 +33,9 @@ module.exports = async (req, res) => {
        LEFT JOIN lots l ON l.product_id = s.producto_id AND BINARY l.lpn = BINARY s.lote
        LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.bodega_id = s.bodega_id
        LEFT JOIN bodegas b ON b.id = s.bodega_id
-       WHERE p.activo = 1 AND p.control_stock = 1 AND p.stock_minimo > 0
+       -- Un minimo configurado expresa la intencion de alertar, aunque el
+       -- producto se haya creado en el WMS sin control de stock de Siigo.
+       WHERE p.activo = 1 AND p.stock_minimo > 0
        GROUP BY p.id, p.siigo_code, p.nombre, p.unit_label, p.stock_minimo
        HAVING disponible <= p.stock_minimo
        ORDER BY (disponible / GREATEST(p.stock_minimo, 1)) ASC

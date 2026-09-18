@@ -39,7 +39,7 @@ module.exports = async (req, res) => {
          LEFT JOIN lots l ON l.product_id = s.producto_id AND BINARY l.lpn = BINARY s.lote
          LEFT JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.bodega_id = s.bodega_id
          LEFT JOIN bodegas b ON b.id = s.bodega_id
-         WHERE p.activo = 1 AND p.control_stock = 1 AND p.stock_minimo > 0
+         WHERE p.activo = 1 AND p.stock_minimo > 0
          GROUP BY p.id, p.stock_minimo
          HAVING COALESCE(SUM(CASE
            WHEN l.status = 'DISPONIBLE'

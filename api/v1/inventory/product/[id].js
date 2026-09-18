@@ -38,11 +38,12 @@ module.exports = async (req, res) => {
          b.codigo AS bodega_codigo,
          b.nombre AS bodega_nombre,
          b.activa AS bodega_activa,
-         COALESCE(s.ubicacion_id, dv.ubicacion_id) AS ubicacion_id,
+         COALESCE(s.ubicacion_id, dv.ubicacion_id, rd.ubicacion_id) AS ubicacion_id,
          u.codigo AS ubicacion_codigo,
          u.zona AS ubicacion_zona,
          u.activa AS ubicacion_activa,
          l.lpn AS lote,
+         rd.lote_proveedor,
          s.fecha_venc,
          COALESCE(s.cantidad, l.qty_current) AS cantidad,
          COALESCE(s.reservada, 0) AS reservada,
@@ -58,15 +59,22 @@ module.exports = async (req, res) => {
        FROM lots l
        LEFT JOIN stock s ON BINARY s.lote = BINARY l.lpn AND s.producto_id = l.product_id
        LEFT JOIN devoluciones dv ON BINARY dv.lote = BINARY l.lpn
+       -- Las partidas bloqueadas de recepcion (RECBLK) no tienen fila en stock:
+       -- su ubicacion y lote de proveedor se conservan en la distribucion.
+       LEFT JOIN (
+         SELECT lote, MIN(ubicacion_id) AS ubicacion_id, MIN(lote_proveedor) AS lote_proveedor
+           FROM recepcion_distribuciones
+          GROUP BY lote
+       ) rd ON BINARY rd.lote = BINARY l.lpn
        LEFT JOIN bodegas b ON b.id = COALESCE(s.bodega_id, l.bodega_id)
-       LEFT JOIN ubicaciones u ON u.id = COALESCE(s.ubicacion_id, dv.ubicacion_id)
+       LEFT JOIN ubicaciones u ON u.id = COALESCE(s.ubicacion_id, dv.ubicacion_id, rd.ubicacion_id)
        WHERE l.product_id = ? AND l.qty_current > 0
        UNION ALL
        SELECT
          s.id AS stock_id, s.producto_id, s.bodega_id,
          b.codigo AS bodega_codigo, b.nombre AS bodega_nombre, b.activa AS bodega_activa,
          s.ubicacion_id, u.codigo AS ubicacion_codigo, u.zona AS ubicacion_zona,
-         u.activa AS ubicacion_activa, s.lote, s.fecha_venc, s.cantidad,
+         u.activa AS ubicacion_activa, s.lote, NULL AS lote_proveedor, s.fecha_venc, s.cantidad,
          COALESCE(s.reservada, 0) AS reservada,
          (s.cantidad - COALESCE(s.reservada, 0)) AS disponible,
          NULL AS lot_id, NULL AS lpn, NULL AS lot_status, NULL AS lot_origin,

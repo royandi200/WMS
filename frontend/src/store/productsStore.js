@@ -97,7 +97,7 @@ export const useProductsStore = create((set, get) => ({
       set((s) => ({ list: s.list.map((p) => p.id === id ? { ...p, active: !p.active } : p) }))
       return { ok: true }
     } catch (e) {
-      return { ok: false, message: e.response?.data?.error ?? 'Error' }
+      return { ok: false, message: e.response?.data?.error || 'No se pudo cambiar el estado del producto' }
     }
   },
 }))
