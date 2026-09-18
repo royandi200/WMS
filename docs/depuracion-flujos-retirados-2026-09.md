@@ -57,13 +57,11 @@ Motivo: flujo anterior. Hoy las facturas nacen en Siigo y `SIIGO_STAMP_SEND=fals
 | `api/_lib/retired-flows.js` | Nuevo. Concentra la decision: acciones retiradas, mensaje de redireccion y la escotilla `ENABLE_APPROVALS_WORKFLOW`. |
 | `api/v1/webhook/builderbot.js` | Antes de validar permisos, una accion retirada responde con la guia vigente, se registra como `RETIRED_FLOW` en `webhook_logs` y no ejecuta nada. |
 | `api/v1/approvals.js`, `api/v1/approvals/pending.js`, `api/v1/approvals/approve.js`, `api/v1/approvals/reject.js` | Responden HTTP 410 con el motivo mientras el circuito este apagado. |
-| `frontend/src/components/Sidebar.jsx` | Se retira la entrada Aprobaciones. |
-| `frontend/src/components/BottomNav.jsx` | Aprobaciones se sustituye por Despachos. |
-| `frontend/src/App.jsx` | Se retira la ruta `/aprobaciones` y su carga diferida. |
-| `frontend/src/pages/DashboardPage.jsx` | Se retiran la tarjeta Aprobaciones, la seccion Aprobaciones por tipo, la excepcion de aprobaciones pendientes y el acceso rapido; el indicador pasa a despachos y el acceso rapido a Produccion. |
 | `test/retired-flows.test.js` | Nuevo. Comprueba el apagado, la insensibilidad a mayusculas y espacios, que las acciones vigentes no se bloqueen y que la escotilla restaure solo las aprobaciones. |
 
-Verificacion ejecutada: `npm test` 380/380 en verde y build de Vite satisfactorio.
+Panel (menu lateral, menu inferior, ruta `/aprobaciones` y dashboard): lo retiro Juan en `main` con el commit `a9a3868` "refactor: retirar aprobaciones del dashboard" del 16 de septiembre, con su prueba `test/dashboard-without-approvals.test.js`. Esta rama se integro sobre ese commit y conserva su version de los archivos del panel; aporta el bloqueo en servidor y webhook, que el panel por si solo no cubre.
+
+Verificacion ejecutada: `npm test` 381/381 en verde y build de Vite satisfactorio.
 
 ## Como revertir
 

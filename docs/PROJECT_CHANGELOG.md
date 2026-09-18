@@ -4,14 +4,14 @@
 
 ## 2026-09-17 - Depuracion de flujos retirados (etapa 1)
 
-- Se apago el circuito de aprobaciones acordado con el cliente: la produccion se libera y se cierra directamente. Deja de estar en el menu lateral, el menu inferior, la ruta `/aprobaciones` y el dashboard; sus endpoints responden HTTP 410.
+- Se apago el circuito de aprobaciones acordado con el cliente: la produccion se libera y se cierra directamente. El panel ya lo habia retirado en `a9a3868`; ahora sus endpoints tambien responden HTTP 410.
 - Las siete acciones retiradas de WhatsApp (`SOLICITAR_INICIO_PRODUCCION`, `SOLICITAR_CIERRE_PRODUCCION`, `CONSULTAR_SOLICITUDES_PENDIENTES`, `APROBAR_SOLICITUD`, `RECHAZAR_SOLICITUD`, `SOLICITAR_DESPACHO`, `INGRESO_RECEPCION`) responden con la guia hacia el flujo vigente, se registran como `RETIRED_FLOW` y no ejecutan ninguna operacion.
 - Se elimina el riesgo de solicitudes en espera que, al aprobarse, movian inventario sin responsable asignado.
 - La decision se concentra en `api/_lib/retired-flows.js` con la escotilla `ENABLE_APPROVALS_WORKFLOW` para revertir sin rehacer desarrollo.
 - El codigo, la tabla `aprobaciones` y sus pruebas permanecen hasta la etapa 2, posterior a la bateria de pruebas.
 - Registro completo, alcance, reversion y pendientes: `docs/depuracion-flujos-retirados-2026-09.md`.
 - Inventario actualizado con marcas de vigencia, flujo In & Out y casos DEP-01 a DEP-07: `docs/inventario-detallado-plataforma-wms.md`.
-- Validacion local: `380/380` pruebas y build Vite aprobados. Sin cambios de base de datos ni despliegue.
+- Validacion local: `381/381` pruebas y build Vite aprobados. Sin cambios de base de datos ni despliegue a produccion.
 
 ## 2026-09-05 - Integridad operativa y bateria de regresion
 
