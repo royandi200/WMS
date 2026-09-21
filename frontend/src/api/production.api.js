@@ -17,6 +17,7 @@ export const startProduction  = (body)   => client.post('/production/start',    
 export const confirmMaterials = (body)   => client.post('/production/confirm',           withNormalizedOrder(body)).then(r => r.data)
 export const advancePhase     = (body)   => client.post('/production/advance',           withNormalizedOrder(body)).then(r => r.data)
 export const closeProduction  = (body)   => client.post('/production/close',             withNormalizedOrder(body)).then(r => r.data)
+export const cancelProduction = (body)   => client.post('/production/cancel',            withNormalizedOrder(body)).then(r => r.data)
 export const adjustMaterials  = (body)   => client.post('/production/material-adjustment', withNormalizedOrder(body)).then(r => r.data)
 export const prepareReplenishment = (body) => client.post('/production/replenishment-prepare', withNormalizedOrder(body)).then(r => r.data)
 export const confirmReplenishment = (body) => client.post('/production/replenishment-confirm', withNormalizedOrder(body)).then(r => r.data)

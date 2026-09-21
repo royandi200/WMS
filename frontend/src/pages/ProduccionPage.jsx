@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Ban, X } from 'lucide-react'
 import { useProductionStore } from '../store/productionStore'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
@@ -28,11 +29,17 @@ const safeTime = (val) => {
 export default function ProduccionPage() {
   const [tab, setTab] = useState(0)
   const [locations, setLocations] = useState([])
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelConfirmed, setCancelConfirmed] = useState(false)
+  const [cancelError, setCancelError] = useState('')
+  const [listToast, setListToast] = useState(null)
   const {
     list, loading, error, fetchList, start, confirm, adjustMaterials,
-    prepareReplenishment, confirmReplenishment, cancelReplenishment, advance, close, clearError,
+    prepareReplenishment, confirmReplenishment, cancelReplenishment, advance, close, cancelOrder, clearError,
   } = useProductionStore()
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
+  const canCancelOrder = capabilities.includes('*') || capabilities.includes('production.release')
   const visibleTabs = TABS.map((label, index) => ({ label, index, capability: TAB_CAPABILITIES[index] }))
     .filter((item) => capabilities.includes('*') || capabilities.includes(item.capability))
 
@@ -44,6 +51,38 @@ export default function ProduccionPage() {
     if (tab === 0) fetchList()
     if (tab === 3 || tab === 7) listUbicaciones().then((payload) => setLocations(payload?.data?.rows || [])).catch(() => setLocations([]))
   }, [tab])
+
+  const closeCancellation = () => {
+    setCancelTarget(null)
+    setCancelReason('')
+    setCancelConfirmed(false)
+    setCancelError('')
+  }
+
+  const submitCancellation = async (event) => {
+    event.preventDefault()
+    setCancelError('')
+    if (cancelReason.trim().length < 5) {
+      setCancelError('Escribe un motivo de al menos 5 caracteres.')
+      return
+    }
+    if (!cancelConfirmed) {
+      setCancelError('Confirma que deseas cancelar esta orden y liberar sus reservas.')
+      return
+    }
+    const result = await cancelOrder({ order_id: cancelTarget.id, motivo: cancelReason.trim() })
+    if (!result.ok) {
+      setCancelError(result.message)
+      return
+    }
+    setListToast({
+      ok: true,
+      msg: result.data?.duplicate
+        ? 'La orden ya estaba cancelada.'
+        : `OP ID ${result.data?.order_id} cancelada; se liberaron ${result.data?.released_reservations || 0} reservas.`,
+    })
+    closeCancellation()
+  }
 
   return (
     <div>
@@ -64,6 +103,7 @@ export default function ProduccionPage() {
       </div>
 
       {error && <Alert msg={error} />}
+      {listToast && tab === 0 && <div className="mb-4"><ToastInline toast={listToast} /></div>}
 
       {tab === 0 && (
         <div>
@@ -74,7 +114,7 @@ export default function ProduccionPage() {
               <table className="w-full text-sm min-w-[1240px]">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['Orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Mermas', 'Lote PT', 'Fase', 'Estado', 'Fecha', 'Hora'].map((c) => (
+                    {['Orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Mermas', 'Lote PT', 'Fase', 'Estado', 'Fecha', 'Hora', 'Acciones'].map((c) => (
                       <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
                     ))}
                   </tr>
@@ -103,6 +143,19 @@ export default function ProduccionPage() {
                         </td>
                         <td className="px-4 py-3 text-muted text-xs">{safeDate(r.created_at)}</td>
                         <td className="px-4 py-3 text-muted text-xs">{safeTime(r.created_at)}</td>
+                        <td className="px-4 py-3">
+                          {canCancelOrder && r.status === 'APROBADA' ? (
+                            <button
+                              type="button"
+                              title="Cancelar orden de producción"
+                              aria-label={`Cancelar OP ID ${r.id}`}
+                              onClick={() => { setListToast(null); setCancelTarget(r) }}
+                              className="inline-flex h-8 w-8 items-center justify-center text-muted hover:bg-danger/10 hover:text-danger"
+                            >
+                              <Ban size={16} />
+                            </button>
+                          ) : <span className="text-muted">-</span>}
+                        </td>
                       </tr>
                     )
                   })}
@@ -120,6 +173,48 @@ export default function ProduccionPage() {
       {tab === 5 && <ConfirmReplenishmentForm loading={loading} onSubmit={confirmReplenishment} />}
       {tab === 6 && <AdvanceForm loading={loading} onSubmit={advance} />}
       {tab === 7 && <CloseForm loading={loading} onSubmit={close} locations={locations} />}
+
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="cancel-production-title">
+          <form onSubmit={submitCancellation} className="w-full max-w-lg border border-border bg-surface shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <h2 id="cancel-production-title" className="text-base font-semibold text-foreground">Cancelar OP ID {cancelTarget.id}</h2>
+                <p className="mt-1 text-sm text-muted">{cancelTarget.codigo_orden} · {cancelTarget.product_name}</p>
+                <p className="mt-2 text-sm text-muted">La orden quedará cancelada y sus materiales reservados volverán a estar disponibles. No se modificará el stock físico.</p>
+              </div>
+              <button type="button" onClick={closeCancellation} title="Cerrar" className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-muted hover:text-foreground">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <Field label="Motivo de cancelación *">
+                <textarea
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  maxLength={500}
+                  rows={4}
+                  className="input-field resize-y"
+                  placeholder="Ej. Orden duplicada o solicitud del cliente cancelada"
+                  autoFocus
+                  required
+                />
+              </Field>
+              <label className="flex cursor-pointer items-start gap-3 text-sm text-foreground">
+                <input type="checkbox" checked={cancelConfirmed} onChange={(event) => setCancelConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" />
+                <span>Confirmo que deseo cancelar la orden y liberar todas sus reservas de materiales.</span>
+              </label>
+              {cancelError && <div role="alert" className="border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{cancelError}</div>}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <button type="button" onClick={closeCancellation} disabled={loading} className="px-4 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50">Volver</button>
+              <button type="submit" disabled={loading || !cancelConfirmed || cancelReason.trim().length < 5} className="inline-flex items-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90 disabled:cursor-not-allowed disabled:opacity-50">
+                <Ban size={15} /> {loading ? 'Cancelando...' : 'Cancelar orden'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import {
   confirmMaterials,
   advancePhase,
   closeProduction,
+  cancelProduction,
   listProductions,
   getProduction,
   adjustMaterials,
@@ -181,6 +182,25 @@ export const useProductionStore = create((set) => ({
       return { ok: true, data: payload?.data ?? payload }
     } catch (e) {
       const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cerrar producción'
+      set({ error: msg, loading: false })
+      return { ok: false, message: msg }
+    }
+  },
+
+  cancelOrder: async (body) => {
+    set({ loading: true, error: null })
+    try {
+      const payload = await cancelProduction(body)
+      const data = payload?.data ?? payload
+      set((state) => ({
+        list: state.list.map((order) => String(order.id) === String(data?.order_id)
+          ? { ...order, status: 'CANCELADA', estado: 'CANCELADA' }
+          : order),
+        loading: false,
+      }))
+      return { ok: true, data }
+    } catch (e) {
+      const msg = e.response?.data?.error || e.response?.data?.message || 'Error al cancelar la orden de producción'
       set({ error: msg, loading: false })
       return { ok: false, message: msg }
     }
