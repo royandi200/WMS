@@ -206,6 +206,18 @@ Esta fase se ejecuta al final para evitar mensajes a usuarios historicos.
 7. Reintentar el evento: no debe duplicar el mensaje por la clave idempotente.
 8. Restaurar roles, telefonos y flag; redesplegar y verificar nuevamente.
 
+### 7.1 Identidad, duplicados y audio por usuario
+
+Caso obligatorio con Sofi (`admin`) y su número registrado:
+
+1. Enviar un saludo por texto y comprobar una sola recepción del proveedor, una sola ejecución del flujo, una sola llamada HTTP al WMS y una sola respuesta.
+2. Enviar por texto una solicitud de producción identificada con `<RUN_ID>-SOFI`; no confirmarla si el agente pide datos adicionales. Comprobar que el mismo mensaje no aparezca repetido en BuilderBot CRM.
+3. Repetir la solicitud como una sola nota de voz. Registrar el identificador original de WhatsApp o de transporte, el evento `EVENTS.VOICE_NOTE`, la transcripción, la llamada HTTP al WMS y el ID de la operación si llega a crearse.
+4. El criterio de aprobación es exactamente un evento lógico por mensaje físico, una llamada al WMS, una respuesta visible y, como máximo, una mutación de negocio. Un reintento con la misma identidad de transporte debe ser silencioso y no puede volver a ejecutar el flujo.
+5. Ejecutar el mismo control con dos usuarios activos que compartan rol. Ambos deben conservar permisos independientes; compartir rol no puede duplicar listeners, respuestas ni notificaciones.
+
+Incidente base del 21/09/2026: una sola nota de voz de Sofi generó seis eventos iguales de transcripción y siete eventos `EVENTS.VOICE_NOTE` con UUID distintos en menos de un segundo dentro de BuilderBot. Ninguno alcanzó el webhook del WMS y no se creó una OP. El WMS ya deduplica audios repetidos que sí alcancen su webhook; sigue pendiente que BuilderBot exponga el `wamid` original para cortar también la duplicación anterior al clasificador.
+
 ## Fase 8. Dashboard y conciliacion cruzada
 
 Buscar `<RUN_ID>` en cada modulo. Los totales del dashboard deben reconciliar con DB:

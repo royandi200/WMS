@@ -50,6 +50,8 @@
     "data:notification-charset:apply": "node scripts/apply-notification-utf8mb4-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:user-whatsapp-aliases:dry-run": "node scripts/apply-user-whatsapp-aliases-migration.js",
     "data:user-whatsapp-aliases:apply": "node scripts/apply-user-whatsapp-aliases-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:builderbot-ingress-dedupe:dry-run": "node scripts/apply-builderbot-ingress-dedupe-migration.js",
+    "data:builderbot-ingress-dedupe:apply": "node scripts/apply-builderbot-ingress-dedupe-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:warehouse-map-demo:dry-run": "node scripts/qa/seed-warehouse-map-demo-stock.js",
     "data:warehouse-map-demo:apply": "node scripts/qa/seed-warehouse-map-demo-stock.js --apply --yes-i-understand-this-changes-qa-inventory",
     "data:demo-io-hints:dry-run": "node scripts/qa/seed-demo-io-document-hints.js",

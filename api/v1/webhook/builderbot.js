@@ -147,6 +147,12 @@ const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope'
 const { receptionPartidas } = require('../../_lib/reception-partidas');
 const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
 const { formatWhatsAppMessage } = require('../../_lib/whatsapp-message');
+const {
+  buildIngressIdentity,
+  claimIngress,
+  completeIngress,
+  failIngress,
+} = require('../../_lib/builderbot-ingress-dedupe');
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
@@ -1306,7 +1312,7 @@ async function executeApprovedPayload(db, { accion, payload, aprobador_id, bodeg
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', process.env.BUILDERBOT_ALLOWED_ORIGIN || 'https://app.builderbot.cloud');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-BuilderBot-Secret, X-Webhook-Secret');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-BuilderBot-Secret, X-Webhook-Secret, Idempotency-Key, X-Message-Id, X-WhatsApp-Message-Id, X-Event-Id');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     const msg = 'Metodo no permitido';
@@ -1365,7 +1371,36 @@ module.exports = async (req, res) => {
   console.log(`[webhook] ▶ action="${action}" from="${from}" priority="${priority}"`);
 
   const db = await DB();
+  let ingressClaim = null;
   try {
+    const ingressIdentity = buildIngressIdentity({ req, rawBody, info, from });
+    ingressClaim = await claimIngress(db, ingressIdentity, action);
+    if (ingressClaim.duplicate) {
+      const duplicateContext = {
+        ingress_dedupe: {
+          duplicate: true,
+          identity_kind: ingressClaim.identity.kind,
+          window_seconds: ingressClaim.identity.windowSeconds,
+        },
+      };
+      await saveLog(db, {
+        from,
+        action,
+        priority,
+        payload: rawBody,
+        response: { duplicate: true, context: duplicateContext },
+        status: 'PROCESSED',
+      });
+      console.warn(`[webhook] Duplicado de ingreso omitido action="${action}" kind="${ingressClaim.identity.kind}"`);
+      return builderbotResponse(res, 200, {
+        ok: true,
+        message: '',
+        mensaje: '',
+        duplicate: true,
+        context: duplicateContext,
+      });
+    }
+
     await saveLog(db, { from, action, priority, payload: rawBody, response: null, status: 'RECEIVED' });
 
     const user     = await getOrCreateBotUser(db, from);
@@ -3735,6 +3770,9 @@ module.exports = async (req, res) => {
     }
 
     await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje, context: responseContext }, status: 'PROCESSED' });
+    await completeIngress(db, ingressClaim, action).catch(error => {
+      console.error('[webhook] No se pudo cerrar la marca de idempotencia:', error.message);
+    });
     console.log(`[webhook] ✅ action="${action}" completado OK`);
     return builderbotResponse(res, 200, { ok: true, message: mensaje, mensaje, context: responseContext });
 
@@ -3744,6 +3782,10 @@ module.exports = async (req, res) => {
   const isBusinessError = statusCode >= 400 && statusCode < 500;
 
   console.error(`[webhook] ❌ action="${action}" error:`, errMsg);
+
+  await failIngress(db, ingressClaim, action, errMsg).catch(error => {
+    console.error('[webhook] No se pudo marcar el ingreso fallido:', error.message);
+  });
 
   await saveLog(db, {
     from,
