@@ -11,4 +11,4 @@ CREATE TABLE IF NOT EXISTS notificaciones_salida (
   enviado_en DATETIME NULL,
   UNIQUE KEY uk_notificacion_evento_destino (evento, canal, destinatario),
   INDEX idx_notificaciones_estado (estado, creado_en)
-);
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
