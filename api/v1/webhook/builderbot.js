@@ -716,10 +716,11 @@ async function getOrCreateBotUser(db, phone) {
   const [realRows] = await db.execute(
     `SELECT u.*, r.nombre AS rol_nombre FROM usuarios u
      LEFT JOIN roles r ON r.id = u.rol_id
-     WHERE u.telefono = ?
+     LEFT JOIN usuario_whatsapp_aliases uwa ON uwa.usuario_id = u.id
+     WHERE (u.telefono = ? OR uwa.alias = ?)
        AND u.activo = 1
        AND u.email NOT LIKE '%@wa.bot'
-     LIMIT 1`, [phone]
+     LIMIT 1`, [phone, phone]
   );
   if (realRows.length) {
     console.log(`[getOrCreateBotUser] ✅ Usuario real por teléfono: id=${realRows[0].id} rol=${realRows[0].rol_nombre}`);
