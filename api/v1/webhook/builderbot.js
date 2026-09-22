@@ -1377,10 +1377,14 @@ module.exports = async (req, res) => {
 
   console.log(`[webhook] ▶ action="${action}" from="${from}" priority="${priority}"`);
 
-  const db = await DB();
+  let db = null;
   let ingressClaim = null;
   let inboxEvent = null;
   try {
+    // La conexión también debe quedar dentro del manejo de errores. Si falla antes
+    // del try, BuilderBot no recibe un cuerpo nuevo y puede reutilizar el mensaje
+    // que conservaba de la petición HTTP anterior.
+    db = await DB();
     const ingressIdentity = buildIngressIdentity({ req, rawBody, info, from });
     inboxEvent = await createInboxEvent(db, {
       identity: ingressIdentity,
@@ -3812,26 +3816,31 @@ module.exports = async (req, res) => {
   const errMsg = err.message || 'Error interno';
   const statusCode = Number(err.status || 500);
   const isBusinessError = statusCode >= 400 && statusCode < 500;
+  const databaseUnavailable = !db;
 
   console.error(`[webhook] ❌ action="${action}" error:`, errMsg);
 
-  await failIngress(db, ingressClaim, action, errMsg).catch(error => {
-    console.error('[webhook] No se pudo marcar el ingreso fallido:', error.message);
-  });
-  await failInboxEvent(db, inboxEvent, err).catch(error => {
-    console.error('[webhook] No se pudo marcar el evento durable como fallido:', error.message);
-  });
+  if (db) {
+    await failIngress(db, ingressClaim, action, errMsg).catch(error => {
+      console.error('[webhook] No se pudo marcar el ingreso fallido:', error.message);
+    });
+    await failInboxEvent(db, inboxEvent, err).catch(error => {
+      console.error('[webhook] No se pudo marcar el evento durable como fallido:', error.message);
+    });
 
-  await saveLog(db, {
-    from,
-    action,
-    priority,
-    payload: rawBody,
-    response: { error: errMsg, statusCode, ...(err.documentDiagnostics ? { document_extraction: err.documentDiagnostics } : {}) },
-    status: isBusinessError ? 'REJECTED' : 'ERROR'
-  }).catch(() => {});
+    await saveLog(db, {
+      from,
+      action,
+      priority,
+      payload: rawBody,
+      response: { error: errMsg, statusCode, ...(err.documentDiagnostics ? { document_extraction: err.documentDiagnostics } : {}) },
+      status: isBusinessError ? 'REJECTED' : 'ERROR'
+    }).catch(() => {});
+  }
 
-  const publicMessage = publicOperationalError(err);
+  const publicMessage = databaseUnavailable
+    ? 'No pude conectar con el WMS. Intenta nuevamente en unos segundos.'
+    : publicOperationalError(err);
   const body = {
     ok: false,
     message: `❌ ${publicMessage}`,
@@ -3846,7 +3855,7 @@ module.exports = async (req, res) => {
 
   return builderbotResponse(res, 200, body);
 } finally {
-    await db.end().catch(() => {});
+    if (db) await db.end().catch(() => {});
   }
 };
 

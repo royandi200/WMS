@@ -107,6 +107,26 @@ test('el webhook persiste en la bandeja antes de deduplicar y operar', () => {
   assert.match(source, /await failInboxEvent\(db, inboxEvent, err\)/u);
 });
 
+test('el webhook responde de forma controlada si falla la conexión inicial', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '../api/v1/webhook/builderbot.js'),
+    'utf8'
+  );
+  const dbDeclarationIndex = source.indexOf('let db = null;');
+  const tryIndex = source.indexOf('try {', dbDeclarationIndex);
+  const dbConnectionIndex = source.indexOf('db = await DB();', tryIndex);
+  const catchIndex = source.indexOf('} catch (err) {', dbConnectionIndex);
+
+  assert.ok(dbDeclarationIndex > 0);
+  assert.ok(tryIndex > dbDeclarationIndex);
+  assert.ok(dbConnectionIndex > tryIndex);
+  assert.ok(catchIndex > dbConnectionIndex);
+  assert.match(source, /const databaseUnavailable = !db;/u);
+  assert.match(source, /if \(db\) \{[\s\S]*await failIngress/u);
+  assert.match(source, /if \(db\) await db\.end\(\)\.catch/u);
+  assert.match(source, /No pude conectar con el WMS\. Intenta nuevamente en unos segundos\./u);
+});
+
 test('el monitor no expone payloads y exige rol operativo alto', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '../api/v1/webhook/monitor.js'),
