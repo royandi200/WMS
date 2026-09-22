@@ -60,4 +60,10 @@ test('dashboard keeps alert settings in an admin-only section', () => {
   assert.match(sidebar, /item\.adminOnly[\s\S]*!== 'admin'/u);
   assert.match(page, /Stock mínimo/u);
   assert.match(page, /Permanencia máxima/u);
+  assert.match(page, /Proveedor:/u);
+  assert.match(page, /Clientes:/u);
+  assert.match(page, /row\.aliases/u);
+  const route = fs.readFileSync(path.join(__dirname, '../api/v1/inventory/alert-settings.js'), 'utf8');
+  assert.match(route, /producto_relaciones_comerciales/u);
+  assert.match(route, /pa\.origen = 'CLIENTE'/u);
 });

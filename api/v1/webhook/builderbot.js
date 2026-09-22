@@ -3107,7 +3107,10 @@ module.exports = async (req, res) => {
         const bodegaCodigo = bodegaRow[0]?.codigo || 'BG-PPAL';
 
         const requestedProduct = params.id_item
-          ? await resolveProductReference(db, params.id_item)
+          ? await resolveProductReference(db, params.id_item, {
+            allowContextualPartial: true,
+            allowCatalogContextual: true,
+          })
           : null;
         const operationalType = requestedProduct?.modalidad_operativa === 'PR'
           ? 'Producto terminado - produccion propia'

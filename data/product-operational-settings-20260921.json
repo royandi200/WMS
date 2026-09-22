@@ -1,0 +1,1201 @@
+{
+  "source": {
+    "spreadsheet_id": "1RdYUh0B2TCVbxfvf8Y9LaneaOuypbpZborefrSJ-w_0",
+    "sheet": "Inventario",
+    "sheet_id": 2054615267,
+    "range": "A8:N250",
+    "captured_on": "2026-09-21"
+  },
+  "rows": [
+    {
+      "source_row": 9,
+      "item": "TAPA AZUL ASHWAGHANDA LINEA BLANCA x 60",
+      "alias": "Tapa azul",
+      "sku": "00004-TPALB",
+      "proveedor": "BY SOLUTION",
+      "cliente": "",
+      "stock_minimo": "4000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 10,
+      "item": "TAPA MORADA RESVERATROL LINEA BLANCA X 60",
+      "alias": "Tapa morada",
+      "sku": "00005-TPMLB",
+      "proveedor": "BY SOLUTION",
+      "cliente": "",
+      "stock_minimo": "4000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 11,
+      "item": "TAPA TARRO CUADRADO BLANCO (60 UNID)",
+      "alias": "Tapa pequeña",
+      "sku": "00001-TPBI",
+      "proveedor": "ISOPLASTICOS",
+      "cliente": "",
+      "stock_minimo": "6000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 12,
+      "item": "TAPA TARRO GRANDE GRIS x 120",
+      "alias": "Tapa gris",
+      "sku": "00003-TPGG",
+      "proveedor": "ISOPLASTICOS",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 13,
+      "item": "TAPA TARRO GRANDE PRICESMART BLANCA x 120",
+      "alias": "tapa grande",
+      "sku": "00002-TPGB",
+      "proveedor": "ISOPLASTICOS",
+      "cliente": "",
+      "stock_minimo": "6000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 14,
+      "item": "TARRO CUADRADO x 60",
+      "alias": "tarro pequeño",
+      "sku": "00006-TRP",
+      "proveedor": "ISOPLASTICOS",
+      "cliente": "",
+      "stock_minimo": "6000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 15,
+      "item": "TARRO GRANDE PRICESMART x 120",
+      "alias": "tarro grande",
+      "sku": "00007-TRG",
+      "proveedor": "ISOPLASTICOS",
+      "cliente": "",
+      "stock_minimo": "6000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 16,
+      "item": "TARRO PASTILLERO LINEA BLANCA x 60",
+      "alias": "tarro linea blanca",
+      "sku": "00008-TRLB",
+      "proveedor": "BY SOLUTION",
+      "cliente": "",
+      "stock_minimo": "5000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 17,
+      "item": "ETIQUETA COLAGENO x 60",
+      "alias": "etiqueta colageno",
+      "sku": "00011-ETCOL60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 18,
+      "item": "ETIQUETA ASHWAGANDHA x 120",
+      "alias": "etiqueta ashwa x 120",
+      "sku": "00028-ETASH120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 19,
+      "item": "ETIQUETA ASHWAGANDHA x 60",
+      "alias": "etiqueta ashwa x 60",
+      "sku": "00017-ETASH60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 20,
+      "item": "ETIQUETA AZUL ASHWAGANDHA LINEA BLANCA x 60",
+      "alias": "etiqueta asha linea blanca 60",
+      "sku": "00031-ETLBASH",
+      "proveedor": "CONTACTO VISUAL",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 21,
+      "item": "ETIQUETA AZUL ASHWAGANDHA LINEA BLANCA X 80",
+      "alias": "etiqueta asha linea blanca 80",
+      "sku": "000292- ETLBASH",
+      "proveedor": "CONTACTO VISUAL",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 22,
+      "item": "ETIQUETA MORADA RESVERATROL LINEA BLANCA X 80",
+      "alias": "etiqueta resveratrol linea blanca x80",
+      "sku": "000293-ETLBRES",
+      "proveedor": "CONTACTO VISUAL",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 23,
+      "item": "ETIQUETA BALANCE x 120",
+      "alias": "Descontinuado",
+      "sku": "00029-ETBAL120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 24,
+      "item": "ETIQUETA BOOSTER x 60",
+      "alias": "Etiqueda boster x 60",
+      "sku": "00018-ETBOS60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 25,
+      "item": "ETIQUETA CALM TEDDYS DORMIR NIÑOS x 60",
+      "alias": "etiqueta calm tedis x 60",
+      "sku": "00013-ETCT60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 26,
+      "item": "ETIQUETA CALM VIBES x 120",
+      "alias": "etiqueta calm x 120",
+      "sku": "00024-ETCV120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 27,
+      "item": "ETIQUETA CALM VIBES x 60",
+      "alias": "etiqueta calm x 60",
+      "sku": "00010-ETCV60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 28,
+      "item": "ETIQUETA COLAGENO VENEZUELA x 60",
+      "alias": "-",
+      "sku": "00020-ETCOLV",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 29,
+      "item": "ETIQUETA CREAGUMS x 120",
+      "alias": "etiqueta creagums x120",
+      "sku": "00022-ETCG120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 30,
+      "item": "ETIQUETA CREAGUMS x 140",
+      "alias": "etiqueta creagums x140",
+      "sku": "00030-ETCG140",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 31,
+      "item": "ETIQUETA GREEN FIT x 60",
+      "alias": "etiqueta grinfit",
+      "sku": "00012-ETGF60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 32,
+      "item": "ETIQUETA GREEN TEDDYS x 60",
+      "alias": "Descontinuado",
+      "sku": "00019-ETGT60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 33,
+      "item": "ETIQUETA MENTALIS x 120",
+      "alias": "Descontinuado",
+      "sku": "00027-ETML120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 34,
+      "item": "ETIQUETA MENTALIS x 60",
+      "alias": "Descontinuado",
+      "sku": "00016-ETML60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 35,
+      "item": "ETIQUETA MORADA RESVERATROL LINEA BLANCA",
+      "alias": "etiqueta resveratrol linea blanca x60",
+      "sku": "00032-ETRLB",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 36,
+      "item": "ETIQUETA PROBIOTICOS x 120",
+      "alias": "Descontinuado",
+      "sku": "00025-ETPR120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 37,
+      "item": "ETIQUETA PROBIOTICOS x 60",
+      "alias": "Descontinuado",
+      "sku": "00014-ETPR60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 38,
+      "item": "ETIQUETA RESVERATROL x 120",
+      "alias": "etiqueta resveratrol X120",
+      "sku": "00026-ETRES120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 39,
+      "item": "ETIQUETA RESVERATROL x 60 PROVI",
+      "alias": "Descontinuado",
+      "sku": "000155-ETREPRO60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 40,
+      "item": "ETIQUETA RESVERATROL x 60 ISO",
+      "alias": "Etiqueta resveratrol x 60",
+      "sku": "00015-ETRESI60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 41,
+      "item": "ETIQUETA VINAGRE DE MANZANA VENEZUELA x 60",
+      "alias": "-",
+      "sku": "00021-ETVMV60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 42,
+      "item": "ETIQUETA VINAGRE DE MANZANA x 120",
+      "alias": "Etiqueta manzana x 120",
+      "sku": "00023-ETVM120",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 43,
+      "item": "ETIQUETA VINAGRE DE MANZANA x 60",
+      "alias": "Etiqueta manzana x 60",
+      "sku": "00009-ETVM60",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "1500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 44,
+      "item": "LINER TARRO GRANDE x 120",
+      "alias": "liner grande",
+      "sku": "00036-LNTG120",
+      "proveedor": "SELLAEMPAQ",
+      "cliente": "",
+      "stock_minimo": "5000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 45,
+      "item": "LINER TARRO LINEA BLANCA x 60",
+      "alias": "liner linea blanca",
+      "sku": "00037-LNTLB",
+      "proveedor": "BY SOLUTION",
+      "cliente": "",
+      "stock_minimo": "5000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 46,
+      "item": "LINER TARRO x 60",
+      "alias": "liner pequeño",
+      "sku": "00035-LNTP60",
+      "proveedor": "SELLAEMPAQ",
+      "cliente": "",
+      "stock_minimo": "5000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 47,
+      "item": "CAJA MASTER CALM VIBES x 24",
+      "alias": "Caja vibes",
+      "sku": "00041-CMCV",
+      "proveedor": "GRAFICARTON",
+      "cliente": "",
+      "stock_minimo": "300",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 48,
+      "item": "CAJA MASTER CREA GUMS x 24",
+      "alias": "Caja gums",
+      "sku": "00042-CMCG",
+      "proveedor": "GRAFICARTON",
+      "cliente": "",
+      "stock_minimo": "300",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 49,
+      "item": "CAJA MASTER MULTIVIT",
+      "alias": "caja teddys master",
+      "sku": "000291-CMMV",
+      "proveedor": "GRAFICARTON",
+      "cliente": "",
+      "stock_minimo": "250",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 50,
+      "item": "CAJA DISPLAY MULTIVIT",
+      "alias": "caja pequeña teddys",
+      "sku": "000291-CDMV",
+      "proveedor": "GRAFICARTON",
+      "cliente": "",
+      "stock_minimo": "3000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 51,
+      "item": "CAJA MASTER VINAGRE x 24",
+      "alias": "caja master vinagre",
+      "sku": "00040-CMV",
+      "proveedor": "GRAFICARTON",
+      "cliente": "",
+      "stock_minimo": "300",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 52,
+      "item": "CAJAS X 12 TE GUMMY",
+      "alias": "cajas pequeña the gummy",
+      "sku": "00038-CJ12",
+      "proveedor": "MULTICARTON",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 53,
+      "item": "CAJAS X 12 INFINITY",
+      "alias": "caja pequeña infinity",
+      "sku": "00038-CJ12IN",
+      "proveedor": "MULTICARTON",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 54,
+      "item": "CAJAS X 56",
+      "alias": "caja x 56",
+      "sku": "00038-CJ56",
+      "proveedor": "MULTICARTON",
+      "cliente": "",
+      "stock_minimo": "500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 55,
+      "item": "BOLSAS DE EMPAQUE ECOMMERCE",
+      "alias": "bolsas de maiz",
+      "sku": "00043-BECM",
+      "proveedor": "MAIZ",
+      "cliente": "",
+      "stock_minimo": "3000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 56,
+      "item": "BOLSA BLANCA THE GUMMY",
+      "alias": "bolsas road",
+      "sku": "00023-BBTG",
+      "proveedor": "PIXEL FACTORI",
+      "cliente": "",
+      "stock_minimo": "3000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 57,
+      "item": "FUNDAS LILI PINK",
+      "alias": "fundas lili",
+      "sku": "00033-FLLP",
+      "proveedor": "",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 58,
+      "item": "FUNDAS LINEA BLANCA",
+      "alias": "fundas linea blanca",
+      "sku": "000-34FLB",
+      "proveedor": "JDM BANDAS Y ETIQUETAS",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 59,
+      "item": "GOMAS ASHWAGANDHA -MAGNESIO Y VITAMINA C",
+      "alias": "ashwaganda",
+      "sku": "00051-MPASH",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "3000",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 60,
+      "item": "GOMAS ASHWAGANDHA LINEA BLANCA - MORA AZUL",
+      "alias": "ashwaganda linea blanca",
+      "sku": "00045-MPASHLB",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "2000",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 61,
+      "item": "GOMAS CALM VIBES- CALM TEDDYS - CITRATO MAGNESIO",
+      "alias": "citrato",
+      "sku": "00047-MPCBCT",
+      "proveedor": "SEA & OIL",
+      "cliente": "",
+      "stock_minimo": "10000",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 64,
+      "item": "GOMAS COLAGENO LILIPINK - COLAGENO Y BIOTINA",
+      "alias": "colageno lili",
+      "sku": "00053-MPCLP",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 65,
+      "item": "GOMAS COLAGENO Y BIOTINA ROJO",
+      "alias": "colageno rosado",
+      "sku": "00044-MPCBR",
+      "proveedor": "SEA & OIL",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 67,
+      "item": "GOMAS CREAGUMS - CREATINA CREAPURE",
+      "alias": "",
+      "sku": "00052-MPCG",
+      "proveedor": "SEA & OIL",
+      "cliente": "",
+      "stock_minimo": "2000",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 73,
+      "item": "GOMAS GREEN FIT",
+      "alias": "grin fit",
+      "sku": "00048-MPGF",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 74,
+      "item": "GOMAS PROBIOTICOS",
+      "alias": "probioticos",
+      "sku": "00050-MPRO",
+      "proveedor": "SEA & OIL",
+      "cliente": "",
+      "stock_minimo": "500",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 75,
+      "item": "GOMAS RESVERATROL LINEA BLANCA",
+      "alias": "resveratrol linea blanca",
+      "sku": "00046-MPRESLB",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "2000",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 76,
+      "item": "GOMAS VINAGRE DE MANZANA",
+      "alias": "",
+      "sku": "00049-MPVM",
+      "proveedor": "SEA & OIL",
+      "cliente": "",
+      "stock_minimo": "10000",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 80,
+      "item": "GOMAS MENTALIS",
+      "alias": "mentalis",
+      "sku": "000-MPMENT",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "400",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 81,
+      "item": "GOMAS ASHWAGHANDA OSITOS KSM66",
+      "alias": "KSM66",
+      "sku": "001-ASHKSM6",
+      "proveedor": "ALNATURE",
+      "cliente": "",
+      "stock_minimo": "2000",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 82,
+      "item": "AURA FRESH - SOUL",
+      "alias": "Descontinuado",
+      "sku": "00103-PTAUR",
+      "proveedor": "AURA",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 83,
+      "item": "AURA FRESH - SERENITY",
+      "alias": "Descontinuado",
+      "sku": "00104-PTAUR",
+      "proveedor": "AURA",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 84,
+      "item": "AURA FRESH - ROSE LOVE",
+      "alias": "Descontinuado",
+      "sku": "00105-PTAUR",
+      "proveedor": "AURA",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 85,
+      "item": "FUNGI CAFÉ",
+      "alias": "FUNGI",
+      "sku": "00111-PTFUN",
+      "proveedor": "AURA",
+      "cliente": "",
+      "stock_minimo": "50",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 86,
+      "item": "LUMIA MULTIESTILIZADOR CABELLO",
+      "alias": "lumia",
+      "sku": "00126-PTLUM",
+      "proveedor": "BRAIN FOODS",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 87,
+      "item": "PRODUCTO TERMINADO ASHWAGANDHA X 60",
+      "alias": "ashwaganda x 60",
+      "sku": "00102-PTASH60",
+      "proveedor": "INFINITY",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 88,
+      "item": "PRODUCTO TERMINADO BALANCE X 60",
+      "alias": "Descontinuado",
+      "sku": "00104-PTBLNC60",
+      "proveedor": "INFINITY",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 89,
+      "item": "PRODUCTO TERMINADO BOOSTER X 60",
+      "alias": "booster",
+      "sku": "00105-PTBOS60",
+      "proveedor": "3Q",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 90,
+      "item": "PRODUCTO TERMINADO GREEN TEDDYS X 60",
+      "alias": "Descontinuado",
+      "sku": "00202-PTGT60",
+      "proveedor": "INFINITY",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "100",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 91,
+      "item": "PRODUCTO TERMINADO CALM TEDDYS TARRO x 60G",
+      "alias": "calm teddys",
+      "sku": "00106-PTCLT60",
+      "proveedor": "INFINITY",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 92,
+      "item": "PRODUCTO TERMINADO CALM VIBES TARRO x 60G",
+      "alias": "calm vibes 60",
+      "sku": "00106-PTCV60",
+      "proveedor": "INFINITY",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 93,
+      "item": "PRODUCTO TERMINADO COFEE BOOSTER TARRO x 60G",
+      "alias": "Descontinuado",
+      "sku": "00108-PTCBS60",
+      "proveedor": "INFINITY",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 94,
+      "item": "PRODUCTO TERMINADO COLAGENO Y BIOTINA TARRO x 60G",
+      "alias": "Colageno",
+      "sku": "00109-PTCOL60",
+      "proveedor": "INFINITY",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 95,
+      "item": "PRODUCTO TERMINADO VENEZUELA  COLAGENO X 60",
+      "alias": "Descontinuado",
+      "sku": "00286-PTCOLV",
+      "proveedor": "INFINITY",
+      "cliente": "-",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 96,
+      "item": "PRODUCTO TERMINADO VINAGRE VENEZUELA X 60",
+      "alias": "Descontinuado",
+      "sku": "00287-PTVV",
+      "proveedor": "INFINITY",
+      "cliente": "-",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 97,
+      "item": "PRODUCTO TERMINADO CREAGUMS X 120G",
+      "alias": "Creagums x 120",
+      "sku": "00110-PTCG120",
+      "proveedor": "INFINITY",
+      "cliente": "FARMATODO- FULFILMENT",
+      "stock_minimo": "100",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 98,
+      "item": "PRODUCTO TERMINADO GARGANTOX TARRO x 60G",
+      "alias": "Descontinuado",
+      "sku": "00112-PTGT60",
+      "proveedor": "INFINITY",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 101,
+      "item": "GESTAR TARRO x 60G",
+      "alias": "Descontinuado",
+      "sku": "00113-PTGES60",
+      "proveedor": "BONTAL",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 102,
+      "item": "GREEN FIT TARRO x 60G",
+      "alias": "grin fit terminado",
+      "sku": "00114-PTGF60",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 103,
+      "item": "MEGFULL TARRO x 60G",
+      "alias": "Descontinuado",
+      "sku": "00117-PTMGF60",
+      "proveedor": "NA",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 104,
+      "item": "MENOCALM TARRO x 60G",
+      "alias": "Descontinuado",
+      "sku": "00101-PTMCL60",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 105,
+      "item": "MENTALIS TARRO x 60G",
+      "alias": "Descontinuado",
+      "sku": "00118-PTMTLS60",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 106,
+      "item": "PRODUCTO TERMINADO PRO G 60",
+      "alias": "Descontinuado",
+      "sku": "00121-PTPG60",
+      "proveedor": "BONTAL",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 107,
+      "item": "PRODUCTO TERMINADO PROBIOTICOS 60",
+      "alias": "Descontinuado",
+      "sku": "00120-PTPBT60",
+      "proveedor": "INFINITY",
+      "cliente": "FULFILMENT",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 108,
+      "item": "PRODUCTO TERMINADO SOLAR LOW 60",
+      "alias": "Descontinuado",
+      "sku": "00123-PTSLW60",
+      "proveedor": "BONTAL",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 109,
+      "item": "PRODUCTO TERMINADO RESVERATROL 60",
+      "alias": "restregatrol x 60",
+      "sku": "00231-PTRES60",
+      "proveedor": "3Q",
+      "cliente": "FULFILMENT-MAYORISTAS",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 110,
+      "item": "PRODUCTO TERMINADO VINAGRE DE MANZANA TARRO x 60G",
+      "alias": "vinagre x 60",
+      "sku": "00125-PTVM60",
+      "proveedor": "INFINITY",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 111,
+      "item": "PRODUCTO TERMINADO ASHWAGANDHA X 120",
+      "alias": "ashwaganda x 120",
+      "sku": "00200-PTASH120",
+      "proveedor": "INFINITY",
+      "cliente": "PRICESMART",
+      "stock_minimo": "500",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 112,
+      "item": "PRODUCTO TERMINADO PROBIOTICOS 120",
+      "alias": "Descontinuado",
+      "sku": "00201-PTPBS120",
+      "proveedor": "INFINITY",
+      "cliente": "NO SE COMERCIALIZ",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 113,
+      "item": "PRODUCTO TERMINADO COLAGENO LILI PINK",
+      "alias": "colageno lili pink terminado",
+      "sku": "001-COLLILI",
+      "proveedor": "INFINITY",
+      "cliente": "LILI PINK",
+      "stock_minimo": "200",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 114,
+      "item": "PRODUCTO TERMINADO RESVERATROL 120",
+      "alias": "resveratrol grande",
+      "sku": "00202-PTRESV120",
+      "proveedor": "INFINITY",
+      "cliente": "PRICESMART",
+      "stock_minimo": "500",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 115,
+      "item": "PRODUCTO TERMINADO MENTALIS 120",
+      "alias": "Descontinuado",
+      "sku": "00203-PTMTL120",
+      "proveedor": "INFINITY",
+      "cliente": "PRICESMART",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 116,
+      "item": "PRODUCTO TERMINADO BALANCE X 120",
+      "alias": "Descontinuado",
+      "sku": "00210-PTBLA 120",
+      "proveedor": "INFINITY",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 117,
+      "item": "PRODUCTO TERMINADO VINAGRE DE MANZANA 120",
+      "alias": "vinagre x 120",
+      "sku": "00204-PTVM120",
+      "proveedor": "INFINITY",
+      "cliente": "PRICESMART",
+      "stock_minimo": "1200",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 118,
+      "item": "PRODUCTO TERMINADO CALM VIBES 120",
+      "alias": "calm vibes x 120",
+      "sku": "00205-PTCV120",
+      "proveedor": "INFINITY",
+      "cliente": "PRICESMART",
+      "stock_minimo": "500",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 119,
+      "item": "PRODUCTO TERMINADO CREAGUMS 140",
+      "alias": "creagums x 40",
+      "sku": "00206-PTCG140",
+      "proveedor": "INFINITY",
+      "cliente": "YA NO SE COMERCIALIZA",
+      "stock_minimo": "500",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 120,
+      "item": "PRODUCTO TERMINADO ASGWAGANDHA LINEA BLANCA",
+      "alias": "ashwaganda linea blanca",
+      "sku": "00207-PTAHSLB",
+      "proveedor": "INFINITY",
+      "cliente": "FARMATODO",
+      "stock_minimo": "1000",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 121,
+      "item": "PRODUCTO TERMINADO RESVERATROL LINEA BLANCA",
+      "alias": "resveratrol linea blanca",
+      "sku": "00208-PTRESVLB",
+      "proveedor": "INFINITY",
+      "cliente": "FARMATODO",
+      "stock_minimo": "1000",
+      "alerta_rotacion": "15 DIAS"
+    },
+    {
+      "source_row": 122,
+      "item": "PRODUCTO TERMINADO ZENOVA ASHWAGANDHA",
+      "alias": "zenova ashwagandha",
+      "sku": "00276-PTZNASHWA",
+      "proveedor": "JJB",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 123,
+      "item": "PRODUCTO TERMINADO ZENOVA REMOLACHA",
+      "alias": "zenova remolacha",
+      "sku": "00277-PTZNREM",
+      "proveedor": "JJB",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 124,
+      "item": "PRODUCTO TERMINADO ZENOVA CURCUMA",
+      "alias": "zenova curcuma",
+      "sku": "00278-PTZNCUR",
+      "proveedor": "JJB",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 125,
+      "item": "PRODUCTO TERMINADO ZENOVA INOSITOL",
+      "alias": "zenova inositol",
+      "sku": "00279-PTZNINO",
+      "proveedor": "JJB",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 126,
+      "item": "PRODUCTO TERMINADO ZENOVA QUEEN",
+      "alias": "zenova quen",
+      "sku": "00280-PTZNQUE",
+      "proveedor": "JJB",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 127,
+      "item": "PRODUCTO TERMINADO ZENOVA MAGNESIO",
+      "alias": "zenova magnesio",
+      "sku": "00281-PTZNMAG",
+      "proveedor": "JJB",
+      "cliente": "FULFILMENT- MKP- FAMARMATODO-JR-GARNICA-PASTEUR",
+      "stock_minimo": "100",
+      "alerta_rotacion": "30 DIAS"
+    },
+    {
+      "source_row": 128,
+      "item": "TAPA DE CAJA MASTER",
+      "alias": "tapa caja master",
+      "sku": "00283-TPDCJM",
+      "proveedor": "GRAFICARTON",
+      "cliente": "",
+      "stock_minimo": "500",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 129,
+      "item": "SEPARADORES",
+      "alias": "separadores",
+      "sku": "00284-SEP",
+      "proveedor": "DOTACIONES INDUSTRIALES",
+      "cliente": "",
+      "stock_minimo": "200",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 130,
+      "item": "ESQUINEROS",
+      "alias": "esquineros",
+      "sku": "00285-ESQ",
+      "proveedor": "DOTACIONES INDUSTRIALES",
+      "cliente": "",
+      "stock_minimo": "50",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 131,
+      "item": "VINIPEL",
+      "alias": "vinipel",
+      "sku": "00288- VINI",
+      "proveedor": "DOTACIONES INDUSTRIALES",
+      "cliente": "",
+      "stock_minimo": "10",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 132,
+      "item": "SAMPLINGS PRODUCTO TERMINADO VINAGRE DE MANZANA",
+      "alias": "",
+      "sku": "00286-SAMPV",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 133,
+      "item": "SAMPLINGS PRODUCTO TERMINADO CALM VIBES",
+      "alias": "",
+      "sku": "00287-SAMPCV",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 134,
+      "item": "BOLSAS SAMPLINGS ASHWAGANDGA",
+      "alias": "",
+      "sku": "00289-SAMPCV",
+      "proveedor": "TOPAN",
+      "cliente": "",
+      "stock_minimo": "100",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 135,
+      "item": "BOLSAS SAMPLINGS RESVERTROL",
+      "alias": "",
+      "sku": "00290-SAMPCV",
+      "proveedor": "TOPAN",
+      "cliente": "",
+      "stock_minimo": "100",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 136,
+      "item": "BOLSAS SAMPLING VINAGRE",
+      "alias": "",
+      "sku": "001-SAMPVIN",
+      "proveedor": "TOPAN",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 137,
+      "item": "BOLSAS SAMPLING CALM VIBES",
+      "alias": "",
+      "sku": "002-SAMCALV",
+      "proveedor": "TOPAN",
+      "cliente": "",
+      "stock_minimo": "1000",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 138,
+      "item": "PRODUCTO TERMMINADO SAMPLIGS ASHWAGANDHA X 3 GOMAS",
+      "alias": "",
+      "sku": "PDT-SMASH",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 139,
+      "item": "PRODUCTO TERMINADO SAMPLINGS RESVERATROL X 3 GOMAS",
+      "alias": "",
+      "sku": "PDT-SAMRES",
+      "proveedor": "INFINITY",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    },
+    {
+      "source_row": 140,
+      "item": "LAMINA IMPRESA BICAPA BOPP+BOPP (50 MICRAS), DE 16X9 CM DE ANCHO REF. GOMAS NAPS BANANAS (120,000 UND APROX)",
+      "alias": "",
+      "sku": "00501-BLGMV",
+      "proveedor": "FLEXIPRINT",
+      "cliente": "",
+      "stock_minimo": "0",
+      "alerta_rotacion": ""
+    }
+  ]
+}

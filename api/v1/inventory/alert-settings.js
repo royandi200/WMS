@@ -19,8 +19,13 @@ async function handleGet(req, res) {
   const args = [];
   let filter = '';
   if (search) {
-    filter = 'AND (p.siigo_code LIKE ? OR p.nombre LIKE ?)';
-    args.push(`%${search}%`, `%${search}%`);
+    filter = `AND (p.siigo_code LIKE ? OR p.nombre LIKE ?
+      OR EXISTS (SELECT 1 FROM producto_aliases pa_search
+                  WHERE pa_search.producto_id = p.id AND pa_search.activo = 1 AND pa_search.alias LIKE ?)
+      OR EXISTS (SELECT 1 FROM producto_relaciones_comerciales prc_search
+                  WHERE prc_search.producto_id = p.id AND prc_search.activo = 1
+                    AND prc_search.etiqueta_fuente LIKE ?))`;
+    args.push(...Array(4).fill(`%${search}%`));
   }
   const conn = await createConnection();
   try {
@@ -28,6 +33,15 @@ async function handleGet(req, res) {
       `SELECT p.id, p.siigo_code AS sku, p.nombre,
               COALESCE(NULLIF(p.unit_label, ''), 'und') AS unidad,
               p.stock_minimo, p.permanencia_max_dias,
+              (SELECT GROUP_CONCAT(DISTINCT pa.alias ORDER BY pa.alias SEPARATOR '||')
+                 FROM producto_aliases pa
+                WHERE pa.producto_id = p.id AND pa.activo = 1 AND pa.origen = 'CLIENTE') AS aliases,
+              (SELECT GROUP_CONCAT(DISTINCT prc.etiqueta_fuente ORDER BY prc.etiqueta_fuente SEPARATOR '||')
+                 FROM producto_relaciones_comerciales prc
+                WHERE prc.producto_id = p.id AND prc.activo = 1 AND prc.tipo = 'PROVEEDOR') AS proveedores,
+              (SELECT GROUP_CONCAT(DISTINCT prc.etiqueta_fuente ORDER BY prc.etiqueta_fuente SEPARATOR '||')
+                 FROM producto_relaciones_comerciales prc
+                WHERE prc.producto_id = p.id AND prc.activo = 1 AND prc.tipo = 'CLIENTE') AS clientes,
               COALESCE(SUM(CASE
                 WHEN l.status = 'DISPONIBLE'
                  AND (l.expiry_date IS NULL OR l.expiry_date >= CURDATE())
@@ -55,6 +69,9 @@ async function handleGet(req, res) {
           stock_minimo: Number(row.stock_minimo || 0),
           permanencia_max_dias: Number(row.permanencia_max_dias || DEFAULT_DWELL_DAYS),
           disponible: Number(row.disponible || 0),
+          aliases: row.aliases ? row.aliases.split('||') : [],
+          proveedores: row.proveedores ? row.proveedores.split('||') : [],
+          clientes: row.clientes ? row.clientes.split('||') : [],
         })),
       },
     });

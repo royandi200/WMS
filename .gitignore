@@ -16,6 +16,7 @@ dist/
 logs/
 *.log
 npm-debug.log*
+output/backups/product-operational-settings-*.json
 
 # Testing
 coverage/

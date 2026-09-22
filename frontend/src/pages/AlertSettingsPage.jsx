@@ -37,7 +37,13 @@ export default function AlertSettingsPage() {
   const visibleRows = useMemo(() => {
     const term = search.trim().toLowerCase()
     if (!term) return rows
-    return rows.filter((row) => row.sku.toLowerCase().includes(term) || row.nombre.toLowerCase().includes(term))
+    return rows.filter((row) => [
+      row.sku,
+      row.nombre,
+      ...(row.aliases || []),
+      ...(row.proveedores || []),
+      ...(row.clientes || []),
+    ].some((value) => String(value || '').toLowerCase().includes(term)))
   }, [rows, search])
 
   const setField = (id, field, value) => {
@@ -90,7 +96,7 @@ export default function AlertSettingsPage() {
 
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5 border-y border-border py-4">
         <label className="text-xs text-muted w-full max-w-md">
-          Buscar SKU o producto
+          Buscar SKU, producto, alias, proveedor o cliente
           <span className="relative block mt-1">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} className="input-field pl-9" placeholder="Ej: 00102 o Ashwagandha" />
@@ -129,6 +135,9 @@ export default function AlertSettingsPage() {
                   <td className="px-4 py-3">
                     <span className="block font-medium text-foreground">{row.nombre}</span>
                     <span className="block text-xs text-muted mt-0.5">Unidad: {row.unidad}</span>
+                    {!!row.aliases?.length && <span className="block text-xs text-muted mt-1"><span className="text-foreground/80">Alias:</span> {row.aliases.join(', ')}</span>}
+                    {!!row.proveedores?.length && <span className="block text-xs text-muted mt-1"><span className="text-foreground/80">Proveedor:</span> {row.proveedores.join(', ')}</span>}
+                    {!!row.clientes?.length && <span className="block text-xs text-muted mt-1"><span className="text-foreground/80">Clientes:</span> {row.clientes.join(', ')}</span>}
                   </td>
                   <td className="px-4 py-3 tabular-nums">{row.disponible} {row.unidad}</td>
                   <td className="px-4 py-3">

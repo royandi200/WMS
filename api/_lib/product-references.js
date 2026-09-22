@@ -16,6 +16,8 @@ function normalizeProductReference(value) {
     .replace(/\bciento\s+veinte\b/g, '120')
     .replace(/\bsesenta\b/g, '60')
     .replace(/&/g, ' y ')
+    .replace(/([a-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([a-z])/g, '$1 $2')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -57,12 +59,13 @@ function ambiguousProductError(term, products) {
 
 const CONTEXT_STOP_WORDS = new Set([
   'de', 'del', 'el', 'la', 'las', 'los', 'material', 'producto', 'insumo', 'para', 'un', 'una', 'y', 'x',
+  'und', 'unid', 'unidad', 'unidades',
 ]);
 
 function contextualTokens(value) {
   return normalizeProductReference(value)
     .split(' ')
-    .filter(token => token.length >= 3 && !CONTEXT_STOP_WORDS.has(token));
+    .filter(token => (token.length >= 3 || /^\d+$/u.test(token)) && !CONTEXT_STOP_WORDS.has(token));
 }
 
 function equivalentToken(left, right) {
@@ -77,13 +80,22 @@ function contextualProductMatches(term, rows) {
   const products = new Map();
   for (const row of rows) {
     const id = Number(row.id);
-    if (!products.has(id)) products.set(id, { product: row, tokens: [] });
+    if (!products.has(id)) products.set(id, { product: row, references: [] });
     const entry = products.get(id);
-    entry.tokens.push(...contextualTokens(row.nombre), ...contextualTokens(row.alias));
+    for (const value of [row.nombre, row.alias]) {
+      const tokens = contextualTokens(value);
+      if (tokens.length) entry.references.push(tokens);
+    }
   }
-  return [...products.values()]
-    .filter(entry => expected.every(token => entry.tokens.some(candidate => equivalentToken(token, candidate))))
-    .map(entry => entry.product);
+  const scored = [...products.values()].flatMap((entry) => {
+    const scores = entry.references
+      .filter(tokens => expected.every(token => tokens.some(candidate => equivalentToken(token, candidate))))
+      .map(tokens => new Set(tokens.filter(token => !expected.some(candidate => equivalentToken(token, candidate)))).size);
+    return scores.length ? [{ product: entry.product, score: Math.min(...scores) }] : [];
+  });
+  if (!scored.length) return [];
+  const bestScore = Math.min(...scored.map(entry => entry.score));
+  return scored.filter(entry => entry.score === bestScore).map(entry => entry.product);
 }
 
 async function resolveProductReference(conn, value, options = {}) {
@@ -136,7 +148,8 @@ async function resolveProductReference(conn, value, options = {}) {
   }
   if (aliases.length > 1) throw ambiguousProductError(term, aliases);
 
-  if (options.allowContextualPartial && (options.productIds || []).length) {
+  const contextualIsScoped = (options.productIds || []).length > 0;
+  if (options.allowContextualPartial && (contextualIsScoped || options.allowCatalogContextual)) {
     const [contextRows] = await conn.execute(
       `SELECT p.id, p.siigo_code, p.nombre, p.tipo_producto, p.modalidad_operativa,
               p.unit_label, pa.alias
@@ -144,7 +157,7 @@ async function resolveProductReference(conn, value, options = {}) {
          LEFT JOIN producto_aliases pa ON pa.producto_id = p.id AND pa.activo = 1
         WHERE p.activo = 1${filters.sql}
         ORDER BY p.siigo_code, pa.alias
-        LIMIT 100`,
+        LIMIT ${contextualIsScoped ? 100 : 500}`,
       filters.params
     );
     const contextual = contextualProductMatches(term, contextRows);

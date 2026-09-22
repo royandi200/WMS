@@ -12,6 +12,7 @@ test('product references normalize speech, accents and punctuation deterministic
   assert.equal(normalizeProductReference('  Etiqueta ÁSHWA x Sesenta  '), 'etiqueta ashwa x 60');
   assert.equal(normalizeProductReference('Creagums ciento veinte'), 'creagums 120');
   assert.equal(normalizeProductReference('Creagums ciento cuarenta'), 'creagums 140');
+  assert.equal(normalizeProductReference('tarro cuadrado x60'), 'tarro cuadrado x 60');
 });
 
 test('product reference prefers canonical SKU before human aliases', async () => {
@@ -103,6 +104,32 @@ test('resolver uses partial aliases only when explicitly scoped', async () => {
   assert.equal(product.siigo_code, '00051-MPASH');
   assert.equal(product.matched_by, 'contextual_alias');
   assert.equal(calls, 3);
+});
+
+test('stock queries can explicitly resolve a unique contextual alias across the catalog', async () => {
+  let calls = 0;
+  const db = {
+    async execute(sql) {
+      calls += 1;
+      if (calls <= 2) return [[]];
+      assert.match(sql, /LIMIT 500/u);
+      return [[
+        { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO (60 UNID)', alias: 'tapa pequeña' },
+        { id: 20, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60', alias: 'tarro pequeño' },
+      ]];
+    },
+  };
+  const product = await resolveProductReference(db, 'tarros cuadrados x60', {
+    allowContextualPartial: true,
+    allowCatalogContextual: true,
+  });
+  assert.equal(product.siigo_code, '00006-TRP');
+  assert.equal(product.matched_by, 'contextual_alias');
+});
+
+test('stock webhook enables catalog contextual matching only for the read-only stock query', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
+  assert.match(source, /allowCatalogContextual: true/u);
 });
 
 test('human product references share one resolver across operational workflows', () => {
