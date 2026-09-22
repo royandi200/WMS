@@ -10,11 +10,14 @@ const { additionalOperationInput } = require('../api/_lib/additional-operation-i
 function harness({ operationError, role = 'admin' } = {}) {
   const calls = [];
   const baseReads = [];
+  let inboxId = 1;
   const filename = path.resolve(__dirname, '../api/v1/webhook/builderbot.js');
   const nativeRequire = createRequire(filename);
   const db = {
     async end() {},
     async execute(sql, args) {
+      if (sql.includes('INSERT INTO webhook_ingress_inbox')) return [{ insertId: inboxId++ }];
+      if (sql.includes('UPDATE webhook_ingress_inbox')) return [{ affectedRows: 1 }];
       if (sql.includes('INSERT INTO webhook_logs')) return [{ affectedRows: 1 }];
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];

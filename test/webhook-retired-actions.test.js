@@ -54,7 +54,7 @@ async function call({ action, text, params = {}, headers = { 'x-builderbot-secre
 
 const mutations = () => executed
   .filter(e => /^(INSERT|UPDATE|DELETE)/i.test(e.sql))
-  .filter(e => !/INTO webhook_logs|UPDATE webhook_logs/i.test(e.sql));
+  .filter(e => !/(?:INTO|UPDATE)\s+(?:webhook_logs|webhook_ingress_inbox|webhook_ingress_dedupe)/i.test(e.sql));
 
 const RETIRED = [
   ['SOLICITAR_INICIO_PRODUCCION', 'quiero iniciar la produccion de 10 unidades', /se libera directamente/i],

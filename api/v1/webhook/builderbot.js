@@ -153,6 +153,13 @@ const {
   completeIngress,
   failIngress,
 } = require('../../_lib/builderbot-ingress-dedupe');
+const {
+  completeInboxEvent,
+  createInboxEvent,
+  failInboxEvent,
+  markInboxDuplicate,
+  startInboxProcessing,
+} = require('../../_lib/builderbot-durable-inbox');
 const BB_TOKEN  = process.env.BUILDERBOT_API_TOKEN || '';
 const BB_BOT_ID = process.env.BUILDERBOT_BOT_ID || '';
 
@@ -1372,8 +1379,17 @@ module.exports = async (req, res) => {
 
   const db = await DB();
   let ingressClaim = null;
+  let inboxEvent = null;
   try {
     const ingressIdentity = buildIngressIdentity({ req, rawBody, info, from });
+    inboxEvent = await createInboxEvent(db, {
+      identity: ingressIdentity,
+      rawBody,
+      info,
+      from,
+      action,
+      priority,
+    });
     ingressClaim = await claimIngress(db, ingressIdentity, action);
     if (ingressClaim.duplicate) {
       const duplicateContext = {
@@ -1383,6 +1399,7 @@ module.exports = async (req, res) => {
           window_seconds: ingressClaim.identity.windowSeconds,
         },
       };
+      await markInboxDuplicate(db, inboxEvent, ingressClaim);
       await saveLog(db, {
         from,
         action,
@@ -1401,6 +1418,16 @@ module.exports = async (req, res) => {
       });
     }
 
+    await startInboxProcessing(db, inboxEvent, ingressClaim);
+
+    const finalizeHandledResponse = async body => {
+      await completeIngress(db, ingressClaim, action).catch(error => {
+        console.error('[webhook] No se pudo cerrar la marca de idempotencia:', error.message);
+      });
+      await completeInboxEvent(db, inboxEvent, body);
+      return builderbotResponse(res, 200, body);
+    };
+
     await saveLog(db, { from, action, priority, payload: rawBody, response: null, status: 'RECEIVED' });
 
     const user     = await getOrCreateBotUser(db, from);
@@ -1411,7 +1438,7 @@ module.exports = async (req, res) => {
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'UNREGISTERED_PHONE', mensaje: msg }, status: 'REJECTED' });
       // Retornar 200 para que BuilderBot Cloud pueda renderizar el mensaje en WhatsApp.
       // El 4xx impide que BBC lea el body y muestra el placeholder {mensaje} literal.
-      return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
+      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
     const recoveredDocument = await recoverRejectedDocumentAction({
@@ -1467,7 +1494,7 @@ module.exports = async (req, res) => {
     if (retiredMessage) {
       const msg = `⚠️ ${retiredMessage}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RETIRED_FLOW' }, status: 'REJECTED' });
-      return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'RETIRED_FLOW' });
+      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RETIRED_FLOW' });
     }
 
     const rolRaw = user.rol_nombre || '';
@@ -1475,7 +1502,7 @@ module.exports = async (req, res) => {
     if (requiredCapability && !hasCapability(rolRaw, requiredCapability)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
-      return builderbotResponse(res, 200, { ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
+      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
     }
 
     let mensaje = '';
@@ -3769,12 +3796,14 @@ module.exports = async (req, res) => {
         throw { status: 400, message: `Acción desconocida: ${action}` };
     }
 
-    await saveLog(db, { from, action, priority, payload: rawBody, response: { message: mensaje, mensaje, context: responseContext }, status: 'PROCESSED' });
+    const successBody = { ok: true, message: mensaje, mensaje, context: responseContext };
+    await saveLog(db, { from, action, priority, payload: rawBody, response: successBody, status: 'PROCESSED' });
     await completeIngress(db, ingressClaim, action).catch(error => {
       console.error('[webhook] No se pudo cerrar la marca de idempotencia:', error.message);
     });
+    await completeInboxEvent(db, inboxEvent, successBody);
     console.log(`[webhook] ✅ action="${action}" completado OK`);
-    return builderbotResponse(res, 200, { ok: true, message: mensaje, mensaje, context: responseContext });
+    return builderbotResponse(res, 200, successBody);
 
 } catch (err) {
   const errMsg = err.message || 'Error interno';
@@ -3785,6 +3814,9 @@ module.exports = async (req, res) => {
 
   await failIngress(db, ingressClaim, action, errMsg).catch(error => {
     console.error('[webhook] No se pudo marcar el ingreso fallido:', error.message);
+  });
+  await failInboxEvent(db, inboxEvent, err).catch(error => {
+    console.error('[webhook] No se pudo marcar el evento durable como fallido:', error.message);
   });
 
   await saveLog(db, {
