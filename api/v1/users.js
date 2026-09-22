@@ -2,6 +2,7 @@ const { createConnection } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, capabilitiesForRole, normalizeRoles } = require('../_lib/capabilities');
 const { loadUserRolesFromConnection } = require('../_lib/user-roles');
+const { maskPhone, normalizePhone } = require('../_lib/builderbot-notifications');
 
 const ASSIGNABLE_ROLES = new Set(['admin', 'recepcion_cierre', 'alistador', 'despacho', 'consulta']);
 
@@ -9,6 +10,12 @@ function httpError(status, message) {
   const error = new Error(message);
   error.status = status;
   return error;
+}
+
+function normalizeUserPhone(value) {
+  const phone = normalizePhone(value);
+  if (!phone) throw httpError(400, 'Ingresa un celular colombiano valido de 10 digitos');
+  return phone;
 }
 
 async function handleGet(req, res) {
@@ -122,12 +129,57 @@ async function handlePut(req, res) {
   }
 }
 
+async function handlePatch(req, res) {
+  const actor = await requireCapability(req, CAPABILITIES.USERS_MANAGE);
+  const userId = Number(req.body?.user_id || req.body?.id || 0);
+  if (!Number.isInteger(userId) || userId <= 0) throw httpError(400, 'user_id es obligatorio');
+  const phone = normalizeUserPhone(req.body?.telefono ?? req.body?.phone);
+  const conn = await createConnection();
+  try {
+    await conn.beginTransaction();
+    // Always lock in the same order so concurrent dashboard edits cannot
+    // assign the same WhatsApp destination or deadlock each other.
+    const [allUsers] = await conn.execute(
+      `SELECT id, nombre, telefono FROM usuarios ORDER BY id FOR UPDATE`
+    );
+    const users = allUsers.filter(user => Number(user.id) === userId);
+    if (!users.length) throw httpError(404, 'Usuario no encontrado');
+    const otherUsers = allUsers.filter(user => Number(user.id) !== userId);
+    if (otherUsers.some(user => normalizePhone(user.telefono) === phone)) {
+      throw httpError(409, 'Este celular ya esta asignado a otro usuario');
+    }
+
+    await conn.execute(`UPDATE usuarios SET telefono = ? WHERE id = ?`, [phone, userId]);
+    await conn.execute(
+      `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
+       VALUES ('autorizacion', 'INFO', 'Cambio de celular de usuario', ?, ?, NOW())`,
+      [actor.id, JSON.stringify({
+        usuario_id: userId,
+        telefono_anterior: users[0].telefono ? maskPhone(normalizePhone(users[0].telefono) || users[0].telefono) : null,
+        telefono_nuevo: maskPhone(phone),
+        canal: 'dashboard',
+      })]
+    );
+    await conn.commit();
+    return res.status(200).json({
+      ok: true,
+      data: { id: userId, nombre: users[0].nombre, telefono: phone },
+    });
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    await conn.end().catch(() => {});
+  }
+}
+
 module.exports = async (req, res) => {
-  cors(res, 'GET,PUT');
+  cors(res, 'GET,PUT,PATCH');
   if (req.method === 'OPTIONS') return res.status(200).end();
   try {
     if (req.method === 'GET') return await handleGet(req, res);
     if (req.method === 'PUT') return await handlePut(req, res);
+    if (req.method === 'PATCH') return await handlePatch(req, res);
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ ok: false, error: error.message });
@@ -135,3 +187,5 @@ module.exports = async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
   }
 };
+
+module.exports.normalizeUserPhone = normalizeUserPhone;

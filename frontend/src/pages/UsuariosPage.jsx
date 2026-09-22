@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ShieldCheck } from 'lucide-react'
-import { listUsers, updateUserRoles } from '../api/users.api'
+import { Pencil, Save, ShieldCheck, X } from 'lucide-react'
+import { listUsers, updateUserPhone, updateUserRoles } from '../api/users.api'
 
 const ROLE_LABELS = {
   admin: 'Administración y producción',
@@ -14,6 +14,7 @@ export default function UsuariosPage() {
   const [data, setData] = useState({ users: [], roles: [] })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState(null)
+  const [phoneEditor, setPhoneEditor] = useState({ userId: null, value: '', saving: false })
   const load = async () => {
     setLoading(true)
     try {
@@ -43,6 +44,28 @@ export default function UsuariosPage() {
       setMessage({ ok: false, text: error.response?.data?.error || 'No fue posible cambiar el rol' })
     }
   }
+  const startPhoneEdit = (user) => {
+    setPhoneEditor({ userId: user.id, value: user.telefono || '', saving: false })
+    setMessage(null)
+  }
+  const cancelPhoneEdit = () => setPhoneEditor({ userId: null, value: '', saving: false })
+  const savePhone = async (user) => {
+    const value = phoneEditor.value.trim()
+    if (!value) {
+      setMessage({ ok: false, text: 'Ingresa el nuevo número de celular' })
+      return
+    }
+    setPhoneEditor((current) => ({ ...current, saving: true }))
+    try {
+      await updateUserPhone(user.id, value)
+      setMessage({ ok: true, text: `Celular de ${user.nombre} actualizado` })
+      cancelPhoneEdit()
+      await load()
+    } catch (error) {
+      setMessage({ ok: false, text: error.response?.data?.error || 'No fue posible actualizar el celular' })
+      setPhoneEditor((current) => ({ ...current, saving: false }))
+    }
+  }
   return (
     <div>
       <div className="mb-5">
@@ -61,7 +84,34 @@ export default function UsuariosPage() {
               <tr key={user.id} className="border-b border-border/50 hover:bg-white/[0.02]">
                 <td className="px-4 py-3 font-medium text-foreground inline-flex items-center gap-2"><ShieldCheck size={15} className="text-muted" />{user.nombre}</td>
                 <td className="px-4 py-3 text-muted">{user.email}</td>
-                <td className="px-4 py-3 font-mono text-xs">{user.telefono || '-'}</td>
+                <td className="px-4 py-3 text-xs min-w-[230px]">
+                  {phoneEditor.userId === user.id ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="tel"
+                        inputMode="tel"
+                        autoFocus
+                        value={phoneEditor.value}
+                        onChange={(event) => setPhoneEditor((current) => ({ ...current, value: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') savePhone(user)
+                          if (event.key === 'Escape') cancelPhoneEdit()
+                        }}
+                        placeholder="Ej. 315 000 0000"
+                        aria-label={`Celular de ${user.nombre}`}
+                        className="input-field h-9 min-w-0 font-mono text-xs"
+                        disabled={phoneEditor.saving}
+                      />
+                      <button type="button" onClick={() => savePhone(user)} disabled={phoneEditor.saving} title="Guardar celular" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-green-400 hover:bg-green-400/10 disabled:opacity-50"><Save size={15} /></button>
+                      <button type="button" onClick={cancelPhoneEdit} disabled={phoneEditor.saving} title="Cancelar" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-muted hover:bg-white/5 disabled:opacity-50"><X size={15} /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono">{user.telefono || 'Sin número'}</span>
+                      <button type="button" onClick={() => startPhoneEdit(user)} disabled={!user.activo} title={user.telefono ? 'Editar celular' : 'Agregar celular'} className="inline-flex h-8 w-8 items-center justify-center text-primary hover:bg-primary/10 disabled:opacity-40"><Pencil size={14} /></button>
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-3"><span className={user.activo ? 'text-green-400' : 'text-muted'}>{user.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td className="px-4 py-3">
                   <div className="grid min-w-[260px] grid-cols-2 gap-x-3 gap-y-2">

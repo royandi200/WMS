@@ -36,6 +36,23 @@ function formatUnitTotals(totals = []) {
   return totals.map((total) => `${formatQuantity(total.quantity)} ${total.unit}`).join(' + ')
 }
 
+function ReceptionProgress({ row }) {
+  const progress = row.progreso_recepcion_por_unidad || []
+  if (row.estado !== 'RECIBIDA_PARCIAL' || !progress.length) {
+    return <>{formatUnitTotals(row.totales_por_unidad)}</>
+  }
+  return (
+    <div className="space-y-1">
+      {progress.map((item) => (
+        <div key={item.unit}>
+          <span className="block text-green-400">Llegaron: {formatQuantity(item.received)} {item.unit}</span>
+          <span className="block text-muted">Se esperan: {formatQuantity(item.expected)} {item.unit}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function totalsFromItems(items = []) {
   const totals = new Map()
   for (const item of items) {
@@ -831,7 +848,7 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
                 )}
               </td>
               <td className="px-4 py-3 tabular-nums">{row.total_items}</td>
-              <td className="px-4 py-3 tabular-nums whitespace-nowrap">{formatUnitTotals(row.totales_por_unidad)}</td>
+              <td className="px-4 py-3 tabular-nums whitespace-nowrap"><ReceptionProgress row={row} /></td>
               <td className="px-4 py-3">{row.creado_por_nombre}</td>
               <td className="px-4 py-3 text-muted">{formatDate(row.creado_en)}</td>
               <td className="px-4 py-3">

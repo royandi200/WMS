@@ -7,7 +7,7 @@ const {
   purchaseOrderInputHash,
 } = require('../_lib/purchase-orders');
 const { normalizePurchaseOrderPdf, safeDownloadName } = require('../_lib/purchase-order-documents');
-const { groupQuantitiesByUnit } = require('../_lib/purchase-order-reception');
+const { groupQuantitiesByUnit, groupReceptionProgressByUnit } = require('../_lib/purchase-order-reception');
 const {
   cancelPurchaseOrder,
   normalizePurchaseOrderCancellation,
@@ -93,6 +93,30 @@ async function handleGet(req, res) {
     if (!byOrder.has(quantity.orden_compra_id)) byOrder.set(quantity.orden_compra_id, []);
     byOrder.get(quantity.orden_compra_id).push(quantity);
   }
+  const accepted = orderIds.length ? await query(
+    `SELECT accepted.orden_compra_id, accepted.producto_id,
+            SUM(accepted.cantidad) AS cantidad_aceptada
+       FROM (
+         SELECT r.orden_compra_id, ri.id, ri.producto_id,
+                CASE WHEN COUNT(rd.id) > 0
+                     THEN COALESCE(SUM(CASE WHEN rd.condicion = 'DISPONIBLE' THEN rd.cantidad ELSE 0 END), 0)
+                     ELSE LEAST(ri.cantidad_rec, ri.cantidad_esp) END AS cantidad
+           FROM recepciones r
+           JOIN recepcion_items ri ON ri.recepcion_id = r.id
+           LEFT JOIN recepcion_distribuciones rd
+             ON rd.recepcion_id = r.id AND rd.recepcion_item_id = ri.id
+          WHERE r.orden_compra_id IN (${orderIds.map(() => '?').join(',')})
+            AND r.estado = 'completada'
+          GROUP BY r.orden_compra_id, ri.id, ri.producto_id, ri.cantidad_rec, ri.cantidad_esp
+       ) accepted
+      GROUP BY accepted.orden_compra_id, accepted.producto_id`,
+    orderIds
+  ) : [];
+  const acceptedByOrder = new Map();
+  for (const item of accepted) {
+    if (!acceptedByOrder.has(item.orden_compra_id)) acceptedByOrder.set(item.orden_compra_id, []);
+    acceptedByOrder.get(item.orden_compra_id).push(item);
+  }
   for (const row of rows) {
     row.items = (byOrder.get(row.id) || []).map((item) => ({
       producto_id: item.producto_id,
@@ -103,6 +127,10 @@ async function handleGet(req, res) {
       unidad: item.unidad,
     }));
     row.totales_por_unidad = groupQuantitiesByUnit(byOrder.get(row.id) || []);
+    row.progreso_recepcion_por_unidad = groupReceptionProgressByUnit(
+      byOrder.get(row.id) || [],
+      acceptedByOrder.get(row.id) || []
+    );
   }
   return res.status(200).json({ ok: true, data: { rows, total: rows.length } });
 }

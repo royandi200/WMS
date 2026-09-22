@@ -16,6 +16,9 @@ export const createUser = (body) =>
 export const updateUserRoles = (id, roles) =>
   client.put('/users', { user_id: id, roles }).then((r) => r.data)
 
+export const updateUserPhone = (id, telefono) =>
+  client.patch('/users', { user_id: id, telefono }).then((r) => r.data)
+
 // Compatibilidad para consumidores antiguos que aun asignan un solo rol.
 export const updateUserRole = (id, role) => updateUserRoles(id, [role])
 

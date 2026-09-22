@@ -22,6 +22,34 @@ function groupQuantitiesByUnit(items = []) {
     .map(([unit, quantity]) => ({ unit, quantity }));
 }
 
+function groupReceptionProgressByUnit(orderedItems = [], acceptedItems = []) {
+  const acceptedByProduct = new Map(
+    acceptedItems.map(item => [Number(item.producto_id), Number(item.cantidad_aceptada || 0)])
+  );
+  const productsByUnit = new Map();
+  for (const item of orderedItems) {
+    const unit = normalizeUnit(item.unit ?? item.unidad);
+    const productId = Number(item.producto_id);
+    if (!productsByUnit.has(unit)) productsByUnit.set(unit, new Map());
+    const products = productsByUnit.get(unit);
+    products.set(productId, Number(((products.get(productId) || 0) + Number(item.cantidad_ordenada || 0)).toFixed(4)));
+  }
+  return [...productsByUnit.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([unit, products]) => {
+      const expected = [...products.values()].reduce((sum, quantity) => sum + quantity, 0);
+      const received = [...products.keys()].reduce(
+        (sum, productId) => sum + Number(acceptedByProduct.get(productId) || 0), 0
+      );
+      return {
+        unit,
+        expected: Number(expected.toFixed(4)),
+        received: Number(received.toFixed(4)),
+        pending: Number(Math.max(expected - received, 0).toFixed(4)),
+      };
+    });
+}
+
 function remainingPurchaseOrderItems(orderedItems = [], acceptedItems = []) {
   const acceptedByProduct = new Map(
     acceptedItems.map((item) => [Number(item.producto_id), Number(item.cantidad_aceptada || 0)])
@@ -200,6 +228,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
 
 module.exports = {
   groupQuantitiesByUnit,
+  groupReceptionProgressByUnit,
   normalizeUnit,
   preparePurchaseOrderReception,
   remainingPurchaseOrderItems,
