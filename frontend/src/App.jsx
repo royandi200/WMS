@@ -24,8 +24,9 @@ const OutsourcingPage = lazy(() => import('./pages/OutsourcingPage'))
 const AlertSettingsPage = lazy(() => import('./pages/AlertSettingsPage'))
 
 function AdminRoute({ children }) {
-  const role = String(useAuthStore((state) => state.user?.rol) || '').toLowerCase()
-  return role === 'admin' ? children : <Navigate to="/" replace />
+  const user = useAuthStore((state) => state.user)
+  const roles = user?.roles || [user?.rol].filter(Boolean)
+  return roles.map((role) => String(role).toLowerCase()).includes('admin') ? children : <Navigate to="/" replace />
 }
 
 function PageLoader() {
@@ -39,7 +40,8 @@ function PageLoader() {
 function CapabilityRoute({ capability, children }) {
   const user = useAuthStore((state) => state.user)
   const capabilities = user?.capabilities || []
-  const legacyAdmin = ['admin', 'supervisor'].includes(String(user?.rol || '').toLowerCase())
+  const roles = user?.roles || [user?.rol].filter(Boolean)
+  const legacyAdmin = roles.some((role) => ['admin', 'supervisor'].includes(String(role).toLowerCase()))
   const allowed = legacyAdmin || capabilities.includes('*') || capabilities.includes(capability)
   return allowed ? children : <Navigate to="/" replace />
 }

@@ -87,6 +87,7 @@ const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
 const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
+const { loadUserRolesFromConnection } = require('../../_lib/user-roles');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { confirmOutsourcingShipment } = require('../../_lib/outsourcing-workflow');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
@@ -736,8 +737,9 @@ async function getOrCreateBotUser(db, phone) {
      LIMIT 1`, [phone, phone]
   );
   if (realRows.length) {
-    console.log(`[getOrCreateBotUser] ✅ Usuario real por teléfono: id=${realRows[0].id} rol=${realRows[0].rol_nombre}`);
-    return realRows[0];
+    const roles = await loadUserRolesFromConnection(db, realRows[0].id, realRows[0].rol_nombre);
+    console.log(`[getOrCreateBotUser] ✅ Usuario real por identidad WhatsApp: id=${realRows[0].id} roles=${roles.join(',')}`);
+    return { ...realRows[0], roles };
   }
 
   // [FIX 20] Número no registrado → null. NO se crean ghost bots.
@@ -1502,11 +1504,12 @@ module.exports = async (req, res) => {
     }
 
     const rolRaw = user.rol_nombre || '';
+    const roles = user.roles || [rolRaw].filter(Boolean);
     const requiredCapability = capabilityForAction(action);
-    if (requiredCapability && !hasCapability(rolRaw, requiredCapability)) {
-      const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTu rol: ${rolRaw}`;
+    if (requiredCapability && !hasCapability(roles, requiredCapability)) {
+      const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTus roles: ${roles.join(', ') || 'sin rol'}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
-      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw });
+      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw, roles });
     }
 
     let mensaje = '';

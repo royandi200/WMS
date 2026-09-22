@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query } = require('./db');
 const { capabilitiesForRole, hasCapability } = require('./capabilities');
+const { loadUserRoles } = require('./user-roles');
 
 function getAllowedOrigin() {
   const configured = process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -30,7 +31,7 @@ function verifyToken(req) {
 async function requireAuth(req) {
   const payload = verifyToken(req);
   const rows = await query(
-    `SELECT u.id, u.nombre, u.email, u.activo, r.nombre AS rol
+    `SELECT u.id, u.nombre, u.email, u.activo, u.rol_id, r.nombre AS rol
      FROM usuarios u
      LEFT JOIN roles r ON r.id = u.rol_id
      WHERE u.id = ? AND u.activo = 1
@@ -40,15 +41,15 @@ async function requireAuth(req) {
   if (!rows.length) throw Object.assign(new Error('Usuario no autorizado'), { status: 401 });
   const user = rows[0];
   if (!user.rol) throw Object.assign(new Error('Usuario sin rol asignado'), { status: 403 });
-  return user;
+  const roles = await loadUserRoles(query, user.id, user.rol);
+  return { ...user, roles };
 }
 
 async function requireRole(req, allowedRoles = []) {
   const user = await requireAuth(req);
   if (!allowedRoles.length) return user;
-  const normalizedRole = String(user.rol || '').toLowerCase();
   const allowed = allowedRoles.map((role) => String(role).toLowerCase());
-  if (!allowed.includes(normalizedRole)) {
+  if (!user.roles.some(role => allowed.includes(role))) {
     throw Object.assign(new Error('No tienes permiso para esta acción'), { status: 403 });
   }
   return user;
@@ -56,10 +57,10 @@ async function requireRole(req, allowedRoles = []) {
 
 async function requireCapability(req, capability) {
   const user = await requireAuth(req);
-  if (!hasCapability(user.rol, capability)) {
+  if (!hasCapability(user.roles, capability)) {
     throw Object.assign(new Error('No tienes permiso para esta accion'), { status: 403 });
   }
-  return { ...user, capabilities: capabilitiesForRole(user.rol) };
+  return { ...user, capabilities: capabilitiesForRole(user.roles) };
 }
 
 function safeEqual(a, b) {

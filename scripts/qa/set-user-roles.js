@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const APPLY_TOKEN = 'APPLY_USER_WHATSAPP_ALIAS';
+const APPLY_TOKEN = 'APPLY_USER_ROLES';
+const ASSIGNABLE_ROLES = new Set(['admin', 'recepcion_cierre', 'alistador', 'despacho', 'consulta']);
 
 function loadEnv() {
   const candidates = [
@@ -31,27 +32,24 @@ function argument(name) {
 
 async function main() {
   loadEnv();
-  const phone = argument('phone').replace(/\D/gu, '');
   const userId = Number(argument('user-id') || 0);
-  const alias = argument('alias');
+  const roles = [...new Set(argument('roles').split(',').map(value => value.trim().toLowerCase()).filter(Boolean))];
   const actorPhone = argument('actor-phone').replace(/\D/gu, '');
   const apply = argument('confirmation') === APPLY_TOKEN;
-  const validAlias = alias.length >= 3
-    && alias.length <= 80
-    && /^[A-Za-z0-9._:@-]+$/u.test(alias)
-    && (alias.includes('@') || /^[A-Za-z]{2}\.\d+$/u.test(alias));
-  if ((!/^573\d{9}$/u.test(phone) && (!Number.isInteger(userId) || userId <= 0)) || !validAlias || !/^573\d{9}$/u.test(actorPhone)) {
-    throw new Error('Usa --phone=57... o --user-id=... junto con --alias=... --actor-phone=57...');
+  if (!Number.isInteger(userId) || userId <= 0 || !roles.length || !/^573\d{9}$/u.test(actorPhone)) {
+    throw new Error('Usa --user-id=... --roles=recepcion_cierre,despacho --actor-phone=57...');
   }
+  if (roles.some(role => !ASSIGNABLE_ROLES.has(role))) throw new Error('Hay roles no permitidos');
 
   const { createConnection } = require('../../api/_lib/db');
+  const { loadUserRolesFromConnection } = require('../../api/_lib/user-roles');
   const conn = await createConnection();
   try {
     const [users] = await conn.execute(
-      `SELECT u.id, u.nombre, u.telefono, u.activo, LOWER(r.nombre) AS rol
+      `SELECT u.id, u.nombre, u.activo, u.rol_id, LOWER(r.nombre) AS rol
          FROM usuarios u JOIN roles r ON r.id = u.rol_id
-        WHERE ${userId > 0 ? 'u.id = ?' : 'u.telefono = ?'} LIMIT 1`,
-      [userId > 0 ? userId : phone]
+        WHERE u.id = ? LIMIT 1`,
+      [userId]
     );
     const [actors] = await conn.execute(
       `SELECT u.id, u.nombre, LOWER(r.nombre) AS rol
@@ -61,35 +59,38 @@ async function main() {
     );
     if (users.length !== 1 || Number(users[0].activo) !== 1) throw new Error('Usuario objetivo no encontrado o inactivo');
     if (actors.length !== 1 || actors[0].rol !== 'admin') throw new Error('Actor administrador no valido');
-    const [existing] = await conn.execute(
-      `SELECT uwa.id, uwa.alias, uwa.usuario_id, u.nombre
-         FROM usuario_whatsapp_aliases uwa JOIN usuarios u ON u.id = uwa.usuario_id
-        WHERE uwa.alias = ? LIMIT 1`,
-      [alias]
+    const before = await loadUserRolesFromConnection(conn, userId, users[0].rol);
+    const placeholders = roles.map(() => '?').join(',');
+    const [roleRows] = await conn.execute(
+      `SELECT id, LOWER(nombre) AS nombre FROM roles WHERE LOWER(nombre) IN (${placeholders})`,
+      roles
     );
-    if (existing.length && Number(existing[0].usuario_id) !== Number(users[0].id)) {
-      throw new Error(`El alias ya pertenece a ${existing[0].nombre}`);
-    }
-    const preview = { ok: true, dryRun: !apply, user: users[0], alias, existing: existing[0] || null };
+    if (roleRows.length !== roles.length) throw new Error('Uno o mas roles no existen');
+    const preview = { ok: true, dryRun: !apply, user: { id: userId, nombre: users[0].nombre }, before, after: roles };
     if (!apply) {
       console.log(JSON.stringify(preview, null, 2));
       return;
     }
 
+    const byName = new Map(roleRows.map(role => [role.nombre, role]));
+    const primaryName = roles.includes(users[0].rol) ? users[0].rol : roles[0];
     await conn.beginTransaction();
-    await conn.execute(
-      `INSERT INTO usuario_whatsapp_aliases (usuario_id, alias, habilitado_salida, creado_en)
-       VALUES (?, ?, 1, NOW())
-       ON DUPLICATE KEY UPDATE usuario_id = VALUES(usuario_id), habilitado_salida = 1`,
-      [users[0].id, alias]
-    );
+    await conn.execute('UPDATE usuarios SET rol_id = ? WHERE id = ?', [byName.get(primaryName).id, userId]);
+    await conn.execute('DELETE FROM usuario_roles WHERE usuario_id = ?', [userId]);
+    for (const roleName of roles) {
+      await conn.execute(
+        `INSERT INTO usuario_roles (usuario_id, rol_id, es_principal, creado_en)
+         VALUES (?, ?, ?, NOW())`,
+        [userId, byName.get(roleName).id, roleName === primaryName ? 1 : 0]
+      );
+    }
     await conn.execute(
       `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
-       VALUES ('autorizacion', 'INFO', 'Alias de identidad WhatsApp registrado', ?, ?, NOW())`,
-      [actors[0].id, JSON.stringify({ usuario_id: users[0].id, telefono: users[0].telefono || null, alias, habilitado_salida: true })]
+       VALUES ('autorizacion', 'INFO', 'Roles multiples de usuario actualizados', ?, ?, NOW())`,
+      [actors[0].id, JSON.stringify({ usuario_id: userId, roles_anteriores: before, roles_nuevos: roles, canal: 'qa_roles' })]
     );
     await conn.commit();
-    console.log(JSON.stringify({ ...preview, dryRun: false, changedBy: actors[0].nombre }, null, 2));
+    console.log(JSON.stringify({ ...preview, dryRun: false, primaryRole: primaryName, changedBy: actors[0].nombre }, null, 2));
   } catch (error) {
     await conn.rollback().catch(() => {});
     throw error;
@@ -99,6 +100,6 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error(error.message);
+  console.error(error?.message || error?.code || String(error));
   process.exitCode = 1;
 });

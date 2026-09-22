@@ -32,9 +32,10 @@ const NAV = [
 export default function Sidebar({ open, mobile = false, onClose }) {
   const user = useAuthStore((state) => state.user)
   const capabilities = user?.capabilities || []
-  const legacyAdmin = ['admin', 'supervisor'].includes(String(user?.rol || '').toLowerCase())
+  const roles = user?.roles || [user?.rol].filter(Boolean)
+  const legacyAdmin = roles.some((role) => ['admin', 'supervisor'].includes(String(role).toLowerCase()))
   const allowed = (item) => {
-    if (item.adminOnly && String(user?.rol || '').toLowerCase() !== 'admin') return false
+    if (item.adminOnly && !roles.map((role) => String(role).toLowerCase()).includes('admin')) return false
     return legacyAdmin || capabilities.includes('*') || capabilities.includes(item.capability)
   }
   return (

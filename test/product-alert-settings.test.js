@@ -55,9 +55,9 @@ test('dashboard keeps alert settings in an admin-only section', () => {
   const sidebar = fs.readFileSync(path.join(__dirname, '../frontend/src/components/Sidebar.jsx'), 'utf8');
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/AlertSettingsPage.jsx'), 'utf8');
   assert.match(app, /path="configuracion-alertas" element=\{<AdminRoute>/u);
-  assert.match(app, /role === 'admin'/u);
+  assert.match(app, /roles\.map\(\(role\)[\s\S]*\.includes\('admin'\)/u);
   assert.match(sidebar, /alert_settings\.manage', adminOnly: true/u);
-  assert.match(sidebar, /item\.adminOnly[\s\S]*!== 'admin'/u);
+  assert.match(sidebar, /item\.adminOnly[\s\S]*roles\.map\(\(role\)[\s\S]*\.includes\('admin'\)/u);
   assert.match(page, /Stock mínimo/u);
   assert.match(page, /Permanencia máxima/u);
   assert.match(page, /Proveedor:/u);

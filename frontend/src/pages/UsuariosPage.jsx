@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck } from 'lucide-react'
-import { listUsers, updateUserRole } from '../api/users.api'
+import { listUsers, updateUserRoles } from '../api/users.api'
 
 const ROLE_LABELS = {
   admin: 'Administración y producción',
@@ -26,10 +26,18 @@ export default function UsuariosPage() {
     }
   }
   useEffect(() => { load() }, [])
-  const changeRole = async (user, role) => {
+  const changeRole = async (user, role, checked) => {
+    const current = Array.isArray(user.roles) && user.roles.length ? user.roles : [user.rol].filter(Boolean)
+    const roles = checked
+      ? [...new Set([...current, role])]
+      : current.filter((assigned) => assigned !== role)
+    if (!roles.length) {
+      setMessage({ ok: false, text: 'Cada usuario debe conservar al menos un rol' })
+      return
+    }
     try {
-      await updateUserRole(user.id, role)
-      setMessage({ ok: true, text: `Rol de ${user.nombre} actualizado` })
+      await updateUserRoles(user.id, roles)
+      setMessage({ ok: true, text: `Roles de ${user.nombre} actualizados` })
       await load()
     } catch (error) {
       setMessage({ ok: false, text: error.response?.data?.error || 'No fue posible cambiar el rol' })
@@ -45,7 +53,7 @@ export default function UsuariosPage() {
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm min-w-[760px]">
           <thead><tr className="bg-surface border-b border-border">
-            {['Usuario', 'Correo', 'Teléfono', 'Estado', 'Rol'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
+            {['Usuario', 'Correo', 'Teléfono', 'Estado', 'Roles'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={5} className="px-4 py-10 text-center text-muted">Cargando usuarios...</td></tr>}
@@ -56,10 +64,21 @@ export default function UsuariosPage() {
                 <td className="px-4 py-3 font-mono text-xs">{user.telefono || '-'}</td>
                 <td className="px-4 py-3"><span className={user.activo ? 'text-green-400' : 'text-muted'}>{user.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td className="px-4 py-3">
-                  <select value={user.rol || ''} onChange={(event) => changeRole(user, event.target.value)} className="input-field max-w-[220px]" disabled={!user.activo}>
-                    {!data.roles.some((role) => role.nombre === user.rol) && <option value={user.rol}>{ROLE_LABELS[user.rol] || user.rol || 'Sin rol'}</option>}
-                    {data.roles.map((role) => <option key={role.id} value={role.nombre}>{ROLE_LABELS[role.nombre] || role.nombre}</option>)}
-                  </select>
+                  <div className="grid min-w-[260px] grid-cols-2 gap-x-3 gap-y-2">
+                    {data.roles.map((role) => {
+                      const assigned = (user.roles || [user.rol]).includes(role.nombre)
+                      return <label key={role.id} className="inline-flex items-center gap-2 text-xs text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={assigned}
+                          onChange={(event) => changeRole(user, role.nombre, event.target.checked)}
+                          disabled={!user.activo}
+                          className="accent-primary"
+                        />
+                        {ROLE_LABELS[role.nombre] || role.nombre}
+                      </label>
+                    })}
+                  </div>
                 </td>
               </tr>
             ))}

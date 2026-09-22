@@ -18,7 +18,12 @@ require.cache[dbPath] = {
         state.executed.push({ sql, params });
         if (/FROM usuarios u JOIN roles/.test(sql)) {
           const roles = params.map(String);
-          return [state.users.filter(u => u.activo && u.telefono && roles.includes(u.rol))];
+          return [state.users.filter((u) => {
+            const assigned = u.roles || [u.rol];
+            return u.activo
+              && (u.telefono || u.whatsapp_alias)
+              && assigned.some(role => roles.includes(role));
+          })];
         }
         if (/INSERT INTO notificaciones_salida/.test(sql)) {
           const key = `${params[0]}|${params[1]}`;
@@ -83,6 +88,7 @@ const USERS = [
   { id: 20, rol: 'recepcion_cierre', activo: 1, telefono: '315 000 0083' },
   { id: 4, rol: 'recepcion_cierre', activo: 0, telefono: '3150000099' },
   { id: 30, rol: 'despacho', activo: 1, telefono: '12345' },
+  { id: 31, rol: 'consulta', roles: ['consulta', 'despacho'], activo: 1, telefono: null, whatsapp_alias: '123456789012345@lid' },
 ];
 const BOT = { BUILDERBOT_API_TOKEN: 'qa-token', BUILDERBOT_BOT_ID: 'qa-bot' };
 
@@ -164,11 +170,21 @@ test('sin destinatarios en el rol usa el respaldo; sin respaldo registra adverte
 });
 
 test('un telefono invalido no se envia', async () => {
-  reset(USERS);
+  reset(USERS.filter(user => user.id !== 31));
   await withEnv({ ...BOT, DISABLE_OUTBOUND_NOTIFICATIONS: undefined }, async () => {
     const result = await notifyRoles({ event: 'dispatch_ready:1', roles: ['despacho'], fallbackRoles: [], text: 'x' });
     assert.deepEqual(result, [{ status: 'no_recipient' }]);
     assert.equal(sent.length, 0);
+  });
+});
+
+test('un rol adicional recibe push por alias cuando no existe celular', async () => {
+  reset(USERS.filter(user => user.id === 31));
+  await withEnv({ ...BOT, DISABLE_OUTBOUND_NOTIFICATIONS: undefined }, async () => {
+    const result = await notifyRoles({ event: 'dispatch_ready:2', roles: ['despacho'], fallbackRoles: [], text: 'x' });
+    assert.deepEqual(result.map(item => item.status), ['sent']);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].body.number, '123456789012345@lid');
   });
 });
 

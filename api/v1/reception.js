@@ -46,7 +46,7 @@ async function findProduct(conn, value) {
 }
 
 function canSyncSiigo(user) {
-  return hasCapability(user.rol, CAPABILITIES.SIIGO_SYNC);
+  return hasCapability(user.roles || user.rol, CAPABILITIES.SIIGO_SYNC);
 }
 
 function receptionMovementReference(reception) {
@@ -490,7 +490,7 @@ async function confirmReceptionForUser({ body = {}, user }) {
         || body.orden_maquila_id || body.outsourcing_order_id || 0
       ) || null;
       if (item.modalidad_operativa === PRODUCT_MODES.OUTSOURCED) {
-        if (!hasCapability(user.rol, CAPABILITIES.OUTSOURCING_RECEIVE)) {
+        if (!hasCapability(user.roles || user.rol, CAPABILITIES.OUTSOURCING_RECEIVE)) {
           throw httpError(403, 'No tienes permiso para vincular recepciones de maquila');
         }
         if (!outsourcingOrderId) {

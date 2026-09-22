@@ -3,6 +3,7 @@
 const jwt = require('jsonwebtoken');
 const { query } = require('../../_lib/db');
 const { cors } = require('../../_lib/auth');
+const { loadUserRoles } = require('../../_lib/user-roles');
 
 module.exports = async (req, res) => {
   cors(res, 'POST');
@@ -36,8 +37,9 @@ module.exports = async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
 
     const user = rows[0];
+    const roles = await loadUserRoles(query, user.id, user.rol_nombre);
     const access_token = jwt.sign(
-      { id: user.id, email: user.email, rol: user.rol_nombre },
+      { id: user.id, email: user.email, rol: user.rol_nombre, roles },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );

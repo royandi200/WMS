@@ -56,7 +56,7 @@ async function getProductByLot(conn, lpn) {
 }
 
 function canSyncSiigo(user) {
-  return hasCapability(user.rol, CAPABILITIES.SIIGO_SYNC);
+  return hasCapability(user.roles || user.rol, CAPABILITIES.SIIGO_SYNC);
 }
 
 async function validateSiigoDispatch(conn, { terceroId, product, price }) {

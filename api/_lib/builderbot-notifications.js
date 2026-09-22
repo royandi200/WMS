@@ -8,8 +8,27 @@ function normalizePhone(phone) {
   return /^573\d{9}$/.test(digits) ? digits : null;
 }
 
+function normalizeRecipient(value) {
+  const phone = normalizePhone(value);
+  if (phone) return phone;
+  const alias = String(value || '').trim();
+  if (alias.length < 3 || alias.length > 80) return null;
+  if (!/^[A-Za-z0-9._:@-]+$/u.test(alias)) return null;
+  if (!alias.includes('@') && !/^[A-Za-z]{2}\.\d+$/u.test(alias)) return null;
+  return alias;
+}
+
+function maskRecipient(value) {
+  const recipient = String(value || '');
+  if (/^573\d{9}$/u.test(recipient)) {
+    return `${recipient.slice(0, 4)}******${recipient.slice(-2)}`;
+  }
+  if (recipient.length <= 6) return `${recipient.slice(0, 1)}***${recipient.slice(-1)}`;
+  return `${recipient.slice(0, 4)}${'*'.repeat(Math.min(10, recipient.length - 6))}${recipient.slice(-2)}`;
+}
+
 function maskPhone(phone) {
-  return `${String(phone).slice(0, 4)}******${String(phone).slice(-2)}`;
+  return maskRecipient(phone);
 }
 
 function notificationsEnabled() {
@@ -17,19 +36,23 @@ function notificationsEnabled() {
   return !disabled;
 }
 
-function recipientPhones(rows, excludeUserIds = []) {
+function recipientAddresses(rows, excludeUserIds = []) {
   const excludedUsers = new Set(excludeUserIds.map(Number).filter(Number.isInteger));
   return [...new Set(rows
     .filter(row => !excludedUsers.has(Number(row.id)))
-    .map(row => normalizePhone(row.telefono))
+    .map(row => normalizePhone(row.telefono) || normalizeRecipient(row.whatsapp_alias || row.alias))
     .filter(Boolean))];
 }
 
-function sendMessage(phone, text) {
+function recipientPhones(rows, excludeUserIds = []) {
+  return recipientAddresses(rows, excludeUserIds);
+}
+
+function sendMessage(recipient, text) {
   const token = process.env.BUILDERBOT_API_TOKEN;
   const botId = process.env.BUILDERBOT_BOT_ID;
   if (!token || !botId) return Promise.reject(new Error('BuilderBot no configurado'));
-  const body = JSON.stringify({ number: phone, messages: { content: formatWhatsAppMessage(text) } });
+  const body = JSON.stringify({ number: recipient, messages: { content: formatWhatsAppMessage(text) } });
   return new Promise((resolve, reject) => {
     const request = https.request({
       hostname: 'app.builderbot.cloud',
@@ -68,12 +91,19 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
       if (!roleNames.length) return [];
       const placeholders = roleNames.map(() => '?').join(',');
       const [rows] = await conn.execute(
-        `SELECT u.id, u.telefono FROM usuarios u JOIN roles r ON r.id = u.rol_id
-         WHERE u.activo = 1 AND u.telefono IS NOT NULL AND u.email NOT LIKE '%@wa.bot'
-           AND LOWER(r.nombre) IN (${placeholders}) ORDER BY u.id`,
-        roleNames
+        `SELECT u.id, u.telefono, MIN(uwa.alias) AS whatsapp_alias
+           FROM usuarios u JOIN roles r ON r.id = u.rol_id
+           LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
+           LEFT JOIN roles ar ON ar.id = ur.rol_id
+           LEFT JOIN usuario_whatsapp_aliases uwa
+             ON uwa.usuario_id = u.id AND uwa.habilitado_salida = 1
+          WHERE u.activo = 1 AND u.email NOT LIKE '%@wa.bot'
+            AND (LOWER(r.nombre) IN (${placeholders}) OR LOWER(ar.nombre) IN (${placeholders}))
+          GROUP BY u.id, u.telefono
+          ORDER BY u.id`,
+        [...roleNames, ...roleNames]
       );
-      return recipientPhones(rows, excludeUserIds);
+      return recipientAddresses(rows, excludeUserIds);
     };
     let phones = await find(normalizedRoles);
     if (!phones.length) phones = await find(fallback);
@@ -87,14 +117,14 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
     }
     const formattedText = formatWhatsAppMessage(text);
     const results = [];
-    for (const phone of phones) {
+    for (const recipient of phones) {
       let notificationId;
       try {
         const [created] = await conn.execute(
           `INSERT INTO notificaciones_salida
              (evento, canal, destinatario, mensaje, estado, intentos, creado_en)
            VALUES (?, 'WHATSAPP', ?, ?, 'PENDIENTE', 0, NOW())`,
-          [event, phone, formattedText]
+          [event, recipient, formattedText]
         );
         notificationId = created.insertId;
       } catch (error) {
@@ -102,10 +132,10 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
           const [existing] = await conn.execute(
             `SELECT id, estado FROM notificaciones_salida
              WHERE evento = ? AND canal = 'WHATSAPP' AND destinatario = ? LIMIT 1`,
-            [event, phone]
+            [event, recipient]
           );
           if (!existing.length || existing[0].estado !== 'ERROR') {
-            results.push({ recipient: maskPhone(phone), status: 'duplicate' });
+            results.push({ recipient: maskRecipient(recipient), status: 'duplicate' });
             continue;
           }
           notificationId = existing[0].id;
@@ -114,20 +144,20 @@ async function notifyRoles({ event, roles, text, fallbackRoles = ['admin'], excl
         }
       }
       try {
-        await sendMessage(phone, formattedText);
+        await sendMessage(recipient, formattedText);
         await conn.execute(
           `UPDATE notificaciones_salida SET estado = 'ENVIADA', intentos = intentos + 1,
                enviado_en = NOW(), ultimo_error = NULL WHERE id = ?`,
           [notificationId]
         );
-        results.push({ recipient: maskPhone(phone), status: 'sent' });
+        results.push({ recipient: maskRecipient(recipient), status: 'sent' });
       } catch (error) {
         await conn.execute(
           `UPDATE notificaciones_salida SET estado = 'ERROR', intentos = intentos + 1,
                ultimo_error = ? WHERE id = ?`,
           [String(error.message).slice(0, 1000), notificationId]
         );
-        results.push({ recipient: maskPhone(phone), status: 'error', error: error.message });
+        results.push({ recipient: maskRecipient(recipient), status: 'error', error: error.message });
       }
     }
     return results;
@@ -142,7 +172,7 @@ async function retryNotification(id) {
   }
   const notificationId = Number(id || 0);
   if (!Number.isInteger(notificationId) || notificationId <= 0) throw Object.assign(new Error('notificacion_id es obligatorio'), { status: 400 });
-  let phone;
+  let recipient;
   let message;
   const conn = await createConnection();
   try {
@@ -160,8 +190,8 @@ async function retryNotification(id) {
       await conn.commit();
       return { id: notificationId, status: 'already_pending' };
     }
-    phone = normalizePhone(rows[0].destinatario);
-    if (!phone) throw Object.assign(new Error('Destinatario invalido'), { status: 409 });
+    recipient = normalizeRecipient(rows[0].destinatario);
+    if (!recipient) throw Object.assign(new Error('Destinatario invalido'), { status: 409 });
     message = rows[0].mensaje;
     await conn.execute(
       `UPDATE notificaciones_salida SET estado = 'PENDIENTE', ultimo_error = NULL WHERE id = ?`,
@@ -176,7 +206,7 @@ async function retryNotification(id) {
   }
 
   try {
-    await sendMessage(phone, message);
+    await sendMessage(recipient, message);
     const sentConn = await createConnection();
     try {
       await sentConn.execute(
@@ -187,7 +217,7 @@ async function retryNotification(id) {
     } finally {
       await sentConn.end().catch(() => {});
     }
-    return { id: notificationId, recipient: maskPhone(phone), status: 'sent' };
+    return { id: notificationId, recipient: maskRecipient(recipient), status: 'sent' };
   } catch (error) {
     const errorConn = await createConnection();
     try {
@@ -203,4 +233,14 @@ async function retryNotification(id) {
   }
 }
 
-module.exports = { notifyRoles, retryNotification, normalizePhone, maskPhone, notificationsEnabled, recipientPhones };
+module.exports = {
+  notifyRoles,
+  retryNotification,
+  normalizePhone,
+  normalizeRecipient,
+  maskPhone,
+  maskRecipient,
+  notificationsEnabled,
+  recipientPhones,
+  recipientAddresses,
+};

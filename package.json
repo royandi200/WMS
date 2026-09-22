@@ -54,6 +54,8 @@
     "data:builderbot-ingress-dedupe:apply": "node scripts/apply-builderbot-ingress-dedupe-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:builderbot-durable-inbox:dry-run": "node scripts/apply-builderbot-durable-inbox-migration.js",
     "data:builderbot-durable-inbox:apply": "node scripts/apply-builderbot-durable-inbox-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:user-multi-roles:dry-run": "node scripts/apply-user-multi-roles-migration.js",
+    "data:user-multi-roles:apply": "node scripts/apply-user-multi-roles-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:product-settings:dry-run": "node scripts/sync-product-operational-settings.js",
     "data:product-settings:apply": "node scripts/sync-product-operational-settings.js --apply --yes-i-understand-this-changes-the-qa-product-catalog",
     "data:product-settings:verify": "node scripts/qa/verify-product-operational-settings.js",

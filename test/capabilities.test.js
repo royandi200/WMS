@@ -15,7 +15,13 @@ const {
 } = require('../api/_lib/purchase-orders');
 const { normalizeReceptionDistributions } = require('../api/_lib/reception-distributions');
 const { roundQty } = require('../api/_lib/production-workflow');
-const { notificationsEnabled, normalizePhone, maskPhone, recipientPhones } = require('../api/_lib/builderbot-notifications');
+const {
+  notificationsEnabled,
+  normalizePhone,
+  normalizeRecipient,
+  maskPhone,
+  recipientPhones,
+} = require('../api/_lib/builderbot-notifications');
 const {
   normalizeExpiryDate,
   normalizeProductionCloseParams,
@@ -35,6 +41,13 @@ test('workflow roles use least privilege', () => {
   assert.equal(hasCapability('alistador', CAPABILITIES.PRODUCTION_RELEASE), false);
   assert.equal(hasCapability('despacho', CAPABILITIES.DISPATCH_CONFIRM), true);
   assert.equal(hasCapability('despacho', CAPABILITIES.APPROVALS_DECIDE), false);
+});
+
+test('multiple roles combine capabilities without broadening either role globally', () => {
+  const roles = ['recepcion_cierre', 'despacho'];
+  assert.equal(hasCapability(roles, CAPABILITIES.RECEPTION_CONFIRM), true);
+  assert.equal(hasCapability(roles, CAPABILITIES.DISPATCH_CONFIRM), true);
+  assert.equal(hasCapability(roles, CAPABILITIES.USERS_MANAGE), false);
 });
 
 test('unknown and read-only roles cannot mutate inventory', () => {
@@ -246,6 +259,9 @@ test('BuilderBot phone normalization is deterministic and masked in results', ()
   assert.equal(normalizePhone('317 444 2659'), '573174442659');
   assert.equal(normalizePhone('+57 312 503 1367'), '573125031367');
   assert.equal(normalizePhone('123'), null);
+  assert.equal(normalizeRecipient('123456789012345@lid'), '123456789012345@lid');
+  assert.equal(normalizeRecipient('CO.1963644074304116'), 'CO.1963644074304116');
+  assert.equal(normalizeRecipient('alias con espacios'), null);
   assert.equal(maskPhone('573174442659'), '5731******59');
 });
 
@@ -267,6 +283,14 @@ test('proactive notifications exclude the actor and deduplicate phones', () => {
     { id: 4, telefono: 'invalido' },
   ];
   assert.deepEqual(recipientPhones(rows, [1]), ['573125031367']);
+});
+
+test('proactive notifications use an enabled WhatsApp alias only when no valid phone exists', () => {
+  const rows = [
+    { id: 1, telefono: null, whatsapp_alias: '123456789012345@lid' },
+    { id: 2, telefono: '3174442659', whatsapp_alias: 'CO.1234567890' },
+  ];
+  assert.deepEqual(recipientPhones(rows), ['123456789012345@lid', '573174442659']);
 });
 
 test('production start and close emit stable notification events', () => {

@@ -17,7 +17,8 @@ module.exports = async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         rol: user.rol,
-        capabilities: capabilitiesForRole(user.rol),
+        roles: user.roles,
+        capabilities: capabilitiesForRole(user.roles),
       },
     });
   } catch (err) {

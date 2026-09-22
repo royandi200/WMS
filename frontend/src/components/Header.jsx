@@ -48,7 +48,7 @@ export default function Header({ onToggleSidebar, sidebarOpen, onOpenMobileMenu,
             </div>
             <div className="hidden sm:block">
               <p className="text-xs font-medium text-foreground leading-tight">{user.nombre || user.name || user.email}</p>
-              <p className="text-[10px] text-muted capitalize leading-tight">{user.role || user.rol || 'usuario'}</p>
+              <p className="text-[10px] text-muted capitalize leading-tight">{(user.roles || [user.role || user.rol]).filter(Boolean).join(' · ') || 'usuario'}</p>
             </div>
           </div>
         )}

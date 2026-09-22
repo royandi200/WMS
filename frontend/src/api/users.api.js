@@ -13,8 +13,11 @@ export const createUser = (body) =>
   client.post('/users', body).then((r) => r.data)
 
 // PUT /users/:id
-export const updateUserRole = (id, role) =>
-  client.put('/users', { user_id: id, role }).then((r) => r.data)
+export const updateUserRoles = (id, roles) =>
+  client.put('/users', { user_id: id, roles }).then((r) => r.data)
+
+// Compatibilidad para consumidores antiguos que aun asignan un solo rol.
+export const updateUserRole = (id, role) => updateUserRoles(id, [role])
 
 // DELETE /users/:id
 export const deleteUser = (id) =>

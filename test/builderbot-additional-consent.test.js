@@ -20,6 +20,7 @@ function harness({ operationError, role = 'admin' } = {}) {
       if (sql.includes('UPDATE webhook_ingress_inbox')) return [{ affectedRows: 1 }];
       if (sql.includes('INSERT INTO webhook_logs')) return [{ affectedRows: 1 }];
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
+      if (sql.includes('FROM usuario_roles ur')) return [[{ rol: role }]];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];
       if (sql.includes('FROM despachos d')) return [[]];
       if (sql.includes('FROM maquila_envios me')) return [[{

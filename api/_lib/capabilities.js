@@ -138,12 +138,25 @@ function normalizeRole(role) {
   return String(role || '').trim().toLowerCase();
 }
 
-function capabilitiesForRole(role) {
-  return ROLE_CAPABILITIES[normalizeRole(role)] || [];
+function normalizeRoles(roles) {
+  const values = Array.isArray(roles) ? roles : [roles];
+  return [...new Set(values.map(normalizeRole).filter(Boolean))];
 }
 
-function hasCapability(role, capability) {
-  const capabilities = capabilitiesForRole(role);
+function capabilitiesForRole(roles) {
+  const combined = [];
+  for (const role of normalizeRoles(roles)) {
+    const assigned = ROLE_CAPABILITIES[role] || [];
+    if (assigned.includes('*')) return ['*'];
+    for (const capability of assigned) {
+      if (!combined.includes(capability)) combined.push(capability);
+    }
+  }
+  return combined;
+}
+
+function hasCapability(roles, capability) {
+  const capabilities = capabilitiesForRole(roles);
   return capabilities.includes('*') || capabilities.includes(capability);
 }
 
@@ -156,6 +169,7 @@ module.exports = {
   ROLE_CAPABILITIES,
   ACTION_CAPABILITIES,
   normalizeRole,
+  normalizeRoles,
   capabilitiesForRole,
   hasCapability,
   capabilityForAction,

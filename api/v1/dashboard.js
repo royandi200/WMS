@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
     await conn.query('SET TRANSACTION READ ONLY');
     await conn.beginTransaction();
     const data = await dashboardMetrics(async (sql, args = []) => (await conn.execute(sql, args))[0], {
-      period, approvalsAllowed: hasCapability(user.rol, CAPABILITIES.APPROVALS_READ),
+      period, approvalsAllowed: hasCapability(user.roles || user.rol, CAPABILITIES.APPROVALS_READ),
     });
     await conn.commit();
     return res.status(200).json({ ok: true, data });

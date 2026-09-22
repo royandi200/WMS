@@ -1,6 +1,7 @@
 const { createConnection } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
-const { CAPABILITIES, capabilitiesForRole } = require('../_lib/capabilities');
+const { CAPABILITIES, capabilitiesForRole, normalizeRoles } = require('../_lib/capabilities');
+const { loadUserRolesFromConnection } = require('../_lib/user-roles');
 
 const ASSIGNABLE_ROLES = new Set(['admin', 'recepcion_cierre', 'alistador', 'despacho', 'consulta']);
 
@@ -26,10 +27,19 @@ async function handleGet(req, res) {
        WHERE LOWER(nombre) IN ('admin','recepcion_cierre','alistador','despacho','consulta')
        ORDER BY FIELD(LOWER(nombre),'admin','recepcion_cierre','alistador','despacho','consulta')`
     );
+    const hydratedUsers = [];
+    for (const user of users) {
+      const assignedRoles = await loadUserRolesFromConnection(conn, user.id, user.rol);
+      hydratedUsers.push({
+        ...user,
+        roles: assignedRoles,
+        capabilities: capabilitiesForRole(assignedRoles),
+      });
+    }
     return res.status(200).json({
       ok: true,
       data: {
-        users: users.map(user => ({ ...user, capabilities: capabilitiesForRole(user.rol) })),
+        users: hydratedUsers,
         roles,
       },
     });
@@ -41,39 +51,68 @@ async function handleGet(req, res) {
 async function handlePut(req, res) {
   const actor = await requireCapability(req, CAPABILITIES.USERS_MANAGE);
   const userId = Number(req.body?.user_id || req.body?.id || 0);
-  const roleName = String(req.body?.role || req.body?.rol || '').trim().toLowerCase();
+  const requestedRoles = normalizeRoles(
+    Array.isArray(req.body?.roles) ? req.body.roles : (req.body?.role || req.body?.rol)
+  );
   if (!Number.isInteger(userId) || userId <= 0) throw httpError(400, 'user_id es obligatorio');
-  if (!ASSIGNABLE_ROLES.has(roleName)) throw httpError(400, 'Rol no permitido');
-  if (userId === Number(actor.id) && roleName !== 'admin') {
+  if (!requestedRoles.length || requestedRoles.some(role => !ASSIGNABLE_ROLES.has(role))) {
+    throw httpError(400, 'Roles no permitidos');
+  }
+  if (userId === Number(actor.id) && !requestedRoles.includes('admin')) {
     throw httpError(409, 'No puedes retirar tu propio rol de administrador');
   }
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
     const [users] = await conn.execute(
-      `SELECT u.id, u.nombre, r.nombre AS rol_anterior
+      `SELECT u.id, u.nombre, u.rol_id, r.nombre AS rol_anterior
        FROM usuarios u LEFT JOIN roles r ON r.id = u.rol_id
        WHERE u.id = ? LIMIT 1 FOR UPDATE`,
       [userId]
     );
     if (!users.length) throw httpError(404, 'Usuario no encontrado');
-    const [roles] = await conn.execute(`SELECT id, nombre FROM roles WHERE LOWER(nombre) = ? LIMIT 1`, [roleName]);
-    if (!roles.length) throw httpError(409, 'El rol aun no existe en la base de datos');
-    await conn.execute(`UPDATE usuarios SET rol_id = ? WHERE id = ?`, [roles[0].id, userId]);
+    const previousRoles = await loadUserRolesFromConnection(conn, userId, users[0].rol_anterior);
+    const placeholders = requestedRoles.map(() => '?').join(',');
+    const [roleRows] = await conn.execute(
+      `SELECT id, LOWER(nombre) AS nombre FROM roles WHERE LOWER(nombre) IN (${placeholders})`,
+      requestedRoles
+    );
+    if (roleRows.length !== requestedRoles.length) throw httpError(409, 'Uno o mas roles aun no existen en la base de datos');
+    const roleByName = new Map(roleRows.map(role => [role.nombre, role]));
+    const currentPrimary = String(users[0].rol_anterior || '').toLowerCase();
+    const primaryName = requestedRoles.includes(currentPrimary) ? currentPrimary : requestedRoles[0];
+    const primary = roleByName.get(primaryName);
+    await conn.execute(`UPDATE usuarios SET rol_id = ? WHERE id = ?`, [primary.id, userId]);
+    await conn.execute(`DELETE FROM usuario_roles WHERE usuario_id = ?`, [userId]);
+    for (const roleName of requestedRoles) {
+      const role = roleByName.get(roleName);
+      await conn.execute(
+        `INSERT INTO usuario_roles (usuario_id, rol_id, es_principal, creado_en)
+         VALUES (?, ?, ?, NOW())`,
+        [userId, role.id, roleName === primaryName ? 1 : 0]
+      );
+    }
     await conn.execute(
       `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
        VALUES ('autorizacion', 'INFO', 'Cambio de rol de usuario', ?, ?, NOW())`,
       [actor.id, JSON.stringify({
         usuario_id: userId,
-        rol_anterior: users[0].rol_anterior,
-        rol_nuevo: roles[0].nombre,
+        roles_anteriores: previousRoles,
+        roles_nuevos: requestedRoles,
+        rol_principal: primaryName,
         canal: 'dashboard',
       })]
     );
     await conn.commit();
     return res.status(200).json({
       ok: true,
-      data: { id: userId, nombre: users[0].nombre, rol: roles[0].nombre, capabilities: capabilitiesForRole(roles[0].nombre) },
+      data: {
+        id: userId,
+        nombre: users[0].nombre,
+        rol: primaryName,
+        roles: requestedRoles,
+        capabilities: capabilitiesForRole(requestedRoles),
+      },
     });
   } catch (error) {
     await conn.rollback().catch(() => {});
