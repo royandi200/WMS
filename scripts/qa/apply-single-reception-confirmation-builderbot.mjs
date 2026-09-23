@@ -12,9 +12,12 @@ if (reboot && !apply) throw new Error('--reboot requires --apply');
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 const prompt = await readFile(resolve(repo, 'docs', 'Prompt WMS.txt'), 'utf8');
 const env = await readFile(resolve('.env'), 'utf8');
-const checkpointPath = resolve('.tmp', guided
-  ? 'builderbot-pre-guided-reception-20260923.json'
-  : 'builderbot-pre-single-reception-confirmation-20260923.json');
+const checkpointNameArg = process.argv.find(arg => arg.startsWith('--checkpoint-name='));
+const checkpointName = checkpointNameArg?.slice('--checkpoint-name='.length)
+  || (guided ? 'builderbot-pre-guided-reception-20260923.json'
+    : 'builderbot-pre-single-reception-confirmation-20260923.json');
+if (!/^[a-z0-9-]+\.json$/u.test(checkpointName)) throw new Error('Invalid checkpoint name');
+const checkpointPath = resolve('.tmp', checkpointName);
 const originalTargets = JSON.parse(await readFile(
   resolve('.tmp', 'builderbot-pre-ocid-transcription-20260923.json'), 'utf8'
 )).prompts;
