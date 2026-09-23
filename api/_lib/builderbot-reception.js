@@ -2,7 +2,7 @@ const { preparePurchaseOrderReception } = require('./purchase-order-reception');
 const { prepareOutsourcingReception } = require('./outsourcing-workflow');
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
-const { typedReceptionReferences } = require('./typed-reception-reference');
+const { typedReceptionReferences, preparationIntentFromText } = require('./typed-reception-reference');
 const { normalizeReceptionDistributions, validateReceptionItem } = require('./reception-distributions');
 const { DOCUMENT_TYPES, assertDocumentTypeMarker, normalizeMarkerText } = require('./document-type-markers');
 
@@ -430,9 +430,16 @@ async function prepareReceptionFromPurchaseOrder({
   userId,
   rawText,
   requireExplicitTextReference = false,
+  confirmedReference = null,
 }) {
   const order = await findPurchaseOrder(db, params);
-  if (requireExplicitTextReference) assertPurchaseOrderTextReference(rawText, order);
+  if (requireExplicitTextReference) {
+    const expectedKind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
+    const alternate = confirmedReference || preparationIntentFromText(rawText);
+    if (!alternate || alternate.kind !== expectedKind || alternate.id !== Number(order.id)) {
+      assertPurchaseOrderTextReference(rawText, order);
+    }
+  }
   const completed = await findCompletedReception(db, order.id);
   if (order.estado === 'CERRADA' && completed) {
     return { order, reception: completed, alreadyCompleted: true };

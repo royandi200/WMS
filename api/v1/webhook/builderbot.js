@@ -150,6 +150,7 @@ const { receptionPartidas } = require('../../_lib/reception-partidas');
 const {
   preparationIntentFromText,
   purchaseOrderParamsFromText,
+  confirmedPreparationReference,
 } = require('../../_lib/typed-reception-reference');
 const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
 const { formatWhatsAppMessage } = require('../../_lib/whatsapp-message');
@@ -441,6 +442,25 @@ async function findRecentProductionCloseReason(db, from, orderId) {
   }
 
   return null;
+}
+
+async function findRecentReceptionPreparationQuestion(db, from, rawText) {
+  if (!from || !/^(?:SI|SÍ|CORRECTO|EXACTO|ASÍ ES)[.!]?$/iu.test(String(rawText || '').trim())) return null;
+  const [rows] = await db.execute(
+    `SELECT payload, response
+       FROM webhook_logs
+      WHERE from_phone = ? AND status = 'PROCESSED'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+      ORDER BY id DESC LIMIT 1`,
+    [from]
+  );
+  const prior = rows[0];
+  if (!prior) return null;
+  const payload = asObject(prior.payload);
+  const response = asObject(prior.response);
+  return confirmedPreparationReference(rawText,
+    getUserText(payload, parseBuilderBotInfo(payload)),
+    response.message || response.mensaje);
 }
 
 function firstDefined(...values) {
@@ -1474,6 +1494,19 @@ module.exports = async (req, res) => {
       }
     }
 
+    let confirmedReceptionReference = null;
+    if (['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)) {
+      const receptionIntent = preparationIntentFromText(rawText);
+      confirmedReceptionReference = receptionIntent
+        ? null
+        : await findRecentReceptionPreparationQuestion(db, from, rawText);
+      const selected = receptionIntent || confirmedReceptionReference;
+      if (selected) {
+        action = 'PREPARAR_RECEPCION_OC';
+        params = { orden_compra_id: selected.id };
+      }
+    }
+
     const bodegaId = await getDefaultBodega(db);
 
     params = normalizeOperationalParams(action, params);
@@ -1644,6 +1677,7 @@ module.exports = async (req, res) => {
           userId: user.id,
           rawText,
           requireExplicitTextReference: true,
+          confirmedReference: confirmedReceptionReference,
         });
         if (prepared.alreadyCompleted) {
           mensaje = `${purchaseOrderReceptionIdentifier(prepared.order)} | ${prepared.order.numero} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;
@@ -3858,14 +3892,6 @@ module.exports = async (req, res) => {
       response: { error: errMsg, statusCode, ...(err.documentDiagnostics ? { document_extraction: err.documentDiagnostics } : {}) },
       status: isBusinessError ? 'REJECTED' : 'ERROR'
     }).catch(() => {});
-  }
-
-  if (action === 'UNKNOWN' || action === 'MODO_CHARLA') {
-    const receptionIntent = preparationIntentFromText(rawText);
-    if (receptionIntent) {
-      action = 'PREPARAR_RECEPCION_OC';
-      params = { orden_compra_id: receptionIntent.id };
-    }
   }
 
   const publicMessage = databaseUnavailable

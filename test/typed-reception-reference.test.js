@@ -7,8 +7,10 @@ const {
   singleTypedReceptionReference,
   purchaseOrderParamsFromText,
   preparationIntentFromText,
+  confirmedPreparationReference,
 } = require('../api/_lib/typed-reception-reference');
-const { purchaseOrderTextReference, explicitConfirmation } = require('../api/_lib/builderbot-reception');
+const { purchaseOrderTextReference, explicitConfirmation,
+  prepareReceptionFromPurchaseOrder } = require('../api/_lib/builderbot-reception');
 const { receptionPartidas } = require('../api/_lib/reception-partidas');
 
 test('speech transcription spacing does not change an explicit OC, IO or MQ identity', () => {
@@ -56,10 +58,16 @@ test('spoken OCID 38 works for preparation and final confirmation but not IO', (
 test('clear preparation intent is recoverable even when the model chooses chat', () => {
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
   assert.match(webhook, /const receptionIntent = preparationIntentFromText\(rawText\)/u);
+  assert.ok(webhook.indexOf('const receptionIntent = preparationIntentFromText(rawText)')
+    < webhook.indexOf("case 'PREPARAR_RECEPCION_OC':"));
   assert.deepEqual(preparationIntentFromText('Prepara la recepción OCID 38'),
     { kind: 'OC', id: 38 });
   assert.deepEqual(preparationIntentFromText('Por favor, prepara la recepción IOID 34'),
     { kind: 'IO', id: 34 });
+  assert.deepEqual(preparationIntentFromText('Prepara la recepción OC y B38'),
+    { kind: 'OC', id: 38 });
+  assert.deepEqual(preparationIntentFromText('Prepara la recepción OCIB38'),
+    { kind: 'OC', id: 38 });
   for (const phrase of [
     'Cómo preparo la recepción OCID 38',
     'No prepares la recepción OCID 38',
@@ -67,6 +75,42 @@ test('clear preparation intent is recoverable even when the model chooses chat',
     'Prepara la recepción MQID 38',
     'Prepara la recepción OCID 38 o IOID 34',
   ]) assert.equal(preparationIntentFromText(phrase), null, phrase);
+});
+
+test('a short yes resumes only a single immediately proposed preparation reference', () => {
+  assert.deepEqual(confirmedPreparationReference('sí',
+    'Prepara la recepción OC y B38',
+    '¿Te refieres a la recepción OC ID 38? Si es así, confírmame.'),
+  { kind: 'OC', id: 38 });
+  assert.equal(confirmedPreparationReference('sí',
+    'Prepara la recepción OC y B38',
+    '¿Me confirmas la recepción OC ID 38 o la recepción IO ID 34?'), null);
+  assert.equal(confirmedPreparationReference('sí',
+    'Quiero saber el stock OC ID 38',
+    '¿Te refieres a OC ID 38?'), null);
+  assert.equal(confirmedPreparationReference('sí, pero IO ID 34',
+    'Prepara la recepción OC y B38',
+    '¿Te refieres a OC ID 38?'), null);
+  assert.equal(purchaseOrderTextReference('Prepara la recepción OC y B38',
+    { id: 38, tipo_recepcion: 'INSUMOS_MP' }), false);
+});
+
+test('preparation checks the selected order namespace without loosening final receipt evidence', async () => {
+  const attempt = (tipo_recepcion, rawText, confirmedReference = null) =>
+    prepareReceptionFromPurchaseOrder({
+      db: { execute: async () => [[{ id: 38, numero: 'ORDER-38',
+        estado: 'CANCELADA', tipo_recepcion }]] },
+      params: { orden_compra_id: 38 }, userId: 1, rawText,
+      requireExplicitTextReference: true, confirmedReference,
+    });
+  await assert.rejects(attempt('INSUMOS_MP', 'Prepara la recepción OC y B38'),
+    /La orden de compra esta CANCELADA/u);
+  await assert.rejects(attempt('IN_OUT', 'Prepara la recepción OC y B38'),
+    /El ID 38 es ambiguo/u);
+  await assert.rejects(attempt('INSUMOS_MP', 'sí', { kind: 'OC', id: 38 }),
+    /La orden de compra esta CANCELADA/u);
+  await assert.rejects(attempt('INSUMOS_MP', 'sí', { kind: 'IO', id: 38 }),
+    /El ID 38 es ambiguo/u);
 });
 
 test('full text reception recovers the OC ID even when transcription joins the tokens', () => {

@@ -47,12 +47,37 @@ function purchaseOrderParamsFromText(params = {}, rawText = '') {
   return { ...clean, orden_compra_id: reference.id };
 }
 
-function preparationIntentFromText(rawText) {
+function preparationRequestFromText(rawText) {
   const text = normalizedSpeech(rawText).trim();
-  if (!/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:LA\s+)?RECEPCION\b/u.test(text)) {
-    return null;
-  }
+  const match = text.match(/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:LA\s+)?RECEPCION\b/u);
+  return match ? text.slice(match[0].length).trim() : null;
+}
+
+function preparationIntentFromText(rawText) {
+  const remainder = preparationRequestFromText(rawText);
+  if (remainder === null) return null;
   const references = typedReceptionReferences(rawText);
+  if (references.length) {
+    return references.length === 1 && ['OC', 'IO'].includes(references[0].kind)
+      ? references[0]
+      : null;
+  }
+  // Solo en la orden de PREPARAR: el dictado puede convertir "OC ID 38" en
+  // "OC y B38" u "OCIB38". No se acepta esta variante para confirmar stock.
+  const noisy = remainder.match(/^(OC|IO)\s*[YI]\s*B\s*(\d+)\s*[.!]?$/u);
+  const id = Number(noisy?.[2]);
+  return noisy && Number.isSafeInteger(id) && id > 0
+    ? { kind: noisy[1], id }
+    : null;
+}
+
+function confirmedPreparationReference(rawText, previousUserText, previousBotMessage) {
+  if (!/^(?:SI|CORRECTO|EXACTO|ASI ES)[.!]?$/u.test(normalizedSpeech(rawText).trim())) return null;
+  if (preparationRequestFromText(previousUserText) === null) return null;
+  const reply = normalizedSpeech(previousBotMessage);
+  if (!/\b(?:TE REFIERES|ME CONFIRMAS|CONFIRMAS|ES ESA)\b/u.test(reply)
+    || !reply.includes('?')) return null;
+  const references = typedReceptionReferences(reply);
   return references.length === 1 && ['OC', 'IO'].includes(references[0].kind)
     ? references[0]
     : null;
@@ -63,4 +88,5 @@ module.exports = {
   singleTypedReceptionReference,
   purchaseOrderParamsFromText,
   preparationIntentFromText,
+  confirmedPreparationReference,
 };
