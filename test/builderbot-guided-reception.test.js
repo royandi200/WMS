@@ -70,7 +70,7 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   const send = (rawText, avance) => advanceGuidedReception({
     db, user, rawText, params: { avance },
   });
-  const first = await send('Empiezo con etapa de OC ID 37', { producto: 'etapa' });
+  const first = await send('Empiezo con etapa de OCID 37', { producto: 'etapa' });
   assert.match(first.message, /00001-TPBI/u);
   assert.match(first.message, /Interpreté «etapa»/u);
   assert.match(first.message, /Falta: cantidad, condición, ubicación/u);

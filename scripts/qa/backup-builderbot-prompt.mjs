@@ -31,7 +31,10 @@ const prompts = targets.map(([name, flowId, answerId]) => {
     sha256: createHash('sha256').update(instructions).digest('hex'),
   };
 });
-const path = resolve('.tmp', 'builderbot-pre-guided-reception-20260923.json');
+const outputName = process.argv.find(arg => arg.startsWith('--output='))?.slice('--output='.length)
+  || 'builderbot-pre-guided-reception-20260923.json';
+if (!/^builderbot-[a-z0-9-]+\.json$/u.test(outputName)) throw new Error('Invalid backup filename');
+const path = resolve('.tmp', outputName);
 await writeFile(path, JSON.stringify({ projectId, capturedAt: new Date().toISOString(), prompts }, null, 2), {
   flag: 'wx',
 });

@@ -147,6 +147,10 @@ const { advanceGuidedReception } = require('../../_lib/builderbot-guided-recepti
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
 const { receptionPartidas } = require('../../_lib/reception-partidas');
+const {
+  preparationIntentFromText,
+  purchaseOrderParamsFromText,
+} = require('../../_lib/typed-reception-reference');
 const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
 const { formatWhatsAppMessage } = require('../../_lib/whatsapp-message');
 const {
@@ -1636,7 +1640,7 @@ module.exports = async (req, res) => {
       case 'PREPARAR_RECEPCION_OC': {
         const prepared = await prepareReceptionFromPurchaseOrder({
           db,
-          params,
+          params: purchaseOrderParamsFromText(params, rawText),
           userId: user.id,
           rawText,
           requireExplicitTextReference: true,
@@ -1678,7 +1682,7 @@ module.exports = async (req, res) => {
       case 'CONFIRMAR_RECEPCION_OC': {
         const confirmation = await confirmReceptionFromWhatsApp({
           db,
-          params: receptionPartidas(params, { rawText }),
+          params: receptionPartidas(purchaseOrderParamsFromText(params, rawText), { rawText }),
           rawText,
           user,
         });
@@ -3854,6 +3858,14 @@ module.exports = async (req, res) => {
       response: { error: errMsg, statusCode, ...(err.documentDiagnostics ? { document_extraction: err.documentDiagnostics } : {}) },
       status: isBusinessError ? 'REJECTED' : 'ERROR'
     }).catch(() => {});
+  }
+
+  if (action === 'UNKNOWN' || action === 'MODO_CHARLA') {
+    const receptionIntent = preparationIntentFromText(rawText);
+    if (receptionIntent) {
+      action = 'PREPARAR_RECEPCION_OC';
+      params = { orden_compra_id: receptionIntent.id };
+    }
   }
 
   const publicMessage = databaseUnavailable

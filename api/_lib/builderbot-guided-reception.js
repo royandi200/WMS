@@ -1,5 +1,6 @@
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
+const { singleTypedReceptionReference } = require('./typed-reception-reference');
 const {
   assertPurchaseOrderTextReference,
   buildConfirmationItems,
@@ -47,10 +48,11 @@ function parseDraft(row, orderId, receptionId, userId) {
 }
 
 function typedOrderId(text) {
-  const matches = [...String(text || '').matchAll(/\b(?:OC|IO)\s+ID\s+(\d+)\b/giu)];
-  const ids = [...new Set(matches.map(match => Number(match[1])))];
-  if (ids.length > 1) throw inputError('Indica solo una recepción OC ID o IO ID', 409);
-  return ids[0] || null;
+  const reference = singleTypedReceptionReference(text);
+  if (reference?.kind === 'MQ') {
+    throw inputError('MQ ID corresponde a la recepción de maquila, no a una OC directa', 409);
+  }
+  return reference?.id || null;
 }
 
 async function activeUserSession(db, userId, { allowPreview = false } = {}) {

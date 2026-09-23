@@ -453,6 +453,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
     'REVISAR_BORRADOR_ORDEN_COMPRA',
     'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
     'PREPARAR_RECEPCION_OC',
+    'AVANZAR_RECEPCION_GUIADA_OC',
     'CONFIRMAR_RECEPCION_OC',
     'PREPARAR_RECEPCION_MAQUILA',
     'CONFIRMAR_RECEPCION_MAQUILA',
@@ -473,7 +474,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(purchaseOrders, /createPurchaseOrderForUser/u);
   assert.match(prompt, /Confirmo la orden de compra ID N/u);
   assert.match(prompt, /Confirmo la recepcion OC ID N/u);
-  assert.match(prompt, /Confirmo la recepcion IO ID N/u);
+  assert.match(prompt, /`IO ID N`\/`IOID N`/u);
   assert.match(prompt, /Confirmo la recepcion MQ ID N/u);
   assert.match(prompt, /confirmaciones vagas/u);
   assert.match(prompt, /no lo preguntes ni lo inventes/u);

@@ -1,3 +1,5 @@
+const { singleTypedReceptionReference } = require('./typed-reception-reference');
+
 function normalizeTextDate(value) {
   const text = String(value || '').trim();
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
@@ -54,10 +56,11 @@ function receptionPartidas(params = {}, { rawText = '' } = {}) {
       for (const key of ['items', 'productos', 'lineas']) {
         if (Array.isArray(clean[key]) && !clean[key].length) delete clean[key];
       }
-      const ocId = String(rawText).match(/\bOC\s+ID\s+(\d+)\b/iu)?.[1];
-      const mqId = String(rawText).match(/\bMQ\s+ID\s+(\d+)\b/iu)?.[1];
-      if (!clean.orden_compra_id && ocId) clean.orden_compra_id = Number(ocId);
-      if (!clean.orden_maquila_id && mqId) clean.orden_maquila_id = Number(mqId);
+      const typed = singleTypedReceptionReference(rawText);
+      if (!clean.orden_compra_id && ['OC', 'IO'].includes(typed?.kind)) {
+        clean.orden_compra_id = typed.id;
+      }
+      if (!clean.orden_maquila_id && typed?.kind === 'MQ') clean.orden_maquila_id = typed.id;
       params = clean;
     }
   }

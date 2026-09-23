@@ -2,6 +2,7 @@ const { preparePurchaseOrderReception } = require('./purchase-order-reception');
 const { prepareOutsourcingReception } = require('./outsourcing-workflow');
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
+const { typedReceptionReferences } = require('./typed-reception-reference');
 const { normalizeReceptionDistributions, validateReceptionItem } = require('./reception-distributions');
 const { DOCUMENT_TYPES, assertDocumentTypeMarker, normalizeMarkerText } = require('./document-type-markers');
 
@@ -237,12 +238,17 @@ function outsourcingOrderReference(params = {}) {
 
 function purchaseOrderTextReference(rawText, order) {
   const text = normalizeCommandText(rawText);
+  const id = Number(order?.id || 0);
+  const typed = typedReceptionReferences(rawText);
+  if (typed.length) {
+    const kind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
+    return typed.length === 1 && typed[0].kind === kind && typed[0].id === id;
+  }
   const number = String(order?.numero || (typeof order === 'string' ? order : '') || '').trim();
   if (number && new RegExp(
     `(^|[^A-Z0-9])${escapeRegExp(number)}([^A-Z0-9]|$)`,
     'iu'
   ).test(text)) return true;
-  const id = Number(order?.id || 0);
   if (!Number.isSafeInteger(id) || id <= 0) return false;
   const prefix = purchaseOrderReceptionType(order) === 'IN_OUT'
     ? String.raw`(?:IO|I\s*\.?\s*O\.?|IN\s*(?:&|AND|Y)\s*OUT)`
@@ -265,12 +271,14 @@ function assertPurchaseOrderTextReference(rawText, order) {
 
 function outsourcingTextReference(rawText, order) {
   const text = normalizeCommandText(rawText);
+  const id = Number(order?.id || 0);
+  const typed = typedReceptionReferences(rawText);
+  if (typed.length) return typed.length === 1 && typed[0].kind === 'MQ' && typed[0].id === id;
   const number = String(order?.codigo || (typeof order === 'string' ? order : '') || '').trim();
   if (number && new RegExp(
     `(^|[^A-Z0-9])${escapeRegExp(number)}([^A-Z0-9]|$)`,
     'iu'
   ).test(text)) return true;
-  const id = Number(order?.id || 0);
   if (!Number.isSafeInteger(id) || id <= 0) return false;
   const typedId = new RegExp(
     `\\b(?:MQ|MAQUILA|ORDEN\\s+(?:DE\\s+)?MAQUILA)\\s*(?:ID|#|NUMERO|NRO)?\\s*#?\\s*${escapeRegExp(id)}\\b`,
