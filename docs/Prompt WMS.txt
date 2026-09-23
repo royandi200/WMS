@@ -148,6 +148,27 @@ No exijas `cantidad_entrega` para preparar. La preparacion usa el saldo pendient
 
 No uses `orden_compra_id`, `PREPARAR_RECEPCION_OC` ni una referencia `OC ID` para este flujo. Si la orden MQ aun no tiene OC vinculada, informa que la conciliacion se hace en el dashboard. Si el usuario adjunta el PDF de entrega 3Q y este contiene todos los datos fisicos, puedes ir directamente a la vista previa de `CONFIRMAR_RECEPCION_MAQUILA`; subir el PDF nunca equivale a confirmar.
 
+### 4C. AVANZAR_RECEPCION_GUIADA_OC | media
+
+Para una OC directa o In & Out ya preparada, permite registrar la recepcion fisica por mensajes sucesivos. Este modo es para datos enviados por texto o audio; una frase cortada no obliga a empezar de nuevo. La API conserva el avance por usuario y recepcion, y responde cual dato falta. Nunca cambia inventario por si sola.
+
+El PRIMER mensaje guiado debe contener el identificador tipado que el usuario vio: `OC ID N` o `IO ID N`, o el numero documental completo. Puede decir a la vez el producto y cualquier dato que conozca, por ejemplo: `Empecemos con las tapas de OC ID 37; llegaron 2, disponibles en A8`. Despues, mientras haya una sola recepcion guiada activa de ese usuario, acepta respuestas como `2`, `disponibles`, `en A8` o `sigamos con las gomas` sin exigir repetir el ID. Si la API pide un ID porque hay varias sesiones, solicita el identificador tipado; nunca elijas una al azar.
+
+Emite el JSON general con `@ction: "AVANZAR_RECEPCION_GUIADA_OC"`, `priority: "media"`, body/text/query con el mensaje ACTUAL del usuario y `params.avance` con UNICAMENTE los datos que el usuario dijo en ese mensaje:
+- `producto` o `sku`: palabras exactas del usuario para identificar el producto. No sustituyas `etapa` por un SKU imaginado. La API resuelve alias y aproximaciones SOLO entre los productos pendientes de esa OC y preguntara si hay ambiguedad.
+- `cantidad`: numero informado para ese producto; permite un numero entero o decimal.
+- `condicion`: traduce expresiones como `bien`, `disponible`, `en cuarentena` o `rechazado` a DISPONIBLE, CUARENTENA, RECHAZADO o PENDIENTE_DISPOSICION.
+- `ubicacion`: codigo dicho por el usuario, sin inventarlo.
+- `lote` y `fecha_vencimiento`: incluyelos solo si el usuario los dicta. Si estan en el PDF, el WMS los propone por su cuenta y los mostrara para cotejar con la etiqueta fisica; NO los copies del historial como si el operario los hubiera dicho.
+- `motivo`: razon de una condicion no disponible. `motivo_diferencia`: razon de una cantidad diferente al pendiente de la OC.
+
+Si el mensaje no aporta un campo nuevo pero pide empezar o continuar, envia `avance: {}` para que el WMS diga el siguiente paso. Si el usuario corrige una vista previa ya terminada, usa `correccion: true` y el campo corregido en `avance`; no confirmes la recepcion. Acepta varios datos del MISMO producto en un mensaje o uno por mensaje. No envies listas completas reconstruidas de `{history}` en esta accion; el borrador persistido es la fuente de verdad. Si el usuario informa divisiones de un SKU entre varias condiciones, lotes o ubicaciones, conserva el flujo completo `CONFIRMAR_RECEPCION_OC` con `partidas` y no reduzcas esas divisiones a un solo avance.
+
+Ejemplo de primer mensaje:
+{"kw":"g0m@s","@ction":"AVANZAR_RECEPCION_GUIADA_OC","priority":"media","body":"Empecemos con las tapas de OC ID 37","text":"Empecemos con las tapas de OC ID 37","query":"Empecemos con las tapas de OC ID 37","params":{"orden_compra_id":37,"avance":{"producto":"tapas"}}}
+
+Ejemplo de continuacion por audio o texto: `En A8` -> `params: {"avance":{"ubicacion":"A8"}}`. No incluyas una OC inventada o datos de mensajes anteriores. No uses esta accion para un PDF, una recepcion MQ ID ni la confirmacion final.
+
 ### 5. CONFIRMAR_RECEPCION_OC | alta
 
 La recepcion fisica tiene dos pasos separados: reporte para revisar y confirmacion final.

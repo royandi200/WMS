@@ -142,6 +142,7 @@ const {
   confirmOutsourcingReceptionFromWhatsApp,
   validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
+const { advanceGuidedReception } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
@@ -492,6 +493,7 @@ function sanitizeWebhookLogPayload(payload, action) {
     'REVISAR_BORRADOR_ORDEN_COMPRA',
     'CONFIRMAR_BORRADOR_ORDEN_COMPRA',
     'PREPARAR_RECEPCION_OC',
+    'AVANZAR_RECEPCION_GUIADA_OC',
     'CONFIRMAR_RECEPCION_OC',
     'PREPARAR_RECEPCION_MAQUILA',
     'CONFIRMAR_RECEPCION_MAQUILA',
@@ -1660,7 +1662,8 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Si interpreto una palabra por contexto, lo mostrare en el resumen para que la verifiques. Indica cantidad, condicion, lote, vencimiento y ubicacion para cada item. La ubicacion sugerida es flexible. Los datos del PDF son solo referencia y deben cotejarse contra la etiqueta fisica.',
+          `Para registrar por partes, di con que producto comienzas e incluye ${purchaseOrderReceptionIdentifier(prepared.order)} en ese primer mensaje. Despues puedes enviar cantidad, condicion y ubicacion juntos o por separado. Si el PDF trae lote y vencimiento, se propondran para que los verifiques con la etiqueta fisica.`,
+          'Tambien puedes enviar el reporte completo de todos los productos como hasta ahora. Si interpreto una palabra por contexto, lo mostrare en el resumen para que la verifiques.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${purchaseOrderReceptionIdentifier(prepared.order)}`,
         ].join('\n');
         responseContext.reception = {
@@ -1705,6 +1708,18 @@ module.exports = async (req, res) => {
           ].join('\n');
           responseContext.reception = confirmation;
         }
+        break;
+      }
+
+      case 'AVANZAR_RECEPCION_GUIADA_OC': {
+        const result = await advanceGuidedReception({ db, params, rawText, user });
+        mensaje = result.message;
+        responseContext.reception = {
+          guided: true,
+          inventory_changed: false,
+          requires_confirmation: Boolean(result.requires_confirmation),
+          item_count: result.item_count || 0,
+        };
         break;
       }
 
