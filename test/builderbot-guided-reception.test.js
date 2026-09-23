@@ -85,11 +85,14 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   const first = await send('Empiezo con etapa de OCID 37', { producto: 'etapa' });
   assert.match(first.message, /00001-TPBI/u);
   assert.match(first.message, /Interpreté «etapa»/u);
+  assert.match(first.message, /Cantidad pendiente según OC: 2 und \(referencia; no es la cantidad recibida\)/u);
+  assert.match(first.message, /Indica cuántas unidades recibiste \(und\)/u);
   assert.match(first.message, /Falta: cantidad, condición, ubicación/u);
   assert.match(first.message, /Lote propuesto por PDF: T-1/u);
   assert.match(first.message, /Ubicación sugerida: A8/u);
   const quantity = await send('Llegaron dos', { cantidad: 2 });
   assert.match(quantity.message, /Cantidad registrada: 2 und/u);
+  assert.doesNotMatch(quantity.message, /Indica cuántas unidades recibiste/u);
   assert.match(quantity.message, /Falta: condición, ubicación/u);
   await send('Están disponibles', { condicion: 'DISPONIBLE' });
   const review = await send('En la ubicación A8', { ubicacion: 'A8' });
@@ -112,6 +115,22 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
   assert.equal(state.inventoryWrites, 0);
   assert.equal(state.transactions, 0);
+});
+
+test('selecting a gram-based SKU shows expected grams and asks for actual grams', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas, dos disponibles en A8', {
+    producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  await send('sí', {});
+  const grams = await send('Empecemos con las gomas', { producto: 'gomas' });
+  assert.match(grams.message, /Cantidad pendiente según OC: 100 g \(referencia; no es la cantidad recibida\)/u);
+  assert.match(grams.message, /Indica cuántos gramos recibiste \(g\)/u);
+  assert.match(grams.message, /Falta: cantidad, condición, ubicación/u);
+  assert.equal(state.inventoryWrites, 0);
 });
 
 test('a PDF lot mismatch requires the physical lot before verifying the SKU', async () => {

@@ -264,6 +264,17 @@ function availableChoices(preparedItems, entries) {
   );
 }
 
+function receivedQuantityPrompt(unit) {
+  const normalized = String(unit || 'und').trim().toLowerCase();
+  if (['g', 'gr', 'gramo', 'gramos'].includes(normalized)) {
+    return 'Indica cuántos gramos recibiste (g).';
+  }
+  if (['und', 'unidad', 'unidades'].includes(normalized)) {
+    return 'Indica cuántas unidades recibiste (und).';
+  }
+  return `Indica cuánto recibiste en ${unit}.`;
+}
+
 function skuReviewMessage(order, reception, prepared, entry) {
   const loteFromPdf = !entry.lote && Boolean(prepared.lote_documento);
   const expiryFromPdf = !entry.fecha_vencimiento && Boolean(prepared.fecha_vencimiento_documento);
@@ -272,7 +283,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
     `Producto: ${prepared.sku} - ${prepared.producto}`,
     entry.referencia_interpretada
       ? `Interpreté «${entry.referencia_interpretada}» como ${prepared.sku}; verifica que sea correcto.` : null,
-    `Cantidad recibida: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)}).`,
+    `Cantidad recibida: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)} ${prepared.unidad || 'und'}).`,
     `Condición: ${entry.condicion}.`,
     `Ubicación registrada: ${entry.ubicacion}.`,
     prepared.ubicacion_sugerida
@@ -512,7 +523,9 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
         `Producto: ${selected.sku} - ${selected.producto}`,
         entry.referencia_interpretada
           ? `Interpreté «${entry.referencia_interpretada}» como ${selected.sku}; verifica que sea correcto.` : null,
+        `Cantidad pendiente según OC: ${Number(selected.cantidad_pendiente)} ${selected.unidad || 'und'} (referencia; no es la cantidad recibida).`,
         entry.cantidad ? `Cantidad registrada: ${entry.cantidad} ${selected.unidad || 'und'}.` : null,
+        !entry.cantidad ? receivedQuantityPrompt(selected.unidad || 'und') : null,
         entry.condicion ? `Condición registrada: ${entry.condicion}.` : null,
         entry.ubicacion ? `Ubicación registrada: ${entry.ubicacion}.` : null,
         selected.ubicacion_sugerida
