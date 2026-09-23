@@ -142,7 +142,7 @@ const {
   confirmOutsourcingReceptionFromWhatsApp,
   validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
-const { advanceGuidedReception } = require('../../_lib/builderbot-guided-reception');
+const { advanceGuidedReception, hasPendingSkuReview, skuReviewReply } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
@@ -1495,6 +1495,7 @@ module.exports = async (req, res) => {
     }
 
     let confirmedReceptionReference = null;
+    let selectedPreparationReference = null;
     if (['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)) {
       const receptionIntent = preparationIntentFromText(rawText);
       confirmedReceptionReference = receptionIntent
@@ -1502,9 +1503,16 @@ module.exports = async (req, res) => {
         : await findRecentReceptionPreparationQuestion(db, from, rawText);
       const selected = receptionIntent || confirmedReceptionReference;
       if (selected) {
+        selectedPreparationReference = selected;
         action = 'PREPARAR_RECEPCION_OC';
         params = { orden_compra_id: selected.id };
       }
+    }
+    if (!selectedPreparationReference && skuReviewReply(rawText)
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
+      && await hasPendingSkuReview(db, user.id)) {
+      action = 'AVANZAR_RECEPCION_GUIADA_OC';
+      params = { avance: {} };
     }
 
     const bodegaId = await getDefaultBodega(db);
@@ -1754,6 +1762,7 @@ module.exports = async (req, res) => {
         mensaje = result.message;
         responseContext.reception = {
           guided: true,
+          sku_review: Boolean(result.sku_review),
           inventory_changed: false,
           requires_confirmation: Boolean(result.requires_confirmation),
           item_count: result.item_count || 0,

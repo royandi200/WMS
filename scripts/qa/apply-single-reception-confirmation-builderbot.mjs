@@ -8,13 +8,16 @@ const apply = process.argv.includes('--apply');
 const reboot = process.argv.includes('--reboot');
 const restore = process.argv.includes('--restore');
 const guided = process.argv.includes('--guided');
+const skuReview = process.argv.includes('--sku-review');
+if (guided && skuReview) throw new Error('Choose one prompt update at a time');
 if (reboot && !apply) throw new Error('--reboot requires --apply');
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 const prompt = await readFile(resolve(repo, 'docs', 'Prompt WMS.txt'), 'utf8');
 const env = await readFile(resolve('.env'), 'utf8');
 const checkpointNameArg = process.argv.find(arg => arg.startsWith('--checkpoint-name='));
 const checkpointName = checkpointNameArg?.slice('--checkpoint-name='.length)
-  || (guided ? 'builderbot-pre-guided-reception-20260923.json'
+  || (skuReview ? 'builderbot-pre-sku-review-20260923.json'
+    : guided ? 'builderbot-pre-guided-reception-20260923.json'
     : 'builderbot-pre-single-reception-confirmation-20260923.json');
 if (!/^[a-z0-9-]+\.json$/u.test(checkpointName)) throw new Error('Invalid checkpoint name');
 const checkpointPath = resolve('.tmp', checkpointName);
@@ -87,7 +90,27 @@ function withGuidedInstructions(current) {
   return updated;
 }
 
-const transform = guided ? withGuidedInstructions : withAdditions;
+function withSkuReviewInstructions(current) {
+  const insertions = [
+    ['- `motivo`: razon de una condicion no disponible.',
+      'Cuando el WMS muestre `Revisa OC ID N`'],
+    ['Ejemplo de continuacion por audio o texto:',
+      'Ejemplo de respuesta al resumen de un SKU:'],
+  ];
+  let updated = current;
+  for (const [anchorStart, additionStart] of insertions) {
+    const addition = promptLines.filter(line => line.startsWith(additionStart));
+    if (addition.length !== 1) throw new Error(`Expected one local SKU-review rule: ${additionStart}`);
+    if (updated.split(/\r?\n/u).includes(addition[0])) continue;
+    const anchor = updated.split(/\r?\n/u).filter(line => line.startsWith(anchorStart));
+    if (anchor.length !== 1) throw new Error(`Live SKU-review anchor has diverged: ${anchorStart}`);
+    updated = updated.replace(anchor[0], `${anchor[0]}\n${addition[0]}`);
+  }
+  return updated;
+}
+
+const transform = skuReview ? withSkuReviewInstructions
+  : guided ? withGuidedInstructions : withAdditions;
 
 const beforeFlows = await loadFlows();
 const savedCheckpoint = restore

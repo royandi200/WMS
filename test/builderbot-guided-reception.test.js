@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { advanceGuidedReception } = require('../api/_lib/builderbot-guided-reception');
+const { createHash } = require('node:crypto');
+const { advanceGuidedReception, hasPendingSkuReview, skuReviewReply } = require('../api/_lib/builderbot-guided-reception');
+const { canonicalJson } = require('../api/_lib/builderbot-reception');
 
 function guidedDb() {
   const products = [
@@ -82,11 +84,19 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   assert.match(first.message, /Lote propuesto por PDF: T-1/u);
   await send('Llegaron dos', { cantidad: 2 });
   await send('Están disponibles', { condicion: 'DISPONIBLE' });
-  const next = await send('En la ubicación A8', { ubicacion: 'A8' });
+  const review = await send('En la ubicación A8', { ubicacion: 'A8' });
+  assert.equal(review.sku_review, true);
+  assert.match(review.message, /Cantidad recibida: 2 und/u);
+  assert.match(review.message, /¿Está correcto este SKU\?/u);
+  assert.equal(JSON.parse(state.draft.payload_json).reviewSku, '00001-TPBI');
+  const next = await send('sí', {});
   assert.match(next.message, /00051-MPASH/u);
-  const preview = await send('De gomas, cien gramos disponibles en B16', {
+  const secondReview = await send('De gomas, cien gramos disponibles en B16', {
     producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16',
   });
+  assert.equal(secondReview.sku_review, true);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  const preview = await send('sí', {});
   assert.equal(preview.requires_confirmation, true);
   assert.match(preview.message, /Confirmo la recepcion OC ID 37/u);
   assert.match(preview.message, /propuesto por PDF/u);
@@ -159,6 +169,10 @@ test('guided OC reception asks why a partial quantity differs from the order', a
   });
   assert.match(response.message, /motivo de la diferencia frente a la OC/u);
   assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  const premature = await advanceGuidedReception({ db, user: { id: 5 }, rawText: 'sí',
+    params: { avance: {} } });
+  assert.match(premature.message, /motivo de la diferencia frente a la OC/u);
+  assert.notEqual(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
   assert.equal(state.inventoryWrites, 0);
 });
 
@@ -168,17 +182,85 @@ test('guided OC reception can correct its own preview without confirming invento
   await advanceGuidedReception({ db, user, rawText: 'OC ID 37',
     params: { avance: { producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' } },
   });
+  await advanceGuidedReception({ db, user, rawText: 'sí', params: { avance: {} } });
   await advanceGuidedReception({ db, user, rawText: 'Gomas, cien disponibles en B16',
     params: { avance: { producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16' } },
   });
+  await advanceGuidedReception({ db, user, rawText: 'sí', params: { avance: {} } });
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
   const corrected = await advanceGuidedReception({ db, user,
     rawText: 'Corrige las tapas: recibí una, faltó otra',
     params: { correccion: true, avance: { producto: 'tapa', cantidad: 1,
       motivo_diferencia: 'Faltó una unidad' } },
   });
-  assert.equal(corrected.requires_confirmation, true);
-  assert.match(corrected.message, /00001-TPBI.*1 und/u);
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Cantidad recibida: 1 und/u);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  const preview = await advanceGuidedReception({ db, user, rawText: 'sí', params: { avance: {} } });
+  assert.equal(preview.requires_confirmation, true);
+  assert.match(preview.message, /00001-TPBI.*1 und/u);
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('an incorrect SKU is corrected and reviewed again before the next one', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas, dos disponibles en A8', {
+    producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  const no = await send('no', {});
+  assert.match(no.message, /Indica qué dato de 00001-TPBI debo corregir/u);
+  const premature = await send('Ahora sigamos con las gomas', { producto: 'gomas' });
+  assert.match(premature.message, /Antes de pasar a otro producto, revisa 00001-TPBI/u);
+  const corrected = await send('No, llegó una tapa; faltó otra', {
+    cantidad: 1, motivo_diferencia: 'Faltó una unidad',
+  });
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Cantidad recibida: 1 und/u);
+  assert.match(corrected.message, /Motivo de diferencia: Faltó una unidad/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, false);
+  const next = await send('sí', {});
+  assert.match(next.message, /00051-MPASH/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a bare yes is scoped to a stored SKU review, not final inventory confirmation', async () => {
+  const { db, state } = guidedDb();
+  assert.equal(skuReviewReply('Sí.'), 'YES');
+  assert.equal(skuReviewReply('Sí, todo está bien'), 'YES');
+  assert.equal(skuReviewReply('No'), 'NO');
+  assert.equal(skuReviewReply('No está bien'), 'NO');
+  assert.equal(skuReviewReply('Sí, pero cambia la cantidad'), null);
+  assert.equal(skuReviewReply('Confirmo la recepción OC ID 37'), null);
+  assert.equal(await hasPendingSkuReview(db, 5), false);
+  await advanceGuidedReception({ db, user: { id: 5 }, rawText: 'OC ID 37',
+    params: { avance: { producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  assert.equal(await hasPendingSkuReview(db, 5), true);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('an in-progress draft from before this change stops for its first SKU review', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: tapas, dos disponibles en A8',
+    params: { avance: { producto: 'tapa', cantidad: 2,
+      condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  const old = JSON.parse(state.draft.payload_json);
+  delete old.reviewSku;
+  delete old.entries['00001-TPBI'].verified;
+  old.selectedSku = null;
+  state.draft.payload_json = canonicalJson(old);
+  state.draft.payload_hash = createHash('sha256').update(state.draft.payload_json).digest('hex');
+  assert.equal(await hasPendingSkuReview(db, 5), true);
+  const resumed = await advanceGuidedReception({ db, user, rawText: 'Sigamos con las gomas',
+    params: { avance: { producto: 'gomas' } } });
+  assert.equal(resumed.sku_review, true);
+  assert.match(resumed.message, /Producto: 00001-TPBI/u);
+  assert.equal(JSON.parse(state.draft.payload_json).reviewSku, '00001-TPBI');
   assert.equal(state.inventoryWrites, 0);
 });

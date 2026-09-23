@@ -16,6 +16,15 @@ function inputError(message, status = 400) {
   return Object.assign(new Error(message), { status });
 }
 
+function skuReviewReply(rawText) {
+  const text = String(rawText || '').trim().normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '').toUpperCase()
+    .replace(/[.!?]+$/u, '').replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if (/^(?:SI(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO)$/u.test(text)) return 'YES';
+  if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO ES CORRECTO|ESTA MAL)$/u.test(text)) return 'NO';
+  return null;
+}
+
 function digest(payload) {
   return createHash('sha256').update(canonicalJson(payload)).digest('hex');
 }
@@ -75,6 +84,15 @@ async function activeUserSession(db, userId, { allowPreview = false } = {}) {
   return sessions[0] || null;
 }
 
+async function hasPendingSkuReview(db, userId) {
+  const session = await activeUserSession(db, userId);
+  if (!session) return false;
+  const payload = parseDraft(session, session.orden_compra_id, session.recepcion_id, userId);
+  return payload.version === 2 && (Boolean(payload.reviewSku)
+    || Object.values(payload.entries).some(entry => entry && !entry.verified
+      && entry.cantidad && entry.condicion && entry.ubicacion));
+}
+
 async function recentlyPreparedSession(db, from) {
   if (!from) return null;
   const [rows] = await db.execute(
@@ -130,6 +148,7 @@ function fromCompletedPreview(payload) {
       motivo: row.motivo || null,
       motivo_diferencia: item.motivo || null,
       referencia_interpretada: item.referencia_interpretada || null,
+      verified: true,
     };
   }
   return { version: 2, orderId: payload.orderId, receptionId: payload.receptionId,
@@ -214,9 +233,29 @@ function itemFromEntry(entry, prepared) {
 
 function availableChoices(preparedItems, entries) {
   return preparedItems.filter(item => !entries[item.sku]
-    || missingFields(entries[item.sku], item).length).map(item =>
+    || !entries[item.sku].verified || missingFields(entries[item.sku], item).length).map(item =>
     `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || 'und'}`
   );
+}
+
+function skuReviewMessage(order, reception, prepared, entry) {
+  const loteFromPdf = !entry.lote && Boolean(prepared.lote_documento);
+  const expiryFromPdf = !entry.fecha_vencimiento && Boolean(prepared.fecha_vencimiento_documento);
+  return [
+    `🧾 Revisa ${purchaseOrderReceptionIdentifier(order)} | ${reception.numero}`,
+    `Producto: ${prepared.sku} - ${prepared.producto}`,
+    entry.referencia_interpretada
+      ? `Interpreté «${entry.referencia_interpretada}» como ${prepared.sku}; verifica que sea correcto.` : null,
+    `Cantidad recibida: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)}).`,
+    `Condición: ${entry.condicion}.`,
+    `Ubicación: ${entry.ubicacion}.`,
+    `Lote: ${entry.lote || prepared.lote_documento}${loteFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
+    `Vencimiento: ${entry.fecha_vencimiento || prepared.fecha_vencimiento_documento}${expiryFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
+    entry.motivo ? `Motivo de condición: ${entry.motivo}.` : null,
+    entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
+    '¿Está correcto este SKU? Responde «sí» para continuar o dime qué dato debo corregir.',
+    'Este paso no confirma la recepción ni modifica inventario.',
+  ].filter(Boolean).join('\n');
 }
 
 async function saveGuidedDraft(db, order, reception, userId, payload) {
@@ -287,34 +326,108 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       ? fromCompletedPreview(existing)
       : existing || { version: 2, orderId: Number(order.id), receptionId: Number(reception.id),
         selectedSku: null, entries: {} };
+    if (!payload.reviewSku) {
+      // Borradores creados antes de esta revisión pueden tener un SKU completo
+      // sin validar. Muéstralo antes de aceptar cualquier siguiente producto.
+      const unreviewed = preparedItems.find(item => payload.entries[item.sku]
+        && !payload.entries[item.sku].verified
+        && !missingFields(payload.entries[item.sku], item).length);
+      if (unreviewed) {
+        payload.reviewSku = unreviewed.sku;
+        payload.selectedSku = unreviewed.sku;
+        await saveGuidedDraft(db, order, reception, user.id, payload);
+        await db.commit();
+        return { message: skuReviewMessage(order, reception, unreviewed,
+          payload.entries[unreviewed.sku]), inventory_changed: false, sku_review: true };
+      }
+    }
+
+    const reviewSku = payload.reviewSku;
+    const reviewItem = preparedItems.find(item => item.sku === reviewSku);
+    if (reviewSku && !reviewItem) throw inputError('El SKU en revisión ya no pertenece a esta recepción', 409);
+    const reviewReply = skuReviewReply(rawText);
+    const hasFields = Object.keys(advance).some(key => !['producto', 'sku'].includes(key));
     const reference = String(advance.producto || advance.sku || '').trim();
-    if (reference) {
+    let confirmedSku = null;
+    if (reviewItem && reviewReply === 'YES') {
+      if (missingFields(payload.entries[reviewSku], reviewItem).length) {
+        throw inputError('Faltan datos del SKU antes de validarlo', 409);
+      }
+      payload.entries[reviewSku].verified = true;
+      payload.reviewSku = null;
+      payload.selectedSku = null;
+      confirmedSku = reviewSku;
+    } else if (reviewItem && !hasFields) {
+      if (reference) {
+        const requested = await resolveProductReference(db, reference, {
+          productIds: preparedItems.map(item => item.producto_id),
+          allowContextualPartial: true,
+          allowScopedApproximate: true,
+        });
+        if (requested.siigo_code !== reviewSku) {
+          await db.commit();
+          return { message: `Antes de pasar a otro producto, revisa ${reviewSku}.\n${skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku])}`,
+            inventory_changed: false, sku_review: true };
+        }
+      }
+      await db.commit();
+      return { message: reviewReply === 'NO'
+        ? `Indica qué dato de ${reviewSku} debo corregir; puedes dictar los datos corregidos juntos o por separado.\n${skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku])}`
+        : skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku]),
+      inventory_changed: false, sku_review: true };
+    }
+
+    if (!confirmedSku && reference) {
       const product = await resolveProductReference(db, reference, {
         productIds: preparedItems.map(item => item.producto_id),
         allowContextualPartial: true,
         allowScopedApproximate: true,
       });
+      if (reviewSku && product.siigo_code !== reviewSku) {
+        throw inputError(`Antes de pasar a otro producto, revisa ${reviewSku} y responde si está correcto o corrige sus datos`, 409);
+      }
       payload.selectedSku = product.siigo_code;
       if (!payload.entries[product.siigo_code]) payload.entries[product.siigo_code] = { sku: product.siigo_code };
       if (product.matched_by === 'scoped_approximate') {
         payload.entries[product.siigo_code].referencia_interpretada = reference;
       }
     }
+    if (reviewSku && !confirmedSku) payload.selectedSku = reviewSku;
     const selected = preparedItems.find(item => item.sku === payload.selectedSku);
     if (!selected && Object.keys(advance).some(key => !['producto', 'sku'].includes(key))) {
       throw inputError('Indica primero cuál SKU de esta recepción vas a registrar', 409);
     }
-    if (selected) applyFields(payload.entries[selected.sku], advance);
+    if (selected && hasFields) {
+      applyFields(payload.entries[selected.sku], advance);
+      const updated = payload.entries[selected.sku];
+      if (Object.hasOwn(advance, 'cantidad') && !Object.hasOwn(advance, 'motivo_diferencia')
+        && Math.abs(Number(updated.cantidad) - Number(selected.cantidad_pendiente)) < 0.0001) {
+        updated.motivo_diferencia = null;
+      }
+      if (Object.hasOwn(advance, 'condicion') && !Object.hasOwn(advance, 'motivo')
+        && updated.condicion === 'DISPONIBLE') updated.motivo = null;
+      payload.entries[selected.sku].verified = false;
+      payload.reviewSku = null;
+    } else if (selected && params.correccion === true) {
+      payload.entries[selected.sku].verified = false;
+    }
     const entry = selected ? payload.entries[selected.sku] : null;
     const missing = selected ? missingFields(entry, selected) : [];
     if (selected && !missing.length) {
       await buildConfirmationItems(db, [selected], { items: [itemFromEntry(entry, selected)] },
         { warehouseId: reception.bodega_id });
+      if (!entry.verified) {
+        payload.reviewSku = selected.sku;
+        await saveGuidedDraft(db, order, reception, user.id, payload);
+        await db.commit();
+        return { message: skuReviewMessage(order, reception, selected, entry),
+          inventory_changed: false, sku_review: true };
+      }
       payload.selectedSku = null;
     }
     const pending = preparedItems.filter(item => {
       const saved = payload.entries[item.sku];
-      return !saved || missingFields(saved, item).length;
+      return !saved || !saved.verified || missingFields(saved, item).length;
     });
     if (!pending.length) {
       const items = await buildConfirmationItems(db, preparedItems, {
@@ -357,7 +470,9 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     }
     return { message: [
       `🧾 Recepción guiada ${identifier} | ${reception.numero}`,
-      selected ? `${selected.sku} quedó registrado en el borrador. No se modificó inventario.` : 'Elige el primer SKU para registrar.',
+      confirmedSku ? `${confirmedSku} quedó revisado en el borrador. No se modificó inventario.`
+        : selected ? `${selected.sku} quedó registrado en el borrador. No se modificó inventario.`
+          : 'Elige el primer SKU para registrar.',
       'Productos pendientes:',
       ...availableChoices(preparedItems, payload.entries),
       'Puedes decir el SKU o un nombre inequívoco. Si un nombre puede referirse a varios productos, te pediré precisarlo.',
@@ -368,4 +483,5 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   }
 }
 
-module.exports = { advanceGuidedReception, parseDraft, missingFields, itemFromEntry };
+module.exports = { advanceGuidedReception, hasPendingSkuReview, skuReviewReply,
+  parseDraft, missingFields, itemFromEntry };
