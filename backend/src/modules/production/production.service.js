@@ -18,6 +18,43 @@ async function findOrden(order_id, options = {}) {
   });
 }
 
+// Helper: arma sugerencia FIFO por lotes para alistamiento
+async function buildFifoSuggestion(productId, qtyNeeded, options = {}) {
+  const lots = await Lot.findAll({
+    where: {
+      product_id: productId,
+      status: 'DISPONIBLE',
+      qty_current: { [Op.gt]: 0 },
+    },
+    order: [['created_at', 'ASC']],
+    ...options,
+  });
+
+  let restante = parseFloat(qtyNeeded);
+  const suggestedLots = [];
+
+  for (const lot of lots) {
+    if (restante <= 0) break;
+
+    const disponibleLote = parseFloat(lot.qty_current);
+    const qtyToPick = Math.min(disponibleLote, restante);
+
+    suggestedLots.push({
+      lot_id: lot.id,
+      lpn: lot.lpn,
+      qty_available: disponibleLote,
+      qty_to_pick: qtyToPick,
+    });
+
+    restante -= qtyToPick;
+  }
+
+  return {
+    total_available: lots.reduce((sum, lot) => sum + parseFloat(lot.qty_current || 0), 0),
+    suggestedLots,
+  };
+}
+
 // ─── Inicia orden de producción ────────────────────────────────────────────────
 exports.start = async ({ product_id, qty_planned, notas }, usuario) => {
   const producto = await Producto.findByPk(product_id);
@@ -29,18 +66,29 @@ exports.start = async ({ product_id, qty_planned, notas }, usuario) => {
   });
   if (!bom.length) throw new AppError(`No existe BOM para ${producto.siigo_code}`, 422);
 
-  // Validar stock de cada insumo en tabla lots
+  // Validar stock de cada insumo en tabla lots y preparar sugerencia FIFO
   const faltantes = [];
+  const bomRequired = [];
+
   for (const item of bom) {
-    const necesario  = parseFloat(item.cantidad_por_unidad) * qty_planned;
-    const disponible = await Lot.sum('qty_current', {
-      where: { product_id: item.insumo_id, status: 'DISPONIBLE' },
-    }) || 0;
+    const necesario = parseFloat(item.cantidad_por_unidad) * qty_planned;
+    const fifoPlan = await buildFifoSuggestion(item.insumo_id, necesario);
+    const disponible = fifoPlan.total_available || 0;
+
     if (disponible < necesario) {
       faltantes.push(
         `${item.insumo.siigo_code}: necesita ${necesario} ${item.unidad}, disponible ${disponible}`
       );
     }
+
+    bomRequired.push({
+      sku: item.insumo.siigo_code,
+      needed: necesario,
+      unit: item.unidad,
+      available: disponible,
+      suggested_lpn: fifoPlan.suggestedLots[0]?.lpn || null,
+      suggested_lots: fifoPlan.suggestedLots,
+    });
   }
   if (faltantes.length) throw new AppError('Stock insuficiente para iniciar producción', 409, faltantes);
 
@@ -67,11 +115,7 @@ exports.start = async ({ product_id, qty_planned, notas }, usuario) => {
 
   return {
     order: { ...orden.toJSON(), order_code: codigo_orden },
-    bom_required: bom.map(b => ({
-      sku:    b.insumo.siigo_code,
-      needed: b.cantidad_por_unidad * qty_planned,
-      unit:   b.unidad,
-    })),
+    bom_required: bomRequired,
   };
 };
 
