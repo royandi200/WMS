@@ -7,7 +7,9 @@ const {
   singleTypedReceptionReference,
   purchaseOrderParamsFromText,
   preparationIntentFromText,
+  preparationClarificationCandidate,
   confirmedPreparationReference,
+  clarifiedPreparationReference,
 } = require('../api/_lib/typed-reception-reference');
 const { purchaseOrderTextReference, explicitConfirmation,
   prepareReceptionFromPurchaseOrder } = require('../api/_lib/builderbot-reception');
@@ -68,6 +70,10 @@ test('clear preparation intent is recoverable even when the model chooses chat',
     { kind: 'OC', id: 38 });
   assert.deepEqual(preparationIntentFromText('Prepara la recepción OCIB38'),
     { kind: 'OC', id: 38 });
+  assert.deepEqual(preparationIntentFromText('Prepara la recepción OCIP 38'),
+    { kind: 'OC', id: 38 });
+  assert.deepEqual(preparationIntentFromText('Prepara la recepción O, C y D, 38'),
+    { kind: 'OC', id: 38 });
   for (const phrase of [
     'Cómo preparo la recepción OCID 38',
     'No prepares la recepción OCID 38',
@@ -92,6 +98,21 @@ test('a short yes resumes only a single immediately proposed preparation referen
     'Prepara la recepción OC y B38',
     '¿Te refieres a OC ID 38?'), null);
   assert.equal(purchaseOrderTextReference('Prepara la recepción OC y B38',
+    { id: 38, tipo_recepcion: 'INSUMOS_MP' }), false);
+  assert.deepEqual(clarifiedPreparationReference('O, C y D, 38',
+    'Prepara la recepción OCIP 38',
+    '¿Te refieres a OC ID 38, IO ID 38 o MQ ID 38?'), { kind: 'OC', id: 38 });
+  assert.equal(clarifiedPreparationReference('O, C y D, 39',
+    'Prepara la recepción OCIP 38',
+    '¿Te refieres a OC ID 38, IO ID 38 o MQ ID 38?'), null);
+  assert.equal(clarifiedPreparationReference('38',
+    'Prepara la recepción OCIP 38',
+    '¿Te refieres a OC ID 38, IO ID 38 o MQ ID 38?'), null);
+  assert.equal(preparationClarificationCandidate('Confirmo la recepción OC ID 38'), null);
+  assert.equal(clarifiedPreparationReference('O, C y D, 38',
+    'Quiero saber el stock',
+    '¿Te refieres a OC ID 38, IO ID 38 o MQ ID 38?'), null);
+  assert.equal(purchaseOrderTextReference('Confirmo la recepción OCIP 38',
     { id: 38, tipo_recepcion: 'INSUMOS_MP' }), false);
 });
 

@@ -150,8 +150,10 @@ const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope'
 const { receptionPartidas } = require('../../_lib/reception-partidas');
 const {
   preparationIntentFromText,
+  preparationClarificationCandidate,
   purchaseOrderParamsFromText,
   confirmedPreparationReference,
+  clarifiedPreparationReference,
 } = require('../../_lib/typed-reception-reference');
 const { dispatchConfirmationInput } = require('../../_lib/dispatch-confirmation-input');
 const { formatWhatsAppMessage } = require('../../_lib/whatsapp-message');
@@ -446,7 +448,10 @@ async function findRecentProductionCloseReason(db, from, orderId) {
 }
 
 async function findRecentReceptionPreparationQuestion(db, from, rawText) {
-  if (!from || !/^(?:SI|SÍ|CORRECTO|EXACTO|ASÍ ES)[.!]?$/iu.test(String(rawText || '').trim())) return null;
+  if (!from) return null;
+  const shortYes = /^(?:SI|SÍ|CORRECTO|EXACTO|ASÍ ES)[.!]?$/iu
+    .test(String(rawText || '').trim());
+  if (!shortYes && !preparationClarificationCandidate(rawText)) return null;
   const [rows] = await db.execute(
     `SELECT payload, response
        FROM webhook_logs
@@ -459,9 +464,10 @@ async function findRecentReceptionPreparationQuestion(db, from, rawText) {
   if (!prior) return null;
   const payload = asObject(prior.payload);
   const response = asObject(prior.response);
-  return confirmedPreparationReference(rawText,
-    getUserText(payload, parseBuilderBotInfo(payload)),
-    response.message || response.mensaje);
+  const previousUserText = getUserText(payload, parseBuilderBotInfo(payload));
+  const previousBotMessage = response.message || response.mensaje;
+  return confirmedPreparationReference(rawText, previousUserText, previousBotMessage)
+    || clarifiedPreparationReference(rawText, previousUserText, previousBotMessage);
 }
 
 function firstDefined(...values) {

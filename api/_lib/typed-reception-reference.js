@@ -53,6 +53,18 @@ function preparationRequestFromText(rawText) {
   return match ? text.slice(match[0].length).trim() : null;
 }
 
+function noisySpokenPreparationReference(rawText) {
+  const text = normalizedSpeech(rawText).replace(/[.,;:]+/gu, ' ')
+    .replace(/\s+/gu, ' ').trim();
+  // Variantes frecuentes de "OC ID" / "IO ID" en audio: OCIP, OCIB,
+  // "O, C y D". Solo se usan al PREPARAR, nunca al confirmar inventario.
+  const match = text.match(/^(O\s*C|I\s*O)\s*(?:I|Y)\s*(?:D|B|P)\s*(\d+)$/u);
+  const id = Number(match?.[2]);
+  return match && Number.isSafeInteger(id) && id > 0
+    ? { kind: match[1].replace(/\s/gu, ''), id }
+    : null;
+}
+
 function preparationIntentFromText(rawText) {
   const remainder = preparationRequestFromText(rawText);
   if (remainder === null) return null;
@@ -62,13 +74,30 @@ function preparationIntentFromText(rawText) {
       ? references[0]
       : null;
   }
-  // Solo en la orden de PREPARAR: el dictado puede convertir "OC ID 38" en
-  // "OC y B38" u "OCIB38". No se acepta esta variante para confirmar stock.
-  const noisy = remainder.match(/^(OC|IO)\s*[YI]\s*B\s*(\d+)\s*[.!]?$/u);
-  const id = Number(noisy?.[2]);
-  return noisy && Number.isSafeInteger(id) && id > 0
-    ? { kind: noisy[1], id }
-    : null;
+  return noisySpokenPreparationReference(remainder);
+}
+
+function preparationClarificationCandidate(rawText) {
+  const text = normalizedSpeech(rawText).replace(/[.,;:]+/gu, ' ')
+    .replace(/\s+/gu, ' ').trim();
+  if (!/^(?:NO\s+)?(?:ES\s+)?(?:O\s*C|I\s*O)\s*(?:(?:I\s*D|NUMERO|NRO|[IY]\s*[DBP])\s*)?#?\s*\d+$/u.test(text)) {
+    return null;
+  }
+  const selected = typedReceptionReferences(rawText);
+  return selected.length === 1 ? selected[0]
+    : selected.length ? null : noisySpokenPreparationReference(rawText);
+}
+
+function clarifiedPreparationReference(rawText, previousUserText, previousBotMessage) {
+  if (preparationRequestFromText(previousUserText) === null) return null;
+  const reply = normalizedSpeech(previousBotMessage);
+  if (!/\b(?:TE REFIERES|ME CONFIRMAS|CONFIRMAS|ES ESA)\b/u.test(reply)
+    || !reply.includes('?')) return null;
+  const reference = preparationClarificationCandidate(rawText);
+  if (!reference || !['OC', 'IO'].includes(reference.kind)) return null;
+  const proposed = typedReceptionReferences(reply);
+  return proposed.some(item => item.kind === reference.kind && item.id === reference.id)
+    ? reference : null;
 }
 
 function confirmedPreparationReference(rawText, previousUserText, previousBotMessage) {
@@ -88,5 +117,7 @@ module.exports = {
   singleTypedReceptionReference,
   purchaseOrderParamsFromText,
   preparationIntentFromText,
+  preparationClarificationCandidate,
   confirmedPreparationReference,
+  clarifiedPreparationReference,
 };
