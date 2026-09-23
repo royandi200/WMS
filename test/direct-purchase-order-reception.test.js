@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   groupQuantitiesByUnit,
   groupReceptionProgressByUnit,
+  pendingPurchaseOrderProducts,
   remainingPurchaseOrderItems,
 } = require('../api/_lib/purchase-order-reception');
 
@@ -30,6 +31,25 @@ test('separa ingreso físico, disponibilidad y cuarentena por unidad', () => {
   assert.match(page, /Recibido físicamente:/u);
   assert.match(page, /En cuarentena:/u);
   assert.match(page, /Saldo pendiente de aceptación:/u);
+});
+
+test('la OC parcial identifica el SKU pendiente sin confundir gramos ni cuarentena', () => {
+  assert.deepEqual(pendingPurchaseOrderProducts([
+    { producto_id: 1, sku: '00001-TPBI', producto: 'Tapa', cantidad_ordenada: 5, unidad: 'und' },
+    { producto_id: 2, sku: '00035-LNTP60', producto: 'Liner', cantidad_ordenada: 2, unidad: 'und' },
+    { producto_id: 2, sku: '00035-LNTP60', producto: 'Liner', cantidad_ordenada: 3, unidad: 'und' },
+    { producto_id: 3, sku: '00051-MPASH', producto: 'Gomas', cantidad_ordenada: 900, unidad: 'g' },
+  ], [
+    { producto_id: 1, cantidad_aceptada: 5, cantidad_fisica: 5 },
+    { producto_id: 2, cantidad_aceptada: 0, cantidad_fisica: 5, cantidad_cuarentena: 5 },
+    { producto_id: 3, cantidad_aceptada: 900, cantidad_fisica: 900 },
+  ]), [{ sku: '00035-LNTP60', product: 'Liner', unit: 'und', expected: 5,
+    accepted: 0, quarantined: 5, pending: 5 }]);
+  const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/RecepcionPage.jsx'), 'utf8');
+  assert.match(page, /Pendiente de aceptación por SKU:/u);
+  assert.match(page, /item\.sku/u);
+  const route = fs.readFileSync(path.join(__dirname, '../api/v1/purchase-orders.js'), 'utf8');
+  assert.match(route, /row\.pendientes_aceptacion_por_sku = pendingPurchaseOrderProducts/u);
 });
 
 test('mixed purchase-order quantities remain grouped by unit', () => {

@@ -845,6 +845,17 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
               <td className="px-4 py-3 text-muted">{formatDate(row.fecha_orden).slice(0, 10)}</td>
               <td className="px-4 py-3 max-w-64">
                 <span className={`text-xs font-semibold ${statusClass(row.estado)}`}>{row.estado}</span>
+                {row.estado === 'RECIBIDA_PARCIAL' && (row.pendientes_aceptacion_por_sku || []).length > 0 && (
+                  <div className="mt-2 space-y-1 text-xs text-yellow-400">
+                    <span className="block font-semibold">Pendiente de aceptación por SKU:</span>
+                    {row.pendientes_aceptacion_por_sku.map((item) => (
+                      <span key={item.sku} className="block break-words">
+                        <span className="font-mono">{item.sku}</span>: {formatQuantity(item.pending)} {item.unit}
+                        {Number(item.quarantined) > 0 && ` (${formatQuantity(item.quarantined)} ${item.unit} en cuarentena)`}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {row.estado === 'CANCELADA' && (
                   <span className="block mt-1 text-xs text-muted">
                     {row.motivo_cancelacion}<br />

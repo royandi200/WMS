@@ -60,6 +60,39 @@ function groupReceptionProgressByUnit(orderedItems = [], acceptedItems = []) {
     });
 }
 
+function pendingPurchaseOrderProducts(orderedItems = [], acceptedItems = []) {
+  const acceptedByProduct = new Map(acceptedItems.map(item => [Number(item.producto_id), item]));
+  const orderedByProduct = new Map();
+  for (const item of orderedItems) {
+    const productId = Number(item.producto_id);
+    const previous = orderedByProduct.get(productId);
+    if (previous) {
+      previous.expected = Number((previous.expected + Number(item.cantidad_ordenada || 0)).toFixed(4));
+    } else {
+      orderedByProduct.set(productId, {
+        productId,
+        sku: item.sku,
+        product: item.producto,
+        unit: normalizeUnit(item.unidad),
+        expected: Number(item.cantidad_ordenada || 0),
+      });
+    }
+  }
+  return [...orderedByProduct.values()].map(item => {
+    const progress = acceptedByProduct.get(item.productId) || {};
+    const accepted = Number(progress.cantidad_aceptada || 0);
+    return {
+      sku: item.sku,
+      product: item.product,
+      unit: item.unit,
+      expected: item.expected,
+      accepted: Number(accepted.toFixed(4)),
+      quarantined: Number(Number(progress.cantidad_cuarentena || 0).toFixed(4)),
+      pending: Number(Math.max(item.expected - accepted, 0).toFixed(4)),
+    };
+  }).filter(item => item.pending > 0.0001);
+}
+
 function remainingPurchaseOrderItems(orderedItems = [], acceptedItems = []) {
   const acceptedByProduct = new Map(
     acceptedItems.map((item) => [Number(item.producto_id), Number(item.cantidad_aceptada || 0)])
@@ -239,6 +272,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
 module.exports = {
   groupQuantitiesByUnit,
   groupReceptionProgressByUnit,
+  pendingPurchaseOrderProducts,
   normalizeUnit,
   preparePurchaseOrderReception,
   remainingPurchaseOrderItems,

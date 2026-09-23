@@ -7,7 +7,8 @@ const {
   purchaseOrderInputHash,
 } = require('../_lib/purchase-orders');
 const { normalizePurchaseOrderPdf, safeDownloadName } = require('../_lib/purchase-order-documents');
-const { groupQuantitiesByUnit, groupReceptionProgressByUnit } = require('../_lib/purchase-order-reception');
+const { groupQuantitiesByUnit, groupReceptionProgressByUnit,
+  pendingPurchaseOrderProducts } = require('../_lib/purchase-order-reception');
 const {
   cancelPurchaseOrder,
   normalizePurchaseOrderCancellation,
@@ -137,6 +138,10 @@ async function handleGet(req, res) {
     }));
     row.totales_por_unidad = groupQuantitiesByUnit(byOrder.get(row.id) || []);
     row.progreso_recepcion_por_unidad = groupReceptionProgressByUnit(
+      byOrder.get(row.id) || [],
+      acceptedByOrder.get(row.id) || []
+    );
+    row.pendientes_aceptacion_por_sku = pendingPurchaseOrderProducts(
       byOrder.get(row.id) || [],
       acceptedByOrder.get(row.id) || []
     );
