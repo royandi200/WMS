@@ -45,8 +45,13 @@ function ReceptionProgress({ row }) {
     <div className="space-y-1">
       {progress.map((item) => (
         <div key={item.unit}>
-          <span className="block text-green-400">Llegaron: {formatQuantity(item.received)} {item.unit}</span>
-          <span className="block text-muted">Se esperan: {formatQuantity(item.expected)} {item.unit}</span>
+          <span className="block text-green-400">Recibido físicamente: {formatQuantity(item.received)} {item.unit}</span>
+          <span className="block text-foreground">Disponible al recibir: {formatQuantity(item.accepted)} {item.unit}</span>
+          {Number(item.quarantined) > 0 && <span className="block text-yellow-400">En cuarentena: {formatQuantity(item.quarantined)} {item.unit}</span>}
+          {Number(item.rejected) > 0 && <span className="block text-red-400">Rechazado: {formatQuantity(item.rejected)} {item.unit}</span>}
+          {Number(item.pendingDisposition) > 0 && <span className="block text-yellow-400">Pendiente de disposición: {formatQuantity(item.pendingDisposition)} {item.unit}</span>}
+          <span className="block text-muted">Esperado según OC: {formatQuantity(item.expected)} {item.unit}</span>
+          {Number(item.pending) > 0 && <span className="block text-muted">Saldo pendiente de aceptación: {formatQuantity(item.pending)} {item.unit}</span>}
         </div>
       ))}
     </div>

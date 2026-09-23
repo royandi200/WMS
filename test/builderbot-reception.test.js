@@ -27,6 +27,7 @@ const {
   assertAvailableQuantityWithinExpected,
   newKardexEntryIds,
 } = require('../api/_lib/reception-distributions');
+const { formatWhatsAppMessage } = require('../api/_lib/whatsapp-message');
 
 test('WhatsApp purchase order and reception require an exact explicit confirmation', () => {
   assert.equal(explicitPurchaseOrderConfirmation(
@@ -185,10 +186,31 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
       }],
     }]
   );
-  assert.match(review, /Resumen de recepcion para OC ID 5 \| OC-DEMO-5/u);
-  assert.match(review, /2000 gr \| DISPONIBLE \| PPAL-A-1-01 \| lote DEMO-GOMAS-001/u);
-  assert.match(review, /No se modifico inventario/u);
-  assert.match(review, /Confirmo la recepcion OC ID 5/u);
+  assert.match(review, /Resumen de recepción para OC ID 5 \| OC-DEMO-5/u);
+  assert.match(review, /- 00051-MPASH - Gomas Ashwa\n  Recibido: 2000 gr\.\n  Condición: DISPONIBLE\.\n  Ubicación: PPAL-A-1-01\.\n  Lote: DEMO-GOMAS-001\.\n  Vencimiento: 2027-12-31\./u);
+  assert.match(review, /Todavía no se modificó inventario/u);
+  assert.match(review, /Confirmo la recepción OC ID 5/u);
+  const formatted = formatWhatsAppMessage(review);
+  assert.match(formatted, /- 00051-MPASH - Gomas Ashwa\n  Recibido: 2000 gr\.\n  Condición: DISPONIBLE\./u);
+});
+
+test('reception preview separates quarantine, physical lot and each distribution', () => {
+  const review = buildReceptionReview(
+    { id: 38, numero: 'DEMO-R4-260921-OC-INSUMOS' },
+    { numero: 'REC-OC-38-001' },
+    [{ sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und',
+      motivo: 'Una unidad menos que la OC', distributions: [
+        { cantidad: 3, condicion: 'DISPONIBLE', ubicacion: 'A14', lote: 'L-1',
+          fecha_venc: '2027-10-31' },
+        { cantidad: 1, condicion: 'CUARENTENA', ubicacion: 'A14', lote: 'L-2',
+          lote_documento: 'L-1', fecha_venc: '2027-10-31', motivo: 'Etiqueta ilegible' },
+      ] }]
+  );
+  assert.match(review, /Recibido: 4 und\.\n  Partida 1: 3 und\n  Condición: DISPONIBLE/u);
+  assert.match(review, /Partida 2: 1 und\n  Condición: CUARENTENA/u);
+  assert.match(review, /Lote físico: L-2 \(PDF: L-1\)/u);
+  assert.match(review, /Motivo de condición: Etiqueta ilegible/u);
+  assert.match(review, /Motivo de diferencia: Una unidad menos que la OC/u);
 });
 
 test('WhatsApp uses IO ID throughout an In & Out reception review', () => {
@@ -200,9 +222,9 @@ test('WhatsApp uses IO ID throughout an In & Out reception review', () => {
       distributions: [{ cantidad: 5, condicion: 'DISPONIBLE', ubicacion: 'B13', lote: 'IO-L1', fecha_venc: '2027-11-30' }],
     }]
   );
-  assert.match(review, /Resumen de recepcion para IO ID 8 \| OC-IO-DEMO-8/u);
-  assert.match(review, /Confirmo la recepcion IO ID 8/u);
-  assert.doesNotMatch(review, /Confirmo la recepcion OC ID 8/u);
+  assert.match(review, /Resumen de recepción para IO ID 8 \| OC-IO-DEMO-8/u);
+  assert.match(review, /Confirmo la recepción IO ID 8/u);
+  assert.doesNotMatch(review, /Confirmo la recepción OC ID 8/u);
 });
 
 test('WhatsApp renders the 3Q order and its reconciled OC before confirmation', () => {
@@ -214,10 +236,10 @@ test('WhatsApp renders the 3Q order and its reconciled OC before confirmation', 
       distributions: [{ cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'C8', lote: 'TRIO-E-3Q-A', fecha_venc: '2026-09-14' }],
     }]
   );
-  assert.match(review, /Resumen de recepcion para MQ ID 12 \| MQ-3Q-20260908-000012/u);
+  assert.match(review, /Resumen de recepción para MQ ID 12 \| MQ-3Q-20260908-000012/u);
   assert.match(review, /OC conciliada: OC-3Q-25/u);
-  assert.match(review, /Confirmo la recepcion MQ ID 12/u);
-  assert.doesNotMatch(review, /Confirmo la recepcion OC ID/u);
+  assert.match(review, /Confirmo la recepción MQ ID 12/u);
+  assert.doesNotMatch(review, /Confirmo la recepción OC ID/u);
 });
 
 test('3Q delivery PDF creates only a grounded preview payload', () => {
@@ -291,7 +313,8 @@ test('WhatsApp requires physical lot, expiry and location instead of trusting PD
     { id: 61, numero: 'REC-OC-6-001' },
     items
   );
-  assert.match(review, /lote fisico FISICO-001 \(PDF: DEMO-IO-ZENOVA-001\)/u);
+  assert.match(review, /Lote físico: FISICO-001 \(PDF: DEMO-IO-ZENOVA-001\)/u);
+  assert.match(review, /Vencimiento físico: 2027-12-15 \(PDF: 2027-11-30\)/u);
   assert.match(review, /PDF es una referencia/u);
 });
 
@@ -328,7 +351,7 @@ test('reception resolves gomas and a misspoken tapa only among its pending SKUs'
     items
   );
   assert.match(review, /Interpreté "ETAPA" como 00001-TPBI/u);
-  assert.match(review, /No se modifico inventario/u);
+  assert.match(review, /Todavía no se modificó inventario/u);
 });
 
 test('WhatsApp receipt draft is canonical, actor-bound and integrity checked', () => {

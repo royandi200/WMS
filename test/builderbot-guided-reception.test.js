@@ -110,7 +110,7 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   assert.equal(JSON.parse(state.draft.payload_json).version, 2);
   const preview = await send('sí', {});
   assert.equal(preview.requires_confirmation, true);
-  assert.match(preview.message, /Confirmo la recepcion OC ID 37/u);
+  assert.match(preview.message, /Confirmo la recepción OC ID 37/u);
   assert.match(preview.message, /propuesto por PDF/u);
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
   assert.equal(state.inventoryWrites, 0);
@@ -270,7 +270,7 @@ test('guided OC reception can correct its own preview without confirming invento
   assert.equal(JSON.parse(state.draft.payload_json).version, 2);
   const preview = await advanceGuidedReception({ db, user, rawText: 'sí', params: { avance: {} } });
   assert.equal(preview.requires_confirmation, true);
-  assert.match(preview.message, /00001-TPBI.*1 und/u);
+  assert.match(preview.message, /00001-TPBI[^\n]*\n  Recibido: 1 und/u);
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
   assert.equal(state.inventoryWrites, 0);
 });

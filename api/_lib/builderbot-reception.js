@@ -791,45 +791,48 @@ function buildReceptionReview(order, reception, items) {
       (sum, entry) => sum + Number(entry.cantidad || 0),
       0
     );
-    const header = `- ${item.sku} - ${item.producto}: ${Number(total.toFixed(4))} ${item.unidad}`;
+    const header = `- ${item.sku} - ${item.producto}`;
     const interpretation = item.referencia_interpretada
       ? `  Interpreté "${item.referencia_interpretada}" como ${item.sku}; verifica que sea el producto físico.`
       : null;
-    const details = item.distributions.map(entry => {
-      const parts = [
-        `${Number(entry.cantidad)} ${item.unidad}`,
-        String(entry.condicion || '').toUpperCase(),
-        entry.ubicacion || 'sin ubicacion',
-        entry.lote
-          ? entry.lote_fuente === 'DOCUMENTO'
-            ? `lote ${entry.lote} (propuesto por PDF; verifica la etiqueta fisica)`
-            : entry.lote_documento && entry.lote !== entry.lote_documento
-              ? `lote fisico ${entry.lote} (PDF: ${entry.lote_documento})`
-              : `lote ${entry.lote}`
-          : 'lote proveedor faltante',
-        entry.fecha_venc
-          ? entry.fecha_venc_fuente === 'DOCUMENTO'
-            ? `vence ${entry.fecha_venc} (propuesto por PDF)`
-            : `vence ${entry.fecha_venc}`
-          : null,
-        entry.motivo ? `motivo ${entry.motivo}` : null,
-      ].filter(Boolean);
-      return `  ${parts.join(' | ')}`;
-    });
-    return [header, interpretation, ...details].filter(Boolean);
+    const details = item.distributions.flatMap((entry, index) => [
+      item.distributions.length > 1
+        ? `  Partida ${index + 1}: ${Number(entry.cantidad)} ${item.unidad}` : null,
+      `  Condición: ${String(entry.condicion || '').toUpperCase()}.`,
+      `  Ubicación: ${entry.ubicacion || 'sin ubicación'}.`,
+      entry.lote
+        ? entry.lote_fuente === 'DOCUMENTO'
+          ? `  Lote: ${entry.lote} (propuesto por PDF; verifica la etiqueta física).`
+          : entry.lote_documento && entry.lote !== entry.lote_documento
+            ? `  Lote físico: ${entry.lote} (PDF: ${entry.lote_documento}).`
+            : `  Lote: ${entry.lote}.`
+        : '  Lote del proveedor: faltante.',
+      entry.fecha_venc
+        ? entry.fecha_venc_fuente === 'DOCUMENTO'
+          ? `  Vencimiento: ${entry.fecha_venc} (propuesto por PDF).`
+          : entry.fecha_vencimiento_documento
+            && entry.fecha_venc !== entry.fecha_vencimiento_documento
+            ? `  Vencimiento físico: ${entry.fecha_venc} (PDF: ${entry.fecha_vencimiento_documento}).`
+            : `  Vencimiento: ${entry.fecha_venc}.`
+        : null,
+      entry.motivo ? `  Motivo de condición: ${entry.motivo}.` : null,
+    ].filter(Boolean));
+    return [header, `  Recibido: ${Number(total.toFixed(4))} ${item.unidad}.`,
+      interpretation, ...details,
+      item.motivo ? `  Motivo de diferencia: ${item.motivo}.` : null].filter(Boolean);
   });
   const comparesDocumentValues = items.some(item => item.distributions.some(
     entry => entry.lote_documento || entry.fecha_vencimiento_documento
   ));
   return [
-    `Resumen de recepcion para ${identifier} | ${order.numero}.`,
-    `Borrador interno: ${reception.numero}`,
+    `Resumen de recepción para ${identifier} | ${order.numero}.`,
+    `Recepción preparada: ${reception.numero}.`,
     ...lines,
-    'No se modifico inventario.',
+    'Todavía no se modificó inventario.',
     comparesDocumentValues
-      ? 'El PDF es una referencia. Confirma siempre los valores leidos en la etiqueta fisica; cualquier diferencia queda visible en este resumen.'
+      ? 'El PDF es una referencia. Verifica lote y vencimiento contra la etiqueta física.'
       : null,
-    `Si todo coincide, escribe: Confirmo la recepcion ${identifier}`,
+    `Si todo coincide, escribe: Confirmo la recepción ${identifier}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -840,8 +843,8 @@ function buildOutsourcingReceptionReview(order, reception, items) {
     items
   );
   const lines = directReview.split('\n');
-  lines[0] = `Resumen de recepcion para MQ ID ${order.id} | ${order.codigo}.`;
-  lines[lines.length - 1] = `Si todo coincide, escribe: Confirmo la recepcion MQ ID ${order.id}`;
+  lines[0] = `Resumen de recepción para MQ ID ${order.id} | ${order.codigo}.`;
+  lines[lines.length - 1] = `Si todo coincide, escribe: Confirmo la recepción MQ ID ${order.id}`;
   lines.splice(1, 0, `OC conciliada: ${order.orden_compra_numero}`);
   return lines.join('\n');
 }

@@ -95,12 +95,21 @@ async function handleGet(req, res) {
   }
   const accepted = orderIds.length ? await query(
     `SELECT accepted.orden_compra_id, accepted.producto_id,
-            SUM(accepted.cantidad) AS cantidad_aceptada
+            SUM(accepted.cantidad) AS cantidad_aceptada,
+            SUM(accepted.cantidad_fisica) AS cantidad_fisica,
+            SUM(accepted.cantidad_cuarentena) AS cantidad_cuarentena,
+            SUM(accepted.cantidad_rechazada) AS cantidad_rechazada,
+            SUM(accepted.cantidad_pendiente_disposicion) AS cantidad_pendiente_disposicion
        FROM (
          SELECT r.orden_compra_id, ri.id, ri.producto_id,
                 CASE WHEN COUNT(rd.id) > 0
                      THEN COALESCE(SUM(CASE WHEN rd.condicion = 'DISPONIBLE' THEN rd.cantidad ELSE 0 END), 0)
-                     ELSE LEAST(ri.cantidad_rec, ri.cantidad_esp) END AS cantidad
+                     ELSE LEAST(ri.cantidad_rec, ri.cantidad_esp) END AS cantidad,
+                CASE WHEN COUNT(rd.id) > 0 THEN COALESCE(SUM(rd.cantidad), 0)
+                     ELSE ri.cantidad_rec END AS cantidad_fisica,
+                COALESCE(SUM(CASE WHEN rd.condicion = 'CUARENTENA' THEN rd.cantidad ELSE 0 END), 0) AS cantidad_cuarentena,
+                COALESCE(SUM(CASE WHEN rd.condicion = 'RECHAZADO' THEN rd.cantidad ELSE 0 END), 0) AS cantidad_rechazada,
+                COALESCE(SUM(CASE WHEN rd.condicion = 'PENDIENTE_DISPOSICION' THEN rd.cantidad ELSE 0 END), 0) AS cantidad_pendiente_disposicion
            FROM recepciones r
            JOIN recepcion_items ri ON ri.recepcion_id = r.id
            LEFT JOIN recepcion_distribuciones rd

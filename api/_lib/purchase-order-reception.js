@@ -23,9 +23,13 @@ function groupQuantitiesByUnit(items = []) {
 }
 
 function groupReceptionProgressByUnit(orderedItems = [], acceptedItems = []) {
-  const acceptedByProduct = new Map(
-    acceptedItems.map(item => [Number(item.producto_id), Number(item.cantidad_aceptada || 0)])
-  );
+  const progressByProduct = new Map(acceptedItems.map(item => [Number(item.producto_id), {
+    accepted: Number(item.cantidad_aceptada || 0),
+    received: Number(item.cantidad_fisica ?? item.cantidad_aceptada ?? 0),
+    quarantined: Number(item.cantidad_cuarentena || 0),
+    rejected: Number(item.cantidad_rechazada || 0),
+    pendingDisposition: Number(item.cantidad_pendiente_disposicion || 0),
+  }]));
   const productsByUnit = new Map();
   for (const item of orderedItems) {
     const unit = normalizeUnit(item.unit ?? item.unidad);
@@ -38,14 +42,20 @@ function groupReceptionProgressByUnit(orderedItems = [], acceptedItems = []) {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([unit, products]) => {
       const expected = [...products.values()].reduce((sum, quantity) => sum + quantity, 0);
-      const received = [...products.keys()].reduce(
-        (sum, productId) => sum + Number(acceptedByProduct.get(productId) || 0), 0
+      const total = field => [...products.keys()].reduce(
+        (sum, productId) => sum + Number(progressByProduct.get(productId)?.[field] || 0), 0
       );
+      const received = total('received');
+      const accepted = total('accepted');
       return {
         unit,
         expected: Number(expected.toFixed(4)),
         received: Number(received.toFixed(4)),
-        pending: Number(Math.max(expected - received, 0).toFixed(4)),
+        accepted: Number(accepted.toFixed(4)),
+        quarantined: Number(total('quarantined').toFixed(4)),
+        rejected: Number(total('rejected').toFixed(4)),
+        pendingDisposition: Number(total('pendingDisposition').toFixed(4)),
+        pending: Number(Math.max(expected - accepted, 0).toFixed(4)),
       };
     });
 }

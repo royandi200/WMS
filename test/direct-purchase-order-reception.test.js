@@ -9,23 +9,27 @@ const {
   remainingPurchaseOrderItems,
 } = require('../api/_lib/purchase-order-reception');
 
-test('agrupa el progreso parcial como recibido frente a esperado por unidad', () => {
+test('separa ingreso físico, disponibilidad y cuarentena por unidad', () => {
   assert.deepEqual(groupReceptionProgressByUnit([
     { producto_id: 1, cantidad_ordenada: 10, unidad: 'und' },
     { producto_id: 2, cantidad_ordenada: 5, unidad: 'und' },
     { producto_id: 3, cantidad_ordenada: 2.5, unidad: 'kg' },
   ], [
     { producto_id: 1, cantidad_aceptada: 6 },
-    { producto_id: 2, cantidad_aceptada: 2 },
+    { producto_id: 2, cantidad_aceptada: 2, cantidad_fisica: 5,
+      cantidad_cuarentena: 3 },
     { producto_id: 3, cantidad_aceptada: 1 },
   ]), [
-    { unit: 'kg', expected: 2.5, received: 1, pending: 1.5 },
-    { unit: 'und', expected: 15, received: 8, pending: 7 },
+    { unit: 'kg', expected: 2.5, received: 1, accepted: 1,
+      quarantined: 0, rejected: 0, pendingDisposition: 0, pending: 1.5 },
+    { unit: 'und', expected: 15, received: 11, accepted: 8,
+      quarantined: 3, rejected: 0, pendingDisposition: 0, pending: 7 },
   ]);
   const page = fs.readFileSync(path.join(__dirname, '../frontend/src/pages/RecepcionPage.jsx'), 'utf8');
   assert.match(page, /row\.estado !== 'RECIBIDA_PARCIAL'/u);
-  assert.match(page, /Llegaron:/u);
-  assert.match(page, /Se esperan:/u);
+  assert.match(page, /Recibido físicamente:/u);
+  assert.match(page, /En cuarentena:/u);
+  assert.match(page, /Saldo pendiente de aceptación:/u);
 });
 
 test('mixed purchase-order quantities remain grouped by unit', () => {
