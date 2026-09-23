@@ -9,14 +9,18 @@ const reboot = process.argv.includes('--reboot');
 const restore = process.argv.includes('--restore');
 const guided = process.argv.includes('--guided');
 const skuReview = process.argv.includes('--sku-review');
-if (guided && skuReview) throw new Error('Choose one prompt update at a time');
+const physicalCorrection = process.argv.includes('--physical-correction');
+if ([guided, skuReview, physicalCorrection].filter(Boolean).length > 1) {
+  throw new Error('Choose one prompt update at a time');
+}
 if (reboot && !apply) throw new Error('--reboot requires --apply');
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 const prompt = await readFile(resolve(repo, 'docs', 'Prompt WMS.txt'), 'utf8');
 const env = await readFile(resolve('.env'), 'utf8');
 const checkpointNameArg = process.argv.find(arg => arg.startsWith('--checkpoint-name='));
 const checkpointName = checkpointNameArg?.slice('--checkpoint-name='.length)
-  || (skuReview ? 'builderbot-pre-sku-review-20260923.json'
+  || (physicalCorrection ? 'builderbot-pre-physical-correction-20260923.json'
+    : skuReview ? 'builderbot-pre-sku-review-20260923.json'
     : guided ? 'builderbot-pre-guided-reception-20260923.json'
     : 'builderbot-pre-single-reception-confirmation-20260923.json');
 if (!/^[a-z0-9-]+\.json$/u.test(checkpointName)) throw new Error('Invalid checkpoint name');
@@ -109,7 +113,27 @@ function withSkuReviewInstructions(current) {
   return updated;
 }
 
-const transform = skuReview ? withSkuReviewInstructions
+function withPhysicalCorrectionInstructions(current) {
+  const insertions = [
+    ['- `lote` y `fecha_vencimiento`: incluyelos solo si el usuario los dicta.',
+      'Si el operario dice `el lote no coincide`'],
+    ['Cuando el WMS muestre `Revisa OC ID N`',
+      'En cada avance por pasos el WMS muestra lo ya registrado'],
+  ];
+  let updated = current;
+  for (const [anchorStart, additionStart] of insertions) {
+    const addition = promptLines.filter(line => line.startsWith(additionStart));
+    if (addition.length !== 1) throw new Error(`Expected one local correction rule: ${additionStart}`);
+    if (updated.split(/\r?\n/u).includes(addition[0])) continue;
+    const anchor = updated.split(/\r?\n/u).filter(line => line.startsWith(anchorStart));
+    if (anchor.length !== 1) throw new Error(`Live correction anchor has diverged: ${anchorStart}`);
+    updated = updated.replace(anchor[0], `${anchor[0]}\n${addition[0]}`);
+  }
+  return updated;
+}
+
+const transform = physicalCorrection ? withPhysicalCorrectionInstructions
+  : skuReview ? withSkuReviewInstructions
   : guided ? withGuidedInstructions : withAdditions;
 
 const beforeFlows = await loadFlows();

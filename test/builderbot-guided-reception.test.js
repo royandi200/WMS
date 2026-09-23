@@ -45,7 +45,12 @@ function guidedDb() {
             fecha_vencimiento_documento: '2027-12-31' },
         ]];
       }
-      if (/FROM producto_ubicaciones pu/u.test(sql)) return [[]];
+      if (/FROM producto_ubicaciones pu/u.test(sql)) return [[
+        { producto_id: 19, prioridad: 1, tipo_asignacion: 'PRIMARIA',
+          ubicacion_id: 8, ubicacion: 'A8' },
+        { producto_id: 60, prioridad: 1, tipo_asignacion: 'PRIMARIA',
+          ubicacion_id: 16, ubicacion: 'B16' },
+      ]];
       if (/SELECT id FROM recepciones WHERE id = \? FOR UPDATE/u.test(sql)) return [[{ id: 101 }]];
       if (/FROM recepcion_confirmacion_borradores d/u.test(sql)) {
         return [state.draft ? [{ ...state.draft, recepcion_id: 101, orden_compra_id: 37 }] : []];
@@ -82,11 +87,15 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   assert.match(first.message, /Interpreté «etapa»/u);
   assert.match(first.message, /Falta: cantidad, condición, ubicación/u);
   assert.match(first.message, /Lote propuesto por PDF: T-1/u);
-  await send('Llegaron dos', { cantidad: 2 });
+  assert.match(first.message, /Ubicación sugerida: A8/u);
+  const quantity = await send('Llegaron dos', { cantidad: 2 });
+  assert.match(quantity.message, /Cantidad registrada: 2 und/u);
+  assert.match(quantity.message, /Falta: condición, ubicación/u);
   await send('Están disponibles', { condicion: 'DISPONIBLE' });
   const review = await send('En la ubicación A8', { ubicacion: 'A8' });
   assert.equal(review.sku_review, true);
   assert.match(review.message, /Cantidad recibida: 2 und/u);
+  assert.match(review.message, /Ubicación sugerida: A8/u);
   assert.match(review.message, /¿Está correcto este SKU\?/u);
   assert.equal(JSON.parse(state.draft.payload_json).reviewSku, '00001-TPBI');
   const next = await send('sí', {});
@@ -103,6 +112,50 @@ test('guided OC reception accumulates audio-sized pieces and only creates a revi
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
   assert.equal(state.inventoryWrites, 0);
   assert.equal(state.transactions, 0);
+});
+
+test('a PDF lot mismatch requires the physical lot before verifying the SKU', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas, dos disponibles en A8', {
+    producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  const mismatch = await send('el lote no coincide', { motivo: 'lote no coincide' });
+  assert.match(mismatch.message, /Falta: lote físico correcto/u);
+  assert.match(mismatch.message, /Lote propuesto por PDF: T-1 \(no coincide/u);
+  assert.doesNotMatch(mismatch.message, /Motivo de condición: lote no coincide/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].lote_discrepa_pdf, true);
+  const premature = await send('sí', {});
+  assert.match(premature.message, /Falta: lote físico correcto/u);
+  const corrected = await send('El lote de la etiqueta es T-2', { lote: 'T-2' });
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Lote: T-2\./u);
+  assert.doesNotMatch(corrected.message, /Lote: T-1/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].lote_discrepa_pdf, false);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a PDF expiry mismatch requires a corrected date and shows saved progress', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas, dos disponibles en A8', {
+    producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  const mismatch = await send('la fecha de vencimiento no coincide', {});
+  assert.match(mismatch.message, /Cantidad registrada: 2 und/u);
+  assert.match(mismatch.message, /Ubicación sugerida: A8/u);
+  assert.match(mismatch.message, /Falta: vencimiento físico correcto/u);
+  const corrected = await send('Vence el 30 de noviembre de 2027', {
+    fecha_vencimiento: '2027-11-30',
+  });
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Vencimiento: 2027-11-30\./u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].vencimiento_discrepa_pdf, false);
+  assert.equal(state.inventoryWrites, 0);
 });
 
 test('guided OC reception refuses to infer a new order from model memory alone', async () => {

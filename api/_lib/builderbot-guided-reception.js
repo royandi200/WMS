@@ -25,6 +25,17 @@ function skuReviewReply(rawText) {
   return null;
 }
 
+function documentMismatch(rawText) {
+  const text = String(rawText || '').normalize('NFD').replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase();
+  const differs = /(?:no coincide|no corresponde|es diferente|es distinto|esta mal|es incorrect[oa])/u;
+  return {
+    lote: /\blote\b/u.test(text) && differs.test(text),
+    fecha_vencimiento: /\b(?:vencimiento|vence|fecha(?: de vencimiento)?|caducidad)\b/u.test(text)
+      && differs.test(text),
+  };
+}
+
 function digest(payload) {
   return createHash('sha256').update(canonicalJson(payload)).digest('hex');
 }
@@ -91,6 +102,13 @@ async function hasPendingSkuReview(db, userId) {
   return payload.version === 2 && (Boolean(payload.reviewSku)
     || Object.values(payload.entries).some(entry => entry && !entry.verified
       && entry.cantidad && entry.condicion && entry.ubicacion));
+}
+
+async function hasSelectedGuidedSku(db, userId) {
+  const session = await activeUserSession(db, userId);
+  if (!session) return false;
+  const payload = parseDraft(session, session.orden_compra_id, session.recepcion_id, userId);
+  return payload.version === 2 && Boolean(payload.reviewSku || payload.selectedSku);
 }
 
 async function recentlyPreparedSession(db, from) {
@@ -186,6 +204,10 @@ function applyFields(entry, advance) {
     }
     entry[key] = value || null;
   }
+  if (Object.hasOwn(advance, 'lote') && entry.lote) entry.lote_discrepa_pdf = false;
+  if (Object.hasOwn(advance, 'fecha_vencimiento') && entry.fecha_vencimiento) {
+    entry.vencimiento_discrepa_pdf = false;
+  }
   if (entry.condicion) {
     entry.condicion = entry.condicion.toUpperCase();
     if (!['DISPONIBLE', 'CUARENTENA', 'RECHAZADO', 'PENDIENTE_DISPOSICION'].includes(entry.condicion)) {
@@ -200,9 +222,13 @@ function missingFields(entry, prepared) {
   if (!entry.cantidad) missing.push('cantidad');
   if (!entry.condicion) missing.push('condición');
   if (!entry.ubicacion) missing.push('ubicación');
-  if (!entry.lote && !prepared.lote_documento) missing.push('lote de la etiqueta');
-  if (!entry.fecha_vencimiento && !prepared.fecha_vencimiento_documento) {
-    missing.push('vencimiento de la etiqueta');
+  if (!entry.lote && (entry.lote_discrepa_pdf || !prepared.lote_documento)) {
+    missing.push(entry.lote_discrepa_pdf ? 'lote físico correcto' : 'lote de la etiqueta');
+  }
+  if (!entry.fecha_vencimiento
+    && (entry.vencimiento_discrepa_pdf || !prepared.fecha_vencimiento_documento)) {
+    missing.push(entry.vencimiento_discrepa_pdf
+      ? 'vencimiento físico correcto' : 'vencimiento de la etiqueta');
   }
   if (entry.condicion && entry.condicion !== 'DISPONIBLE' && !entry.motivo) {
     missing.push('motivo de la condición');
@@ -248,12 +274,14 @@ function skuReviewMessage(order, reception, prepared, entry) {
       ? `Interpreté «${entry.referencia_interpretada}» como ${prepared.sku}; verifica que sea correcto.` : null,
     `Cantidad recibida: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)}).`,
     `Condición: ${entry.condicion}.`,
-    `Ubicación: ${entry.ubicacion}.`,
+    `Ubicación registrada: ${entry.ubicacion}.`,
+    prepared.ubicacion_sugerida
+      ? `Ubicación sugerida: ${prepared.ubicacion_sugerida} (verifica físicamente).` : null,
     `Lote: ${entry.lote || prepared.lote_documento}${loteFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
     `Vencimiento: ${entry.fecha_vencimiento || prepared.fecha_vencimiento_documento}${expiryFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
     entry.motivo ? `Motivo de condición: ${entry.motivo}.` : null,
     entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-    '¿Está correcto este SKU? Responde «sí» para continuar o dime qué dato debo corregir.',
+    '¿Está correcto este SKU? Responde «sí» para continuar o dime qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
     'Este paso no confirma la recepción ni modifica inventario.',
   ].filter(Boolean).join('\n');
 }
@@ -346,7 +374,9 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     const reviewItem = preparedItems.find(item => item.sku === reviewSku);
     if (reviewSku && !reviewItem) throw inputError('El SKU en revisión ya no pertenece a esta recepción', 409);
     const reviewReply = skuReviewReply(rawText);
-    const hasFields = Object.keys(advance).some(key => !['producto', 'sku'].includes(key));
+    const mismatches = documentMismatch(rawText);
+    const hasFields = Object.keys(advance).some(key => !['producto', 'sku'].includes(key))
+      || mismatches.lote || mismatches.fecha_vencimiento;
     const reference = String(advance.producto || advance.sku || '').trim();
     let confirmedSku = null;
     if (reviewItem && reviewReply === 'YES') {
@@ -398,14 +428,39 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       throw inputError('Indica primero cuál SKU de esta recepción vas a registrar', 409);
     }
     if (selected && hasFields) {
-      applyFields(payload.entries[selected.sku], advance);
+      const safeAdvance = { ...advance };
+      for (const key of ['lote', 'fecha_vencimiento']) {
+        if (mismatches[key] && safeAdvance[key]
+          && (/^(?:no coincide|no corresponde|diferente|distinto|incorrect[oa])$/iu
+            .test(String(safeAdvance[key]).trim())
+            || documentMismatch(String(safeAdvance[key]))[key])) delete safeAdvance[key];
+      }
+      if (mismatches.lote || mismatches.fecha_vencimiento) {
+        if (safeAdvance.motivo && /(?:lote|vencimiento|caducidad|fecha)/iu.test(safeAdvance.motivo)
+          && /(?:no coincide|no corresponde|diferente|distinto|incorrect[oa])/iu
+            .test(safeAdvance.motivo)) delete safeAdvance.motivo;
+      }
+      applyFields(payload.entries[selected.sku], safeAdvance);
       const updated = payload.entries[selected.sku];
+      if (mismatches.lote && !updated.lote) updated.lote_discrepa_pdf = true;
+      if (mismatches.fecha_vencimiento && !updated.fecha_vencimiento) {
+        updated.vencimiento_discrepa_pdf = true;
+      }
+      if (mismatches.lote && !Object.hasOwn(safeAdvance, 'lote')) {
+        updated.lote = null;
+        updated.lote_discrepa_pdf = true;
+      }
+      if (mismatches.fecha_vencimiento && !Object.hasOwn(safeAdvance, 'fecha_vencimiento')) {
+        updated.fecha_vencimiento = null;
+        updated.vencimiento_discrepa_pdf = true;
+      }
       if (Object.hasOwn(advance, 'cantidad') && !Object.hasOwn(advance, 'motivo_diferencia')
         && Math.abs(Number(updated.cantidad) - Number(selected.cantidad_pendiente)) < 0.0001) {
         updated.motivo_diferencia = null;
       }
-      if (Object.hasOwn(advance, 'condicion') && !Object.hasOwn(advance, 'motivo')
+      if (Object.hasOwn(advance, 'condicion') && !Object.hasOwn(safeAdvance, 'motivo')
         && updated.condicion === 'DISPONIBLE') updated.motivo = null;
+      if (updated.condicion === 'DISPONIBLE') updated.motivo = null;
       payload.entries[selected.sku].verified = false;
       payload.reviewSku = null;
     } else if (selected && params.correccion === true) {
@@ -452,18 +507,24 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     await db.commit();
     const identifier = purchaseOrderReceptionIdentifier(order);
     if (selected && missing.length) {
-      const hints = [
-        !entry.lote && selected.lote_documento ? `Lote propuesto por PDF: ${selected.lote_documento}` : null,
-        !entry.fecha_vencimiento && selected.fecha_vencimiento_documento
-          ? `Vencimiento propuesto por PDF: ${selected.fecha_vencimiento_documento}` : null,
-      ].filter(Boolean);
       return { message: [
         `🧾 Recepción guiada ${identifier} | ${reception.numero}`,
         `Producto: ${selected.sku} - ${selected.producto}`,
         entry.referencia_interpretada
           ? `Interpreté «${entry.referencia_interpretada}» como ${selected.sku}; verifica que sea correcto.` : null,
+        entry.cantidad ? `Cantidad registrada: ${entry.cantidad} ${selected.unidad || 'und'}.` : null,
+        entry.condicion ? `Condición registrada: ${entry.condicion}.` : null,
+        entry.ubicacion ? `Ubicación registrada: ${entry.ubicacion}.` : null,
+        selected.ubicacion_sugerida
+          ? `Ubicación sugerida: ${selected.ubicacion_sugerida} (verifica físicamente; no se asigna automáticamente).` : null,
+        entry.lote ? `Lote registrado: ${entry.lote}.`
+          : selected.lote_documento ? `Lote propuesto por PDF: ${selected.lote_documento}${entry.lote_discrepa_pdf ? ' (no coincide; indica el lote físico correcto)' : ''}.` : null,
+        entry.fecha_vencimiento ? `Vencimiento registrado: ${entry.fecha_vencimiento}.`
+          : selected.fecha_vencimiento_documento
+            ? `Vencimiento propuesto por PDF: ${selected.fecha_vencimiento_documento}${entry.vencimiento_discrepa_pdf ? ' (no coincide; indica el vencimiento físico correcto)' : ''}.` : null,
+        entry.motivo && entry.condicion !== 'DISPONIBLE' ? `Motivo de condición: ${entry.motivo}.` : null,
+        entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
         `Falta: ${missing.join(', ')}.`,
-        ...hints,
         'Puedes responder todo junto o dato por dato. Los datos del PDF deben cotejarse con la etiqueta física.',
         'Aún no se modificó inventario.',
       ].filter(Boolean).join('\n'), inventory_changed: false };
@@ -483,5 +544,6 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   }
 }
 
-module.exports = { advanceGuidedReception, hasPendingSkuReview, skuReviewReply,
+module.exports = { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
+  skuReviewReply, documentMismatch,
   parseDraft, missingFields, itemFromEntry };

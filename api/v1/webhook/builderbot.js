@@ -142,7 +142,8 @@ const {
   confirmOutsourcingReceptionFromWhatsApp,
   validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
-const { advanceGuidedReception, hasPendingSkuReview, skuReviewReply } = require('../../_lib/builderbot-guided-reception');
+const { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
+  skuReviewReply, documentMismatch } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
@@ -1511,6 +1512,13 @@ module.exports = async (req, res) => {
     if (!selectedPreparationReference && skuReviewReply(rawText)
       && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
       && await hasPendingSkuReview(db, user.id)) {
+      action = 'AVANZAR_RECEPCION_GUIADA_OC';
+      params = { avance: {} };
+    }
+    const mismatch = documentMismatch(rawText);
+    if (!selectedPreparationReference && (mismatch.lote || mismatch.fecha_vencimiento)
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
+      && await hasSelectedGuidedSku(db, user.id)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
     }
