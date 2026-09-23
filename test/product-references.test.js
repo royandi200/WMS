@@ -6,6 +6,7 @@ const {
   normalizeProductReference,
   resolveProductReference,
   contextualProductMatches,
+  scopedApproximateMatches,
 } = require('../api/_lib/product-references');
 
 test('product references normalize speech, accents and punctuation deterministically', () => {
@@ -104,6 +105,58 @@ test('resolver uses partial aliases only when explicitly scoped', async () => {
   assert.equal(product.siigo_code, '00051-MPASH');
   assert.equal(product.matched_by, 'contextual_alias');
   assert.equal(calls, 3);
+});
+
+test('scoped reception references tolerate one transcription error only when unique', () => {
+  const rows = [
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa pequeña' },
+    { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
+  ];
+  assert.deepEqual(scopedApproximateMatches('etapa', rows).map(row => row.siigo_code), ['00001-TPBI']);
+  assert.deepEqual(scopedApproximateMatches('etapa', [
+    ...rows,
+    { id: 20, siigo_code: '00004-TPALB', nombre: 'TAPA ALTA BLANCA', alias: 'tapa alta' },
+  ]).map(row => row.siigo_code), ['00001-TPBI', '00004-TPALB']);
+  assert.deepEqual(scopedApproximateMatches('00001-TPB1', rows), []);
+});
+
+test('approximate product matching needs an active product scope', async () => {
+  let calls = 0;
+  const rows = [
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa pequeña' },
+    { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
+  ];
+  const db = { async execute() { calls += 1; return calls < 3 ? [[]] : [rows]; } };
+  const product = await resolveProductReference(db, 'etapa', {
+    productIds: [19, 60],
+    allowContextualPartial: true,
+    allowScopedApproximate: true,
+  });
+  assert.equal(product.siigo_code, '00001-TPBI');
+  assert.equal(product.matched_by, 'scoped_approximate');
+  assert.equal(calls, 3);
+  const unscopedDb = { async execute() { return [[]]; } };
+  await assert.rejects(
+    resolveProductReference(unscopedDb, 'etapa', { allowContextualPartial: true, allowScopedApproximate: true }),
+    error => error.code === 'PRODUCT_REFERENCE_NOT_FOUND'
+  );
+});
+
+test('ambiguous approximate reception reference refuses to select a SKU', async () => {
+  let calls = 0;
+  const rows = [
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO' },
+    { id: 20, siigo_code: '00004-TPALB', nombre: 'TAPA ALTA BLANCA' },
+  ];
+  const db = { async execute() { calls += 1; return calls < 3 ? [[]] : [rows]; } };
+  await assert.rejects(
+    resolveProductReference(db, 'etapa', {
+      productIds: [19, 20],
+      allowContextualPartial: true,
+      allowScopedApproximate: true,
+    }),
+    error => error.code === 'PRODUCT_REFERENCE_AMBIGUOUS'
+  );
 });
 
 test('stock queries can explicitly resolve a unique contextual alias across the catalog', async () => {

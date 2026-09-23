@@ -1660,7 +1660,7 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Indica cantidad, condicion, lote, vencimiento y ubicacion para cada item. La ubicacion sugerida es flexible. Los datos del PDF son solo referencia y deben cotejarse contra la etiqueta fisica.',
+          'Puedes identificar cada producto por SKU o por un nombre inequivoco. Si interpreto una palabra por contexto, lo mostrare en el resumen para que la verifiques. Indica cantidad, condicion, lote, vencimiento y ubicacion para cada item. La ubicacion sugerida es flexible. Los datos del PDF son solo referencia y deben cotejarse contra la etiqueta fisica.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${purchaseOrderReceptionIdentifier(prepared.order)}`,
         ].join('\n');
         responseContext.reception = {

@@ -682,6 +682,8 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
     const reference = itemSku(item);
     const product = await resolveProductReference(db, reference, {
       productIds: preparedItems.map(prepared => prepared.producto_id),
+      allowContextualPartial: true,
+      allowScopedApproximate: true,
     });
     const productId = Number(product.id);
     const prepared = preparedByProduct.get(productId);
@@ -720,6 +722,9 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
       sku: product.siigo_code,
       producto: product.nombre || prepared.producto,
       unidad: prepared.unidad || 'und',
+      ...(product.matched_by === 'scoped_approximate'
+        ? { referencia_interpretada: reference }
+        : {}),
       requiere_lote: true,
       cantidad_recibida: item.cantidad_recibida ?? item.cantidad_total ?? null,
       motivo: item.motivo_diferencia || item.motivo || null,
@@ -772,6 +777,9 @@ function buildReceptionReview(order, reception, items) {
       0
     );
     const header = `- ${item.sku} - ${item.producto}: ${Number(total.toFixed(4))} ${item.unidad}`;
+    const interpretation = item.referencia_interpretada
+      ? `  Interpreté "${item.referencia_interpretada}" como ${item.sku}; verifica que sea el producto físico.`
+      : null;
     const details = item.distributions.map(entry => {
       const parts = [
         `${Number(entry.cantidad)} ${item.unidad}`,
@@ -793,7 +801,7 @@ function buildReceptionReview(order, reception, items) {
       ].filter(Boolean);
       return `  ${parts.join(' | ')}`;
     });
-    return [header, ...details];
+    return [header, interpretation, ...details].filter(Boolean);
   });
   const comparesDocumentValues = items.some(item => item.distributions.some(
     entry => entry.lote_documento || entry.fecha_vencimiento_documento

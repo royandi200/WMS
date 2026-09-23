@@ -295,6 +295,42 @@ test('WhatsApp requires physical lot, expiry and location instead of trusting PD
   assert.match(review, /PDF es una referencia/u);
 });
 
+test('reception resolves gomas and a misspoken tapa only among its pending SKUs', async () => {
+  const products = [
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa pequeña' },
+    { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
+  ];
+  const db = {
+    async execute(sql, values) {
+      if (/FROM ubicaciones/u.test(sql)) return [[{ id: 8, codigo: values[0] }]];
+      if (/LEFT JOIN producto_aliases/u.test(sql)) {
+        assert.deepEqual(values, [19, 60]);
+        return [products];
+      }
+      if (/FROM productos p|FROM producto_aliases pa/u.test(sql)) return [[]];
+      throw new Error(`Consulta inesperada: ${sql}`);
+    },
+  };
+  const prepared = [
+    { item_id: 1, producto_id: 19, sku: '00001-TPBI', producto: products[0].nombre, unidad: 'und', cantidad_pendiente: 2 },
+    { item_id: 2, producto_id: 60, sku: '00051-MPASH', producto: products[1].nombre, unidad: 'g', cantidad_pendiente: 100 },
+  ];
+  const items = await buildConfirmationItems(db, prepared, {
+    items: [
+      { sku: 'etapa', distribuciones: [{ cantidad: 2, condicion: 'DISPONIBLE', lote: 'T-1', fecha_vencimiento: '2027-12-31', ubicacion: 'A8' }] },
+      { sku: 'gomas', distribuciones: [{ cantidad: 100, condicion: 'DISPONIBLE', lote: 'G-1', fecha_vencimiento: '2027-12-31', ubicacion: 'B16' }] },
+    ],
+  });
+  assert.deepEqual(items.map(item => item.sku), ['00001-TPBI', '00051-MPASH']);
+  const review = buildReceptionReview(
+    { id: 37, numero: 'OC-37' },
+    { id: 101, numero: 'REC-OC-37-001' },
+    items
+  );
+  assert.match(review, /Interpreté "ETAPA" como 00001-TPBI/u);
+  assert.match(review, /No se modifico inventario/u);
+});
+
 test('WhatsApp receipt draft is canonical, actor-bound and integrity checked', () => {
   const payload = receptionDraftPayload(
     { id: 5 },

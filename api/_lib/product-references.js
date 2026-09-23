@@ -98,6 +98,48 @@ function contextualProductMatches(term, rows) {
   return scored.filter(entry => entry.score === bestScore).map(entry => entry.product);
 }
 
+function oneEditApart(left, right) {
+  if (left === right || Math.abs(left.length - right.length) > 1) return false;
+  let leftIndex = 0;
+  let rightIndex = 0;
+  let edits = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      leftIndex += 1;
+      rightIndex += 1;
+      continue;
+    }
+    edits += 1;
+    if (edits > 1) return false;
+    if (left.length >= right.length) leftIndex += 1;
+    if (right.length >= left.length) rightIndex += 1;
+  }
+  return edits + Number(leftIndex < left.length || rightIndex < right.length) === 1;
+}
+
+function scopedApproximateMatches(term, rows) {
+  const expected = contextualTokens(term);
+  if (!expected.length || expected.some(token => /^\d+$/u.test(token))) return [];
+  const products = new Map();
+  for (const row of rows) {
+    const references = [row.nombre, row.alias].filter(Boolean);
+    for (const reference of references) {
+      const tokens = contextualTokens(reference);
+      let approximateCount = 0;
+      const matches = expected.every(token => {
+        if (tokens.some(candidate => equivalentToken(token, candidate))) return true;
+        if (token.length < 4 || !tokens.some(candidate =>
+          candidate.length >= 4 && oneEditApart(token, candidate)
+        )) return false;
+        approximateCount += 1;
+        return true;
+      });
+      if (matches && approximateCount === 1) products.set(Number(row.id), row);
+    }
+  }
+  return [...products.values()];
+}
+
 async function resolveProductReference(conn, value, options = {}) {
   const term = String(value || '').trim();
   if (!term) throw httpError(400, 'Indica el producto', 'PRODUCT_REFERENCE_REQUIRED');
@@ -165,6 +207,13 @@ async function resolveProductReference(conn, value, options = {}) {
       return { ...contextual[0], matched_by: 'contextual_alias', matched_term: term };
     }
     if (contextual.length > 1) throw ambiguousProductError(term, contextual);
+    if (contextualIsScoped && options.allowScopedApproximate && !/^\S*\d\S*[-_]\S+/u.test(term)) {
+      const approximate = scopedApproximateMatches(term, contextRows);
+      if (approximate.length === 1) {
+        return { ...approximate[0], matched_by: 'scoped_approximate', matched_term: term };
+      }
+      if (approximate.length > 1) throw ambiguousProductError(term, approximate);
+    }
   }
   throw httpError(404, `Producto "${term}" no encontrado`, 'PRODUCT_REFERENCE_NOT_FOUND');
 }
@@ -174,4 +223,5 @@ module.exports = {
   resolveProductReference,
   ambiguousProductError,
   contextualProductMatches,
+  scopedApproximateMatches,
 };
