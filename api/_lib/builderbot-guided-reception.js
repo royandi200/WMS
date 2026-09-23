@@ -75,6 +75,44 @@ async function activeUserSession(db, userId, { allowPreview = false } = {}) {
   return sessions[0] || null;
 }
 
+async function recentlyPreparedSession(db, from) {
+  if (!from) return null;
+  const [rows] = await db.execute(
+    `SELECT action, response
+       FROM webhook_logs
+      WHERE from_phone = ? AND status = 'PROCESSED'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+      ORDER BY id DESC LIMIT 5`,
+    [from]
+  );
+  for (const row of rows) {
+    let response;
+    try {
+      response = typeof row.response === 'string' ? JSON.parse(row.response) : row.response;
+    } catch {
+      return null;
+    }
+    if (response?.duplicate === true) continue;
+    if (row.action !== 'PREPARAR_RECEPCION_OC') return null;
+    const context = response?.context?.reception;
+    const receptionId = Number(context?.reception_id);
+    const orderId = Number(context?.purchase_order_id);
+    if (!Number.isSafeInteger(receptionId) || receptionId <= 0
+      || !Number.isSafeInteger(orderId) || orderId <= 0
+      || context?.already_completed || context?.inventory_changed !== false) return null;
+    const [active] = await db.execute(
+      `SELECT id AS recepcion_id, orden_compra_id
+         FROM recepciones
+        WHERE id = ? AND orden_compra_id = ?
+          AND estado IN ('borrador', 'en_proceso')
+        LIMIT 1`,
+      [receptionId, orderId]
+    );
+    return active[0] || null;
+  }
+  return null;
+}
+
 function fromCompletedPreview(payload) {
   const entries = {};
   for (const item of payload.items || []) {
@@ -197,7 +235,7 @@ async function saveGuidedDraft(db, order, reception, userId, payload) {
   );
 }
 
-async function advanceGuidedReception({ db, params = {}, rawText, user }) {
+async function advanceGuidedReception({ db, params = {}, rawText, user, from }) {
   if (params.confirmacion_final === true || params.confirmacion_final === 'true') {
     throw inputError('Los avances no confirman inventario; revisa primero el resumen');
   }
@@ -211,7 +249,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user }) {
     order = await findPurchaseOrder(db, { numero_oc: params.numero_oc });
     assertPurchaseOrderTextReference(rawText, order);
   } else {
-    const session = await activeUserSession(db, user.id, {
+    const recent = await recentlyPreparedSession(db, from);
+    const session = recent || await activeUserSession(db, user.id, {
       allowPreview: params.correccion === true,
     });
     if (!session) {

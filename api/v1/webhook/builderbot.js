@@ -1700,7 +1700,7 @@ module.exports = async (req, res) => {
           `Proveedor: ${prepared.order.proveedor_nombre || 'N/A'}`,
           'Pendiente fisico:',
           ...pending,
-          `Para registrar por partes, di con que producto comienzas e incluye ${purchaseOrderReceptionIdentifier(prepared.order)} en ese primer mensaje. Despues puedes enviar cantidad, condicion y ubicacion juntos o por separado. Si el PDF trae lote y vencimiento, se propondran para que los verifiques con la etiqueta fisica.`,
+          '¿Con qué SKU o producto quieres comenzar? Responde solo con el SKU o nombre; esta recepción ya está seleccionada. Después puedes enviar cantidad, condición y ubicación juntas o por separado. Si el PDF trae lote y vencimiento, se propondrán para que los verifiques con la etiqueta física.',
           'Tambien puedes enviar el reporte completo de todos los productos como hasta ahora. Si interpreto una palabra por contexto, lo mostrare en el resumen para que la verifiques.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${purchaseOrderReceptionIdentifier(prepared.order)}`,
         ].join('\n');
@@ -1750,7 +1750,7 @@ module.exports = async (req, res) => {
       }
 
       case 'AVANZAR_RECEPCION_GUIADA_OC': {
-        const result = await advanceGuidedReception({ db, params, rawText, user });
+        const result = await advanceGuidedReception({ db, params, rawText, user, from });
         mensaje = result.message;
         responseContext.reception = {
           guided: true,

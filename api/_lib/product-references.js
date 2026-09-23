@@ -58,7 +58,7 @@ function ambiguousProductError(term, products) {
 }
 
 const CONTEXT_STOP_WORDS = new Set([
-  'de', 'del', 'el', 'la', 'las', 'los', 'material', 'producto', 'insumo', 'para', 'un', 'una', 'y', 'x',
+  'de', 'del', 'el', 'la', 'las', 'los', 'material', 'producto', 'insumo', 'para', 'por', 'un', 'una', 'y', 'x',
   'und', 'unid', 'unidad', 'unidades',
 ]);
 

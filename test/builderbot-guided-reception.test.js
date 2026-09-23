@@ -4,10 +4,10 @@ const { advanceGuidedReception } = require('../api/_lib/builderbot-guided-recept
 
 function guidedDb() {
   const products = [
-    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa' },
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO (60 UNID)', alias: 'tapa' },
     { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
   ];
-  const state = { draft: null, inventoryWrites: 0, transactions: 0 };
+  const state = { draft: null, recentLog: [], inventoryWrites: 0, transactions: 0 };
   const db = {
     async beginTransaction() { state.transactions += 1; },
     async commit() { state.transactions -= 1; },
@@ -19,6 +19,11 @@ function guidedDb() {
       }
       if (/FROM ordenes_compra_proveedor oc WHERE oc\.id/u.test(sql)) {
         return [[{ id: 37, numero: 'OC-37', estado: 'CARGADA', tipo_recepcion: 'INSUMOS_MP' }]];
+      }
+      if (/FROM webhook_logs/u.test(sql)) return [state.recentLog];
+      if (/FROM recepciones\s+WHERE id = \? AND orden_compra_id = \?/u.test(sql)) {
+        return [values[0] === 101 && values[1] === 37
+          ? [{ recepcion_id: 101, orden_compra_id: 37 }] : []];
       }
       if (/FROM recepciones\s+WHERE orden_compra_id = \? AND estado = 'completada'/u.test(sql)) return [[]];
       if (/FROM ordenes_compra_proveedor\s+WHERE id = \? LIMIT 1 FOR UPDATE/u.test(sql)) {
@@ -98,6 +103,41 @@ test('guided OC reception refuses to infer a new order from model memory alone',
     error => error.status === 409 && /OC ID N/u.test(error.message)
   );
   assert.equal(state.draft, null);
+});
+
+test('first product follows the last prepared reception without repeating OC ID', async () => {
+  const { db, state } = guidedDb();
+  state.recentLog = [{ action: 'PREPARAR_RECEPCION_OC', response: JSON.stringify({
+    context: { reception: { reception_id: 101, purchase_order_id: 37,
+      inventory_changed: false } },
+  }) }];
+  const first = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'Empezaremos con tapa tarro cuadrado blanco por 60',
+    params: { avance: { producto: 'tapa tarro cuadrado blanco por 60' } },
+  });
+  assert.match(first.message, /00001-TPBI/u);
+  assert.match(first.message, /Falta: cantidad, condición, ubicación/u);
+  assert.equal(JSON.parse(state.draft.payload_json).orderId, 37);
+  assert.equal(state.inventoryWrites, 0);
+  state.recentLog = [{ action: 'CONSULTAR_STOCK_MATERIA_PRIMA', response: '{}' }];
+  const next = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'Llegaron dos', params: { avance: { cantidad: 2 } },
+  });
+  assert.match(next.message, /Falta: condición, ubicación/u);
+});
+
+test('a stale or unrelated preparation cannot select an order from model memory', async () => {
+  const { db, state } = guidedDb();
+  state.recentLog = [{ action: 'CONSULTAR_STOCK_MATERIA_PRIMA', response: '{}' },
+    { action: 'PREPARAR_RECEPCION_OC', response: JSON.stringify({
+      context: { reception: { reception_id: 101, purchase_order_id: 37,
+        inventory_changed: false } },
+    }) }];
+  await assert.rejects(advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'Empecemos con las tapas', params: { orden_compra_id: 37,
+      avance: { producto: 'tapas' } },
+  }), /Para empezar, indica OC ID N o IO ID N/u);
+  assert.equal(state.inventoryWrites, 0);
 });
 
 test('guided OC reception never reassigns an active draft to another operator', async () => {

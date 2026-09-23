@@ -107,6 +107,15 @@ test('resolver uses partial aliases only when explicitly scoped', async () => {
   assert.equal(calls, 3);
 });
 
+test('spoken "por 60" preserves the presentation while ignoring the filler word', () => {
+  const rows = [
+    { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO (60 UNID)' },
+    { id: 20, siigo_code: '00002-TPBI120', nombre: 'TAPA TARRO CUADRADO BLANCO (120 UNID)' },
+  ];
+  assert.deepEqual(contextualProductMatches('tapa tarro cuadrado blanco por 60', rows)
+    .map(product => product.siigo_code), ['00001-TPBI']);
+});
+
 test('scoped reception references tolerate one transcription error only when unique', () => {
   const rows = [
     { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa pequeña' },

@@ -7,11 +7,14 @@ const projectId = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
 const apply = process.argv.includes('--apply');
 const reboot = process.argv.includes('--reboot');
 const restore = process.argv.includes('--restore');
+const guided = process.argv.includes('--guided');
 if (reboot && !apply) throw new Error('--reboot requires --apply');
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 const prompt = await readFile(resolve(repo, 'docs', 'Prompt WMS.txt'), 'utf8');
 const env = await readFile(resolve('.env'), 'utf8');
-const checkpointPath = resolve('.tmp', 'builderbot-pre-single-reception-confirmation-20260923.json');
+const checkpointPath = resolve('.tmp', guided
+  ? 'builderbot-pre-guided-reception-20260923.json'
+  : 'builderbot-pre-single-reception-confirmation-20260923.json');
 const originalTargets = JSON.parse(await readFile(
   resolve('.tmp', 'builderbot-pre-ocid-transcription-20260923.json'), 'utf8'
 )).prompts;
@@ -55,6 +58,34 @@ function withAdditions(current) {
   return current.replace(anchor[0], `${anchor[0]}\n${additions.join('\n')}`);
 }
 
+function withGuidedInstructions(current) {
+  const changes = [
+    ['El PRIMER mensaje guiado debe contener un identificador',
+      'Si el WMS acaba de responder `Recepción preparada para OC ID N`'],
+    ['{"kw":"g0m@s","@ction":"AVANZAR_RECEPCION_GUIADA_OC"',
+      '{"kw":"g0m@s","@ction":"AVANZAR_RECEPCION_GUIADA_OC"'],
+  ];
+  let updated = current;
+  for (const [oldStart, newStart] of changes) {
+    const desired = promptLines.filter(line => line.startsWith(newStart));
+    if (desired.length !== 1) throw new Error(`Expected one local guided rule: ${newStart}`);
+    if (updated.split(/\r?\n/u).includes(desired[0])) continue;
+    const candidates = updated.split(/\r?\n/u).filter(line => line.startsWith(oldStart));
+    if (candidates.length !== 1) throw new Error(`Live guided rule has diverged: ${oldStart}`);
+    if (candidates[0] === desired[0]) continue;
+    if (oldStart.startsWith('El PRIMER') && !candidates[0].includes('OCID 37')) {
+      throw new Error('Live first-message rule has diverged');
+    }
+    if (oldStart.startsWith('{"kw"') && !candidates[0].includes('"body":"Empecemos con las tapas de OC ID 37"')) {
+      throw new Error('Live guided example has diverged');
+    }
+    updated = updated.replace(candidates[0], desired[0]);
+  }
+  return updated;
+}
+
+const transform = guided ? withGuidedInstructions : withAdditions;
+
 const beforeFlows = await loadFlows();
 const savedCheckpoint = restore
   ? JSON.parse(await readFile(checkpointPath, 'utf8'))
@@ -64,8 +95,8 @@ const updates = originalTargets.map(saved => {
   const prior = savedCheckpoint?.prompts.find(item => item.flowId === saved.flowId
     && item.answerId === saved.answerId);
   if (restore && !prior) throw new Error(`No restoration checkpoint for ${saved.name}`);
-  const desired = restore ? prior.instructions : withAdditions(current);
-  if (restore && current !== desired && current !== withAdditions(desired)) {
+  const desired = restore ? prior.instructions : transform(current);
+  if (restore && current !== desired && current !== transform(desired)) {
     throw new Error(`Prompt ${saved.name} changed since checkpoint; refusing to restore`);
   }
   return { saved, current, desired };
