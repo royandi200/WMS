@@ -133,6 +133,7 @@ async function loadReplenishmentPicking(conn, replenishmentId) {
 }
 
 async function prepareProductionReplenishment({ orderId, quantity, reason, fullBomConfirmed, items, userId }) {
+  throw httpError(409, 'La reposición intermedia ya no se prepara. Declara cada material repuesto, cantidad, lote y causa al cerrar la OP. No se descontó inventario.');
   if (!orderId) throw httpError(400, 'La orden es obligatoria');
   const input = normalizeReplenishmentInput({ quantity, reason, fullBomConfirmed, items });
   const conn = await createConnection();
@@ -469,8 +470,8 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
     };
     result.notification = await notifyRoles({
       event: `production_replenishment_confirmed:${replenishment.id}`,
-      roles: ['admin', 'recepcion_cierre'],
-      fallbackRoles: ['admin'],
+      roles: ['recepcion_cierre'],
+      fallbackRoles: [],
       excludeUserIds: [userId],
       text: [
         '✅ *Material de reposición entregado*',

@@ -90,13 +90,12 @@ test('blocks closure while a replenishment reservation is pending', () => {
   assert.match(source, /confirmala o cancelala antes de cerrar/u);
 });
 
-test('documents guided and full-BOM replenishment without bypassing picking', () => {
+test('documenta la reposición al cierre y conserva la confirmación de reservas anteriores', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
   assert.match(prompt, /GUIAR_REPOSICION_PRODUCCION/u);
   assert.match(prompt, /PREPARAR_REPOSICION_PRODUCCION/u);
   assert.match(prompt, /CONFIRMAR_REPOSICION_PRODUCCION/u);
-  assert.match(prompt, /Nunca asumas que se repone el BOM completo/u);
-  assert.match(prompt, /No pidas al alistador SKU, lote, ubicacion ni cantidades/u);
-  assert.match(prompt, /La reposición guiada no registra merma automáticamente/u);
-  assert.match(prompt, /No uses `AJUSTAR_MATERIALES_PRODUCCION` con `ENTREGA_ADICIONAL` para saltarte la reserva/u);
+  assert.match(prompt, /REPOSICIÓN INTERMEDIA RETIRADA/u);
+  assert.match(prompt, /producto repuesto, cantidad, lote de origen y causa/u);
+  assert.match(prompt, /Solo para una reposición que ya estaba preparada/u);
 });

@@ -157,6 +157,9 @@ async function findRecentGenerated(conn, data, userId, productId, orderId, locat
 }
 
 async function reportWaste(input, userId, { allowGeneratedReference = false } = {}) {
+  if (input?.id_orden || input?.production_order_id) {
+    throw httpError(409, 'La merma de una OP se declara en el cierre de producción, junto con el material repuesto, lote y causa. No se registró ni descontó inventario.');
+  }
   const data = normalizeWasteInput(input, { allowGeneratedReference });
   const conn = await createConnection();
   let dedupeLock = null;

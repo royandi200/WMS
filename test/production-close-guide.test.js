@@ -8,8 +8,9 @@ const { hasProductionCloseIntent } = require('../api/_lib/production-close-input
 function fakeDb() {
   let stored = null;
   const writes = [];
+  const aliasTerms = [];
   return {
-    writes,
+    writes, aliasTerms,
     async execute(sql, params) {
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
       if (sql.includes('FROM webhook_logs')) return [[]];
@@ -21,6 +22,17 @@ function fakeDb() {
       }]];
       if (sql.includes('FROM producto_ubicaciones')) return [[{ codigo: 'C2' }]];
       if (sql.includes('FROM ubicaciones u JOIN bodegas b')) return [[{ codigo: 'C2' }]];
+      if (sql.includes('FROM produccion_materiales pm JOIN productos')) return [[{
+        producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
+      }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' }]];
+      if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
+      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[params[0] === 'etiqueta' ? {
+        id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA',
+        unit_label: 'und', alias: 'etiqueta',
+      } : {
+        id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
+        unit_label: 'und', alias: 'tapa',
+      }]]; }
       if (sql.includes('INSERT INTO produccion_cierre_borradores')) {
         stored = params[2]; writes.push(sql); return [{ affectedRows: 1 }];
       }
@@ -48,13 +60,16 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   assert.match(third.message, /Sugerida: \*C2\*/u);
 
   const fourth = await advanceCloseGuide({ ...base, rawText: 'C2' });
-  assert.match(fourth.message, /confirmo cierre/u);
+  assert.match(fourth.message, /¿Repusiste algún material/u);
   assert.equal(fourth.params, undefined);
 
-  const fifth = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
-  assert.deepEqual(fifth.params, { id_orden: 97, cantidad_real: 2, merma: 0,
-    motivo_merma: null, ubicacion: 'C2' });
-  assert.equal(db.writes.length, 4);
+  const fifth = await advanceCloseGuide({ ...base, rawText: 'no repuse material' });
+  assert.match(fifth.message, /confirmo cierre/u);
+  assert.equal(fifth.params, undefined);
+  const sixth = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.deepEqual(sixth.params, { id_orden: 97, cantidad_real: 2, merma: 0,
+    motivo_merma: null, ubicacion: 'C2', materiales_repuestos: [] });
+  assert.equal(db.writes.length, 5);
 });
 
 test('an operator can begin a close using the sole notified OP without repeating its ID', async () => {
@@ -123,6 +138,44 @@ test('una unidad conforme y una merma se capturan juntas sin inferir cierre', as
   assert.match(result.message, /Falta informar:.*ubicación del producto conforme/u);
   assert.match(result.message, /Sugerida: \*C2\*/u);
   assert.equal(result.params, undefined);
+});
+
+test('material repuesto se reúne por partes, exige lote y causa y solo sale en confirmación final', async () => {
+  const db = fakeDb();
+  const base = { db, userId: 14 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
+  await advanceCloseGuide({ ...base, rawText: '2 conformes, 0 merma, ubicación C2' });
+  const product = await advanceCloseGuide({ ...base, rawText: 'repuse una tapa' });
+  assert.match(product.message, /Lote: pendiente/u);
+  assert.match(product.message, /Causa: pendiente/u);
+  const lot = await advanceCloseGuide({ ...base, rawText: 'lote ACC-260910-TPBI' });
+  assert.match(lot.message, /Lote: ACC-260910-TPBI/u);
+  const reason = await advanceCloseGuide({ ...base, rawText: 'por ruptura' });
+  assert.match(reason.message, /Causa: ruptura/u);
+  assert.match(reason.message, /confirmo cierre/u);
+  assert.equal(reason.params, undefined);
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.deepEqual(done.params.materiales_repuestos, [{
+    sku: '00001-TPBI', cantidad: 1, lote: 'ACC-260910-TPBI',
+    motivo: 'ruptura', ubicacion: undefined,
+  }]);
+});
+
+test('un solo audio puede cerrar el resultado y declarar dos materiales sin duplicar el OP ID', async () => {
+  const db = fakeDb();
+  const base = { db, userId: 15 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
+  const review = await advanceCloseGuide({ ...base,
+    rawText: '2 conformes, 0 merma, ubicación C2; repuse una tapa del lote L-TPBI por ruptura y una etiqueta del lote L-ET por defecto',
+  });
+  assert.equal(review.params, undefined);
+  assert.deepEqual(db.aliasTerms, ['tapa', 'etiqueta']);
+  assert.match(review.message, /00001-TPBI/u);
+  assert.match(review.message, /00017-ETASH60/u);
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.equal(done.params.materiales_repuestos.length, 2);
+  assert.equal(done.params.materiales_repuestos[0].motivo, 'ruptura');
+  assert.equal(done.params.materiales_repuestos[1].lote, 'L-ET');
 });
 
 test('parsea cantidades y causas expresas sin tomar el OP ID como unidades', () => {

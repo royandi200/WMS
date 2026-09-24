@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { normalizeExpiryDate } = require('./production-close-input');
 const { notifyRoles } = require('./builderbot-notifications');
+const { consumeCloseMaterials, normalizeCloseMaterials } = require('./production-close-materials');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -85,7 +86,7 @@ function deriveProductionExpiry(materialLots = []) {
   };
 }
 
-async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, userId }) {
+async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, materialsReplaced, userId }) {
   const conforming = Number(qtyReal);
   const waste = Number(qtyWaste);
   const locationReference = locationId || locationCode || null;
@@ -124,9 +125,11 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         ubicacion: existingLots[0]?.ubicacion || null,
         closed_by: order.cerrado_por_nombre || null,
         closed_at: order.cerrado_en || null,
+        materiales_repuestos: [],
       };
     }
     if (order.estado !== 'EN_PROCESO') throw httpError(409, `La orden esta ${order.estado} y debe estar EN_PROCESO`);
+    const replacementLines = normalizeCloseMaterials(materialsReplaced);
     const [pendingReplenishments] = await conn.execute(
       `SELECT codigo FROM produccion_reposiciones
        WHERE orden_produccion_id = ? AND estado = 'PENDIENTE_ALISTAMIENTO'
@@ -144,7 +147,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     if (waste > 0 && !String(wasteReason || '').trim()) throw httpError(400, 'El motivo de merma es obligatorio');
     if (conforming > 0 && !locationReference) throw httpError(400, 'La ubicacion del producto terminado es obligatoria');
     const [materials] = await conn.execute(
-      `SELECT pm.producto_id, p.siigo_code AS sku, p.nombre,
+      `SELECT pm.id, pm.producto_id, p.siigo_code AS sku, p.nombre,
               COALESCE(NULLIF(pm.unidad, ''), p.unit_label) AS unidad,
               pm.cantidad_teorica, pm.cantidad_consumida,
               pm.cantidad_devuelta, pm.cantidad_adicional
@@ -153,6 +156,18 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       [order.id]
     );
     if (!materials.length) throw httpError(409, 'La orden no tiene conciliacion de materiales');
+    const additionalMaterials = await consumeCloseMaterials(conn, {
+      order, materials, lines: replacementLines, userId,
+    });
+    const [reconciledMaterials] = await conn.execute(
+      `SELECT pm.producto_id, p.siigo_code AS sku, p.nombre,
+              COALESCE(NULLIF(pm.unidad, ''), p.unit_label) AS unidad,
+              pm.cantidad_teorica, pm.cantidad_consumida,
+              pm.cantidad_devuelta, pm.cantidad_adicional
+         FROM produccion_materiales pm JOIN productos p ON p.id = pm.producto_id
+        WHERE pm.orden_produccion_id = ? ORDER BY pm.id`,
+      [order.id]
+    );
     const [processWasteRows] = await conn.execute(
       `SELECT producto_id, COALESCE(SUM(cantidad), 0) AS merma_proceso
        FROM mermas
@@ -248,7 +263,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         [wasteNumber, order.producto_id, order.id, waste, wasteReason, userId, userId]
       );
     }
-    const reconciliation = buildMaterialReconciliation(materials, processWasteRows);
+    const reconciliation = buildMaterialReconciliation(reconciledMaterials, processWasteRows);
     const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
     const result = {
@@ -265,6 +280,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       fecha_venc: normalizedExpiry,
       vencimiento_origen_lotes: productionExpiry.sourceLots,
       material_reconciliation: reconciliation,
+      materiales_repuestos: additionalMaterials,
     };
     const closedAt = new Date().toLocaleString('es-CO', {
       timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short',
@@ -290,6 +306,11 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         `Plan: ${Number(order.cantidad_planeada)} und`,
         `Conformes: ${conforming} und`,
         `Merma de producto terminado: ${waste} und${waste > 0 ? ` (${wasteReason})` : ''}`,
+        `Materiales repuestos al cierre: ${additionalMaterials.length} partida(s)`,
+        ...additionalMaterials.flatMap(item => [
+          `• *${item.sku}* — ${item.producto}: ${item.cantidad} ${item.unidad}`,
+          `  Lote: ${item.lote} | Ubicación: ${item.ubicacion} | Causa: ${item.motivo}`,
+        ]),
         `Faltante frente al plan: ${shortfall} und`,
         `Cumplimiento: ${planCompliance}% | No conforme: ${nonconformityRate}%`,
         '',
@@ -297,7 +318,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         `Ubicación: ${resolvedLocationCode || 'N/A'} | Vence: ${normalizedExpiry || 'N/A'}`,
         `Cerró: ${actors[0]?.nombre || 'Usuario WMS'} | ${closedAt}`,
         '',
-        '*Materiales y reposiciones de la OP*',
+        '*Conciliación de materiales de la OP*',
         ...reconciliation.map(item => [
           `• *${item.sku}* — ${item.producto}`,
           `  Plan: ${item.teorico} ${item.unidad} | Entregado neto: ${item.consumo_neto} ${item.unidad}`,

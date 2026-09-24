@@ -98,7 +98,7 @@ const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
 const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
 const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
-  parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
+  parseWasteMessage, pendingWasteDraft, recentOrderContext } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const {
   assertCustomerOrderEvidence,
@@ -111,7 +111,7 @@ const {
   prepareProductionReplenishment,
 } = require('../../_lib/production-replenishment');
 const { closeProductionOrder } = require('../../_lib/production-close');
-const { advanceCloseGuide, closeFields, closeOrderReference,
+const { advanceCloseGuide,
   finishDraft: finishCloseDraft, isCloseFollowup, pendingCloseDraft } = require('../../_lib/production-close-guide');
 const {
   hasProductionCloseIntent,
@@ -1633,6 +1633,14 @@ module.exports = async (req, res) => {
 
     let mensaje = '';
 
+    if (action === 'REPORTE_MERMA' && !params.id_lote
+      && (params.id_orden || await recentOrderContext(db, from))) {
+      const msg = '🏭 La merma de esta OP se declara al *cerrar la producción*, junto con las unidades conformes, no conformes y cada material repuesto con cantidad, lote y causa. Todavía no se registró merma ni se modificó inventario. Di *cerrar OP ID* y el número cuando termine la operación.';
+      const body = { ok: true, message: msg, mensaje: msg, context: responseContext };
+      await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
+      return await finalizeHandledResponse(body);
+    }
+
     assertOperationalIntent(action, rawBody, info);
     params = additionalOperationInput(action, params, rawBody, info);
 
@@ -1667,27 +1675,17 @@ module.exports = async (req, res) => {
     let guidedCloseDraft = null;
     if (action === 'CERRAR_ORDEN_PRODUCCION') {
       const closeText = currentText(rawBody, info);
-      const spokenClose = closeFields(closeText);
-      const activeClose = await pendingCloseDraft(db, user.id);
-      const needsGuide = activeClose || !closeOrderReference(closeText, params)
-        || spokenClose.conforming == null || spokenClose.waste == null
-        || (spokenClose.waste > 0 && !spokenClose.reason)
-        || (spokenClose.conforming > 0 && !spokenClose.location)
-        || params.cantidad_real == null || params.merma == null
-        || (Number(params.cantidad_real) > 0 && !params.ubicacion);
-      if (needsGuide) {
-        const guided = await advanceCloseGuide({ db, userId: user.id, from,
-          rawText: closeText, params });
-        if (guided.message) {
-          const body = { ok: true, message: guided.message, mensaje: guided.message,
-            context: responseContext };
-          await saveLog(db, { from, action, priority, payload: rawBody,
-            response: body, status: 'PROCESSED' });
-          return await finalizeHandledResponse(body);
-        }
-        params = guided.params;
-        guidedCloseDraft = guided.draft;
+      const guided = await advanceCloseGuide({ db, userId: user.id, from,
+        rawText: closeText, params });
+      if (guided.message) {
+        const body = { ok: true, message: guided.message, mensaje: guided.message,
+          context: responseContext };
+        await saveLog(db, { from, action, priority, payload: rawBody,
+          response: body, status: 'PROCESSED' });
+        return await finalizeHandledResponse(body);
       }
+      params = guided.params;
+      guidedCloseDraft = guided.draft;
     }
 
     switch (action) {
@@ -3141,6 +3139,7 @@ module.exports = async (req, res) => {
           wasteReason: params.motivo_merma,
           locationId: params.ubicacion_id,
           locationCode: params.ubicacion,
+          materialsReplaced: params.materiales_repuestos,
           userId: user.id,
         });
         if (guidedCloseDraft) await finishCloseDraft(db, user.id, guidedCloseDraft).catch(error => {
@@ -3150,14 +3149,24 @@ module.exports = async (req, res) => {
           ? new Date(closure.closed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })
           : null;
         mensaje = closure.already_closed
-          ? `OP ID ${closure.order_id} | ${closure.order_code} ya estaba cerrada${closure.closed_by ? ` por ${closure.closed_by}` : ''}${closedWhen ? ` el ${closedWhen}` : ''}. No se modifico inventario.`
+          ? `🏭 La *OP ID ${closure.order_id}* | ${closure.order_code} ya estaba cerrada${closure.closed_by ? ` por ${closure.closed_by}` : ''}${closedWhen ? ` el ${closedWhen}` : ''}. No se modificó inventario.`
           : [
-              `OP ID ${closure.order_id} | ${closure.order_code} cerrada.`,
-              `Producto conforme: ${closure.qty_real}`,
-              `Merma: ${closure.qty_waste}`,
+              '🏭 ✅ *Producción cerrada*',
+              '',
+              `Orden: *OP ID ${closure.order_id}* | ${closure.order_code}`,
+              `Unidades conformes: ${closure.qty_real}`,
+              `No conformes: ${closure.qty_waste}`,
+              '',
+              '*Materiales repuestos*',
+              ...(closure.materiales_repuestos.length
+                ? closure.materiales_repuestos.flatMap(item => [
+                  `• *${item.sku}*: ${item.cantidad} ${item.unidad} · lote ${item.lote}`,
+                  `  Causa: ${item.motivo} · ubicación ${item.ubicacion}`,
+                ]) : ['• Ninguno']),
+              '',
               `Lote PT: ${closure.lpn_terminado || 'Sin lote conforme'}`,
               `Vencimiento: ${closure.fecha_venc || 'No aplica'}`,
-              `Ubicacion: ${closure.ubicacion || closure.ubicacion_id || 'No aplica'}`,
+              `Ubicación: ${closure.ubicacion || closure.ubicacion_id || 'No aplica'}`,
             ].join('\n');
         responseContext.production_close = closure;
         break;

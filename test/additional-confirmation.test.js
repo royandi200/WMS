@@ -103,8 +103,6 @@ const cases = [
     args: { id_item: 'SKU-1', id_despacho: 'DSP-1', lote_origen: 'LOT-1', ubicacion: 'B1', cantidad: 1, estado: 'RECUPERABLE', confirmar_nueva_devolucion: true, id_devolucion_existente: 1 } },
   { name: 'production', file: 'production-workflow.js', fn: 'releaseProductionOrder', done: 'already_released', insert: 'INSERT INTO ordenes_produccion',
     args: { product: 'SKU-1', quantity: 1, originType: 'STOCK_SEGURIDAD', userId: 5, confirmNew: true, existingOrderId: 1 } },
-  { name: 'material', file: 'production-materials.js', fn: 'adjustProductionMaterials', done: 'already_recorded', insert: 'INSERT INTO movimientos',
-    args: { orderId: 7, productTerm: 'SKU-1', lot: 'LOT-1', locationCode: 'B1', type: 'ENTREGA_ADICIONAL', quantity: 1, userId: 5, confirmNew: true, existingAdjustmentId: 1 } },
 ];
 
 for (const scenario of cases) {
@@ -150,6 +148,15 @@ for (const scenario of cases) {
     });
   }
 }
+
+test('la entrega adicional anticipada está retirada y no crea movimientos', async () => {
+  const db = database();
+  await assert.rejects(workflow('production-materials.js', db).adjustProductionMaterials({
+    orderId: 7, productTerm: 'SKU-1', lot: 'LOT-1', locationCode: 'B1',
+    type: 'ENTREGA_ADICIONAL', quantity: 1, userId: 5,
+  }), /declara al cerrar la OP/u);
+  assert.equal(db.writes.length, 0);
+});
 
 test('additional confirmations fail closed without a valid base or storage', async () => {
   const db = database();

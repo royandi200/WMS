@@ -46,7 +46,8 @@ export default function ProduccionPage() {
   const role = useAuthStore((state) => state.user?.rol || '')
   const canCancelOrder = capabilities.includes('*') || capabilities.includes('production.release')
   const visibleTabs = TABS.map((label, index) => ({ label, index, capability: TAB_CAPABILITIES[index] }))
-    .filter((item) => capabilities.includes('*') || capabilities.includes(item.capability))
+    .filter((item) => ![4, 5].includes(item.index)
+      && (capabilities.includes('*') || capabilities.includes(item.capability)))
 
   useEffect(() => {
     if (!visibleTabs.some((item) => item.index === tab) && visibleTabs.length) setTab(visibleTabs[0].index)
@@ -766,8 +767,15 @@ function AdvanceForm({ loading, onSubmit }) {
 
 function CloseForm({ loading, onSubmit, locations }) {
   const [form, setForm] = useState({ order_id: '', qty_real: '', qty_waste: '', waste_reason: '', ubicacion_id: '' })
+  const [materialsMode, setMaterialsMode] = useState('')
+  const [materials, setMaterials] = useState([])
+  const [review, setReview] = useState(false)
   const [toast, setToast] = useState(null)
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+  const set = (k) => (e) => { setReview(false); setForm((f) => ({ ...f, [k]: e.target.value })) }
+  const setMaterial = (index, key, value) => {
+    setReview(false)
+    setMaterials((current) => current.map((item, position) => position === index ? { ...item, [key]: value } : item))
+  }
   const handle = async (e) => {
     e.preventDefault()
     const qtyReal = Number(form.qty_real)
@@ -788,6 +796,24 @@ function CloseForm({ loading, onSubmit, locations }) {
       setToast({ msg: 'Selecciona la ubicación del producto terminado', ok: false })
       return
     }
+    if (!materialsMode) {
+      setToast({ msg: 'Confirma si se repuso material durante la OP', ok: false })
+      return
+    }
+    if (materialsMode === 'SI' && !materials.length) {
+      setToast({ msg: 'Agrega al menos un material repuesto o selecciona «No hubo»', ok: false })
+      return
+    }
+    if (materialsMode === 'SI' && materials.some((item) => !item.sku.trim() || !item.lote.trim()
+      || !item.motivo.trim() || !Number.isFinite(Number(item.cantidad)) || Number(item.cantidad) <= 0)) {
+      setToast({ msg: 'Cada material repuesto requiere SKU, cantidad positiva, lote y causa concreta', ok: false })
+      return
+    }
+    if (!review) {
+      setToast(null)
+      setReview(true)
+      return
+    }
 
     const res = await onSubmit({
       order_id: form.order_id.trim(),
@@ -795,13 +821,17 @@ function CloseForm({ loading, onSubmit, locations }) {
       qty_waste: qtyWaste,
       waste_reason: form.waste_reason.trim() || undefined,
       ubicacion_id: form.ubicacion_id ? Number(form.ubicacion_id) : undefined,
+      materiales_repuestos: materialsMode === 'SI' ? materials.map((item) => ({
+        sku: item.sku.trim(), cantidad: Number(item.cantidad), lote: item.lote.trim(),
+        motivo: item.motivo.trim(), ubicacion: item.ubicacion.trim() || undefined,
+      })) : [],
     })
-    if (res.ok) setToast({ msg: 'Orden cerrada exitosamente', ok: true })
+    if (res.ok) { setReview(false); setToast({ msg: 'Orden cerrada exitosamente', ok: true }) }
     else setToast({ msg: res.message, ok: false })
   }
 
   return (
-    <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
+    <form onSubmit={handle} className="max-w-2xl bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
       <Field label="OP ID *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
       <Field label="Unidades conformes terminadas *"><input type="number" min="0" value={form.qty_real} onChange={set('qty_real')} placeholder="0" className="input-field" required /></Field>
@@ -815,7 +845,36 @@ function CloseForm({ loading, onSubmit, locations }) {
       <Field label="Motivo de merma">
         <textarea value={form.waste_reason} onChange={set('waste_reason')} rows={2} placeholder="Obligatorio si la merma es mayor a 0" className="input-field resize-none" />
       </Field>
-      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Cerrando...' : 'Cerrar orden'}</button>
+      <Field label="¿Se repuso material durante esta OP? *">
+        <select value={materialsMode} onChange={(event) => {
+          setReview(false); setMaterialsMode(event.target.value)
+          if (event.target.value !== 'SI') setMaterials([])
+        }} className="input-field" required>
+          <option value="">Selecciona una respuesta</option>
+          <option value="NO">No hubo material repuesto</option>
+          <option value="SI">Sí, declarar materiales y lotes</option>
+        </select>
+      </Field>
+      {materialsMode === 'SI' && <div className="space-y-4">
+        {materials.map((item, index) => <div key={index} className="rounded-lg border border-border p-4 space-y-3">
+          <div className="flex items-center justify-between"><span className="text-sm font-medium">Material {index + 1}</span>
+            <button type="button" aria-label={`Quitar material ${index + 1}`} onClick={() => { setReview(false); setMaterials((current) => current.filter((_, position) => position !== index)) }}><Trash2 size={16} /></button></div>
+          <Field label="SKU del material *"><input value={item.sku} onChange={(event) => setMaterial(index, 'sku', event.target.value)} className="input-field" required /></Field>
+          <Field label="Cantidad repuesta *"><input type="number" min="0.001" step="0.001" value={item.cantidad} onChange={(event) => setMaterial(index, 'cantidad', event.target.value)} className="input-field" required /></Field>
+          <Field label="Lote del que se tomó *"><input value={item.lote} onChange={(event) => setMaterial(index, 'lote', event.target.value)} className="input-field" required /></Field>
+          <Field label="Causa concreta *"><input value={item.motivo} onChange={(event) => setMaterial(index, 'motivo', event.target.value)} placeholder="Por ejemplo: ruptura" className="input-field" required /></Field>
+          <Field label="Ubicación (si el lote está en varias)"><input value={item.ubicacion} onChange={(event) => setMaterial(index, 'ubicacion', event.target.value)} className="input-field" /></Field>
+        </div>)}
+        <button type="button" className="btn-secondary" onClick={() => { setReview(false); setMaterials((current) => [...current, { sku: '', cantidad: '', lote: '', motivo: '', ubicacion: '' }]) }}><Plus size={16} className="inline mr-1" />Añadir material</button>
+      </div>}
+      {review && <div className="rounded-lg border border-primary/40 bg-primary/5 p-4 text-sm space-y-2">
+        <p className="font-semibold">Revisa antes de afectar inventario — OP {form.order_id}</p>
+        <p>Conformes: {form.qty_real} und · No conformes: {form.qty_waste} und{Number(form.qty_waste) > 0 ? ` · Causa: ${form.waste_reason}` : ''}</p>
+        <p>Ubicación PT: {locations.find((item) => Number(item.id) === Number(form.ubicacion_id))?.codigo || 'No aplica'}</p>
+        <p>Material repuesto: {materialsMode === 'NO' ? 'Ninguno' : `${materials.length} partida(s)`}</p>
+        {materialsMode === 'SI' && materials.map((item, index) => <p key={index}>{index + 1}. {item.sku}: {item.cantidad} · lote {item.lote} · causa {item.motivo}{item.ubicacion ? ` · ubicación ${item.ubicacion}` : ''}</p>)}
+      </div>}
+      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Cerrando...' : review ? 'Confirmar cierre y ajustar inventario' : 'Revisar cierre'}</button>
     </form>
   )
 }

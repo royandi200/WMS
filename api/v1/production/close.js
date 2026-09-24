@@ -15,6 +15,7 @@ module.exports = async (req, res) => {
       qtyWaste: body.qty_waste ?? body.merma,
       wasteReason: body.waste_reason || body.motivo_merma,
       locationId: body.ubicacion_id || body.location_id,
+      materialsReplaced: body.materiales_repuestos,
       userId: user.id,
     });
     return res.status(200).json({ ok: true, data });

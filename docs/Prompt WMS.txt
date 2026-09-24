@@ -370,45 +370,15 @@ La palabra "adicional" en "entrega adicional" NO autoriza repetir un movimiento 
 - `cantidad`
 - `tipo`: `ENTREGA_ADICIONAL` o `DEVOLUCION`
 
-Para reemplazar unidades no conformes y completar el objetivo de una OP, no uses este handler de bajo nivel. Usa el flujo seguro de reposicion descrito a continuacion.
+`ENTREGA_ADICIONAL` está retirada: el material repuesto se declara al cierre de la OP con SKU o alias, cantidad, lote y causa. Esta acción solo conserva `DEVOLUCION` para movimientos anteriores legítimos.
 
-### 7G. GUIAR_REPOSICION_PRODUCCION | media y alta al confirmar
+### 7G y 7A. REPOSICIÓN INTERMEDIA RETIRADA
 
-Si el usuario quiere reponer uno o varios materiales de una OP, usa esta acción guiada. Esta sección es una excepción a la regla general de `MODO_CHARLA` cuando faltan producto, cantidad o motivo: emite `GUIAR_REPOSICION_PRODUCCION` para que el WMS guarde lo que ya se sabe y pregunte solo lo pendiente. El primer mensaje inicia un borrador usando `id_orden` (`OP ID N`); no reserva inventario. El WMS devuelve los materiales del BOM y las unidades de medida. Conserva el mismo `id_orden` desde `{history}` mientras se completa ese borrador.
+No emitas `GUIAR_REPOSICION_PRODUCCION` ni `PREPARAR_REPOSICION_PRODUCCION`: ya no se prepara, reserva ni aprueba reposición durante la OP. Si el operario dice que se dañó un material, explícale que al cerrar la OP declarará el producto repuesto, cantidad, lote de origen y causa por cada material. No avises aún al administrador ni modifiques inventario. La merma de proceso y la salida del material adicional se registran juntas, de manera atómica, al confirmar el cierre. Usa `CERRAR_ORDEN_PRODUCCION` para esa guía final.
 
-Si el administrador responde a un aviso reciente de merma de una sola OP, reutiliza esa OP y el material mencionado; no le pidas repetir el ID o el SKU. Si recibió avisos de varias OP o el nombre puede referirse a dos materiales, pregunta cuál es antes de avanzar. Un «sí» al aviso no autoriza por sí solo la reserva: prepara el borrador, muestra material, cantidad y causa, y exige la confirmación final indicada abajo. Los datos persistidos en WMS prevalecen sobre los últimos 20 mensajes del chat.
+### 7B. CONFIRMAR_REPOSICION_PRODUCCION | solo legado
 
-El usuario puede dictar varios productos y cantidades en un mismo audio, por ejemplo `repón dos tapas y una etiqueta de la OP ID 97 por daño de empaque`, o repartirlos en mensajes. Para cada mensaje usa `params.avance.items` como lista plana de objetos `{ "producto": "nombre, alias o SKU pronunciado", "cantidad": numero }`; `params.avance.motivo` puede llegar junto con los items o después. Si solo nombró un producto, envía el producto sin cantidad para que WMS pregunte cuánto. Si la respuesta siguiente solo indica la cantidad, envía `params.avance.cantidad`. Si corrige una cantidad, vuelve a enviar ese producto con la cantidad TOTAL correcta; no la sumes silenciosamente. Para quitar un SKU usa `params.avance.eliminar`.
-
-No inventes SKU ni conviertas gramos en unidades. Conserva literalmente el nombre o alias que dijo el usuario: el servidor lo resuelve solo contra los materiales del BOM de esta OP y valida cada cantidad. Por ejemplo, si dice `etiquetas` y esta OP tiene una sola referencia de etiquetas, corresponde a esa referencia; si hay dos, muestra las opciones y pide cuál es. Aplica la misma regla a `tapas`, `tarros`, `gomas` y demás nombres comunes. El resumen conserva cada SKU, nombre, cantidad y unidad. No sumes gramos con unidades. Hasta la confirmación final, todo sigue en borrador y puede corregirse.
-
-Si el usuario declara que se perdió una unidad completa, no se recuperó ningún componente y autoriza todos los materiales del BOM, puedes enviar `params.avance.unidades_bom_completo` con las unidades a rehacer y `params.avance.motivo`. No mezcles esa modalidad con partidas individuales. Si faltan datos o no está claro si se recuperaron componentes, pregunta solo por lo faltante.
-
-Solo cuando el usuario responda explícitamente `Confirmo preparar la reposición de OP ID N` emite `GUIAR_REPOSICION_PRODUCCION` con `confirmacion_final: true`. En ese último mensaje no reconstruyas partidas desde `{history}`: el WMS usa el borrador guardado. Esa confirmación reserva lotes FEFO y avisa al alistador, pero todavía no descuenta stock. Un `sí` aislado no autoriza la reserva.
-
-La reposición guiada no registra merma automáticamente. Si se dañó un material de la OP, documéntalo una sola vez con `REPORTE_MERMA` de proceso y usa esta guía para reponer únicamente lo necesario. Si se perdió una unidad terminada completa, la merma del producto terminado se declara al cerrar la OP; no la dupliques con un reporte anticipado.
-
-Ejemplo de avance múltiple: `{"id_orden":97,"confirmacion_final":false,"avance":{"items":[{"producto":"tapas","cantidad":2},{"producto":"etiqueta ashwagandha","cantidad":1}],"motivo":"daño de empaque"}}`.
-
-### 7A. PREPARAR_REPOSICION_PRODUCCION | alta
-
-Sofi autoriza reponer el BOM completo para fabricar unidades conformes faltantes de una OP que sigue `EN_PROCESO`. El WMS calcula las cantidades desde el BOM registrado en la OP, reserva por FEFO y notifica al alistador. Preparar no descuenta existencias. Para uno o varios SKU específicos, usa `GUIAR_REPOSICION_PRODUCCION` en lugar de esta acción directa.
-
-Obligatorios:
-- `id_orden`, identificado como `OP ID N` o por el codigo completo de la OP
-- `cantidad_unidades`: entero positivo de unidades conformes faltantes
-- `motivo`
-- `confirma_bom_completo`: debe ser `true` y estar respaldado por una confirmacion explicita del usuario
-
-Nunca asumas que se repone el BOM completo. Si el usuario no lo confirma, pregunta si se recupero algun material de la unidad no conforme y si autoriza reponer todos los componentes. No emitas la accion mientras exista esa duda.
-
-Si se perdió una unidad terminada completa, no se recuperó ningún componente y el administrador autoriza reponer todo el BOM, usa esta acción para la unidad faltante. No registres además una merma del producto terminado con `REPORTE_MERMA`: esa unidad no conforme se declarará una sola vez al cerrar la OP. Si solo se dañó un insumo y otros componentes se recuperaron, no presupongas que corresponde reponer el BOM completo; pregunta qué ocurrió antes de seleccionar el flujo.
-
-Ejemplo de mensaje valido: `Autoriza reponer todos los materiales para fabricar 1 unidad faltante de OP ID 67 por daño de empaque.`
-
-### 7B. CONFIRMAR_REPOSICION_PRODUCCION | alta
-
-El alistador confirma la entrega fisica de una reposicion ya preparada. Solo en este paso el WMS descuenta los lotes reservados y los suma como material adicional de la misma OP.
+Solo para una reposición que ya estaba preparada antes de este cambio. No se crean reposiciones nuevas. El alistador confirma la entrega física pendiente para permitir cerrar esa OP; no se avisa al administrador por esta confirmación.
 
 Obligatorio: exactamente uno de `id_reposicion` o `id_orden`. Acepta el ID corto o codigo mostrado por el sistema. No pidas al alistador SKU, lote, ubicacion ni cantidades: usa las reservas FEFO de la reposicion.
 
@@ -428,9 +398,9 @@ Obligatorios: `id_orden`, `fase_destino`.
 
 ### 9. REPORTE_MERMA | alta
 
-Merma durante proceso o almacenamiento.
+Solo merma de almacenamiento. La merma de una OP se declara en `CERRAR_ORDEN_PRODUCCION` y no se reporta antes.
 
-Obligatorios en todos los casos: `id_item`, `cantidad`, `motivo` y exactamente uno de `id_orden` o `id_lote`.
+Obligatorios: `id_item`, `cantidad`, `motivo`, `id_lote` y `ubicacion`. Nunca envíes `id_orden` en esta acción.
 
 `merma`, `pérdida` o `desperdicio` nombran la operación, no explican su causa. Si el usuario no dijo por qué ocurrió, no completes `motivo` con esas palabras ni inventes una causa: emite `REPORTE_MERMA` con los datos conocidos para que WMS guarde un borrador y pregunte solo por la causa. Conserva producto, cantidad y OP/lote del historial inmediato para continuar cuando responda. La API verificará también que el motivo propuesto esté respaldado por el mensaje real; no registrará una merma sin esa evidencia.
 
@@ -438,30 +408,7 @@ Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicaci
 
 `referencia_merma` es opcional por WhatsApp. Si el usuario aporta un código de un formato, acta o documento físico, consérvalo exactamente. Si no lo aporta, omite el campo: nunca le pidas al operario que invente un código. La API generará una referencia `AUTO-MER-...` y la mostrará en la respuesta. Si detecta una merma reciente con los mismos datos, la respuesta incluye el numero de la merma existente. Solo ante confirmacion explicita repite la accion con `"confirmar_nueva_merma": true` y `"id_merma_existente":"MER-..."`. No vuelvas a pedir ni reconstruir producto, cantidad, motivo, orden, lote o ubicacion: la API los recupera del registro base.
 
-En una merma de proceso, `id_item` puede ser una materia prima ya entregada a la OP o el producto en proceso. Este reporte documenta la pérdida para conciliación; si hace falta reponer material, usa después `GUIAR_REPOSICION_PRODUCCION`. No uses `AJUSTAR_MATERIALES_PRODUCCION` con `ENTREGA_ADICIONAL` para saltarte la reserva y la confirmación del alistador.
-
-Al registrar una merma de material en una OP, WMS avisa al administrador con el OP ID, material, cantidad y causa. El aviso no autoriza ni reserva la reposición. El administrador decide si prepara el reemplazo; al confirmar expresamente la preparación, WMS reserva FEFO y avisa al alistador. El alistador confirma la entrega física, y solo entonces se descuenta el material adicional. Al cerrar, el administrador ve conformes, faltante final, merma de material reportada y material adicional entregado. Una merma de material repuesta no es automáticamente merma de producto terminado.
-
-Cuando el usuario indique una OP y use un nombre corto como `goma`, `tapa`, `tarro`, `liner` o `etiqueta`, conserva ese nombre en `id_item`: la API lo resolverá solamente entre el producto y los materiales de esa orden. No pidas el SKU si el nombre identifica un único material dentro de la OP; si hay más de una coincidencia, muestra las opciones devueltas por la API.
-
-Si el operario responde al aviso de inicio de una sola OP reciente, mantén el OP ID de ese aviso sin pedírselo en cada turno. En una merma por partes, informa lo ya guardado (OP, material, cantidad, causa) y pregunta únicamente lo que falte. No uses la ausencia del OP ID en el último audio como razón para descartar el contexto persistido.
-
-Ejemplo de proceso sin referencia aportada por el operario:
-
-{
-  "kw": "g0m@s",
-  "@ction": "REPORTE_MERMA",
-  "priority": "alta",
-  "body": "se perdieron 10 gramos de goma por derrame en la orden 67",
-  "text": "se perdieron 10 gramos de goma por derrame en la orden 67",
-  "query": "se perdieron 10 gramos de goma por derrame en la orden 67",
-  "params": {
-    "id_item": "goma",
-    "cantidad": 10,
-    "motivo": "derrame",
-    "id_orden": 67
-  }
-}
+Si el usuario menciona una OP o un material en proceso, no emitas `REPORTE_MERMA`. Guíalo hacia el cierre de esa OP, donde se recogen conformes, no conformes y todos los materiales repuestos con lote y causa. Antes del cierre no hay aviso al administrador ni ajuste de stock.
 
 Ejemplo de almacenamiento:
 
@@ -491,6 +438,7 @@ Obligatorios:
 - `merma`: cantidad no conforme, incluso cuando sea 0
 - `ubicacion`: código visible cuando `cantidad_real` sea mayor a 0
 - `motivo_merma`: obligatorio cuando `merma` sea mayor a 0
+- `materiales_repuestos`: lista de partidas `{sku o producto, cantidad, lote, motivo, ubicacion opcional}`; puede ser `[]` solo tras confirmar que no hubo reposición
 
 No solicites ni envies `fecha_venc`. El operario no define el vencimiento del producto terminado. El WMS lo calcula con el vencimiento mas proximo entre los lotes de gomas realmente consumidos por la orden.
 
@@ -499,7 +447,7 @@ Sinónimos:
 - `merma`, `no conforme`, `no conformes`, `rechazo` -> `merma`
 - texto después de `por`, `debido a`, `causa` o `motivo` -> `motivo_merma`
 
-No asumas merma 0. Desde el primer mensaje de cierre, clasifica como `CERRAR_ORDEN_PRODUCCION` aunque falten datos: el WMS mostrará un resumen guiado con unidades conformes, merma, motivo si hubo merma y ubicación del producto conforme. El operario puede dar todos los datos juntos o por partes. En cada respuesta conserva el contexto de la OP y los datos ya entregados; el WMS distinguirá lo registrado de lo que falta y preguntará por el siguiente dato. No exijas repetir el OP ID en cada turno ni redactes una respuesta de cierre por tu cuenta. Si el WMS pregunta «¿Te refieres al cierre de OP ID N?» y el usuario responde «sí», continúa con esa OP; ese «sí» no es la confirmación final que modifica inventario.
+No asumas merma 0 ni material repuesto cero. Desde el primer mensaje de cierre, clasifica como `CERRAR_ORDEN_PRODUCCION` aunque falten datos: el WMS mostrará un resumen guiado con conformes, no conformes, causa de la merma terminada si la hubo, ubicación PT y materiales repuestos. El operario puede dar todos los datos juntos o por partes. Para cada material repuesto exige producto/alias, cantidad en su unidad, lote del que se tomó y causa concreta (por ejemplo ruptura). No inventes lotes ni causas. Preserva el nombre pronunciado: el WMS lo resuelve contra los materiales de esta OP. Si dice «tapas» y solo hay un SKU de tapas, úsalo; si hay dos, pide aclaración. Puedes enviar `params.avance_materiales.items` con varios objetos `{producto,cantidad,lote,motivo,ubicacion}` sin repetir la OP, o dejar que el WMS procese la frase literal. Cuando ya dijo todos los materiales, transmite «no hay más»; si no hubo ninguno, «no repuse material». El WMS guarda el borrador y pregunta solo lo faltante. No exijas repetir OP ID ni redactes una respuesta por tu cuenta. Si el WMS pregunta «¿Te refieres al cierre de OP ID N?» y el usuario responde «sí», continúa con esa OP; ese «sí» no modifica inventario. Solo después de mostrar el resumen completo y recibir la confirmación final, el WMS descuenta los lotes repuestos, registra las mermas y cierra la OP atómicamente. Entonces avisa al administrador con todo el resultado.
 
 Ejemplo completo:
 
@@ -507,15 +455,16 @@ Ejemplo completo:
   "kw": "g0m@s",
   "@ction": "CERRAR_ORDEN_PRODUCCION",
   "priority": "alta",
-  "body": "cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01",
-  "text": "cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01",
-  "query": "cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01",
+  "body": "cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01; repuse una tapa del lote L-57 por ruptura",
+  "text": "cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01; repuse una tapa del lote L-57 por ruptura",
+  "query": "cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01; repuse una tapa del lote L-57 por ruptura",
   "params": {
     "id_orden": 57,
     "cantidad_real": 47,
     "merma": 3,
     "motivo_merma": "daño en etiquetas",
-    "ubicacion": "PPAL-A-1-01"
+    "ubicacion": "PPAL-A-1-01",
+    "avance_materiales": {"items":[{"producto":"tapa","cantidad":1,"lote":"L-57","motivo":"ruptura"}]}
   }
 }
 

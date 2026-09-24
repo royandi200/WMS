@@ -23,6 +23,8 @@ const RETIRED_ACTIONS = Object.freeze({
   RECHAZAR_SOLICITUD: 'El circuito de aprobaciones fue retirado. Ejecuta la accion directamente con su frase de confirmacion.',
   SOLICITAR_DESPACHO: 'La solicitud directa de despacho fue retirada. El despacho de cliente nace de una factura de venta de Siigo y la salida a 3Q se confirma en Despachos.',
   INGRESO_RECEPCION: 'El ingreso manual fue retirado. Prepara la recepcion contra una OC operativa o una orden de maquila 3Q y confirmala con su frase exacta.',
+  PREPARAR_REPOSICION_PRODUCCION: 'La reposición intermedia fue retirada. Al cerrar la OP informa cada material repuesto con cantidad, lote y causa; revisa el resumen antes de confirmar.',
+  GUIAR_REPOSICION_PRODUCCION: 'La reposición intermedia fue retirada. Al cerrar la OP informa cada material repuesto con cantidad, lote y causa; revisa el resumen antes de confirmar.',
 });
 
 const APPROVAL_ACTIONS = Object.freeze([

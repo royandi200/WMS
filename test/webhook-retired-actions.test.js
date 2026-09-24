@@ -106,9 +106,8 @@ test('una merma sin causa expresada no llega a inventario aunque el modelo la in
     params: { id_orden: 97, id_item: 'etiqueta', cantidad: 1, motivo: 'daño de empaque' },
   });
   assert.equal(res.body.ok, true);
-  assert.match(res.body.mensaje, /causa concreta/u);
-  assert.ok(mutations().every(e => /produccion_merma_borradores/u.test(e.sql)),
-    'solo puede guardar un borrador; no debe tocar inventario ni registrar merma');
+  assert.match(res.body.mensaje, /merma de esta OP se declara al \*cerrar la producción\*/u);
+  assert.deepEqual(mutations(), [], 'antes del cierre no se guarda merma ni se modifica inventario');
 });
 
 test('un numero no registrado se rechaza antes de cualquier operacion', async () => {

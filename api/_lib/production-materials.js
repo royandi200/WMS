@@ -32,6 +32,9 @@ async function adjustProductionMaterials({
   const lpn = String(lot || '').trim();
   if (!orderId || !productValue || !lpn || !locationReference) throw httpError(400, 'Orden, producto, lote y ubicacion son obligatorios');
   if (!['ENTREGA_ADICIONAL', 'DEVOLUCION'].includes(adjustmentType)) throw httpError(400, 'tipo debe ser ENTREGA_ADICIONAL o DEVOLUCION');
+  if (adjustmentType === 'ENTREGA_ADICIONAL') {
+    throw httpError(409, 'El material repuesto se declara al cerrar la OP con cantidad, lote y causa. No se descontó inventario.');
+  }
   if (!Number.isFinite(qty) || qty <= 0) throw httpError(400, 'La cantidad debe ser positiva');
 
   const conn = await createConnection();
