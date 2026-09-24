@@ -1676,7 +1676,7 @@ module.exports = async (req, res) => {
         || params.cantidad_real == null || params.merma == null
         || (Number(params.cantidad_real) > 0 && !params.ubicacion);
       if (needsGuide) {
-        const guided = await advanceCloseGuide({ db, userId: user.id,
+        const guided = await advanceCloseGuide({ db, userId: user.id, from,
           rawText: closeText, params });
         if (guided.message) {
           const body = { ok: true, message: guided.message, mensaje: guided.message,
@@ -3319,6 +3319,7 @@ module.exports = async (req, res) => {
       case 'GUIAR_REPOSICION_PRODUCCION': {
         const guide = await guideProductionReplenishment({
           userId: user.id,
+          from,
           orderId: params.id_orden,
           params,
           rawText,

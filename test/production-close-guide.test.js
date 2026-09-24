@@ -12,6 +12,8 @@ function fakeDb() {
     writes,
     async execute(sql, params) {
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
+      if (sql.includes('FROM webhook_logs')) return [[]];
+      if (sql.includes('FROM notificaciones_salida')) return [[{ evento: 'production_started:97' }]];
       if (sql.includes('FROM ordenes_produccion op')) return [[{
         id: 97, codigo_orden: 'OP-20260924-000097', estado: 'EN_PROCESO',
         cantidad_planeada: '2.000', producto_id: 74,
@@ -53,6 +55,15 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   assert.deepEqual(fifth.params, { id_orden: 97, cantidad_real: 2, merma: 0,
     motivo_merma: null, ubicacion: 'C2' });
   assert.equal(db.writes.length, 4);
+});
+
+test('an operator can begin a close using the sole notified OP without repeating its ID', async () => {
+  const db = fakeDb();
+  const result = await advanceCloseGuide({ db, userId: 21, from: '573001234567',
+    rawText: 'cerramos producción' });
+  assert.match(result.message, /OP ID 97/u);
+  assert.equal(result.draft.orderId, 97);
+  assert.equal(result.params, undefined);
 });
 
 test('el audio sin cantidades no puede convertirse en cierre por los parámetros del modelo', async () => {

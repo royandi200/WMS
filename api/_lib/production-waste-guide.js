@@ -18,9 +18,10 @@ function normalized(value) {
 
 function parseWasteMessage(value) {
   const text = normalized(value);
-  if (!/\bmerma\b/u.test(text)) return null;
+  const marker = text.match(/\b(?:merma|perdida|perdio|perdieron)\b/u);
+  if (!marker) return null;
   const cause = text.match(/\b(?:por|debido a|causa|motivo)\s+([^.,;]+)$/u)?.[1]?.trim() || null;
-  const afterWaste = text.split(/\bmerma\b/u).slice(1).join('merma')
+  const afterWaste = text.slice(marker.index + marker[0].length)
     .replace(/^\s*(?:de|del)?\s*/u, '')
     .replace(/\s+\b(?:por|debido a|causa|motivo)\b.*$/u, '')
     .replace(/\s+\b(?:de|en)\s+(?:la\s+)?(?:orden|op)\b.*$/u, '')
@@ -74,7 +75,20 @@ async function recentOrderContext(db, from) {
     for (const id of spoken) ids.add(id);
     if (ids.size > 1) return null;
   }
-  return ids.size === 1 ? [...ids][0] : null;
+  if (ids.size === 1) return [...ids][0];
+  // El aviso de inicio de producción también establece contexto para quien cierra la OP.
+  // Nunca elegir una OP si llegaron avisos de dos órdenes distintas en este intervalo.
+  const [notifications] = await db.execute(
+    `SELECT evento FROM notificaciones_salida
+      WHERE destinatario = ? AND estado = 'ENVIADA'
+        AND evento LIKE 'production_started:%'
+        AND creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      ORDER BY id DESC LIMIT 20`, [from]
+  );
+  const notifiedIds = new Set(notifications.map(row => referenceKey(
+    String(row.evento || '').split(':')[1]
+  )).filter(Boolean));
+  return notifiedIds.size === 1 ? [...notifiedIds][0] : null;
 }
 
 async function loadOrder(db, reference) {
@@ -157,10 +171,12 @@ async function advanceWasteGuide({ db, userId, from, rawText, params = {} }) {
     if (draft.quantity) lines.push(`Cantidad: ${draft.quantity} ${material?.unidad || 'und'}`);
     if (draft.cause) lines.push(`Causa: ${draft.cause}`);
     lines.push('');
-    if (!draft.orderId) lines.push('¿A qué OP ID corresponde? Hay más de una orden posible o no hay contexto reciente.');
-    else if (!draft.product) lines.push('¿De qué material de esta OP fue la merma?');
-    else if (!draft.quantity) lines.push('¿Qué cantidad se dañó?');
-    else lines.push('¿Cuál fue la causa concreta de la merma?');
+    if (!draft.orderId) lines.push('¿En cuál *OP ID* ocurrió? Por ejemplo: *OP ID 98*. Conservaré los datos que ya me diste.');
+    else if (!draft.product) {
+      lines.push('¿Qué material se perdió? Puedes decir el nombre, alias o SKU de esta OP.');
+      if (context?.materials.length) lines.push(`Materiales: ${context.materials.map(item => item.nombre).join('; ')}.`);
+    } else if (!draft.quantity) lines.push(`¿Qué cantidad de ${material?.nombre || draft.product} se perdió${material ? ` en ${material.unidad || 'und'}` : ''}?`);
+    else lines.push('¿Cuál fue la causa concreta? Por ejemplo: ruptura o derrame. No usaré «merma» como causa.');
     lines.push('', 'Todavía no se registró ninguna merma ni se modificó inventario.');
     return { message: lines.join('\n'), draft };
   }

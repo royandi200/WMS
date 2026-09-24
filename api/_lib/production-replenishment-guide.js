@@ -87,7 +87,7 @@ function guideSummary(order, materials, draft, { introductory = false } = {}) {
       `${index + 1}. *${material.sku}* — ${material.nombre}`,
       `   Unidad: ${material.unidad || 'und'}`,
     ]));
-    lines.push('', 'Dime uno o varios productos con sus cantidades; puedes enviarlos juntos o por partes.');
+    lines.push('', 'Dime qué material repondremos y cuánto. Puedes usar un alias como «tapas», enviar varios materiales juntos o responder por partes.');
   } else {
     lines.push('*Cantidades a reponer*');
     lines.push(...(entries.length ? entries.flatMap((entry, index) => [
@@ -101,7 +101,11 @@ function guideSummary(order, materials, draft, { introductory = false } = {}) {
     const selected = byId.get(Number(draft.selectedProductId));
     if (selected) lines.push(`Falta la cantidad de *${selected.sku}* en ${selected.unidad || 'und'}.`);
   }
-  if (entries.length && draft.reason && !draft.selectedProductId) {
+  if (draft.selectedProductId) {
+    lines.push('', 'Puedes responder solo la cantidad; conservaré el material y la OP de este borrador.');
+  } else if (entries.length && !draft.reason) {
+    lines.push('', 'Falta el motivo de la reposición. Por ejemplo: «ruptura de una tapa». Conservaré las cantidades ya registradas.');
+  } else if (entries.length && draft.reason) {
     lines.push('', 'Si todo está correcto, responde: *Confirmo preparar la reposición de OP ID '
       + `${order.id}*. También puedes corregir o agregar otro SKU.`);
   } else if (!introductory && !draft.selectedProductId) {
@@ -130,6 +134,19 @@ async function loadOrderAndMaterials(conn, reference) {
   );
   if (!materials.length) throw guideError('La OP no tiene materiales de BOM', 409);
   return { order: orders[0], materials };
+}
+
+async function recentWasteOrderContext(conn, from) {
+  if (!from) return null;
+  const [rows] = await conn.execute(
+    `SELECT DISTINCT m.orden_produccion_id AS order_id
+       FROM notificaciones_salida n
+       JOIN mermas m ON n.evento = CONCAT('production_waste:', m.numero)
+      WHERE n.destinatario = ? AND n.estado = 'ENVIADA'
+        AND n.creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      ORDER BY order_id DESC LIMIT 20`, [from]
+  );
+  return rows.length === 1 ? Number(rows[0].order_id) : null;
 }
 
 async function applyAdvance(conn, draft, materials, advance) {
@@ -199,7 +216,7 @@ async function applyAdvance(conn, draft, materials, advance) {
   return draft;
 }
 
-async function guideProductionReplenishment({ userId, orderId, params = {}, rawText = '', confirm = false }) {
+async function guideProductionReplenishment({ userId, orderId, from, params = {}, rawText = '', confirm = false }) {
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
@@ -210,8 +227,8 @@ async function guideProductionReplenishment({ userId, orderId, params = {}, rawT
     const row = rows[0] || null;
     const active = row?.estado === 'PENDIENTE' && new Date(row.expira_en) > new Date();
     const reference = orderId || ((active || (confirm && row?.estado === 'CONFIRMADO'))
-      ? row.orden_produccion_id : null);
-    if (!reference) throw guideError('Indica el OP ID para iniciar la reposición guiada');
+      ? row.orden_produccion_id : null) || await recentWasteOrderContext(conn, from);
+    if (!reference) throw guideError('¿De cuál *OP ID* repondremos material? Por ejemplo: *OP ID 98*. Si recibiste varios avisos, elige uno; aún no se reservó inventario.');
     if (confirm && row?.estado === 'CONFIRMADO'
       && referenceKey(reference) === Number(row.orden_produccion_id) && row.reposicion_id
       && confirmedByUser(rawText, row.orden_produccion_id)) {
@@ -289,5 +306,5 @@ async function guideProductionReplenishment({ userId, orderId, params = {}, rawT
 
 module.exports = {
   applyAdvance, cleanAdvance, confirmedByUser, guideProductionReplenishment, guideSummary,
-  positiveQuantity,
+  positiveQuantity, recentWasteOrderContext,
 };

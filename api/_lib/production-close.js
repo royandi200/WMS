@@ -276,26 +276,39 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     const nonconformityRate = physicalResult > 0
       ? Number(((waste / physicalResult) * 100).toFixed(2))
       : 0;
+    const shortfall = Math.max(0, Number(order.cantidad_planeada) - conforming);
     result.notification = await notifyRoles({
       event: `production_closed:${order.id}`,
       roles: ['admin'],
       fallbackRoles: [],
       excludeUserIds: [userId],
       text: [
-        `Produccion cerrada: OP ID ${order.id} | ${order.codigo_orden}`,
+        shortfall > 0 ? '⚠️ *Producción cerrada con faltante*' : '✅ *Producción cerrada sin faltante*',
+        '',
+        `Orden: *OP ID ${order.id}* | ${order.codigo_orden}`,
         `${order.producto_sku} - ${order.producto_nombre}`,
-        `Plan: ${Number(order.cantidad_planeada)} | Conformes: ${conforming} | Merma: ${waste}`,
-        `Cumplimiento del plan: ${planCompliance}% | Tasa no conforme: ${nonconformityRate}%`,
-        `Motivo de merma: ${waste > 0 ? wasteReason : 'Sin merma'}`,
-        `Lote PT: ${conforming > 0 ? lpn : 'Sin lote conforme'} | ubicacion ${resolvedLocationCode || 'N/A'} | vence ${normalizedExpiry || 'N/A'}`,
-        `Cerro: ${actors[0]?.nombre || 'Usuario WMS'} | ${closedAt}`,
-        'Conciliacion de materiales:',
+        `Plan: ${Number(order.cantidad_planeada)} und`,
+        `Conformes: ${conforming} und`,
+        `Merma de producto terminado: ${waste} und${waste > 0 ? ` (${wasteReason})` : ''}`,
+        `Faltante frente al plan: ${shortfall} und`,
+        `Cumplimiento: ${planCompliance}% | No conforme: ${nonconformityRate}%`,
+        '',
+        `Lote PT: ${conforming > 0 ? lpn : 'Sin lote conforme'}`,
+        `Ubicación: ${resolvedLocationCode || 'N/A'} | Vence: ${normalizedExpiry || 'N/A'}`,
+        `Cerró: ${actors[0]?.nombre || 'Usuario WMS'} | ${closedAt}`,
+        '',
+        '*Materiales y reposiciones de la OP*',
         ...reconciliation.map(item => [
-          `- ${item.producto} (${item.sku})`,
-          `teorico ${item.teorico} ${item.unidad}, neto entregado ${item.consumo_neto} ${item.unidad}`,
-          `merma proceso ${item.merma_proceso} ${item.unidad}, uso productivo estimado ${item.uso_productivo_estimado} ${item.unidad}`,
-          `variacion de entrega ${item.variacion} ${item.unidad}`,
-        ].join(' | ')),
+          `• *${item.sku}* — ${item.producto}`,
+          `  Plan: ${item.teorico} ${item.unidad} | Entregado neto: ${item.consumo_neto} ${item.unidad}`,
+          `  Merma reportada: ${item.merma_proceso} ${item.unidad} | Material adicional entregado: ${item.adicional} ${item.unidad}`,
+          '',
+        ].join('\n')),
+        shortfall > 0
+          ? (order.origen_tipo === 'OC_CLIENTE'
+            ? 'Las unidades no conformes siguen pendientes en el pedido de cliente. Revisa antes de liberar otra OP.'
+            : 'Revisa el faltante frente al plan antes de liberar otra OP.')
+          : 'Las mermas de material y sus reposiciones quedan visibles en la conciliación; no hay faltante final.',
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;

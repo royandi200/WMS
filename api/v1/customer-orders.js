@@ -67,7 +67,8 @@ async function listCustomerOrders({ pendingOnly = false } = {}) {
        JOIN pedido_cliente_items i ON i.pedido_cliente_id = pc.id
        JOIN productos p ON p.id = i.producto_id
        LEFT JOIN (
-         SELECT pedido_cliente_item_id, SUM(cantidad_planeada) AS cantidad_liberada
+         SELECT pedido_cliente_item_id,
+                SUM(CASE WHEN estado = 'CERRADA' THEN cantidad_real ELSE cantidad_planeada END) AS cantidad_liberada
            FROM ordenes_produccion
           WHERE pedido_cliente_item_id IS NOT NULL AND estado <> 'CANCELADA'
           GROUP BY pedido_cliente_item_id

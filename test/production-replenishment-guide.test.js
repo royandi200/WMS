@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   applyAdvance, cleanAdvance, confirmedByUser, guideSummary, positiveQuantity,
+  recentWasteOrderContext,
 } = require('../api/_lib/production-replenishment-guide');
 const { capabilityForAction, CAPABILITIES } = require('../api/_lib/capabilities');
 const { contextualProductMatches } = require('../api/_lib/product-references');
@@ -90,4 +91,21 @@ test('guided OP draft resolves several spoken aliases against only its BOM', asy
       nombre: 'ETIQUETA BOOSTER x 60', unidad: 'und' }],
     cleanAdvance({ avance: { items: [{ producto: 'etiquetas', cantidad: 1 }] } })),
   /varios productos/u);
+});
+
+test('admin can retain one notified OP but cannot guess between two merma alerts', async () => {
+  const conn = { async execute() { return [[{ order_id: 98 }]]; } };
+  assert.equal(await recentWasteOrderContext(conn, '573001234567'), 98);
+  conn.execute = async () => [[{ order_id: 98 }, { order_id: 97 }]];
+  assert.equal(await recentWasteOrderContext(conn, '573001234567'), null);
+});
+
+test('replenishment help asks for the actual missing field, not more products', () => {
+  const order = { id: 98, codigo_orden: 'OP-20260924-000098', producto_nombre: 'Ashwagandha' };
+  const materials = [{ producto_id: 1, sku: '00001-TPBI', nombre: 'Tapa', unidad: 'und' }];
+  const message = guideSummary(order, materials, {
+    entries: { 1: { productId: 1, quantity: 1 } }, reason: null, selectedProductId: null,
+  });
+  assert.match(message, /Falta el motivo de la reposición/u);
+  assert.doesNotMatch(message, /Indica los SKU y cantidades que faltan/u);
 });

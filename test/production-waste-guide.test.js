@@ -53,9 +53,34 @@ test('ambiguity never silently chooses between two recently discussed OPs', asyn
   assert.equal(await recentOrderContext(db, '573001234567'), null);
 });
 
+test('a single production-start notification gives the recipient safe OP context', async () => {
+  const db = { async execute(sql) {
+    if (sql.includes('FROM webhook_logs')) return [[]];
+    if (sql.includes('FROM notificaciones_salida')) return [[{
+      evento: 'production_started:98',
+    }]];
+    throw new Error(`Unexpected query: ${sql}`);
+  } };
+  assert.equal(await recentOrderContext(db, '573001234567'), 98);
+});
+
+test('notifications for different OPs do not silently choose a production order', async () => {
+  const db = { async execute(sql) {
+    if (sql.includes('FROM webhook_logs')) return [[]];
+    if (sql.includes('FROM notificaciones_salida')) return [[
+      { evento: 'production_started:98' }, { evento: 'production_started:97' },
+    ]];
+    throw new Error(`Unexpected query: ${sql}`);
+  } };
+  assert.equal(await recentOrderContext(db, '573001234567'), null);
+});
+
 test('short cause and explicit-cause variants are identified, not inferred from generic waste', () => {
   assert.deepEqual(parseWasteMessage('Reporta merma de una tapa'), {
     product: 'tapa', quantity: 1, cause: null,
+  });
+  assert.deepEqual(parseWasteMessage('Se perdió una tapa por ruptura'), {
+    product: 'tapa', quantity: 1, cause: 'ruptura',
   });
   assert.equal(parseCauseReply('ruptura'), 'ruptura');
   assert.equal(parseCauseReply('motivo: rotura'), 'rotura');

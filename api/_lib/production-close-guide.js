@@ -1,4 +1,5 @@
 const { explicitReferences, referenceKey } = require('./production-order-reference');
+const { recentOrderContext } = require('./production-waste-guide');
 
 const NUMBER_WORDS = Object.freeze({ cero: 0, ninguna: 0, ninguno: 0,
   una: 1, un: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
@@ -192,7 +193,7 @@ function guideSummary(order, draft, locationHint) {
   return lines.join('\n');
 }
 
-async function advanceCloseGuide({ db, userId, rawText, params = {} }) {
+async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const prior = await pendingCloseDraft(db, userId);
   const spokenOrderId = closeOrderReference(rawText, params);
   if (spokenOrderId && prior?.orderId && spokenOrderId !== prior.orderId) {
@@ -210,6 +211,9 @@ async function advanceCloseGuide({ db, userId, rawText, params = {} }) {
   }
   if (!draft.orderId && rejected(rawText) && draft.candidateOrderId) {
     draft.candidateOrderId = null;
+  }
+  if (!draft.orderId && !draft.candidateOrderId && !rejected(rawText)) {
+    draft.orderId = await recentOrderContext(db, from);
   }
   if (!draft.orderId) {
     const candidate = contextualOrderCandidate(rawText, !!prior);

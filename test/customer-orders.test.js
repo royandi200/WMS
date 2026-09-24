@@ -51,6 +51,14 @@ test('document and pending-order actions stay in different workflows', () => {
   assert.equal(capabilityForAction('CONSULTAR_RECEPCIONES_PENDIENTES'), CAPABILITIES.RECEPTION_READ);
 });
 
+test('a closed OP reserves only conforming units so customer shortfalls stay pending', () => {
+  for (const file of ['../api/v1/customer-orders.js', '../api/_lib/production-workflow.js']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.match(source,
+      /SUM\(CASE WHEN estado = 'CERRADA' THEN cantidad_real ELSE cantidad_planeada END\)/u);
+  }
+});
+
 test('a short customer-order answer lists selectable PED IDs instead of asking for OC reference', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');

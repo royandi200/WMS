@@ -2,11 +2,29 @@ const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { resolveProductReference } = require('./product-references');
 const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
+const { notifyRoles } = require('./builderbot-notifications');
 
 function httpError(status, message) {
   const error = new Error(message);
   error.status = status;
   return error;
+}
+
+function productionWasteAdminMessage(result, unit) {
+  const quantityUnit = unit || 'und';
+  return [
+    '⚠️ *Pérdida de material durante producción*',
+    '',
+    `Orden: *OP ID ${result.order_id}*`,
+    `Merma: *${result.numero}*`,
+    `Material: ${result.producto} (*${result.sku}*)`,
+    `Cantidad: ${result.cantidad} ${quantityUnit}`,
+    `Causa: ${result.motivo}`,
+    '',
+    'El reporte quedó registrado; todavía no se reservó ni entregó un reemplazo.',
+    `Si se necesita reponer, responde: *Repón ${result.cantidad} ${quantityUnit} de ${result.sku} para OP ID ${result.order_id} por ${result.motivo}*.`,
+    'Revisa el borrador y confirma la preparación. Solo entonces se avisará al alistador.',
+  ].join('\n');
 }
 
 function normalizeWasteInput(input = {}, { allowGeneratedReference = false } = {}) {
@@ -367,6 +385,14 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
     };
     await completeAdditionalConfirmation(conn, confirmation, result);
     await conn.commit();
+    if (result.order_id) {
+      result.notification = await notifyRoles({
+        event: `production_waste:${result.numero}`,
+        roles: ['admin'],
+        fallbackRoles: [],
+        text: productionWasteAdminMessage(result, product.unit_label),
+      }).catch(error => [{ status: 'error', error: error.message }]);
+    }
     return result;
   } catch (error) {
     await conn.rollback().catch(() => {});
@@ -386,6 +412,7 @@ module.exports = {
   normalizeWasteInput,
   parseWasteReferences,
   reportWaste,
+  productionWasteAdminMessage,
   buildWasteDedupeKey,
   generateWasteReference,
 };

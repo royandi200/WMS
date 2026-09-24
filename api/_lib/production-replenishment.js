@@ -311,7 +311,7 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
       event: `production_replenishment_prepared:${created.insertId}`,
       roles: ['alistador'],
       text: [
-        '*Reposición de materiales preparada*',
+        '📦 *Reposición autorizada: alistamiento pendiente*',
         '',
         `Orden: *OP ID ${order.id}* | ${order.codigo_orden}`,
         `Reposición: *REP ID ${created.insertId}* | ${code}`,
@@ -327,12 +327,12 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
           `${index + 1}. *${item.sku}* - ${item.producto}`,
           `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
           `   Lote: ${item.lote}`,
-          `   Ubicacion: ${item.ubicacion || item.ubicacion_id}`,
+          `   Ubicación: ${item.ubicacion || item.ubicacion_id}`,
           '',
         ]),
         '*Siguiente paso*',
-        `Cuando estén listos, responde: confirmo la reposición de OP ID ${order.id}.`,
-        'La preparación solo reservó materiales; todavía no los descontó.',
+        `Tras entregar físicamente el material a producción, responde: *Confirmo la reposición de OP ID ${order.id}*.`,
+        'Por ahora los lotes están reservados; la entrega aún no descontó inventario.',
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;
@@ -473,24 +473,25 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
       fallbackRoles: ['admin'],
       excludeUserIds: [userId],
       text: [
-        '*Reposicion de materiales confirmada*',
+        '✅ *Material de reposición entregado*',
         '',
-        `Reposicion: ${replenishment.codigo}`,
-        `Orden: OP ID ${replenishment.orden_produccion_id} | ${replenishment.codigo_orden}`,
+        `Reposición: *REP ID ${replenishment.id}* | ${replenishment.codigo}`,
+        `Orden: *OP ID ${replenishment.orden_produccion_id}* | ${replenishment.codigo_orden}`,
         Number(replenishment.cantidad_objetivo) === 0
           ? `Alcance: ${new Set(consumed.map(item => item.sku)).size} SKU específico(s).`
           : `Objetivo adicional: ${Number(replenishment.cantidad_objetivo)} unidad(es) conformes.`,
-        `Confirmo: ${actors[0]?.nombre || 'Usuario WMS'}.`,
+        `Confirmó: ${actors[0]?.nombre || 'Usuario WMS'}.`,
         '',
         '*Material adicional entregado*',
         ...consumed.flatMap((item, index) => [
           `${index + 1}. *${item.sku}* - ${item.producto}`,
           `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
           `   Lote: ${item.lote}`,
-          `   Ubicacion: ${item.ubicacion || 'N/A'}`,
+          `   Ubicación: ${item.ubicacion || 'N/A'}`,
           '',
         ]),
-        '*Estado: EN_PROCESO*',
+        '*Siguiente paso*',
+        `Continúa la producción de *OP ID ${replenishment.orden_produccion_id}*. Al terminar, informa conformes, merma de producto terminado (indica 0 si no hubo) y ubicación.`,
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;

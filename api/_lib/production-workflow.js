@@ -70,7 +70,8 @@ async function releaseProductionOrder({
       );
       if (!orderItems.length) throw httpError(404, `PED ID ${orderId} no está disponible`);
       const [released] = await conn.execute(
-        `SELECT pedido_cliente_item_id, SUM(cantidad_planeada) AS total
+        `SELECT pedido_cliente_item_id,
+                SUM(CASE WHEN estado = 'CERRADA' THEN cantidad_real ELSE cantidad_planeada END) AS total
            FROM ordenes_produccion
           WHERE pedido_cliente_item_id IN (${orderItems.map(() => '?').join(',')})
             AND estado <> 'CANCELADA'

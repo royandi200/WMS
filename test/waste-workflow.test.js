@@ -5,7 +5,19 @@ const {
   parseWasteReferences,
   buildWasteDedupeKey,
   generateWasteReference,
+  productionWasteAdminMessage,
 } = require('../api/_lib/waste-workflow');
+
+test('a process loss asks admin for an explicit replacement without reserving stock', () => {
+  const message = productionWasteAdminMessage({
+    order_id: 98, numero: 'MER-989978E2', producto: 'Tapa', sku: '00001-TPBI',
+    cantidad: 1, motivo: 'ruptura',
+  }, 'und');
+  assert.match(message, /OP ID 98/u);
+  assert.match(message, /MER-989978E2/u);
+  assert.match(message, /Repón 1 und de 00001-TPBI para OP ID 98 por ruptura/u);
+  assert.match(message, /todavía no se reservó ni entregó/u);
+});
 
 test('normalizes a location-specific warehouse waste report', () => {
   const result = normalizeWasteInput({
