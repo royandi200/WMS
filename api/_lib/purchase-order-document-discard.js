@@ -4,7 +4,7 @@ function httpError(status, message) {
   return error;
 }
 
-const SUPPORTED_DOCUMENT_TYPES = new Set(['ORDEN_COMPRA', 'SALIDA_BODEGA_3Q']);
+const SUPPORTED_DOCUMENT_TYPES = new Set(['ORDEN_COMPRA', 'SALIDA_BODEGA_3Q', 'ORDEN_COMPRA_CLIENTE']);
 
 function normalizePurchaseOrderDocumentDiscard(body = {}) {
   const id = Number(body.id || body.document_draft_id || body.documento_borrador_id || 0);

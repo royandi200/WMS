@@ -4,6 +4,10 @@ import { useProductionStore } from '../store/productionStore'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 import { formatBogotaDateTime } from '../utils/dateTime'
+import {
+  approveCustomerOrder, discardCustomerOrderDraft, downloadCustomerOrderPdf, listCustomerOrderDrafts,
+  listCustomerOrders, uploadCustomerOrderPdf,
+} from '../api/customerOrders.api'
 
 const PHASES = ['F1', 'F2', 'F3', 'F4', 'F5']
 const STATUS_LABEL = {
@@ -13,8 +17,8 @@ const STATUS_LABEL = {
   CERRADA: { label: 'Cerrada', css: 'text-green-400 bg-green-400/10' },
   CANCELADA: { label: 'Cancelada', css: 'text-muted bg-white/5' },
 }
-const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Preparar reposición', 'Confirmar reposición', 'Avanzar fase', 'Cerrar orden']
-const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.pick', 'production.pick', 'production.release', 'production.pick', 'production.advance', 'production.close']
+const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Preparar reposición', 'Confirmar reposición', 'Avanzar fase', 'Cerrar orden', 'Pedidos de cliente']
+const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.pick', 'production.pick', 'production.release', 'production.pick', 'production.advance', 'production.close', 'production.release']
 
 const empty = '-'
 const safeDate = (val) => {
@@ -39,6 +43,7 @@ export default function ProduccionPage() {
     prepareReplenishment, confirmReplenishment, cancelReplenishment, advance, close, cancelOrder, clearError,
   } = useProductionStore()
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
+  const role = useAuthStore((state) => state.user?.rol || '')
   const canCancelOrder = capabilities.includes('*') || capabilities.includes('production.release')
   const visibleTabs = TABS.map((label, index) => ({ label, index, capability: TAB_CAPABILITIES[index] }))
     .filter((item) => capabilities.includes('*') || capabilities.includes(item.capability))
@@ -127,7 +132,7 @@ export default function ProduccionPage() {
                         <td className="px-4 py-3 font-mono text-xs text-foreground"><span className="block font-semibold text-primary">OP ID {r.id}</span><span className="block">{r.codigo_orden ?? empty}</span></td>
                         <td className="px-4 py-3 text-foreground">{r.product_name ?? empty}</td>
                         <td className="px-4 py-3 font-mono text-xs text-muted">{r.sku ?? empty}</td>
-                        <td className="px-4 py-3 text-xs">{r.origen_tipo === 'OC_CLIENTE' ? `${r.referencia_cliente || 'OC'} / ${r.cliente_final || '-'}` : r.origen_tipo === 'STOCK_SEGURIDAD' ? 'Stock seguridad' : '-'}</td>
+                        <td className="px-4 py-3 text-xs">{r.origen_tipo === 'OC_CLIENTE' ? <>{r.pedido_cliente_id && <span className="block font-semibold text-primary">PED ID {r.pedido_cliente_id}</span>}{r.referencia_cliente || 'OC'} / {r.cliente_final || '-'}</> : r.origen_tipo === 'STOCK_SEGURIDAD' ? 'Stock seguridad' : '-'}</td>
                         <td className="px-4 py-3 tabular-nums">{r.qty_planned ?? empty}</td>
                         <td className="px-4 py-3 tabular-nums">{r.qty_real ?? empty}</td>
                         <td className="px-4 py-3 text-xs">{r.mermas?.length ? r.mermas.map((merma) => (
@@ -166,13 +171,14 @@ export default function ProduccionPage() {
         </div>
       )}
 
-      {tab === 1 && <StartForm loading={loading} onSubmit={start} onDone={() => setTab(0)} />}
+      {tab === 1 && <StartForm loading={loading} onSubmit={start} onDone={() => setTab(0)} onChooseCustomer={() => setTab(8)} />}
       {tab === 2 && <ConfirmMaterialsForm loading={loading} onSubmit={confirm} />}
       {tab === 3 && <MaterialAdjustmentForm loading={loading} onSubmit={adjustMaterials} locations={locations} />}
       {tab === 4 && <PrepareReplenishmentForm loading={loading} onSubmit={prepareReplenishment} onCancel={cancelReplenishment} />}
       {tab === 5 && <ConfirmReplenishmentForm loading={loading} onSubmit={confirmReplenishment} />}
       {tab === 6 && <AdvanceForm loading={loading} onSubmit={advance} />}
       {tab === 7 && <CloseForm loading={loading} onSubmit={close} locations={locations} />}
+      {tab === 8 && <CustomerOrdersPanel canApprove={['admin', 'administrador', 'supervisor'].includes(role)} onStart={start} onReleased={fetchList} />}
 
       {cancelTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="cancel-production-title">
@@ -219,7 +225,169 @@ export default function ProduccionPage() {
   )
 }
 
-function StartForm({ loading, onSubmit, onDone }) {
+function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
+  const [drafts, setDrafts] = useState([])
+  const [orders, setOrders] = useState([])
+  const [file, setFile] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState(null)
+  const [releaseCandidate, setReleaseCandidate] = useState(null)
+  const [duplicateOrderId, setDuplicateOrderId] = useState(null)
+  const [discardTarget, setDiscardTarget] = useState(null)
+  const [discardReason, setDiscardReason] = useState('')
+
+  const refresh = async () => {
+    const [draftResult, orderResult] = await Promise.all([listCustomerOrderDrafts(), listCustomerOrders()])
+    setDrafts(draftResult?.data?.rows || [])
+    setOrders(orderResult?.data?.rows || [])
+  }
+
+  useEffect(() => {
+    refresh().catch((error) => setMessage({ ok: false, msg: error.response?.data?.error || 'No fue posible cargar los pedidos de cliente.' }))
+  }, [])
+
+  const execute = async (work, success) => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const result = await work()
+      setMessage({ ok: true, msg: success(result) })
+      await refresh()
+      return result
+    } catch (error) {
+      setMessage({ ok: false, msg: error.response?.data?.error || error.message || 'No fue posible completar la acción.' })
+      return null
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const upload = async (event) => {
+    event.preventDefault()
+    if (!file) return
+    if (file.size > 2_500_000) {
+      setMessage({ ok: false, msg: 'El PDF supera 2,5 MB.' })
+      return
+    }
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('No fue posible leer el PDF'))
+      reader.readAsDataURL(file)
+    }).catch((error) => {
+      setMessage({ ok: false, msg: error.message })
+      return null
+    })
+    if (!base64) return
+    const result = await execute(
+      () => uploadCustomerOrderPdf({ name: file.name, type: 'application/pdf', base64 }),
+      (response) => response.data?.duplicate
+        ? `El PDF ya estaba registrado como borrador ID ${response.data.id}.`
+        : `Borrador ID ${response.data.id} cargado. Revisa cliente, producto y cantidad antes de aprobarlo.`
+    )
+    if (result) setFile(null)
+  }
+
+  const release = async () => {
+    if (!releaseCandidate) return
+    const { order, item } = releaseCandidate
+    setBusy(true)
+    setMessage(null)
+    try {
+      const response = await onStart({
+        pedido_cliente_id: order.id,
+        pedido_cliente_item_id: item.id,
+        qty_planned: item.cantidad_pendiente,
+        confirmar_nueva_orden: Boolean(duplicateOrderId),
+        id_orden_existente: duplicateOrderId || undefined,
+      })
+      if (!response.ok) {
+        setMessage({ ok: false, msg: response.message || 'No fue posible liberar la OP.' })
+      } else if (response.data?.requires_confirmation) {
+        setDuplicateOrderId(response.data.order_id)
+        setMessage({ ok: false, msg: `Ya existe OP ID ${response.data.order_id} con estos datos. Revisa si realmente necesitas otra antes de confirmar.` })
+      } else {
+        setMessage({ ok: true, msg: `OP ID ${response.data.order_id} liberada para PED ID ${order.id}.` })
+        setReleaseCandidate(null)
+        setDuplicateOrderId(null)
+        await refresh()
+        onReleased()
+      }
+    } catch (error) {
+      setMessage({ ok: false, msg: error.response?.data?.error || error.message || 'No fue posible liberar la OP.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="space-y-6">
+    {message && <ToastInline toast={message} />}
+    {canApprove && <form onSubmit={upload} className="rounded-lg border border-border bg-surface p-4 space-y-3">
+      <h2 className="font-semibold text-foreground">Cargar OC de cliente</h2>
+      <p className="text-sm text-muted">El PDF se guarda como borrador. No irá a recepciones ni liberará producción hasta que lo revises y apruebes.</p>
+      <input type="file" accept="application/pdf,.pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} className="block text-sm text-foreground" />
+      <button type="submit" disabled={busy || !file} className="btn-primary disabled:opacity-50">{busy ? 'Procesando...' : 'Cargar PDF'}</button>
+    </form>}
+
+    <section className="space-y-3">
+      <h2 className="font-semibold text-foreground">OC de cliente leídas para revisión</h2>
+      {!drafts.some((draft) => ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado)) && <p className="text-sm text-muted">No hay OC de cliente pendientes de revisión.</p>}
+      {drafts.filter((draft) => ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado)).map((draft) => <div key={draft.id} className="rounded-lg border border-border bg-surface p-4 space-y-2 text-sm">
+        <div className="font-semibold text-foreground">Borrador ID {draft.id} · {draft.referencia_documento} · {draft.destinatario_nombre}</div>
+        <div className="text-muted">Estado: {draft.estado} · Fecha: {safeDate(draft.fecha_documento)}</div>
+        <div className="space-y-1">{draft.items?.map((item, index) => <div key={`${item.sku_extraido}-${index}`}>
+          {item.sku_extraido} · {item.producto_catalogo || item.descripcion_extraida} · {Number(item.cantidad)} {item.unidad || 'und'}
+        </div>)}</div>
+        {!!draft.advertencias?.length && <div className="text-orange-400">{draft.advertencias.map((warning, index) => <div key={index}>{warning}</div>)}</div>}
+        <div className="flex gap-3 items-center">
+          {draft.archivo_id && <button type="button" className="text-primary hover:underline" onClick={() => downloadCustomerOrderPdf(draft.archivo_id, draft.archivo_nombre)}>Ver PDF</button>}
+          {canApprove && draft.estado === 'PENDIENTE_REVISION' && <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => execute(
+            () => approveCustomerOrder(draft.id),
+            (response) => `Pedido aprobado como PED ID ${response.data.id}. Ya puede seleccionarse para producción.`
+          )}>Aprobar pedido</button>}
+          {canApprove && ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado) && <button type="button" disabled={busy} className="text-danger hover:underline" onClick={() => { setDiscardTarget(draft); setDiscardReason('') }}>Descartar borrador</button>}
+        </div>
+      </div>)}
+    </section>
+
+    {discardTarget && <div className="rounded-lg border border-danger/40 bg-surface p-4 space-y-3 text-sm">
+      <div className="font-semibold">Descartar borrador ID {discardTarget.id}</div>
+      <p className="text-muted">Esto permite volver a cargar una versión corregida de la misma OC. No modifica inventario.</p>
+      <input value={discardReason} onChange={(event) => setDiscardReason(event.target.value)} maxLength={300} placeholder="Motivo (mínimo 5 caracteres)" className="input-field" />
+      <div className="flex gap-3">
+        <button type="button" disabled={busy || discardReason.trim().length < 5} className="btn-primary disabled:opacity-50" onClick={async () => {
+          const result = await execute(() => discardCustomerOrderDraft(discardTarget.id, discardReason.trim()), () => `Borrador ID ${discardTarget.id} descartado. Puedes subir el PDF corregido.`)
+          if (result) setDiscardTarget(null)
+        }}>Confirmar descarte</button>
+        <button type="button" disabled={busy} onClick={() => setDiscardTarget(null)} className="text-muted hover:text-foreground">Volver</button>
+      </div>
+    </div>}
+
+    <section className="space-y-3">
+      <h2 className="font-semibold text-foreground">Pedidos disponibles para producción</h2>
+      {!orders.some((order) => order.items.some((item) => item.cantidad_pendiente > 0)) && <p className="text-sm text-muted">No hay unidades pendientes de producir.</p>}
+      {orders.filter((order) => order.items.some((item) => item.cantidad_pendiente > 0)).map((order) => <div key={order.id} className="rounded-lg border border-border bg-surface p-4 space-y-2 text-sm">
+        <div className="font-semibold text-primary">PED ID {order.id} · {order.cliente_nombre}</div>
+        <div className="text-muted">OC: {order.referencia}</div>
+        {order.items.filter((item) => item.cantidad_pendiente > 0).map((item) => <div key={item.id} className="flex flex-wrap justify-between items-center gap-2 border-t border-border pt-2">
+          <span>Item ID {item.id} · {item.producto} ({item.sku}) · Pendiente: {item.cantidad_pendiente} und</span>
+          <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => { setReleaseCandidate({ order, item }); setDuplicateOrderId(null) }}>Preparar OP</button>
+        </div>)}
+      </div>)}
+      {releaseCandidate && <div className="rounded-lg border border-primary/50 bg-primary/5 p-4 space-y-2 text-sm">
+        <div className="font-semibold">Confirma antes de reservar materiales</div>
+        <div>PED ID {releaseCandidate.order.id} · {releaseCandidate.order.cliente_nombre} · {releaseCandidate.item.producto} · {releaseCandidate.item.cantidad_pendiente} und</div>
+        <div className="flex gap-3">
+          <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={release}>{duplicateOrderId ? 'Confirmar OP adicional' : 'Confirmar y liberar OP'}</button>
+          <button type="button" disabled={busy} className="text-muted hover:text-foreground" onClick={() => { setReleaseCandidate(null); setDuplicateOrderId(null) }}>Volver</button>
+        </div>
+      </div>}
+    </section>
+  </div>
+}
+
+
+function StartForm({ loading, onSubmit, onDone, onChooseCustomer }) {
   const [form, setForm] = useState({
     product_id: '',
     qty_planned: '',
@@ -262,22 +430,22 @@ function StartForm({ loading, onSubmit, onDone }) {
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="ID del producto *"><input value={form.product_id} onChange={set('product_id')} placeholder="ID o SKU" className="input-field" required /></Field>
-      <Field label="Cantidad planificada *"><input type="number" min="1" value={form.qty_planned} onChange={set('qty_planned')} placeholder="0" className="input-field" required /></Field>
+      {form.origin_type === 'STOCK_SEGURIDAD' && <>
+        <Field label="ID del producto *"><input value={form.product_id} onChange={set('product_id')} placeholder="ID o SKU" className="input-field" required /></Field>
+        <Field label="Cantidad planificada *"><input type="number" min="1" value={form.qty_planned} onChange={set('qty_planned')} placeholder="0" className="input-field" required /></Field>
+      </>}
       <Field label="Destino de la producción *">
         <select value={form.origin_type} onChange={set('origin_type')} className="input-field">
           <option value="STOCK_SEGURIDAD">Stock de seguridad</option>
           <option value="OC_CLIENTE">Orden de cliente</option>
         </select>
       </Field>
-      {form.origin_type === 'OC_CLIENTE' && (
-        <>
-          <Field label="Referencia OC cliente *"><input value={form.customer_reference} onChange={set('customer_reference')} className="input-field" required /></Field>
-          <Field label="Cliente final *"><input value={form.final_customer} onChange={set('final_customer')} className="input-field" required /></Field>
-        </>
-      )}
-      <Field label="Notas"><textarea value={form.notes} onChange={set('notes')} rows={2} className="input-field resize-none" /></Field>
-      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Liberando...' : confirmDuplicate ? 'Liberar una orden adicional' : 'Liberar orden'}</button>
+      {form.origin_type === 'OC_CLIENTE'
+        ? <p className="text-sm text-muted">Elige una OC aprobada. Producto, cliente y cantidad pendiente se tomarán del pedido verificado.</p>
+        : <Field label="Notas"><textarea value={form.notes} onChange={set('notes')} rows={2} className="input-field resize-none" /></Field>}
+      <button type={form.origin_type === 'OC_CLIENTE' ? 'button' : 'submit'} onClick={form.origin_type === 'OC_CLIENTE' ? onChooseCustomer : undefined} disabled={loading} className="btn-primary">
+        {form.origin_type === 'OC_CLIENTE' ? 'Elegir pedido de cliente' : loading ? 'Liberando...' : confirmDuplicate ? 'Liberar una orden adicional' : 'Liberar orden'}
+      </button>
     </form>
   )
 }

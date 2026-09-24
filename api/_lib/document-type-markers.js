@@ -1,5 +1,6 @@
 const DOCUMENT_TYPES = Object.freeze({
   PURCHASE_ORDER: 'ORDEN_COMPRA',
+  CUSTOMER_PURCHASE_ORDER: 'ORDEN_COMPRA_CLIENTE',
   OUTSOURCING_EXIT: 'SALIDA_BODEGA_3Q',
   OUTSOURCING_RECEIPT: 'RECEPCION_MAQUILA_3Q',
 });
@@ -16,15 +17,18 @@ function normalizeMarkerText(value) {
 
 function detectDocumentTypeMarkers(evidenceText) {
   const text = normalizeMarkerText(evidenceText);
-  const purchaseOrder = /(?:^| )ORDEN DE COMPRA(?: |$)/u.test(text)
-    || /(?:^| )TIPO DOCUMENTO WMS ORDEN COMPRA(?: |$)/u.test(text);
+  const customerPurchaseOrder = /(?:^| )ORDEN DE COMPRA (?:DEL |DE )?CLIENTE(?: |$)/u.test(text)
+    || /(?:^| )OC (?:DEL |DE )?CLIENTE(?: |$)/u.test(text)
+    || /(?:^| )TIPO DOCUMENTO WMS ORDEN COMPRA CLIENTE(?: |$)/u.test(text);
+  const purchaseOrder = !customerPurchaseOrder && (/(?:^| )ORDEN DE COMPRA(?: |$)/u.test(text)
+    || /(?:^| )TIPO DOCUMENTO WMS ORDEN COMPRA(?: |$)/u.test(text));
   const outsourcingExit = /(?:^| )REMISION(?: DE INVENTARIO)? (?:A|HACIA) 3 ?Q(?: |$)/u.test(text)
     || /(?:^| )SALIDA DE BODEGA (?:A|HACIA) 3 ?Q(?: |$)/u.test(text)
     || /(?:^| )TIPO DOCUMENTO WMS REMISION 3 ?Q(?: |$)/u.test(text);
   const outsourcingReceipt = /(?:^| )ENTREGA DE PRODUCTO TERMINADO (?:DESDE|DE)? ?MAQUILA 3 ?Q(?: |$)/u.test(text)
     || /(?:^| )RECEPCION (?:DE PRODUCTO TERMINADO )?(?:DESDE|DE) (?:MAQUILA )?3 ?Q(?: |$)/u.test(text)
     || /(?:^| )TIPO DOCUMENTO WMS RECEPCION MAQUILA 3 ?Q(?: |$)/u.test(text);
-  return { purchaseOrder, outsourcingExit, outsourcingReceipt };
+  return { purchaseOrder, customerPurchaseOrder, outsourcingExit, outsourcingReceipt };
 }
 
 function assertDocumentTypeMarker(expectedType, evidenceText) {
@@ -35,6 +39,9 @@ function assertDocumentTypeMarker(expectedType, evidenceText) {
   }
   if (expectedType === DOCUMENT_TYPES.PURCHASE_ORDER && !markers.purchaseOrder) {
     throw inputError('El PDF debe incluir el encabezado visible ORDEN DE COMPRA');
+  }
+  if (expectedType === DOCUMENT_TYPES.CUSTOMER_PURCHASE_ORDER && !markers.customerPurchaseOrder) {
+    throw inputError('El PDF debe incluir el encabezado visible ORDEN DE COMPRA DEL CLIENTE');
   }
   if (expectedType === DOCUMENT_TYPES.OUTSOURCING_EXIT && !markers.outsourcingExit) {
     throw inputError('El PDF debe incluir el encabezado visible SALIDA DE BODEGA HACIA 3Q o REMISION A 3Q');

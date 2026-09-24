@@ -15,6 +15,8 @@ module.exports = async (req, res) => {
       originType: body.origen_tipo || body.origin_type,
       customerReference: body.referencia_cliente || body.customer_reference,
       finalCustomer: body.cliente_final || body.final_customer,
+      customerOrderId: body.pedido_cliente_id || body.customer_order_id,
+      customerOrderItemId: body.pedido_cliente_item_id || body.customer_order_item_id,
       notes: body.notas || body.notes,
       confirmNew: body.confirmar_nueva_orden === true || body.confirm_new_order === true,
       existingOrderId: body.id_orden_existente,

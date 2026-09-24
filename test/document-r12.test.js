@@ -79,7 +79,7 @@ test('ambiguous repeated headers, shifted columns and decimal package counts are
 test('document prompt keeps all examples in the internal contract, including rejection', () => {
   const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS Documentos BBC.txt'), 'utf8');
   const examples = prompt.split(/\r?\n/).filter(line => line.startsWith('{"kw"'));
-  assert.equal(examples.length, 4);
+  assert.equal(examples.length, 5);
   for (const example of examples) {
     const value = JSON.parse(example);
     assert.deepEqual(Object.keys(value), ['kw', '@ction', 'priority', 'params']);

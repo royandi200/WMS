@@ -12,15 +12,15 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '', recover
   const documentType = cleanText(source.tipo_documento || source.document_type, 50).toUpperCase();
   const reference = cleanText(source.referencia_documento || source.document_reference, 80);
   const documentDate = normalizeDate(source.fecha_documento || source.document_date, 'fecha_documento');
-  const destinationName = cleanText(source.nombre_cliente || source.destinatario || source.customer_name, 200);
+  const destinationName = cleanText(source.nombre_cliente || source.cliente_final || source.destinatario || source.customer_name, 200);
   const items = Array.isArray(source.items) ? source.items : [];
 
-  if (documentType !== 'SALIDA_BODEGA_3Q') {
-    throw inputError('El documento debe ser una SALIDA_BODEGA_3Q');
+  if (!['SALIDA_BODEGA_3Q', 'ORDEN_COMPRA_CLIENTE'].includes(documentType)) {
+    throw inputError('El documento debe ser una salida 3Q o una orden de compra de cliente');
   }
   if (!reference) throw inputError('referencia_documento es obligatoria');
   if (!documentDate) throw inputError('fecha_documento es obligatoria');
-  if (!destinationName) throw inputError('nombre_cliente o destinatario es obligatorio');
+  if (!destinationName) throw inputError('El nombre del cliente es obligatorio');
   if (!items.length) throw inputError('El documento debe incluir al menos un item');
   if (items.length > MAX_DOCUMENT_ITEMS) throw inputError(`El documento supera ${MAX_DOCUMENT_ITEMS} items`);
 
@@ -43,6 +43,9 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '', recover
     if (evidence && normalized.expiryDate && !evidenceIncludes(evidence, normalized.expiryDate)) {
       warnings.push(`El vencimiento propuesto para ${normalized.sku} no aparece literalmente en el documento; se dejo pendiente`);
       normalized.expiryDate = null;
+    }
+    if (documentType === 'ORDEN_COMPRA_CLIENTE' && normalized.unit !== 'und') {
+      throw inputError(`La OC de cliente debe expresar ${normalized.sku} en unidades`);
     }
     return normalized;
   });
@@ -85,13 +88,15 @@ async function registerWarehouseDocumentDraft({
   evidenceText = '',
   documentUrl = '',
   documentName = '',
+  uploadedDocument,
+  precomputedEvidence,
 }) {
   const normalizedOrigin = String(origin || 'BUILDERBOT').trim().toUpperCase();
   if (!['BUILDERBOT', 'DASHBOARD'].includes(normalizedOrigin)) throw inputError('Origen documental no soportado');
-  const document = normalizedOrigin === 'BUILDERBOT'
-    ? await downloadBuilderBotPdf(documentUrl, documentName)
-    : null;
-  const nativeEvidence = await nativePdfEvidence(db, document, body);
+  const document = uploadedDocument === undefined
+    ? (normalizedOrigin === 'BUILDERBOT' ? await downloadBuilderBotPdf(documentUrl, documentName) : null)
+    : uploadedDocument;
+  const nativeEvidence = precomputedEvidence || await nativePdfEvidence(db, document, body);
   let input;
   try {
     input = normalizeWarehouseDocumentInput(nativeEvidence.body, {
@@ -105,6 +110,9 @@ async function registerWarehouseDocumentDraft({
   if (normalizedOrigin === 'BUILDERBOT' && !document) {
     input.warnings.push('El PDF original no fue transferido al WMS; reenvia el documento');
   }
+  if (input.documentType === 'ORDEN_COMPRA_CLIENTE' && !document) {
+    throw inputError('La OC de cliente requiere el PDF original');
+  }
   const verificationWarning = pdfReviewWarning(nativeEvidence);
   if (verificationWarning) input.warnings.push(verificationWarning);
 
@@ -112,13 +120,16 @@ async function registerWarehouseDocumentDraft({
   try {
     const [existing] = await db.execute(
       `SELECT id, tipo_documento, referencia_documento, fecha_documento,
-              total_bultos, total_unidades, sha256, estado, advertencias,
+              destinatario_nombre, total_bultos, total_unidades, sha256, estado, advertencias,
               (SELECT COUNT(*) FROM documento_bodega_borrador_archivos a
                 WHERE a.documento_id = documentos_bodega_borrador.id) AS file_count
          FROM documentos_bodega_borrador
-        WHERE tipo_documento = ? AND origen = ? AND referencia_documento = ?
-        LIMIT 1 FOR UPDATE`,
-      [input.documentType, normalizedOrigin, input.reference]
+        WHERE tipo_documento = ? AND (? = 'ORDEN_COMPRA_CLIENTE' OR origen = ?) AND referencia_documento = ?
+          AND (? <> 'ORDEN_COMPRA_CLIENTE' OR destinatario_nombre = ?)
+          AND (? <> 'ORDEN_COMPRA_CLIENTE' OR estado <> 'DESCARTADO')
+        ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+      [input.documentType, input.documentType, normalizedOrigin, input.reference,
+        input.documentType, input.destinationName, input.documentType]
     );
     if (existing.length) {
       if (existing[0].sha256 !== input.hash) {
@@ -133,6 +144,7 @@ async function registerWarehouseDocumentDraft({
           documentType: existing[0].tipo_documento,
           reference: existing[0].referencia_documento,
           documentDate: dateOnly(existing[0].fecha_documento),
+          destinationName: existing[0].destinatario_nombre,
           totalPackages: nullableNumber(existing[0].total_bultos),
           totalUnits: Number(existing[0].total_unidades),
           items: storedItems.map(item => ({
@@ -182,13 +194,17 @@ async function registerWarehouseDocumentDraft({
     const resolved = [];
     for (const item of input.items) {
       const [products] = await db.execute(
-        `SELECT id, siigo_code, nombre
+        `SELECT id, siigo_code, nombre, modalidad_operativa
            FROM productos
           WHERE UPPER(siigo_code) = ? AND activo = 1
           LIMIT 1`,
         [item.sku]
       );
       if (!products.length) input.warnings.push(`SKU no encontrado o inactivo: ${item.sku}`);
+      if (input.documentType === 'ORDEN_COMPRA_CLIENTE' && products.length
+        && products[0].modalidad_operativa !== 'PR') {
+        input.warnings.push(`El SKU ${item.sku} no corresponde a producción propia`);
+      }
       resolved.push({ ...item, product: products[0] || null });
     }
     input.warnings = [...new Set(input.warnings)].slice(0, 50);
@@ -341,6 +357,9 @@ function operationalDocumentIdentity(normalized) {
     documentType: normalized.documentType,
     reference: normalized.reference,
     documentDate: normalized.documentDate,
+    ...(normalized.documentType === 'ORDEN_COMPRA_CLIENTE'
+      ? { destinationName: String(normalized.destinationName || '').trim().toLocaleLowerCase('es') }
+      : {}),
     totalPackages: normalized.totalPackages == null ? null : roundQty(normalized.totalPackages),
     totalUnits: roundQty(normalized.totalUnits),
     items,
@@ -353,6 +372,7 @@ function operationalDifferences(stored, incoming) {
     ['documentType', 'tipo'],
     ['reference', 'referencia'],
     ['documentDate', 'fecha'],
+    ['destinationName', 'cliente'],
     ['totalPackages', 'bultos'],
     ['totalUnits', 'total'],
   ]) {

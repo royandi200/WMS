@@ -11,7 +11,8 @@ CONTRATO DE RESPUESTA
 
 CLASIFICACION
 
-- `ORDEN_COMPRA` requiere `ORDEN DE COMPRA` o `TIPO DOCUMENTO WMS: ORDEN_COMPRA`. Accion exacta: `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`.
+- `ORDEN_COMPRA_CLIENTE` requiere `ORDEN DE COMPRA DEL CLIENTE`, `OC DE CLIENTE` o `TIPO DOCUMENTO WMS: ORDEN_COMPRA_CLIENTE`. Accion exacta: `REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO`. Este marcador específico prevalece sobre la frase genérica `ORDEN DE COMPRA` y sobre avisos como `no es una OC de insumos`.
+- `ORDEN_COMPRA` de proveedor requiere `ORDEN DE COMPRA` o `TIPO DOCUMENTO WMS: ORDEN_COMPRA`, sin el marcador de cliente. Accion exacta: `REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO`.
 - `SALIDA_BODEGA_3Q` requiere `SALIDA DE BODEGA HACIA 3Q`, `REMISION A 3Q` o `TIPO DOCUMENTO WMS: REMISION_3Q`. Accion exacta: `REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO`.
 - `RECEPCION_MAQUILA_3Q` requiere `ENTREGA DE PRODUCTO TERMINADO - MAQUILA 3Q`, `RECEPCION DE PRODUCTO TERMINADO DESDE 3Q` o `TIPO DOCUMENTO WMS: RECEPCION_MAQUILA_3Q`. Accion exacta: `REGISTRAR_VISTA_PREVIA_RECEPCION_MAQUILA_DOCUMENTO`.
 - Si aparecen marcadores de mas de un tipo o ninguno, devuelve el JSON de RECHAZO con el motivo concreto. No clasifiques por nombre del archivo, proveedor, productos, historial ni texto adjunto.
@@ -39,9 +40,15 @@ FILAS COMPACTAS
 
 ORDEN DE COMPRA
 
-Requiere referencia, fecha, proveedor y todas las filas. NIT, moneda, precio, total y nombre de archivo son opcionales. Unidad, lote y vencimiento son obligatorios cuando el documento contiene esas columnas. Nunca sumes unidades, gramos y kilogramos. Si no hay total impreso, omite `total_unidades`.
+Esta sección se aplica solo a OC de proveedor. Requiere referencia, fecha, proveedor y todas las filas. NIT, moneda, precio, total y nombre de archivo son opcionales. Unidad, lote y vencimiento son obligatorios cuando el documento contiene esas columnas. Nunca sumes unidades, gramos y kilogramos. Si no hay total impreso, omite `total_unidades`.
 
 {"kw":"g0m@s","@ction":"REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO","priority":"media","params":{"tipo_documento":"ORDEN_COMPRA","referencia_documento":"REFERENCIA","fecha_documento":"YYYY-MM-DD","proveedor_nombre":"PROVEEDOR","items":[["SKU","DESCRIPCION",1,"und","LOTE","YYYY-MM-DD"]]}}
+
+ORDEN DE COMPRA DEL CLIENTE
+
+Requiere referencia o número de pedido, fecha, nombre del cliente final y todas las filas de producto terminado. La cantidad se expresa en unidades. No exijas proveedor, lote ni vencimiento: todavía no se ha producido el producto. Este PDF crea un borrador de pedido, nunca una OC de proveedor ni una recepción pendiente. El administrador lo revisará y aprobará en Producción > Pedidos de cliente.
+
+{"kw":"g0m@s","@ction":"REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO","priority":"media","params":{"tipo_documento":"ORDEN_COMPRA_CLIENTE","referencia_documento":"Pedido 1","fecha_documento":"YYYY-MM-DD","nombre_cliente":"CLIENTE FINAL","items":[["SKU","DESCRIPCION",3,"und"]]}}
 
 SALIDA A 3Q
 
@@ -61,7 +68,7 @@ Emite una partida por combinacion de SKU, lote, condicion y ubicacion. `total_re
 
 RECHAZO
 
-{"kw":"g0m@s","@ction":"MODO_CHARLA","priority":"baja","params":{"texto":"No pude clasificar el PDF: falta un encabezado ORDEN DE COMPRA, REMISION A 3Q o ENTREGA DE PRODUCTO TERMINADO - MAQUILA 3Q. No se registro ningun borrador ni vista previa."}}
+{"kw":"g0m@s","@ction":"MODO_CHARLA","priority":"baja","params":{"texto":"No pude clasificar el PDF: falta un encabezado ORDEN DE COMPRA, ORDEN DE COMPRA DEL CLIENTE, REMISION A 3Q o ENTREGA DE PRODUCTO TERMINADO - MAQUILA 3Q. No se registro ningun borrador ni vista previa."}}
 
 Usa siempre esta estructura y cambia solo `params.texto` segun la causa observada: marcadores contradictorios, texto documental vacio, fila ilegible o datos obligatorios ausentes. No afirmes que falta un dato que si aparece. Si puedes leer todas las filas, emite la accion documental con todos los items; no uses el rechazo como resumen de un documento valido.
 

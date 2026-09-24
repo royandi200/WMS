@@ -166,9 +166,13 @@ async function registerPurchaseOrderDocumentDraft({
   evidenceText = '',
   documentUrl = '',
   documentName = '',
+  uploadedDocument,
+  precomputedEvidence,
 }) {
-  const document = await downloadBuilderBotPdf(documentUrl, documentName);
-  const nativeEvidence = await nativePdfEvidence(db, document, body);
+  const document = uploadedDocument === undefined
+    ? await downloadBuilderBotPdf(documentUrl, documentName)
+    : uploadedDocument;
+  const nativeEvidence = precomputedEvidence || await nativePdfEvidence(db, document, body);
   const input = normalizePurchaseOrderDocumentInput(nativeEvidence.body, {
     evidenceText: nativeEvidence.text || evidenceText,
     recoverFields: !nativeEvidence.used,

@@ -20,6 +20,8 @@ module.exports = async (req, res) => {
         op.origen_tipo,
         op.referencia_cliente,
         op.cliente_final,
+        pc.id AS pedido_cliente_id,
+        op.pedido_cliente_item_id,
         op.cantidad_planeada,
         op.cantidad_real,
         (SELECT l.lpn FROM lots l
@@ -38,6 +40,8 @@ module.exports = async (req, res) => {
         p.nombre     AS product_name
       FROM ordenes_produccion op
       LEFT JOIN productos p ON p.id = op.producto_id
+      LEFT JOIN pedido_cliente_items pci ON pci.id = op.pedido_cliente_item_id
+      LEFT JOIN pedidos_cliente pc ON pc.id = pci.pedido_cliente_id
       WHERE 1=1`;
     const args = [];
     if (estado) { sql += ` AND op.estado = ?`; args.push(estado); }

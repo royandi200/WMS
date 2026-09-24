@@ -368,7 +368,7 @@ test('purchase order document action is reception-scoped and cannot mutate inven
   assert.match(prompt, /exactamente un item de salida por cada fila de entrada/u);
   assert.match(prompt, /representa cada item como un arreglo posicional/u);
   assert.match(prompt, /Nunca los omitas para acortar la respuesta/u);
-  assert.match(warehouseDomain, /WHERE tipo_documento = \? AND origen = \? AND referencia_documento = \?/u);
+  assert.match(warehouseDomain, /WHERE tipo_documento = \? AND \(\? = 'ORDEN_COMPRA_CLIENTE' OR origen = \?\) AND referencia_documento = \?/u);
   assert.match(webhook, /delete sanitized\.document_text/u);
   assert.match(webhook, /delete sanitized\.document_url/u);
   assert.match(webhook, /builderBotDocumentValue\(rawBody\.document_url\)/u);

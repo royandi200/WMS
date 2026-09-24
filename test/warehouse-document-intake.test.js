@@ -351,7 +351,7 @@ test('document intake fails closed without exact SKU or with an invalid date', (
   });
   assert.throws(() => normalizeWarehouseDocumentInput(missingSku), /SKU exacto/u);
   assert.throws(() => normalizeWarehouseDocumentInput(validInput({ fecha_documento: '31\/08\/2026' })), /YYYY-MM-DD/u);
-  assert.throws(() => normalizeWarehouseDocumentInput(validInput({ tipo_documento: 'ORDEN_COMPRA' })), /SALIDA_BODEGA_3Q/u);
+  assert.throws(() => normalizeWarehouseDocumentInput(validInput({ tipo_documento: 'ORDEN_COMPRA' })), /orden de compra de cliente/u);
 });
 
 test('3Q document intake flags total mismatch without requiring FEFO data in the source PDF', () => {

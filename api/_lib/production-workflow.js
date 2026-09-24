@@ -41,24 +41,77 @@ async function defaultWarehouse(conn) {
 
 async function releaseProductionOrder({
   product, quantity, originType, customerReference, finalCustomer, notes, userId, confirmNew = false, existingOrderId,
+  customerOrderId, customerOrderItemId,
 }) {
-  const qty = Number(quantity);
-  const origin = String(originType || '').trim().toUpperCase();
-  if (!Number.isFinite(qty) || qty <= 0) throw httpError(400, 'La cantidad planeada debe ser positiva');
-  if (!['OC_CLIENTE', 'STOCK_SEGURIDAD'].includes(origin)) {
-    throw httpError(400, 'origen_tipo debe ser OC_CLIENTE o STOCK_SEGURIDAD');
-  }
-  if (origin === 'OC_CLIENTE' && !String(customerReference || '').trim()) {
-    throw httpError(400, 'La referencia de la OC del cliente es obligatoria');
-  }
-  if (origin === 'OC_CLIENTE' && !String(finalCustomer || '').trim()) {
-    throw httpError(400, 'El cliente final es obligatorio');
-  }
-
+  let qty = Number(quantity);
+  let origin = String(originType || '').trim().toUpperCase();
+  let selectedItemId = null;
   const conn = await createConnection();
   let dedupeLock = null;
   try {
     await conn.beginTransaction();
+    if (customerOrderId != null && String(customerOrderId).trim()) {
+      const orderId = Number(customerOrderId);
+      const requestedItemId = customerOrderItemId == null || customerOrderItemId === ''
+        ? null : Number(customerOrderItemId);
+      if (!Number.isSafeInteger(orderId) || orderId <= 0
+        || (requestedItemId != null && (!Number.isSafeInteger(requestedItemId) || requestedItemId <= 0))) {
+        throw httpError(400, 'Indica un PED ID válido');
+      }
+      const [orderItems] = await conn.execute(
+        `SELECT pc.referencia, pc.cliente_nombre, i.id AS item_id,
+                i.cantidad_ordenada, p.siigo_code, p.nombre, p.modalidad_operativa
+           FROM pedidos_cliente pc
+           JOIN pedido_cliente_items i ON i.pedido_cliente_id = pc.id
+           JOIN productos p ON p.id = i.producto_id
+          WHERE pc.id = ? AND pc.estado = 'ACTIVO'
+          ORDER BY i.id FOR UPDATE`,
+        [orderId]
+      );
+      if (!orderItems.length) throw httpError(404, `PED ID ${orderId} no está disponible`);
+      const [released] = await conn.execute(
+        `SELECT pedido_cliente_item_id, SUM(cantidad_planeada) AS total
+           FROM ordenes_produccion
+          WHERE pedido_cliente_item_id IN (${orderItems.map(() => '?').join(',')})
+            AND estado <> 'CANCELADA'
+          GROUP BY pedido_cliente_item_id`,
+        orderItems.map((item) => item.item_id)
+      );
+      const releasedByItem = new Map(released.map((item) => [Number(item.pedido_cliente_item_id), Number(item.total)]));
+      const available = orderItems.map((item) => ({
+        ...item,
+        pending: Number((Number(item.cantidad_ordenada) - (releasedByItem.get(Number(item.item_id)) || 0)).toFixed(3)),
+      })).filter((item) => item.pending > 0);
+      const chosen = requestedItemId == null
+        ? (available.length === 1 ? available[0] : null)
+        : available.find((item) => Number(item.item_id) === requestedItemId);
+      if (!chosen) {
+        throw httpError(409, available.length
+          ? `PED ID ${orderId} tiene varios productos pendientes; elige un item ID de la lista`
+          : `PED ID ${orderId} no tiene unidades pendientes`,
+        { items: available.map((item) => ({ item_id: item.item_id, sku: item.siigo_code, pendiente: item.pending })) });
+      }
+      if (chosen.modalidad_operativa !== 'PR') throw httpError(409, 'El pedido contiene un producto no fabricable');
+      if (quantity == null || quantity === '') qty = chosen.pending;
+      if (!Number.isFinite(qty) || qty <= 0 || qty > chosen.pending + 0.0001) {
+        throw httpError(409, `PED ID ${orderId} tiene ${chosen.pending} und pendientes para ${chosen.siigo_code}`);
+      }
+      product = chosen.siigo_code;
+      origin = 'OC_CLIENTE';
+      customerReference = chosen.referencia;
+      finalCustomer = chosen.cliente_nombre;
+      selectedItemId = chosen.item_id;
+    }
+    if (!Number.isFinite(qty) || qty <= 0) throw httpError(400, 'La cantidad planeada debe ser positiva');
+    if (!['OC_CLIENTE', 'STOCK_SEGURIDAD'].includes(origin)) {
+      throw httpError(400, 'origen_tipo debe ser OC_CLIENTE o STOCK_SEGURIDAD');
+    }
+    if (origin === 'OC_CLIENTE' && !String(customerReference || '').trim()) {
+      throw httpError(400, 'La referencia de la OC del cliente es obligatoria');
+    }
+    if (origin === 'OC_CLIENTE' && !String(finalCustomer || '').trim()) {
+      throw httpError(400, 'El cliente final es obligatorio');
+    }
     const confirmation = confirmNew ? await beginAdditionalConfirmation(conn, {
       kind: 'PRODUCCION', userId, base: existingOrderId,
       payload: { product: String(product), quantity: qty, originType: origin,
@@ -91,9 +144,10 @@ async function releaseProductionOrder({
           AND origen_tipo = ?
           AND COALESCE(referencia_cliente, '') = ?
           AND COALESCE(cliente_final, '') = ?
+          AND COALESCE(pedido_cliente_item_id, 0) = ?
           AND creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
         ORDER BY creado_en DESC, id DESC LIMIT 1 FOR UPDATE`,
-      [finalProduct.id, userId, qty, origin, String(customerReference || '').trim(), String(finalCustomer || '').trim()]
+      [finalProduct.id, userId, qty, origin, String(customerReference || '').trim(), String(finalCustomer || '').trim(), selectedItemId || 0]
     );
     if (recentOrders.length && !confirmNew) {
       await conn.commit();
@@ -167,12 +221,12 @@ async function releaseProductionOrder({
     const temporaryCode = `TMP-${crypto.randomBytes(8).toString('hex')}`;
     const [created] = await conn.execute(
       `INSERT INTO ordenes_produccion
-         (codigo_orden, producto_id, origen_tipo, referencia_cliente, cliente_final,
+         (codigo_orden, producto_id, origen_tipo, referencia_cliente, cliente_final, pedido_cliente_item_id,
           cantidad_planeada, fase, estado, creado_por, aprobado_por, liberado_por,
           materiales_conf_en, liberado_en, notas, creado_en)
-       VALUES (?, ?, ?, ?, ?, ?, 'F0', 'APROBADA', ?, ?, ?, NULL, NOW(), ?, NOW())`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'F0', 'APROBADA', ?, ?, ?, NULL, NOW(), ?, NOW())`,
       [temporaryCode, finalProduct.id, origin, customerReference || null, finalCustomer || null,
-       qty, userId, userId, userId, notes || null]
+       selectedItemId, qty, userId, userId, userId, notes || null]
     );
     const code = orderCodeForId(created.insertId);
     await conn.execute(`UPDATE ordenes_produccion SET codigo_orden = ? WHERE id = ?`, [code, created.insertId]);
@@ -220,6 +274,8 @@ async function releaseProductionOrder({
       origin_type: origin,
       customer_reference: customerReference || null,
       final_customer: finalCustomer || null,
+      customer_order_id: customerOrderId || null,
+      customer_order_item_id: selectedItemId,
       picking,
       already_released: false,
     };

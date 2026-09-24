@@ -130,6 +130,8 @@ const {
 } = require('../../_lib/purchase-order-document-intake');
 const { nativePdfEvidence } = require('../../_lib/document-pdf-evidence');
 const { detectDocumentTypeMarkers } = require('../../_lib/document-type-markers');
+const { reconcileCustomerOrderId, reconcileCustomerOrderItemId } = require('../../_lib/customer-order-reference');
+const { listCustomerOrders } = require('../customer-orders');
 const {
   listAvailablePurchaseOrderReceptions,
   listAvailableOutsourcingReceptions,
@@ -517,6 +519,7 @@ function sanitizeWebhookLogPayload(payload, action) {
   const normalizedAction = String(action || '').toUpperCase();
   const documentActions = new Set([
     'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO',
+    'REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO',
     'REGISTRAR_BORRADOR_SALIDA_3Q_DOCUMENTO',
   ]);
   const receptionActions = new Set([
@@ -614,6 +617,20 @@ async function recoverRejectedDocumentAction({ db, rawBody, action, params, even
         recovered: true,
         status: 'NATIVE_APPLIED',
         action: 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO',
+        params: recovered,
+        diagnostics: evidence.diagnostics,
+      };
+    }
+
+    if (markers.customerPurchaseOrder
+      && recovered.tipo_documento === 'ORDEN_COMPRA_CLIENTE'
+      && recovered.referencia_documento
+      && recovered.fecha_documento
+      && recovered.nombre_cliente) {
+      return {
+        recovered: true,
+        status: 'NATIVE_APPLIED',
+        action: 'REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO',
         params: recovered,
         diagnostics: evidence.diagnostics,
       };
@@ -1891,18 +1908,41 @@ module.exports = async (req, res) => {
 
       // A purchase-order PDF creates a reviewable draft. Conversion remains a
       // separate, explicit action in dashboard or WhatsApp.
-      case 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO': {
+      case 'REGISTRAR_BORRADOR_ORDEN_COMPRA_DOCUMENTO':
+      case 'REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO': {
         assertDocumentHasSameMessageInstruction(action, contractUserText);
-        const draft = await registerPurchaseOrderDocumentDraft({
+        const documentUrl = builderBotDocumentValue(rawBody.document_url);
+        const documentName = builderBotDocumentValue(rawBody.document_name) || params.nombre_archivo || '';
+        const uploadedDocument = await downloadBuilderBotPdf(documentUrl, documentName);
+        const precomputedEvidence = await nativePdfEvidence(db, uploadedDocument, params);
+        const markers = detectDocumentTypeMarkers(precomputedEvidence.text);
+        const recoveredParams = precomputedEvidence.body?.params || precomputedEvidence.body;
+        const customerDocument = markers.customerPurchaseOrder
+          || recoveredParams?.tipo_documento === 'ORDEN_COMPRA_CLIENTE';
+        const common = {
           db,
-          body: params,
+          body: precomputedEvidence.body,
           userId: user.id,
           evidenceText: builderBotDocumentValue(rawBody.document_text),
-          documentUrl: builderBotDocumentValue(rawBody.document_url),
-          documentName: builderBotDocumentValue(rawBody.document_name) || params.nombre_archivo || '',
-        });
+          documentUrl,
+          documentName,
+          uploadedDocument,
+          precomputedEvidence,
+        };
+        const draft = customerDocument
+          ? await registerWarehouseDocumentDraft(common)
+          : await registerPurchaseOrderDocumentDraft(common);
         const warningLines = (draft.warnings || []).slice(0, 5).map((warning) => `- ${warning}`);
-        mensaje = [
+        mensaje = customerDocument ? [
+          draft.duplicate
+            ? `La OC de cliente ${draft.referencia_documento} ya estaba registrada. No se duplicó.`
+            : `OC de cliente ${draft.referencia_documento} guardada como borrador.`,
+          `Borrador ID ${draft.id} | ${draft.itemCount} producto(s)`,
+          `Estado: ${draft.estado}`,
+          warningLines.length ? 'Revisiones necesarias:' : null,
+          ...warningLines,
+          'Un administrador debe revisarla en Producción > Pedidos de cliente. Hasta entonces no está disponible para liberar una OP. No aparece en Recepciones pendientes ni modifica inventario.',
+        ].filter(Boolean).join('\n\n') : [
           draft.duplicate
             ? `La orden ${draft.referencia_documento} ya estaba registrada. No se duplico.`
             : `Orden ${draft.referencia_documento} leida y guardada como borrador.`,
@@ -1915,7 +1955,8 @@ module.exports = async (req, res) => {
             : `Revisala en el dashboard o escribe: revisa la orden ${draft.referencia_documento}. No se modifico inventario.`,
         ].filter(Boolean).join('\n');
         responseContext.document_draft_id = draft.id;
-        responseContext.purchase_order_id = draft.ordenCompraId || null;
+        responseContext.purchase_order_id = customerDocument ? null : draft.ordenCompraId || null;
+        responseContext.customer_order_draft = customerDocument;
         responseContext.document_extraction = draft.extractionDiagnostics;
         responseContext.inventory_changed = false;
         break;
@@ -2865,6 +2906,26 @@ module.exports = async (req, res) => {
         break;
       }
 
+      case 'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES': {
+        const orders = await listCustomerOrders({ pendingOnly: true });
+        mensaje = orders.length ? [
+          `*Pedidos de cliente pendientes (${orders.length})*`,
+          ...orders.flatMap((order) => [
+            '',
+            `*PED ID ${order.id}* | ${order.cliente_nombre}`,
+            `Referencia del documento: ${order.referencia}`,
+            ...order.items.filter((item) => item.cantidad_pendiente > 0)
+              .map((item) => `- Item ID ${item.id}: ${item.producto} (${item.sku}) - pendiente ${item.cantidad_pendiente} und`),
+          ]),
+          '',
+          'Para crear la OP de un pedido con un solo producto, di: produce el PED ID 1. Si tiene varios productos, indica además el Item ID.',
+          'Esta consulta no reserva ni modifica inventario.',
+        ].join('\n') : 'No hay pedidos de cliente aprobados con unidades pendientes de producir.';
+        responseContext.customer_orders = orders;
+        responseContext.inventory_changed = false;
+        break;
+      }
+
       case 'LIBERAR_ORDEN_PRODUCCION': {
         let releaseParams = { ...params };
         if (params.confirmar_nueva_orden === true && params.id_orden_existente) {
@@ -2891,10 +2952,14 @@ module.exports = async (req, res) => {
             cliente_final: existing.cliente_final,
           };
         }
-        const originType = params.confirmar_nueva_orden === true && params.id_orden_existente
+        const selectedCustomerOrderId = reconcileCustomerOrderId(releaseParams, contractUserText);
+        const originType = selectedCustomerOrderId ? 'OC_CLIENTE'
+          : params.confirmar_nueva_orden === true && params.id_orden_existente
           ? releaseParams.origen_tipo
           : resolveProductionOrigin(contractUserText, releaseParams.origen_tipo);
-        const customerOrder = originType === 'OC_CLIENTE'
+        const customerOrder = selectedCustomerOrderId
+          ? { customerReference: null, finalCustomer: null }
+          : originType === 'OC_CLIENTE'
           ? params.confirmar_nueva_orden === true && params.id_orden_existente
             ? {
                 customerReference: releaseParams.referencia_cliente,
@@ -2912,6 +2977,10 @@ module.exports = async (req, res) => {
           originType,
           customerReference: customerOrder.customerReference,
           finalCustomer: customerOrder.finalCustomer,
+          customerOrderId: selectedCustomerOrderId,
+          customerOrderItemId: selectedCustomerOrderId
+            ? reconcileCustomerOrderItemId(releaseParams, contractUserText)
+            : null,
           notes: params.notas || params.observaciones,
           confirmNew: params.confirmar_nueva_orden === true,
           existingOrderId: params.id_orden_existente,
@@ -2944,7 +3013,7 @@ module.exports = async (req, res) => {
           `Producto: ${productionResult.product.nombre}`,
           `SKU: ${productionResult.product.siigo_code}`,
           `Cantidad planeada interpretada: ${productionResult.planned_quantity} und`,
-          `Destino: ${productionResult.origin_type === 'OC_CLIENTE' ? `OC ${productionResult.customer_reference} - ${productionResult.final_customer}` : 'stock de seguridad'}`,
+          `Destino: ${productionResult.customer_order_id ? `PED ID ${productionResult.customer_order_id} | ` : ''}${productionResult.origin_type === 'OC_CLIENTE' ? `OC ${productionResult.customer_reference} - ${productionResult.final_customer}` : 'stock de seguridad'}`,
           '',
           '*Alistamiento FEFO*',
           ...picking,

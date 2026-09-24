@@ -24,6 +24,17 @@ const PURCHASE_ORDER_FIELDS = {
   MONEDA: 'moneda',
 };
 
+const CUSTOMER_PURCHASE_ORDER_FIELDS = {
+  'REFERENCIA DE LA OC': 'referencia_documento',
+  'NUMERO DE OC': 'referencia_documento',
+  'NUMERO DE PEDIDO': 'referencia_documento',
+  FECHA: 'fecha_documento',
+  'FECHA DE ORDEN': 'fecha_documento',
+  'CLIENTE FINAL': 'nombre_cliente',
+  CLIENTE: 'nombre_cliente',
+  DESTINO: 'destino',
+};
+
 const IDENTITY_FIELDS = new Set([
   'referencia_documento',
   'fecha_documento',
@@ -35,6 +46,9 @@ const IDENTITY_FIELDS = new Set([
 
 function documentHeaderProfile(markers, source) {
   if (Object.values(markers).filter(Boolean).length !== 1) return null;
+  if (markers.customerPurchaseOrder) {
+    return { type: 'ORDEN_COMPRA_CLIENTE', fields: CUSTOMER_PURCHASE_ORDER_FIELDS };
+  }
   if (markers.purchaseOrder && (!source?.tipo_documento || source.tipo_documento === 'ORDEN_COMPRA')) {
     return { type: 'ORDEN_COMPRA', fields: PURCHASE_ORDER_FIELDS };
   }
@@ -59,6 +73,10 @@ function recoverWarehousePdfHeaders(body, text) {
     const value = String(raw || '').trim();
     if (!field || !value || value.length > 255 || fields[normalizeMarkerText(value)]) return;
     let parsed = value;
+    if (field === 'fecha_documento' && profile.type === 'ORDEN_COMPRA_CLIENTE') {
+      parsed = parseCustomerOrderDate(value);
+      if (!parsed) return;
+    }
     if (field === 'total_bultos') {
       const match = value.match(/^(\d+)(?:\s+(?:paquetes?|bultos?|cajas?))?$/iu);
       if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) <= 0) return;
@@ -94,7 +112,8 @@ function recoverWarehousePdfHeaders(body, text) {
       continue;
     }
     const [value] = values;
-    if (IDENTITY_FIELDS.has(field) && source[field] != null && String(source[field]).trim()) continue;
+    if (profile.type !== 'ORDEN_COMPRA_CLIENTE'
+      && IDENTITY_FIELDS.has(field) && source[field] != null && String(source[field]).trim()) continue;
     recovered[field] = value;
     if (source[field] != null && String(source[field]).trim() !== String(value)) {
       warnings.push(`Se recupero ${field} del PDF original; difiere de la extraccion de IA`);
@@ -104,6 +123,19 @@ function recoverWarehousePdfHeaders(body, text) {
   const result = { ...source, ...recovered };
   if (warnings.length) result.advertencias = [...(Array.isArray(source.advertencias) ? source.advertencias : []), ...warnings];
   return body.params ? { ...body, params: result } : result;
+}
+
+function parseCustomerOrderDate(value) {
+  const iso = String(value).match(/^\d{4}-\d{2}-\d{2}$/u);
+  if (iso) return iso[0];
+  const match = String(value).toLowerCase().match(/^(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})$/u);
+  if (!match) return null;
+  const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const month = months.indexOf(match[2]);
+  if (month < 0) return null;
+  const candidate = `${match[3]}-${String(month + 1).padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  const date = new Date(`${candidate}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== candidate ? null : candidate;
 }
 
 module.exports = { recoverWarehousePdfHeaders };

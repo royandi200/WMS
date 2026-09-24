@@ -13,6 +13,9 @@ const {
   reviewWarehouseDocumentDraft,
 } = require('../_lib/warehouse-document-draft-review');
 const { documentDraftStatus } = require('../_lib/document-draft-status');
+const { normalizePurchaseOrderPdf } = require('../_lib/purchase-order-documents');
+const { nativePdfEvidence } = require('../_lib/document-pdf-evidence');
+const { detectDocumentTypeMarkers } = require('../_lib/document-type-markers');
 
 async function handleGet(req, res) {
   if (req.query?.inspect_pdf != null) {
@@ -46,7 +49,9 @@ async function handleGet(req, res) {
     }
     const capability = files[0].tipo_documento === 'ORDEN_COMPRA'
       ? CAPABILITIES.RECEPTION_READ
-      : CAPABILITIES.OUTSOURCING_READ;
+      : files[0].tipo_documento === 'ORDEN_COMPRA_CLIENTE'
+        ? CAPABILITIES.PRODUCTION_RELEASE
+        : CAPABILITIES.OUTSOURCING_READ;
     await requireCapability(req, capability);
     const contents = await query(
       `SELECT contenido FROM documento_bodega_borrador_archivos WHERE id = ? LIMIT 1`,
@@ -63,12 +68,14 @@ async function handleGet(req, res) {
   }
 
   const documentType = String(req.query?.type || 'SALIDA_BODEGA_3Q').trim().toUpperCase();
-  if (!['SALIDA_BODEGA_3Q', 'ORDEN_COMPRA'].includes(documentType)) {
+  if (!['SALIDA_BODEGA_3Q', 'ORDEN_COMPRA', 'ORDEN_COMPRA_CLIENTE'].includes(documentType)) {
     return res.status(400).json({ ok: false, error: 'Tipo documental no soportado' });
   }
   await requireCapability(
     req,
-    documentType === 'ORDEN_COMPRA' ? CAPABILITIES.RECEPTION_READ : CAPABILITIES.OUTSOURCING_READ
+    documentType === 'ORDEN_COMPRA' ? CAPABILITIES.RECEPTION_READ
+      : documentType === 'ORDEN_COMPRA_CLIENTE' ? CAPABILITIES.PRODUCTION_RELEASE
+        : CAPABILITIES.OUTSOURCING_READ
   );
   const limit = Math.min(Math.max(Number(req.query?.limit || 100), 1), 200);
   const rows = await query(
@@ -123,9 +130,28 @@ async function handleGet(req, res) {
 }
 
 async function handlePost(req, res) {
-  const user = await requireCapability(req, CAPABILITIES.OUTSOURCING_MANAGE);
+  const customerOrder = req.body?.tipo_documento === 'ORDEN_COMPRA_CLIENTE';
+  const user = customerOrder
+    ? await requireRole(req, ['admin', 'administrador', 'supervisor'])
+    : await requireCapability(req, CAPABILITIES.OUTSOURCING_MANAGE);
   const conn = await createConnection();
   try {
+    if (customerOrder) {
+      const uploadedDocument = normalizePurchaseOrderPdf(req.body || {});
+      const precomputedEvidence = await nativePdfEvidence(conn, uploadedDocument, req.body || {});
+      if (!detectDocumentTypeMarkers(precomputedEvidence.text).customerPurchaseOrder) {
+        return res.status(400).json({ ok: false, error: 'El PDF debe decir ORDEN DE COMPRA DEL CLIENTE' });
+      }
+      const data = await registerWarehouseDocumentDraft({
+        db: conn,
+        body: precomputedEvidence.body,
+        userId: user.id,
+        origin: 'DASHBOARD',
+        uploadedDocument,
+        precomputedEvidence,
+      });
+      return res.status(data.duplicate ? 200 : 201).json({ ok: true, data });
+    }
     const data = await registerWarehouseDocumentDraft({
       db: conn,
       body: req.body || {},
@@ -140,12 +166,10 @@ async function handlePost(req, res) {
 
 async function handleDelete(req, res) {
   const input = normalizePurchaseOrderDocumentDiscard(req.body || {});
-  const user = await requireCapability(
-    req,
-    input.documentType === 'SALIDA_BODEGA_3Q'
-      ? CAPABILITIES.OUTSOURCING_MANAGE
-      : CAPABILITIES.PURCHASE_ORDER_CANCEL
-  );
+  const user = input.documentType === 'ORDEN_COMPRA_CLIENTE'
+    ? await requireRole(req, ['admin', 'administrador', 'supervisor'])
+    : await requireCapability(req, input.documentType === 'SALIDA_BODEGA_3Q'
+      ? CAPABILITIES.OUTSOURCING_MANAGE : CAPABILITIES.PURCHASE_ORDER_CANCEL);
   const conn = await createConnection();
   try {
     await conn.beginTransaction();

@@ -120,7 +120,12 @@ function deriveCatalogItemsFromPdfTokens(tokens = [], products = []) {
     // A new page starts a new evidence context, not a continuation of the last row.
     const candidates = normalizedTokens.slice(position.index + 1, Math.min(end, position.index + 20));
     const pageBoundary = candidates.findIndex((token) => token.page !== position.page);
-    const block = candidates.slice(0, pageBoundary < 0 ? undefined : pageBoundary).map((token) => token.text);
+    const block = candidates.slice(0, pageBoundary < 0 ? undefined : pageBoundary)
+      .flatMap((token) => {
+        const text = token.text;
+        const compactQuantity = text.match(/^(\d+(?:[.,]\d{1,4})?)\s+(und|unidad(?:es)?|g|gr|kg)$/iu);
+        return compactQuantity ? [compactQuantity[1], compactQuantity[2]] : [text];
+      });
     let unitIndex = -1;
     let quantityIndex = -1;
     for (let index = 1; index < block.length; index += 1) {
