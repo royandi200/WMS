@@ -354,6 +354,7 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
       cantidad: data.quantity,
       motivo: data.reason,
       lote: data.lot || null,
+      order_id: order?.id || null,
       codigo_orden: order?.codigo_orden || null,
       ubicacion: stockRow?.codigo || null,
       balance_disponible: balance,

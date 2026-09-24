@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { notifyRoles } = require('./builderbot-notifications');
 const { roundQty } = require('./production-workflow');
+const { resolveProductReference } = require('./product-references');
 const { resolvePrimaryWarehouse } = require('./warehouses');
 
 function httpError(status, message, data) {
@@ -11,19 +12,77 @@ function httpError(status, message, data) {
   return error;
 }
 
-function normalizeReplenishmentInput({ quantity, reason, fullBomConfirmed }) {
-  const units = Number(quantity);
+function normalizeReplenishmentInput({ quantity, reason, fullBomConfirmed, items }) {
   const normalizedReason = String(reason || '').trim();
+  if (!normalizedReason) throw httpError(400, 'El motivo de la reposicion es obligatorio');
+  if (items !== undefined && items !== null) {
+    if (!Array.isArray(items) || !items.length || items.length > 30) {
+      throw httpError(400, 'Indica entre uno y treinta materiales para reponer');
+    }
+    if (quantity !== undefined && quantity !== null && quantity !== '') {
+      throw httpError(400, 'No mezcles reposicion por SKU con unidades de BOM completo');
+    }
+    return {
+      units: 0,
+      reason: normalizedReason,
+      items: items.map((item) => {
+        const product = String(item?.producto ?? item?.sku ?? item?.id_item ?? '').trim();
+        const amount = Number(String(item?.cantidad ?? '').replace(',', '.'));
+        if (!product || product.length > 200 || !Number.isFinite(amount) || amount <= 0
+          || amount > 999999999 || roundQty(amount) !== amount) {
+          throw httpError(400, 'Cada material requiere producto y cantidad positiva de hasta cuatro decimales');
+        }
+        return { product, amount };
+      }),
+    };
+  }
+  const units = Number(quantity);
   const confirmed = fullBomConfirmed === true
     || ['true', '1', 'si', 'sí'].includes(String(fullBomConfirmed || '').trim().toLowerCase());
   if (!Number.isInteger(units) || units <= 0) {
     throw httpError(400, 'La cantidad de unidades a reponer debe ser un entero positivo');
   }
-  if (!normalizedReason) throw httpError(400, 'El motivo de la reposicion es obligatorio');
   if (!confirmed) {
     throw httpError(400, 'Confirma expresamente que se repondra el BOM completo de las unidades faltantes');
   }
   return { units, reason: normalizedReason };
+}
+
+async function buildSelectedRequirements(conn, materials, selectedItems) {
+  const productIds = materials.map(material => material.producto_id);
+  const byProductId = new Map(materials.map(material => [Number(material.producto_id), material]));
+  const seen = new Set();
+  const requirements = [];
+  for (const item of selectedItems) {
+    const product = await resolveProductReference(conn, item.product, {
+      productIds, allowContextualPartial: true, allowScopedApproximate: true,
+    });
+    const material = byProductId.get(Number(product.id));
+    if (!material) throw httpError(409, `${item.product} no pertenece al BOM de esta OP`);
+    if (seen.has(Number(product.id))) {
+      throw httpError(409, `${product.siigo_code} aparece dos veces. Indica una sola cantidad total para ese SKU`);
+    }
+    seen.add(Number(product.id));
+    if (!['g', 'gr', 'gramo', 'gramos'].includes(String(material.unidad || '').toLowerCase())
+      && !Number.isInteger(item.amount)) {
+      throw httpError(400, `${product.siigo_code} se repone en unidades enteras`);
+    }
+    requirements.push({ material, required: item.amount });
+  }
+  return requirements;
+}
+
+async function sameSelectedRequirements(conn, replenishmentId, requirements) {
+  const [rows] = await conn.execute(
+    `SELECT pri.produccion_material_id, pri.cantidad_requerida
+       FROM produccion_reposicion_items pri
+      WHERE pri.reposicion_id = ?`,
+    [replenishmentId]
+  );
+  return rows.length === requirements.length && rows.every(row => requirements.some(item =>
+    Number(item.material.id) === Number(row.produccion_material_id)
+      && roundQty(item.required) === roundQty(Number(row.cantidad_requerida))
+  ));
 }
 
 function replenishmentCodeForId(orderId, id) {
@@ -73,9 +132,9 @@ async function loadReplenishmentPicking(conn, replenishmentId) {
   }));
 }
 
-async function prepareProductionReplenishment({ orderId, quantity, reason, fullBomConfirmed, userId }) {
+async function prepareProductionReplenishment({ orderId, quantity, reason, fullBomConfirmed, items, userId }) {
   if (!orderId) throw httpError(400, 'La orden es obligatoria');
-  const input = normalizeReplenishmentInput({ quantity, reason, fullBomConfirmed });
+  const input = normalizeReplenishmentInput({ quantity, reason, fullBomConfirmed, items });
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
@@ -90,6 +149,17 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
     if (order.estado !== 'EN_PROCESO') throw httpError(409, 'La orden debe estar EN_PROCESO');
     const warehouseId = await resolvePrimaryWarehouse(conn);
 
+    const [materials] = await conn.execute(
+      `SELECT pm.id, pm.producto_id, pm.cantidad_teorica, pm.unidad,
+              p.siigo_code AS sku, p.nombre
+       FROM produccion_materiales pm JOIN productos p ON p.id = pm.producto_id
+       WHERE pm.orden_produccion_id = ? ORDER BY pm.id FOR UPDATE`,
+      [order.id]
+    );
+    const requirements = input.items
+      ? await buildSelectedRequirements(conn, materials, input.items)
+      : buildReplenishmentRequirements(materials, order.cantidad_planeada, input.units);
+
     const [pending] = await conn.execute(
       `SELECT * FROM produccion_reposiciones
        WHERE orden_produccion_id = ? AND estado = 'PENDIENTE_ALISTAMIENTO'
@@ -102,15 +172,20 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
           || String(existing.motivo).trim().toLowerCase() !== input.reason.toLowerCase()) {
         throw httpError(409, `La orden ya tiene la reposicion pendiente ${existing.codigo}`);
       }
+      if (input.items && !await sameSelectedRequirements(conn, existing.id, requirements)) {
+        throw httpError(409, `La orden ya tiene la reposicion pendiente ${existing.codigo} con otros materiales`);
+      }
       const picking = await loadReplenishmentPicking(conn, existing.id);
       await conn.commit();
       return {
         already_prepared: true,
         replenishment_id: existing.id,
         replenishment_code: existing.codigo,
+        order_id: order.id,
         order_code: order.codigo_orden,
         target_quantity: input.units,
         reason: input.reason,
+        mode: input.items ? 'SKU' : 'BOM_COMPLETO',
         picking,
       };
     }
@@ -125,6 +200,9 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
     );
     if (recentRetry.length) {
       const existing = recentRetry[0];
+      if (input.items && !await sameSelectedRequirements(conn, existing.id, requirements)) {
+        throw httpError(409, 'Hay una reposición reciente con otro detalle; consulta la OP antes de continuar');
+      }
       const picking = await loadReplenishmentPicking(conn, existing.id);
       await conn.commit();
       return {
@@ -132,25 +210,14 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
         already_confirmed: true,
         replenishment_id: existing.id,
         replenishment_code: existing.codigo,
+        order_id: order.id,
         order_code: order.codigo_orden,
         target_quantity: input.units,
         reason: input.reason,
+        mode: input.items ? 'SKU' : 'BOM_COMPLETO',
         picking,
       };
     }
-
-    const [materials] = await conn.execute(
-      `SELECT pm.id, pm.producto_id, pm.cantidad_teorica, pm.unidad,
-              p.siigo_code AS sku, p.nombre
-       FROM produccion_materiales pm JOIN productos p ON p.id = pm.producto_id
-       WHERE pm.orden_produccion_id = ? ORDER BY pm.id FOR UPDATE`,
-      [order.id]
-    );
-    const requirements = buildReplenishmentRequirements(
-      materials,
-      order.cantidad_planeada,
-      input.units
-    );
 
     const plan = [];
     const shortages = [];
@@ -231,24 +298,28 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
       already_prepared: false,
       replenishment_id: created.insertId,
       replenishment_code: code,
+      order_id: order.id,
       order_code: order.codigo_orden,
       product_sku: order.producto_sku,
       product_name: order.producto_nombre,
       target_quantity: input.units,
       reason: input.reason,
+      mode: input.items ? 'SKU' : 'BOM_COMPLETO',
       picking,
     };
     result.notification = await notifyRoles({
       event: `production_replenishment_prepared:${created.insertId}`,
       roles: ['alistador'],
       text: [
-        '*Reposicion de materiales autorizada*',
+        '*Reposición de materiales preparada*',
         '',
-        `Reposicion: ${code}`,
-        `Orden: OP ID ${order.id} | ${order.codigo_orden}`,
+        `Orden: *OP ID ${order.id}* | ${order.codigo_orden}`,
+        `Reposición: *REP ID ${created.insertId}* | ${code}`,
         `Producto: ${order.producto_nombre}`,
         `SKU: ${order.producto_sku}`,
-        `Objetivo adicional: ${input.units} unidad(es) conformes`,
+        input.items
+          ? `Alcance: ${requirements.length} SKU específico(s).`
+          : `Objetivo: material para ${input.units} unidad(es) adicional(es)`,
         `Motivo: ${input.reason}`,
         '',
         '*Alistamiento adicional FEFO*',
@@ -260,7 +331,8 @@ async function prepareProductionReplenishment({ orderId, quantity, reason, fullB
           '',
         ]),
         '*Siguiente paso*',
-        `Cuando esten listos, confirma la reposicion ${code}.`,
+        `Cuando estén listos, responde: confirmo la reposición de OP ID ${order.id}.`,
+        'La preparación solo reservó materiales; todavía no los descontó.',
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;
@@ -295,8 +367,11 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
       await conn.commit();
       return {
         already_confirmed: true,
+        replenishment_id: replenishment.id,
         replenishment_code: replenishment.codigo,
+        order_id: replenishment.orden_produccion_id,
         order_code: replenishment.codigo_orden,
+        mode: Number(replenishment.cantidad_objetivo) === 0 ? 'SKU' : 'BOM_COMPLETO',
         consumed: [],
       };
     }
@@ -386,8 +461,10 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
       already_confirmed: false,
       replenishment_id: replenishment.id,
       replenishment_code: replenishment.codigo,
+      order_id: replenishment.orden_produccion_id,
       order_code: replenishment.codigo_orden,
       target_quantity: Number(replenishment.cantidad_objetivo),
+      mode: Number(replenishment.cantidad_objetivo) === 0 ? 'SKU' : 'BOM_COMPLETO',
       consumed,
     };
     result.notification = await notifyRoles({
@@ -400,7 +477,9 @@ async function confirmProductionReplenishment({ replenishmentId, orderId, userId
         '',
         `Reposicion: ${replenishment.codigo}`,
         `Orden: OP ID ${replenishment.orden_produccion_id} | ${replenishment.codigo_orden}`,
-        `Objetivo adicional: ${Number(replenishment.cantidad_objetivo)} unidad(es) conformes.`,
+        Number(replenishment.cantidad_objetivo) === 0
+          ? `Alcance: ${new Set(consumed.map(item => item.sku)).size} SKU específico(s).`
+          : `Objetivo adicional: ${Number(replenishment.cantidad_objetivo)} unidad(es) conformes.`,
         `Confirmo: ${actors[0]?.nombre || 'Usuario WMS'}.`,
         '',
         '*Material adicional entregado*',

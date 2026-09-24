@@ -8,7 +8,10 @@ const targets = [
   ['Voz', '79ce1f41-00f7-45ba-a3f3-8f042aebe0a4', 'bca07485-2ad1-449c-aa38-3b851b57f79c'],
 ];
 
-const source = await readFile(resolve('.env'), 'utf8');
+const source = await readFile(resolve('.env'), 'utf8').catch(error => {
+  if (error.code === 'ENOENT') return '';
+  throw error;
+});
 const key = process.env.BUILDERBOT_MANAGER_API_KEY
   || process.env.BUILDERBOT_UO_STAGING_API_KEY
   || source.match(/^\s*(?:BUILDERBOT_MANAGER_API_KEY|BUILDERBOT_UO_STAGING_API_KEY)\s*=\s*(.+?)\s*$/m)?.[1]?.replace(/^['"]|['"]$/g, '');

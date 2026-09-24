@@ -131,6 +131,8 @@ const {
 const { nativePdfEvidence } = require('../../_lib/document-pdf-evidence');
 const { detectDocumentTypeMarkers } = require('../../_lib/document-type-markers');
 const { reconcileCustomerOrderId, reconcileCustomerOrderItemId } = require('../../_lib/customer-order-reference');
+const { reconcileProductionOrderId } = require('../../_lib/production-order-reference');
+const { guideProductionReplenishment } = require('../../_lib/production-replenishment-guide');
 const { listCustomerOrders } = require('../customer-orders');
 const {
   listAvailablePurchaseOrderReceptions,
@@ -492,8 +494,20 @@ function formatBogotaDateTime(value) {
   });
 }
 
-function normalizeOperationalParams(action, params) {
+function normalizeOperationalParams(action, params, rawText = '') {
   const next = { ...(params || {}) };
+  if ([
+    'REPORTE_MERMA',
+    'PREPARAR_REPOSICION_PRODUCCION',
+    'GUIAR_REPOSICION_PRODUCCION',
+    'CONFIRMAR_REPOSICION_PRODUCCION',
+    'CANCELAR_REPOSICION_PRODUCCION',
+    'CERRAR_ORDEN_PRODUCCION',
+    'AJUSTAR_MATERIALES_PRODUCCION',
+    'CONFIRMAR_MATERIALES_PRODUCCION',
+  ].includes(action)) {
+    next.id_orden = reconcileProductionOrderId(next, rawText);
+  }
   if (action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION') {
     return normalizeProductionCloseParams(next);
   }
@@ -1548,7 +1562,7 @@ module.exports = async (req, res) => {
 
     const bodegaId = await getDefaultBodega(db);
 
-    params = normalizeOperationalParams(action, params);
+    params = normalizeOperationalParams(action, params, rawText);
 
     const cierreDetectado = parseProductionCloseInput(rawText);
     if (cierreDetectado && (action === 'UNKNOWN' || action === 'MODO_CHARLA' || action === 'CERRAR_ORDEN_PRODUCCION' || action === 'SOLICITAR_CIERRE_PRODUCCION')) {
@@ -1562,7 +1576,7 @@ module.exports = async (req, res) => {
         motivo_merma: firstDefined(params.motivo_merma, cierreDetectado.params.motivo_merma),
         ubicacion: firstDefined(params.ubicacion, cierreDetectado.params.ubicacion),
         fecha_venc: firstDefined(params.fecha_venc, cierreDetectado.params.fecha_venc),
-      });
+      }, rawText);
     }
 
     if (action === 'CONSULTAR_TRAZABILIDAD_LOTE' && hasDispatchIntent(rawText)) {
@@ -2218,6 +2232,7 @@ module.exports = async (req, res) => {
       case 'REPORTE_MERMA': {
         const inferred = parseWasteReferences(rawText);
         let wasteParams = { ...inferred, ...params };
+        wasteParams.id_orden = reconcileProductionOrderId(wasteParams, rawText);
         if (params.confirmar_nueva_merma === true && params.id_merma_existente) {
           const existingWasteId = String(params.id_merma_existente).trim();
           const [existingWasteRows] = await db.execute(
@@ -2253,23 +2268,25 @@ module.exports = async (req, res) => {
         );
         mensaje = result.requires_confirmation
           ? [
-              `Ya existe una merma igual registrada como ${result.numero}. No se modifico inventario.`,
-              `Si es una perdida nueva, responde: confirma una nueva merma adicional como ${result.numero}.`,
+              `Ya existe una merma igual registrada como *${result.numero}*. No se modificó inventario.`,
+              `Si es una pérdida nueva, responde: confirma una nueva merma adicional como ${result.numero}.`,
             ].join('\n')
           : result.already_completed
-          ? `La merma ${result.numero} ya estaba registrada. No se modifico inventario.`
+          ? `La merma *${result.numero}* ya estaba registrada. No se modificó inventario.`
           : [
-              `Merma ${result.numero} registrada.`,
-              `${result.generated_reference ? 'Referencia generada por WMS' : 'Referencia'}: ${result.referencia_externa}`,
-              `Producto: ${result.sku}`,
+              result.codigo_orden ? '*Merma de proceso registrada*' : '*Merma de bodega registrada*',
+              '',
+              `Merma: *${result.numero}*`,
+              result.codigo_orden ? `Orden: *OP ID ${result.order_id}* | ${result.codigo_orden}` : '',
+              `Producto: ${result.producto} (${result.sku})`,
               `Cantidad: ${result.cantidad}`,
               `Motivo: ${result.motivo}`,
-              result.codigo_orden ? `Orden: ${result.codigo_orden}` : '',
+              `${result.generated_reference ? 'Referencia generada por WMS' : 'Referencia'}: ${result.referencia_externa}`,
               result.lote ? `Lote: ${result.lote}` : '',
-              result.ubicacion ? `Ubicacion: ${result.ubicacion}` : '',
+              result.ubicacion ? `Ubicación: ${result.ubicacion}` : '',
               result.balance_disponible != null
-                ? `Disponible en bodega despues de la merma: ${result.balance_disponible}`
-                : 'La merma de proceso quedo registrada para la conciliacion de la orden.',
+                ? `Disponible en bodega después de la merma: ${result.balance_disponible}`
+                : 'Se registró para conciliar la OP; este reporte no descontó material adicional de bodega.',
             ].filter(Boolean).join('\n');
         break;
       }
@@ -3179,13 +3196,15 @@ module.exports = async (req, res) => {
           userId: user.id,
         });
         mensaje = replenishment.already_prepared
-          ? `La reposicion ${replenishment.replenishment_code} ya estaba preparada. No se duplicaron reservas.`
+          ? `La reposición *REP ID ${replenishment.replenishment_id}* de *OP ID ${replenishment.order_id}* ya estaba preparada. No se duplicaron reservas.`
           : [
-              '*Reposicion de materiales preparada*',
+              '*Reposición de materiales preparada*',
               '',
-              `Reposicion: ${replenishment.replenishment_code}`,
-              `Orden: ${replenishment.order_code}`,
-              `Objetivo adicional: ${replenishment.target_quantity} unidad(es) conformes.`,
+              `Orden: *OP ID ${replenishment.order_id}* | ${replenishment.order_code}`,
+              `Reposición: *REP ID ${replenishment.replenishment_id}* | ${replenishment.replenishment_code}`,
+              replenishment.mode === 'SKU'
+                ? `Alcance: ${new Set(replenishment.picking.map(item => item.sku)).size} SKU específico(s).`
+                : `Objetivo: material para ${replenishment.target_quantity} unidad(es) adicional(es).`,
               `Motivo: ${replenishment.reason}`,
               '',
               '*Materiales reservados por FEFO*',
@@ -3193,13 +3212,39 @@ module.exports = async (req, res) => {
                 `${index + 1}. *${item.sku}*`,
                 `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
                 `   Lote: ${item.lote}`,
-                `   Ubicacion: ${item.ubicacion || item.ubicacion_id}`,
+                `   Ubicación: ${item.ubicacion || item.ubicacion_id}`,
                 '',
               ]),
-              '*Estado*',
-              'El alistador fue notificado. La OP sigue EN_PROCESO.',
+              '*Siguiente paso*',
+              `El alistador puede responder: confirmo la reposición de OP ID ${replenishment.order_id}.`,
+              'La preparación solo reservó materiales; todavía no los descontó.',
             ].join('\n');
         responseContext.production_replenishment = replenishment;
+        break;
+      }
+
+      case 'GUIAR_REPOSICION_PRODUCCION': {
+        const guide = await guideProductionReplenishment({
+          userId: user.id,
+          orderId: params.id_orden,
+          params,
+          rawText,
+          confirm: params.confirmacion_final === true,
+        });
+        mensaje = guide.confirmed
+          ? guide.replenishment.already_prepared
+            ? `La reposición *REP ID ${guide.replenishment.replenishment_id}* de *OP ID ${guide.replenishment.order_id}* ya estaba preparada. No se duplicaron reservas.`
+            : [
+              '*Reposición preparada*',
+              '',
+              `Orden: *OP ID ${guide.replenishment.order_id}*`,
+              `Reposición: *REP ID ${guide.replenishment.replenishment_id}*`,
+              `Alcance: ${new Set(guide.replenishment.picking.map(item => item.sku)).size} SKU.`,
+              '',
+              'Los materiales están reservados por FEFO. El alistador fue notificado; todavía no se descontó inventario.',
+            ].join('\n')
+          : guide.message;
+        responseContext.production_replenishment_guide = guide;
         break;
       }
 
@@ -3211,24 +3256,26 @@ module.exports = async (req, res) => {
           userId: user.id,
         });
         mensaje = replenishment.already_confirmed
-          ? `La reposicion ${replenishment.replenishment_code} ya estaba confirmada. No se modifico inventario.`
+          ? `La reposición *REP ID ${replenishment.replenishment_id}* de *OP ID ${replenishment.order_id}* ya estaba confirmada. No se modificó inventario.`
           : [
-              '*Reposicion de materiales confirmada*',
+              '*Reposición de materiales confirmada*',
               '',
-              `Reposicion: ${replenishment.replenishment_code}`,
-              `Orden: ${replenishment.order_code}`,
-              `Objetivo adicional: ${replenishment.target_quantity} unidad(es) conformes.`,
+              `Orden: *OP ID ${replenishment.order_id}* | ${replenishment.order_code}`,
+              `Reposición: *REP ID ${replenishment.replenishment_id}* | ${replenishment.replenishment_code}`,
+              replenishment.mode === 'SKU'
+                ? `Alcance: ${new Set(replenishment.consumed.map(item => item.sku)).size} SKU específico(s).`
+                : `Material adicional para ${replenishment.target_quantity} unidad(es).`,
               '',
               '*Materiales entregados*',
               ...replenishment.consumed.flatMap((item, index) => [
                 `${index + 1}. *${item.sku}* - ${item.producto}`,
                 `   Cantidad: ${item.cantidad} ${item.unidad || ''}`,
                 `   Lote: ${item.lote}`,
-                `   Ubicacion: ${item.ubicacion || 'N/A'}`,
+                `   Ubicación: ${item.ubicacion || 'N/A'}`,
                 '',
               ]),
               '*Estado*',
-              'La OP permanece EN_PROCESO hasta registrar el resultado final.',
+              'La OP sigue EN_PROCESO. El material ya fue descontado; falta registrar el resultado final.',
             ].join('\n');
         responseContext.production_replenishment = replenishment;
         break;

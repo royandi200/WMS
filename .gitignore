@@ -20,6 +20,7 @@ output/backups/product-operational-settings-*.json
 
 # Testing
 coverage/
+.tmp/
 
 # OS files
 .DS_Store

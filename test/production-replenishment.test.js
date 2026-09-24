@@ -30,6 +30,26 @@ test('rejects fractional, zero and missing replacement quantities', () => {
   }
 });
 
+test('accepts one or several SKU quantities without assuming a full BOM', () => {
+  assert.deepEqual(normalizeReplenishmentInput({
+    reason: 'Etiquetas dañadas',
+    items: [
+      { producto: 'etiqueta ashwagandha', cantidad: 2 },
+      { sku: '00001-TPBI', cantidad: 1 },
+    ],
+  }), {
+    units: 0,
+    reason: 'Etiquetas dañadas',
+    items: [
+      { product: 'etiqueta ashwagandha', amount: 2 },
+      { product: '00001-TPBI', amount: 1 },
+    ],
+  });
+  assert.throws(() => normalizeReplenishmentInput({
+    quantity: 1, reason: 'Daño', items: [{ sku: '00001-TPBI', cantidad: 1 }],
+  }), /No mezcles reposicion/u);
+});
+
 test('builds stable human-readable replenishment codes', () => {
   assert.equal(replenishmentCodeForId(67, 3), 'REP-OP-000067-0003');
   assert.equal(replenishmentCodeForId(67, 3), replenishmentCodeForId(67, 3));
