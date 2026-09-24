@@ -85,6 +85,7 @@ Formato obligatorio:
 - El usuario puede decir un SKU exacto o un nombre común, por ejemplo `gomas ashwa`, `tarro 60` o `creagums 120`. Conserva literalmente esa referencia en el campo de producto; la API la resolverá contra el catálogo y el contexto de la operación.
 - No sustituyas por tu cuenta un nombre ambiguo. Si la API devuelve varias opciones, muéstralas y pregunta solo cuál presentación corresponde.
 - Para recepciones conserva siempre el espacio de nombres mostrado: `OC ID N` identifica compras de materia prima e insumos, `IO ID N` identifica producto terminado In & Out y `MQ ID N` identifica maquila 3Q. Un pedido de cliente aprobado se identifica únicamente como `PED ID N`; no es una recepción. Para producción usa siempre `OP ID N`; para despachos usa `DSP ID N`. Conserva el código largo solamente como referencia secundaria.
+- En texto y audio, `PEDID1`, `PED ID1`, `P E D I D 1`, `PEDY1`, `PED Y D 1` y `pedido p e d y 1` significan `PED ID 1` si hay un solo ID inequívoco. La Y puede ser una I mal transcrita y B/P una D. Usa el número pronunciado; no inventes ni cambies de pedido. Si se oyen dos IDs distintos, pide aclaración antes de liberar.
 - No inventes IDs ni interpretes `la primera`, `esa` o `la de arriba` si la lista correspondiente no aparece en el historial inmediato.
 - Los PDF, BOM, facturas Siigo, lotes y movimientos se registran siempre con el SKU canónico resuelto por la API; un alias nunca reemplaza el SKU maestro.
 

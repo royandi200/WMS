@@ -59,16 +59,30 @@ test('a short customer-order answer lists selectable PED IDs instead of asking f
   assert.match(webhook, /\*PED ID \$\{order\.id\}\*/u);
   assert.match(webhook, /produce el PED ID \$\{orders\[0\]\.id\}/u);
   assert.doesNotMatch(webhook, /produce el PED ID 1/u);
+  assert.match(prompt, /`PEDID1`.*`pedido p e d y 1` significan `PED ID 1`/u);
 });
 
 test('PED ID tolerates natural speech but refuses an invented or ambiguous ID', () => {
-  for (const utterance of ['produce PED ID 38', 'libera el pedido 38']) {
+  for (const utterance of [
+    'produce PED ID 38', 'libera el pedido 38', 'produce PEDID38',
+    'produce PED-ID-38', 'libera el pedido-38',
+    'produce PED ID38', 'produce P E D I D 38', 'produce PED Y 38',
+    'produce PEDY38', 'produce PED Y D 38', 'produce PEDIB38',
+    'vamos a producir el pedido p e d y 38',
+  ]) {
     assert.equal(customerOrderIdFromText(utterance), 38);
+    assert.equal(reconcileCustomerOrderId({ pedido_cliente_id: 38 }, utterance), 38);
   }
   assert.equal(customerOrderIdFromText('libera pedido uno'), 1);
+  assert.equal(customerOrderIdFromText('Vamos a producir el PEDID1'), 1);
+  assert.equal(customerOrderIdFromText('vamos a producir el pedido p e d y 1'), 1);
   assert.equal(customerOrderIdFromText('produce 38 unidades'), null);
+  assert.equal(customerOrderIdFromText('PEDID38-OTRO'), null);
+  assert.equal(customerOrderIdFromText('OC-CLIENTE-R6-260923-001'), null);
+  assert.equal(customerOrderIdFromText('produce PEDID38 o PEDID39'), null);
   assert.equal(reconcileCustomerOrderId({ pedido_cliente_id: 38 }, 'produce PED ID 38'), 38);
   assert.throws(() => reconcileCustomerOrderId({ pedido_cliente_id: 38 }, 'produce pedido 39'), /no coincide/u);
+  assert.throws(() => reconcileCustomerOrderId({ pedido_cliente_id: 39 }, 'produce PEDID38'), /no coincide/u);
   assert.throws(() => reconcileCustomerOrderId({ pedido_cliente_id: 38 }, 'produce 38 unidades'), /no coincide/u);
   assert.equal(reconcileCustomerOrderItemId({ pedido_cliente_item_id: 12 }, 'PED ID 38, Item ID 12'), 12);
   assert.throws(() => reconcileCustomerOrderItemId({ pedido_cliente_item_id: 12 }, 'PED ID 38, Item ID 13'), /no coincide/u);

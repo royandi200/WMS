@@ -5,9 +5,16 @@ const WORD_NUMBERS = Object.freeze({
 
 function customerOrderIdFromText(value) {
   const text = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/gu, '')
-    .toUpperCase().replace(/[^A-Z0-9]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  const matches = [...text.matchAll(/\b(?:PED(?:IDO)?|O\s*C(?:\s+DE)?\s+CLIENTE)(?:\s+DE\s+CLIENTE)?(?:\s+(?:ID|NUMERO|NRO))?\s+(\d+|UNO|UNA|DOS|TRES|CUATRO|CINCO|SEIS|SIETE|OCHO|NUEVE|DIEZ)\b/gu)]
-    .map((match) => WORD_NUMBERS[match[1]] || Number(match[1]));
+    .toUpperCase().replace(/[^A-Z0-9_-]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+  const number = '(\\d+|UNO|UNA|DOS|TRES|CUATRO|CINCO|SEIS|SIETE|OCHO|NUEVE|DIEZ)';
+  const patterns = [
+    new RegExp(`(?:^|[^A-Z0-9_-])(?:PEDIDO|PED(?:\\s+DE\\s+CLIENTE)?|O\\s*C(?:\\s+DE)?\\s+CLIENTE)(?:[\\s-]+(?:ID|NUMERO|NRO))?[\\s-]+${number}(?![A-Z0-9_-])`, 'gu'),
+    // Audio frecuente: PEDID1, PEDY1, P E D I D 1 o "pedido p e d y 1".
+    // La letra Y puede representar la I; B/P pueden representar la D final.
+    new RegExp(`(?:^|[^A-Z0-9_-])P\\s*E\\s*D[\\s-]*(?:[IY][\\s-]*[DBP]?)?[\\s-]*${number}(?![A-Z0-9_-])`, 'gu'),
+  ];
+  const matches = patterns.flatMap((pattern) => [...text.matchAll(pattern)]
+    .map((match) => WORD_NUMBERS[match[1]] || Number(match[1])));
   const unique = [...new Set(matches)].filter((id) => Number.isSafeInteger(id) && id > 0);
   return unique.length === 1 ? unique[0] : null;
 }
