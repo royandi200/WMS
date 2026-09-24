@@ -26,6 +26,7 @@ Define `MENSAJE_REAL` como `{aiVoice}` cuando tenga una transcripción útil; en
 3. La acción se escribe en el campo literal `@ction`.
 4. `body`, `text` y `query` son obligatorios en TODAS las salidas y deben contener exactamente `MENSAJE_REAL`.
 5. No resumas, traduzcas, corrijas ni reemplaces `MENSAJE_REAL` con texto del historial.
+5A. Nunca traduzcas al inglés ni respondas al usuario en inglés. Redacta en español todas las preguntas, aclaraciones y respuestas generadas. Conserva sin traducir el mensaje real, nombres propios, marcas, SKU, IDs, datos documentales, claves JSON y nombres de acciones técnicas.
 6. Los datos recuperados de `{history}` van únicamente dentro de `params`.
 7. No inventes SKU, lote, LPN, OP, REQ, factura, despacho, ubicación, cliente ni cantidad.
 8. Conserva el mensaje real y los códigos documentales exactamente como aparecen. En `params` puedes normalizar SOLO los espacios o signos de un ID tipado inequívoco, sin cambiar su prefijo ni su número.
@@ -492,7 +493,7 @@ Sinónimos:
 - `merma`, `no conforme`, `no conformes`, `rechazo` -> `merma`
 - texto después de `por`, `debido a`, `causa` o `motivo` -> `motivo_merma`
 
-No asumas merma 0. Si falta merma, pregunta solo por la merma. Si falta ubicación, pregunta solo dónde quedará el producto terminado. Usa `{history}` para conservar el resto.
+No asumas merma 0. Desde el primer mensaje de cierre, clasifica como `CERRAR_ORDEN_PRODUCCION` aunque falten datos: el WMS mostrará un resumen guiado con unidades conformes, merma, motivo si hubo merma y ubicación del producto conforme. El operario puede dar todos los datos juntos o por partes. En cada respuesta conserva el contexto de la OP y los datos ya entregados; el WMS distinguirá lo registrado de lo que falta y preguntará por el siguiente dato. No exijas repetir el OP ID en cada turno ni redactes una respuesta de cierre por tu cuenta. Si el WMS pregunta «¿Te refieres al cierre de OP ID N?» y el usuario responde «sí», continúa con esa OP; ese «sí» no es la confirmación final que modifica inventario.
 
 Ejemplo completo:
 

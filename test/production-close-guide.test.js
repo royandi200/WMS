@@ -38,7 +38,8 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   assert.equal(first.params, undefined);
 
   const second = await advanceCloseGuide({ ...base, rawText: '2 conformes' });
-  assert.match(second.message, /Conformes: 2 und/u);
+  assert.match(second.message, /Unidades conformes: 2 und/u);
+  assert.match(second.message, /Falta informar:.*merma, ubicación del producto conforme/u);
   assert.match(second.message, /0 merma/u);
 
   const third = await advanceCloseGuide({ ...base, rawText: 'cero merma' });
@@ -60,8 +61,11 @@ test('el audio sin cantidades no puede convertirse en cierre por los parámetros
     rawText: 'Cerramos producción OPIV 97',
     params: { id_orden: 97, cantidad_real: 2, merma: 0, ubicacion: 'C2' } });
   assert.equal(result.params, undefined);
-  assert.match(result.message, /Conformes: pendiente/u);
+  assert.match(result.message, /Unidades conformes: pendiente/u);
   assert.match(result.message, /Merma de producto terminado: pendiente/u);
+  assert.match(result.message, /Motivo de la merma: se requiere si hubo merma/u);
+  assert.match(result.message, /Ubicación del producto conforme: se requiere si hubo conformes/u);
+  assert.match(result.message, /Puedes dar todos los datos juntos o por partes/u);
 });
 
 test('conserva el OP ID propuesto ante una transcripción OCID y acepta sí sin repetir el prefijo', async () => {
@@ -102,8 +106,10 @@ test('una unidad conforme y una merma se capturan juntas sin inferir cierre', as
   await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
   const result = await advanceCloseGuide({ ...base,
     rawText: 'quedó una unidad conforme y una merma por destrucción' });
-  assert.match(result.message, /Conformes: 1 und/u);
+  assert.match(result.message, /Unidades conformes: 1 und/u);
   assert.match(result.message, /Merma de producto terminado: 1 und/u);
+  assert.match(result.message, /Motivo de la merma: destruccion/u);
+  assert.match(result.message, /Falta informar:.*ubicación del producto conforme/u);
   assert.match(result.message, /Sugerida: \*C2\*/u);
   assert.equal(result.params, undefined);
 });

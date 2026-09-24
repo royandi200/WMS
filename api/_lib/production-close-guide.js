@@ -162,12 +162,22 @@ function guideSummary(order, draft, locationHint) {
     `Orden: *OP ID ${order.id}* | ${order.codigo_orden}`,
     `Producto: ${order.producto} (${order.sku})`,
     `Cantidad planeada: ${Number(order.cantidad_planeada)} und`,
-    `Conformes: ${draft.conforming == null ? 'pendiente' : `${draft.conforming} und`}`,
-    `Merma de producto terminado: ${draft.waste == null ? 'pendiente' : `${draft.waste} und`}`];
-  if (draft.waste > 0) lines.push(`Causa: ${draft.reason || 'pendiente'}`);
-  if (draft.conforming > 0) lines.push(`Ubicación PT: ${draft.location || 'pendiente'}`);
+    '', '*Datos del cierre*',
+    `• Unidades conformes: ${draft.conforming == null ? 'pendiente' : `${draft.conforming} und`}`,
+    `• Merma de producto terminado: ${draft.waste == null ? 'pendiente (indica 0 si no hubo)' : `${draft.waste} und`}`,
+    `• Motivo de la merma: ${draft.waste == null ? 'se requiere si hubo merma' : draft.waste === 0 ? 'no aplica' : draft.reason || 'pendiente'}`,
+    `• Ubicación del producto conforme: ${draft.conforming == null ? 'se requiere si hubo conformes' : draft.conforming === 0 ? 'no aplica' : draft.location || 'pendiente'}`];
+  const missing = [];
+  if (draft.conforming == null) missing.push('unidades conformes');
+  if (draft.waste == null) missing.push('merma');
+  if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
+  if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto conforme');
+  if (missing.length) lines.push('', `*Falta informar:* ${missing.join(', ')}.`);
   lines.push('');
-  if (draft.conforming == null) lines.push('¿Cuántas unidades conformes salieron? Puedes decir «2 conformes».');
+  if (draft.conforming == null) {
+    lines.push('¿Cuántas unidades conformes salieron? Puedes dar todos los datos juntos o por partes.');
+    lines.push('Ejemplo: «1 conforme, 1 merma por ruptura, ubicación C2». Ajusta los datos a lo ocurrido.');
+  }
   else if (draft.waste == null) lines.push('¿Cuántas unidades terminadas fueron merma? Di «0 merma» si no hubo.');
   else if (draft.conforming === 0 && draft.waste === 0) lines.push('Ambas cantidades son cero. Corrige conformes o merma para poder cerrar.');
   else if (draft.waste > 0 && !draft.reason) lines.push('¿Cuál fue la causa de la merma de producto terminado?');
