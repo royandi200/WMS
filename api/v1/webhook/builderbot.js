@@ -1568,10 +1568,10 @@ module.exports = async (req, res) => {
       params = { avance: {} };
     }
 
-    if (['UNKNOWN', 'MODO_CHARLA'].includes(action) && rawText) {
+    if (['UNKNOWN', 'MODO_CHARLA', 'REPORTE_MERMA'].includes(action) && rawText) {
       const activeClose = await pendingCloseDraft(db, user.id);
       const explicitWasteReport = /^\s*(?:reporta|registra|registrar)\s+(?:una\s+)?merma\b/iu.test(rawText);
-      if (hasProductionCloseIntent(rawText)
+      if ((['UNKNOWN', 'MODO_CHARLA'].includes(action) && hasProductionCloseIntent(rawText))
         || (isCloseFollowup(rawText, activeClose) && !explicitWasteReport)) {
         action = 'CERRAR_ORDEN_PRODUCCION';
         params = {};
