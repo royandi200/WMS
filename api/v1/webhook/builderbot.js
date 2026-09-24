@@ -1587,7 +1587,8 @@ module.exports = async (req, res) => {
       if ((['UNKNOWN', 'MODO_CHARLA'].includes(action) && hasProductionCloseIntent(rawText))
         || (isCloseFollowup(rawText, activeCloseDraft) && !explicitWasteReport && !standaloneMaterialWaste)) {
         action = 'CERRAR_ORDEN_PRODUCCION';
-        params = {};
+        params = activeCloseDraft?.materialPending?.damageReport
+          ? { avance_materiales: params.avance_materiales } : {};
       }
     }
 

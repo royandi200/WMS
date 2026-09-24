@@ -251,6 +251,30 @@ test('sí y lote de reposición en una sola frase completan el insumo pendiente'
   assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
 });
 
+test('la interpretación de IA ayuda con una frase libre pero no puede inventar el lote', async () => {
+  const pending = { orderId: 100, conforming: null, waste: null, reason: null,
+    location: null, materials: [], materialsAnswered: false, reviewShown: false,
+    materialPending: { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 2, motivo: 'destruccion', lote: null,
+      ubicacion: null, damageReport: true, replacementDecision: null } };
+  const db = fakeDb({ orderId: 100, planned: 5, initialDraft: structuredClone(pending) });
+  const result = await advanceCloseGuide({ db, userId: 103,
+    rawText: 'Claro, las tomé de la partida ACC 260910 TPBI',
+    params: { avance_materiales: { confirmacion_reposicion: true,
+      lote_reposicion: 'ACC-260910-TPBI' } } });
+  assert.equal(result.draft.materialPending, null);
+  assert.equal(result.draft.materials[0].lote, 'ACC-260910-TPBI');
+
+  const unsafeDb = fakeDb({ orderId: 100, planned: 5, initialDraft: structuredClone(pending) });
+  const unsafe = await advanceCloseGuide({ db: unsafeDb, userId: 104,
+    rawText: 'Claro, las tomé de la partida ACC 260910 TPBI',
+    params: { avance_materiales: { confirmacion_reposicion: true,
+      lote_reposicion: 'OTRO-LOTE' } } });
+  assert.equal(unsafe.draft.materialPending.lote, null);
+  assert.equal(unsafe.draft.materialPending.replacementDecision, null);
+  assert.equal(unsafe.draft.materials.length, 0);
+});
+
 test('material repuesto se reúne por partes, exige lote y causa y solo sale en confirmación final', async () => {
   const db = fakeDb();
   const base = { db, userId: 14 };

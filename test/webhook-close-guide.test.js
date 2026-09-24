@@ -131,3 +131,20 @@ test('WhatsApp conserva el contexto y acepta sí con lote en el mismo mensaje', 
   assert.match(res.body.mensaje, /Insumo repuesto: 2 und/u);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 });
+
+test('la lectura contextual de IA llega al cierre y el WMS valida el lote mencionado', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 97, conforming: null, waste: null,
+    reason: null, location: null, materials: [], materialsAnswered: false,
+    reviewShown: false, candidateOrderId: null,
+    materialPending: { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 2, motivo: 'destruccion', lote: null,
+      ubicacion: null, damageReport: true, replacementDecision: null } });
+  const res = await invoke('MODO_CHARLA', 'Claro, las tomé de la partida ACC 260910 TPBI', {
+    avance_materiales: { confirmacion_reposicion: true, lote_reposicion: 'ACC-260910-TPBI' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.parse(closeDraft).materials[0].lote, 'ACC-260910-TPBI');
+  assert.match(res.body.mensaje, /Insumo repuesto: 2 und/u);
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});

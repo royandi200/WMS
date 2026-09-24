@@ -164,6 +164,13 @@ function materialFollowup(text) {
   return { lote: lot, motivo: cause };
 }
 
+function groundedLotHint(text, value) {
+  const lot = String(value || '').trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/u.test(lot)) return null;
+  const compact = value => normalize(value).replace(/[^a-z0-9]/gu, '');
+  return compact(text).includes(compact(lot)) ? lot : null;
+}
+
 async function orderMaterials(db, orderId) {
   const [rows] = await db.execute(
     `SELECT pm.producto_id, pm.unidad, p.siigo_code AS sku, p.nombre
@@ -281,6 +288,9 @@ async function applyMaterialReport(db, draft, order, text, params) {
   if (draft.materialPending?.damageReport) {
     const pending = draft.materialPending;
     const answer = normalize(text);
+    const aiAdvance = params.avance_materiales && typeof params.avance_materiales === 'object'
+      ? params.avance_materiales : {};
+    const aiLot = groundedLotHint(text, aiAdvance.lote_reposicion);
     if (pending.cantidad == null) {
       const amount = quantity(answer) ?? quantity(new RegExp(`^${NUMBER}\\b`, 'u').exec(answer)?.[1]);
       if (amount != null) {
@@ -299,14 +309,15 @@ async function applyMaterialReport(db, draft, order, text, params) {
       const affirmative = (/^si\b/u.test(answer)
         || /\b(?:repuse|reponi|repusimos|saque|sacamos|fueron\s+sacad[oa]s?)\b/u.test(answer))
         && !/\b(?:no|sin)\b/u.test(answer);
-      if (affirmative) {
+      if (affirmative || (aiAdvance.confirmacion_reposicion === true && aiLot
+        && !/\b(?:no|sin)\b/u.test(answer))) {
         pending.replacementDecision = true;
       } else {
         return;
       }
     }
     const followup = materialFollowup(text);
-    if (followup.lote) pending.lote = followup.lote;
+    if (followup.lote || aiLot) pending.lote = followup.lote || aiLot;
     if (pending.cantidad == null) pending.cantidad = quantity(text);
     if (pending.motivo == null && followup.motivo) pending.motivo = followup.motivo;
     if (pending.sku && pending.cantidad != null && pending.lote && pending.motivo) {
