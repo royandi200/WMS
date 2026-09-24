@@ -111,7 +111,10 @@ const {
   prepareProductionReplenishment,
 } = require('../../_lib/production-replenishment');
 const { closeProductionOrder } = require('../../_lib/production-close');
+const { advanceCloseGuide, closeFields, closeOrderReference,
+  finishDraft: finishCloseDraft, isCloseFollowup, pendingCloseDraft } = require('../../_lib/production-close-guide');
 const {
+  hasProductionCloseIntent,
   normalizeProductionCloseParams,
   parseProductionCloseFromText: parseProductionCloseInput,
 } = require('../../_lib/production-close-input');
@@ -1513,7 +1516,7 @@ module.exports = async (req, res) => {
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'UNREGISTERED_PHONE', mensaje: msg }, status: 'REJECTED' });
       // Retornar 200 para que BuilderBot Cloud pueda renderizar el mensaje en WhatsApp.
       // El 4xx impide que BBC lea el body y muestra el placeholder {mensaje} literal.
-      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
+      return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
     const recoveredDocument = await recoverRejectedDocumentAction({
@@ -1566,6 +1569,16 @@ module.exports = async (req, res) => {
     }
 
     if (['UNKNOWN', 'MODO_CHARLA'].includes(action) && rawText) {
+      const activeClose = await pendingCloseDraft(db, user.id);
+      const explicitWasteReport = /^\s*(?:reporta|registra|registrar)\s+(?:una\s+)?merma\b/iu.test(rawText);
+      if (hasProductionCloseIntent(rawText)
+        || (isCloseFollowup(rawText, activeClose) && !explicitWasteReport)) {
+        action = 'CERRAR_ORDEN_PRODUCCION';
+        params = {};
+      }
+    }
+
+    if (['UNKNOWN', 'MODO_CHARLA'].includes(action) && rawText) {
       const activeWaste = parseCauseReply(rawText)
         ? await pendingWasteDraft(db, user.id) : null;
       if (parseWasteMessage(rawText) || activeWaste) {
@@ -1606,7 +1619,7 @@ module.exports = async (req, res) => {
     if (retiredMessage) {
       const msg = `⚠️ ${retiredMessage}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RETIRED_FLOW' }, status: 'REJECTED' });
-      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RETIRED_FLOW' });
+      return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RETIRED_FLOW' });
     }
 
     const rolRaw = user.rol_nombre || '';
@@ -1615,7 +1628,7 @@ module.exports = async (req, res) => {
     if (requiredCapability && !hasCapability(roles, requiredCapability)) {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTus roles: ${roles.join(', ') || 'sin rol'}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
-      return finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw, roles });
+      return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw, roles });
     }
 
     let mensaje = '';
@@ -1645,10 +1658,36 @@ module.exports = async (req, res) => {
           context: responseContext };
         await saveLog(db, { from, action, priority, payload: rawBody,
           response: body, status: 'PROCESSED' });
-        return finalizeHandledResponse(body);
+        return await finalizeHandledResponse(body);
       }
       params = guided.params;
       guidedWasteDraft = guided.draft;
+    }
+
+    let guidedCloseDraft = null;
+    if (action === 'CERRAR_ORDEN_PRODUCCION') {
+      const closeText = currentText(rawBody, info);
+      const spokenClose = closeFields(closeText);
+      const activeClose = await pendingCloseDraft(db, user.id);
+      const needsGuide = activeClose || !closeOrderReference(closeText, params)
+        || spokenClose.conforming == null || spokenClose.waste == null
+        || (spokenClose.waste > 0 && !spokenClose.reason)
+        || (spokenClose.conforming > 0 && !spokenClose.location)
+        || params.cantidad_real == null || params.merma == null
+        || (Number(params.cantidad_real) > 0 && !params.ubicacion);
+      if (needsGuide) {
+        const guided = await advanceCloseGuide({ db, userId: user.id,
+          rawText: closeText, params });
+        if (guided.message) {
+          const body = { ok: true, message: guided.message, mensaje: guided.message,
+            context: responseContext };
+          await saveLog(db, { from, action, priority, payload: rawBody,
+            response: body, status: 'PROCESSED' });
+          return await finalizeHandledResponse(body);
+        }
+        params = guided.params;
+        guidedCloseDraft = guided.draft;
+      }
     }
 
     switch (action) {
@@ -2314,7 +2353,9 @@ module.exports = async (req, res) => {
           user.id,
           { allowGeneratedReference: true }
         );
-        if (guidedWasteDraft) await finishWasteDraft(db, user.id, guidedWasteDraft);
+        if (guidedWasteDraft) await finishWasteDraft(db, user.id, guidedWasteDraft).catch(error => {
+          console.error('[webhook] La merma se registró, pero no se pudo cerrar su borrador:', error.message);
+        });
         mensaje = result.requires_confirmation
           ? [
               `Ya existe una merma igual registrada como *${result.numero}*. No se modificó inventario.`,
@@ -3099,6 +3140,9 @@ module.exports = async (req, res) => {
           locationId: params.ubicacion_id,
           locationCode: params.ubicacion,
           userId: user.id,
+        });
+        if (guidedCloseDraft) await finishCloseDraft(db, user.id, guidedCloseDraft).catch(error => {
+          console.error('[webhook] La OP se cerró, pero no se pudo cerrar su borrador:', error.message);
         });
         const closedWhen = closure.closed_at
           ? new Date(closure.closed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })

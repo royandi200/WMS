@@ -10,7 +10,8 @@ function firstDefined(...values) {
 
 function hasProductionCloseIntent(text) {
   return /\b(cerr|cierre|cerramos|finaliz|termin)\w*\b/i.test(String(text || ''))
-    && /\b(op|orden|producci[oó]n|produccion)\b/i.test(String(text || ''));
+    && (/\b(op|orden|producci[oó]n|produccion)\b/i.test(String(text || ''))
+      || /\bop(?:id|iv|i)?\s*\d+\b/i.test(String(text || '')));
 }
 
 function normalizeExpiryDate(value) {

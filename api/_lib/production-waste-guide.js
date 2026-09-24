@@ -109,7 +109,7 @@ async function saveDraft(db, userId, draft) {
 async function finishDraft(db, userId, draft) {
   await db.execute(
     `UPDATE produccion_merma_borradores SET estado = 'CONFIRMADO', actualizado_en = NOW()
-      WHERE usuario_id = ? AND estado = 'PENDIENTE' AND payload_json = ?`,
+      WHERE usuario_id = ? AND estado = 'PENDIENTE' AND JSON_CONTAINS(payload_json, ?)`,
     [userId, JSON.stringify(draft)]
   );
 }
