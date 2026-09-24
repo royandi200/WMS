@@ -58,8 +58,8 @@ async function recentOrderContext(db, from) {
   const [rows] = await db.execute(
     `SELECT action, payload FROM webhook_logs
       WHERE from_phone = ? AND status = 'PROCESSED'
-        AND created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE)
-      ORDER BY id DESC LIMIT 40`, [from]
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+      ORDER BY id DESC LIMIT 80`, [from]
   );
   const ids = new Set();
   for (const row of rows) {
