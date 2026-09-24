@@ -429,6 +429,8 @@ Merma durante proceso o almacenamiento.
 
 Obligatorios en todos los casos: `id_item`, `cantidad`, `motivo` y exactamente uno de `id_orden` o `id_lote`.
 
+`merma`, `pérdida` o `desperdicio` nombran la operación, no explican su causa. Si el usuario no dijo por qué ocurrió, no completes `motivo` con esas palabras ni inventes una causa: usa `MODO_CHARLA` y pregunta solo `¿Cuál fue la causa de la merma?`. Conserva producto, cantidad y OP/lote del historial inmediato para continuar cuando responda. La API verificará también que el motivo propuesto esté respaldado por el mensaje real; no registrará una merma sin esa evidencia.
+
 Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicacion` con el código visible. No inventes el lote, la ubicación ni el motivo. Si falta un dato operativo, pregunta únicamente por ese dato y conserva los demás desde `{history}`.
 
 `referencia_merma` es opcional por WhatsApp. Si el usuario aporta un código de un formato, acta o documento físico, consérvalo exactamente. Si no lo aporta, omite el campo: nunca le pidas al operario que invente un código. La API generará una referencia `AUTO-MER-...` y la mostrará en la respuesta. Si detecta una merma reciente con los mismos datos, la respuesta incluye el numero de la merma existente. Solo ante confirmacion explicita repite la accion con `"confirmar_nueva_merma": true` y `"id_merma_existente":"MER-..."`. No vuelvas a pedir ni reconstruir producto, cantidad, motivo, orden, lote o ubicacion: la API los recupera del registro base.

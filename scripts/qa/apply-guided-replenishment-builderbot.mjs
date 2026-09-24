@@ -4,9 +4,13 @@ import { resolve } from 'node:path';
 
 const projectId = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
 const copyFix = process.argv.includes('--copy-fix');
-const backupPath = resolve('.tmp', copyFix
-  ? 'builderbot-pre-guided-replenishment-copy-fix-20260923.json'
-  : 'builderbot-pre-guided-replenishment-20260923.json');
+const wasteReasonFix = process.argv.includes('--waste-reason-fix');
+if (copyFix && wasteReasonFix) throw new Error('Select only one prompt patch');
+const backupPath = resolve('.tmp', wasteReasonFix
+  ? 'builderbot-pre-waste-reason-fix-20260923.json'
+  : copyFix
+    ? 'builderbot-pre-guided-replenishment-copy-fix-20260923.json'
+    : 'builderbot-pre-guided-replenishment-20260923.json');
 const checkpoint = JSON.parse(await readFile(backupPath, 'utf8'));
 const local = await readFile(new URL('../../docs/Prompt WMS.txt', import.meta.url), 'utf8');
 const apply = process.argv.includes('--apply');
@@ -38,6 +42,15 @@ const sha256 = value => createHash('sha256').update(value).digest('hex');
 
 function patchedPrompt(original) {
   const newline = original.includes('\r\n') ? '\r\n' : '\n';
+  if (wasteReasonFix) {
+    const anchor = original.split(/\r?\n/u)
+      .find(line => line.startsWith('Obligatorios en todos los casos: `id_item`'));
+    const localLines = local.split(/\r?\n/u);
+    const paragraph = localLines.find(line => line.startsWith('`merma`, `pérdida` o `desperdicio`'));
+    if (!anchor || !paragraph || original.split(anchor).length !== 2
+      || original.includes(paragraph)) throw new Error('Waste reason anchor diverged');
+    return original.replace(anchor, `${anchor}${newline}${newline}${paragraph}`);
+  }
   if (original.split(sectionEnd).length !== 2) throw new Error('Replenishment anchor diverged');
   if (copyFix) {
     if (original.split(sectionStart).length !== 2) throw new Error('Guided section anchor diverged');
@@ -88,7 +101,7 @@ const changes = checkpoint.prompts.map(saved => {
 });
 
 if (!apply) {
-  process.stdout.write(`${JSON.stringify({ mode: restore ? 'restore-dry-run' : 'dry-run', copyFix,
+  process.stdout.write(`${JSON.stringify({ mode: restore ? 'restore-dry-run' : 'dry-run', copyFix, wasteReasonFix,
     projectId, prompts: changes.map(({ saved, before, after }) => ({
       name: saved.name, beforeSha256: sha256(before), afterSha256: sha256(after),
       changed: before !== after,
@@ -180,7 +193,7 @@ for (const change of changes) {
     throw new Error(`Readback mismatch for ${change.saved.name}`);
   }
 }
-process.stdout.write(`${JSON.stringify({ mode: restore ? 'restored' : 'applied', copyFix,
+process.stdout.write(`${JSON.stringify({ mode: restore ? 'restored' : 'applied', copyFix, wasteReasonFix,
   rebootRequested: reboot, prompts: changes.map(({ saved, after }) => ({
     name: saved.name, sha256: sha256(after),
   })) })}\n`);

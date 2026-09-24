@@ -35,11 +35,11 @@ delete process.env.ENABLE_APPROVALS_WORKFLOW;
 
 const handler = require('../api/v1/webhook/builderbot');
 
-async function call({ action, text, params = {}, headers = { 'x-builderbot-secret': 'qa-webhook-secret' }, kw, from = ADMIN.telefono }) {
+async function call({ action, text, outerText, params = {}, headers = { 'x-builderbot-secret': 'qa-webhook-secret' }, kw, from = ADMIN.telefono }) {
   executed.length = 0;
   const info = { '@ction': action, body: text, text, query: text, params };
   if (kw) info.kw = kw;
-  const req = { method: 'POST', headers, body: { from, info } };
+  const req = { method: 'POST', headers, body: { from, info, ...(outerText === undefined ? {} : { body: outerText }) } };
   const res = {
     statusCode: 200, body: null, headers: {},
     setHeader(k, v) { this.headers[k] = v; },
@@ -88,6 +88,17 @@ test('DEP-04 "apruebo" en lenguaje natural tambien queda bloqueado', async () =>
 test('una accion vigente de consulta no se bloquea', async () => {
   const res = await call({ action: 'CONSULTAR_RECEPCIONES_PENDIENTES', text: 'que recepciones hay pendientes' });
   assert.notEqual(res.body?.error, 'RETIRED_FLOW');
+});
+
+test('una merma sin causa expresada no llega a inventario aunque el modelo la invente', async () => {
+  const res = await call({ action: 'REPORTE_MERMA',
+    text: 'Reporta merma de una etiqueta de OP ID 97 por daño de empaque',
+    outerText: 'en la orden OPID 97 reporta merma de una etiqueta',
+    params: { id_orden: 97, id_item: 'etiqueta', cantidad: 1, motivo: 'daño de empaque' },
+  });
+  assert.equal(res.body.ok, false);
+  assert.match(res.body.mensaje, /causa concreta/u);
+  assert.deepEqual(mutations(), []);
 });
 
 test('un numero no registrado se rechaza antes de cualquier operacion', async () => {

@@ -1,6 +1,22 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { assertOperationalIntent, publicOperationalError } = require('../api/_lib/operational-intent-guard');
+const {
+  assertOperationalIntent, assertWasteReasonEvidence, isGenericWasteReason,
+  publicOperationalError,
+} = require('../api/_lib/operational-intent-guard');
+
+test('waste reason must be a concrete cause supported by the user message', () => {
+  const originalAudio = 'en la orden OPID 97 reporta merma de una etiqueta';
+  assert.throws(() => assertWasteReasonEvidence(originalAudio, 'merma'), /causa concreta/u);
+  assert.throws(() => assertWasteReasonEvidence(originalAudio, 'daño de empaque'), /causa concreta/u);
+  assert.throws(() => assertWasteReasonEvidence('reporta una etiqueta por rotura', 'derrame'), /causa concreta/u);
+  assert.equal(assertWasteReasonEvidence(
+    'Reporta merma de una etiqueta de OP ID 97 por daño de empaque', 'daño de empaque'),
+  'daño de empaque');
+  assert.equal(assertWasteReasonEvidence(
+    'La etiqueta se rompió durante la producción', 'rotura'), 'rotura');
+  assert.equal(isGenericWasteReason('pérdida de material en proceso'), true);
+});
 
 test('RI-009: destruction cannot be silently converted to a return, waste or adjustment', () => {
   for (const action of ['GESTION_DEVOLUCION', 'AJUSTAR_MATERIALES_PRODUCCION', 'REPORTE_MERMA']) {

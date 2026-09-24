@@ -82,7 +82,10 @@ const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
-const { assertOperationalIntent, publicOperationalError } = require('../../_lib/operational-intent-guard');
+const {
+  assertOperationalIntent, assertWasteReasonEvidence, isGenericWasteReason,
+  publicOperationalError,
+} = require('../../_lib/operational-intent-guard');
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
@@ -2233,7 +2236,8 @@ module.exports = async (req, res) => {
         const inferred = parseWasteReferences(rawText);
         let wasteParams = { ...inferred, ...params };
         wasteParams.id_orden = reconcileProductionOrderId(wasteParams, rawText);
-        if (params.confirmar_nueva_merma === true && params.id_merma_existente) {
+        const additionalWaste = params.confirmar_nueva_merma === true && params.id_merma_existente;
+        if (additionalWaste) {
           const existingWasteId = String(params.id_merma_existente).trim();
           const [existingWasteRows] = await db.execute(
             `SELECT m.id, m.numero, m.cantidad, m.motivo, m.lote,
@@ -2250,6 +2254,9 @@ module.exports = async (req, res) => {
             throw { status: 409, message: 'No fue posible identificar una unica merma base para el registro adicional' };
           }
           const existing = existingWasteRows[0];
+          if (isGenericWasteReason(existing.motivo)) {
+            throw { status: 409, message: 'La merma base no tiene una causa concreta. Corrige ese registro antes de repetirlo; no se modificó inventario.' };
+          }
           wasteParams = {
             id_item: existing.siigo_code,
             cantidad: Number(existing.cantidad),
@@ -2260,6 +2267,8 @@ module.exports = async (req, res) => {
             confirmar_nueva_merma: true,
             id_merma_existente: existing.id,
           };
+        } else {
+          wasteParams.motivo = assertWasteReasonEvidence(currentText(rawBody, info), wasteParams.motivo);
         }
         const result = await reportWaste(
           wasteParams,
