@@ -62,12 +62,18 @@ function fieldMatch(text, before, after) {
 function closeFields(text) {
   const raw = normalize(text);
   const conformingText = raw.replace(/\bno\s+conformes?\b/gu, '');
-  const conforming = fieldMatch(conformingText,
+  let conforming = fieldMatch(conformingText,
     '(?:conformes?|buenas?|buenos|resultantes?|producidas?)',
     '(?:conformes?|buenas?|buenos|resultantes?|producidas?)');
+  if (conforming == null) {
+    conforming = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?\\s+terminado(?:s)?|unidades?\\s+terminadas?)\\s+conformes?\\b`, 'u'))?.[1]);
+  }
   let waste = fieldMatch(raw,
     '(?:mermas?|no\\s+conformes?|rechazos?|desperdicios?)',
     '(?:mermas?|no\\s+conformes?|rechazos?|desperdicios?)');
+  if (waste == null) {
+    waste = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?\\s+terminado(?:s)?|unidades?\\s+terminadas?)\\s+no\\s+conformes?\\b`, 'u'))?.[1]);
+  }
   if (waste == null && /\b(?:sin|ninguna|no hubo)\s+(?:merma|mermas|rechazos?)\b/u.test(raw)) waste = 0;
   const locationCandidate = [...raw.matchAll(/\b(?:ubicacion\s*[:\-]?|quedan?\s+en|dejar\s+en|ubicar\s+en|en)\s*([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b/gu)]
     .map(match => match[1]).find(candidate => /\d/u.test(candidate));
@@ -92,6 +98,24 @@ function materialLossCandidate(text) {
   const cause = raw.slice(match.index + match[0].length)
     .match(/^\s*(?:por|debido a|causa|motivo)\s+([^.,;]+)/u)?.[1]?.trim() || null;
   return { product, quantity: quantity(match[1]), cause, index: match.index };
+}
+
+function explicitFinishedWaste(text) {
+  const raw = normalize(text);
+  return /\b(?:no\s+conformes?|rechazos?)\b/u.test(raw)
+    || /\b(?:mermas?|perdidas?|desperdicios?)\s+(?:(?:de|del)\s+)?(?:producto(?:s)?\s+terminado(?:s)?|unidades?\s+terminadas?|pt)\b/u.test(raw)
+    || /\b(?:producto(?:s)?\s+terminado(?:s)?|unidades?\s+terminadas?)\s+(?:en\s+)?(?:merma|perdida|no\s+conforme)\b/u.test(raw);
+}
+
+function finishedWasteReply(text) {
+  return /^(?:(?:si|es|fue|eran|era|de|del|la|las|el|los)\s+)*(?:producto(?:s)?\s+terminado(?:s)?|unidades?\s+terminadas?|pt)(?:\s+no\s+conformes?)?[.!]?$/u
+    .test(normalize(text).replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim());
+}
+
+function materialReply(text) {
+  return normalize(text).replace(/[,;]+/gu, ' ').trim()
+    .replace(/^(?:(?:no|solo|fue|fueron|eran|era|es|de|del|la|las|el|los|material(?:es)?|insumo(?:s)?)\s+)+/u, '')
+    .replace(/[.!]+$/u, '').trim();
 }
 
 function ambiguousConformingQuantity(text) {
@@ -196,31 +220,72 @@ async function applyMaterialCorrection(db, draft, order, text) {
   return true;
 }
 
+async function beginMaterialDamage(db, draft, order, damage) {
+  if (draft.materialPending) throw guideError('Termina primero el material pendiente antes de reportar otro daño.');
+  const available = await orderMaterials(db, order.id);
+  const product = await resolveProductReference(db, damage.product, {
+    productIds: available.map(row => row.producto_id),
+    allowContextualPartial: true, allowScopedApproximate: true,
+  });
+  const material = available.find(row => Number(row.producto_id) === Number(product.id));
+  if (!material) throw guideError(`${damage.product} no es un material de OP ID ${order.id}`);
+  draft.materialPending = {
+    sku: material.sku, producto: material.nombre, unidad: material.unidad,
+    cantidad: damage.quantity, motivo: damage.cause, lote: null, ubicacion: null,
+    damageReport: true, replacementDecision: null,
+  };
+  draft.materialsAnswered = false;
+}
+
+async function resolveUnclassifiedWaste(db, draft, order, text) {
+  const candidate = draft.unclassifiedWaste;
+  if (!candidate) return false;
+  if (finishedWasteReply(text) || (explicitFinishedWaste(text) && closeFields(text).waste == null)) {
+    draft.waste = candidate.quantity;
+    draft.reason = closeFields(text).reason || candidate.cause || null;
+    draft.wasteClassified = true;
+    draft.unclassifiedWaste = null;
+    return true;
+  }
+  const term = materialReply(text);
+  if (!term || /\b(?:cerrar|cerramos|cierre|produccion|conformes?)\b/u.test(term)
+    || /^(?:si|no|confirmo|confirmo cierre|por\b.*|lote\b.*|ubicacion\b.*)$/u.test(term)) return false;
+  const amountMatch = new RegExp(`^${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*(?:de\\s+)?(.+)$`, 'u').exec(term);
+  const productTerm = amountMatch?.[2]?.trim() || term;
+  try {
+    await beginMaterialDamage(db, draft, order, {
+      product: productTerm, quantity: amountMatch ? quantity(amountMatch[1]) : null,
+      cause: candidate.cause,
+    });
+  } catch (error) {
+    if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND') return false;
+    throw error;
+  }
+  draft.unclassifiedWaste = null;
+  return true;
+}
+
 async function applyMaterialReport(db, draft, order, text, params) {
   draft.materials ||= [];
   draft.materialPending ||= null;
   if (await applyMaterialCorrection(db, draft, order, text)) return;
   const damage = materialLossCandidate(text);
   if (damage) {
-    if (draft.materialPending) throw guideError('Termina primero el material pendiente antes de reportar otro daño.');
-    const available = await orderMaterials(db, order.id);
-    const product = await resolveProductReference(db, damage.product, {
-      productIds: available.map(row => row.producto_id),
-      allowContextualPartial: true, allowScopedApproximate: true,
-    });
-    const material = available.find(row => Number(row.producto_id) === Number(product.id));
-    if (!material) throw guideError(`${damage.product} no es un material de OP ID ${order.id}`);
-    draft.materialPending = {
-      sku: material.sku, producto: material.nombre, unidad: material.unidad,
-      cantidad: damage.quantity, motivo: damage.cause, lote: null, ubicacion: null,
-      damageReport: true, replacementDecision: null,
-    };
-    draft.materialsAnswered = false;
+    await beginMaterialDamage(db, draft, order, damage);
     return;
   }
   if (draft.materialPending?.damageReport) {
     const pending = draft.materialPending;
     const answer = normalize(text);
+    if (pending.cantidad == null) {
+      const amount = quantity(answer) ?? quantity(new RegExp(`^${NUMBER}\\b`, 'u').exec(answer)?.[1]);
+      if (amount != null) {
+        if (amount <= 0 || (!['g', 'gr', 'gramo', 'gramos'].includes(String(pending.unidad).toLowerCase())
+          && !Number.isInteger(amount))) throw guideError('Indica una cantidad positiva en la unidad del material.');
+        pending.cantidad = amount;
+      }
+      return;
+    }
     if (pending.replacementDecision == null) {
       if (/^(?:no|no\s+(?:las?|los?)\s+repuse|no\s+repuse(?:\s+material)?)\b/u.test(answer)) {
         draft.materialPending = null;
@@ -394,6 +459,7 @@ function isCloseFollowup(text, draft) {
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por|repuse|repusimos|repuesto|lote|materiales?)\b/u.test(raw)) return true;
   if (noReplacements(raw) || replacementsFinished(raw)) return true;
   if (draft.materialPending && raw.length < 120 && !/[?¿]/u.test(raw)) return true;
+  if (draft.unclassifiedWaste && raw.length < 120 && !/[?¿]/u.test(raw)) return true;
   if (draft.conforming != null && draft.waste != null && (draft.conforming === 0 || draft.location)
     && parseMaterialSegments(raw, { allowImplicit: true }).length) return true;
   if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(raw) && /\d/u.test(raw)) return true;
@@ -453,40 +519,50 @@ function guideSummary(order, draft, locationHint) {
     `Cantidad planeada: ${Number(order.cantidad_planeada)} und`,
     '', '*Datos del cierre*',
     `• Unidades conformes: ${draft.conforming == null ? 'pendiente' : `${draft.conforming} und`}`,
-    `• Merma de producto terminado: ${draft.waste == null ? 'pendiente (indica 0 si no hubo)' : `${draft.waste} und`}`,
+    `• Merma de producto terminado: ${draft.waste == null ? draft.unclassifiedWaste ? 'pendiente de aclarar el tipo de merma' : 'pendiente (indica 0 si no hubo)' : `${draft.waste} und`}`,
     `• Motivo de la merma: ${draft.waste == null ? 'se requiere si hubo merma' : draft.waste === 0 ? 'no aplica' : draft.reason || 'pendiente'}`,
     `• Ubicación del producto conforme: ${draft.conforming == null ? 'se requiere si hubo conformes' : draft.conforming === 0 ? 'no aplica' : draft.location || 'pendiente'}`,
     '', '*Materiales repuestos durante la OP*',
     ...(draft.materials || []).map((item, index) =>
       `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`),
     ...((draft.materials || []).length ? [] : ['• Ninguno registrado'])];
+  if (draft.unclassifiedWaste) {
+    lines.push('', `*Merma por clasificar:* ${draft.unclassifiedWaste.quantity} und${draft.unclassifiedWaste.cause ? ` | Causa mencionada: ${draft.unclassifiedWaste.cause}` : ''}. Todavía no se asignó a producto terminado ni a insumos.`);
+  }
   if (draft.materialPending) {
     const item = draft.materialPending;
     lines.push(`• En curso: ${item.producto || 'producto pendiente'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || 'pendiente'} | Causa: ${item.motivo || 'pendiente'}`);
   }
   const missing = [];
+  if (draft.unclassifiedWaste) missing.push('tipo de merma');
   if (draft.conforming == null) missing.push('unidades conformes');
-  if (draft.waste == null) missing.push('merma');
+  if (draft.waste == null && !draft.unclassifiedWaste) missing.push('merma de producto terminado');
   if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
   if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto conforme');
   if (!draft.materialsAnswered || draft.materialPending) missing.push('materiales repuestos (o confirma que no hubo)');
   if (missing.length) lines.push('', `*Falta informar:* ${missing.join(', ')}.`);
   lines.push('');
   if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
-    lines.push(`¿Repusiste ${draft.materialPending.cantidad} ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto}? Responde *sí* o *no*. Si las repusiste, indica de qué lote las sacaste.`);
+    if (draft.materialPending.cantidad == null) {
+      lines.push(`¿Cuántas ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} se dañaron? Antes se mencionó una merma sin identificar; confirma la cantidad real de este insumo.`);
+    } else {
+      lines.push(`¿Repusiste ${draft.materialPending.cantidad} ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto}? Responde *sí* o *no*. Si las repusiste, indica de qué lote las sacaste.`);
+    }
   } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision && !draft.materialPending.lote) {
     lines.push(`¿De qué lote sacaste ${draft.materialPending.cantidad} ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} para reponerlas?`);
   } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision && !draft.materialPending.motivo) {
     lines.push(`¿Cuál fue la causa concreta del daño de ${draft.materialPending.producto}?`);
+  } else if (draft.unclassifiedWaste) {
+    lines.push(`Cuando dijiste *${draft.unclassifiedWaste.quantity} merma*, ¿se trató de *producto terminado* o de un *insumo*? Si fue un insumo, dime su nombre y cantidad real (por ejemplo, «2 tapas»).`);
   } else if (draft.conforming == null) {
     if (draft.conformingClarification != null) {
       lines.push(`Escuché ${draft.conformingClarification} unidades con un nombre de material. ¿Son *${draft.conformingClarification} productos terminados conformes*? Responde «${draft.conformingClarification} conformes» o corrige la cantidad.`);
     } else {
       lines.push('¿Cuántas unidades conformes salieron? Puedes dar todos los datos juntos o por partes.');
-      lines.push('Ejemplo: «1 conforme, 1 merma por ruptura, ubicación C2». Ajusta los datos a lo ocurrido.');
+      lines.push('Ejemplo: «1 producto terminado conforme, 1 producto terminado no conforme por ruptura, ubicación C2». Ajusta los datos a lo ocurrido.');
     }
   }
-  else if (draft.waste == null) lines.push('¿Cuántas unidades terminadas fueron merma? Di «0 merma» si no hubo.');
+  else if (draft.waste == null) lines.push('¿Cuántas unidades de producto terminado fueron no conformes? Di «0 merma de producto terminado» si no hubo.');
   else if (draft.conforming === 0 && draft.waste === 0) lines.push('Ambas cantidades son cero. Corrige conformes o merma para poder cerrar.');
   else if (draft.waste > 0 && !draft.reason) lines.push('¿Cuál fue la causa de la merma de producto terminado?');
   else if (draft.conforming > 0 && !draft.location) {
@@ -550,6 +626,13 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (order.estado !== 'EN_PROCESO') {
     throw guideError(`La OP ID ${order.id} está ${order.estado}. Confirma primero sus materiales; no se cerró.`);
   }
+  // Los borradores previos no guardaban el tipo de merma. Se reclasifican sin
+  // inventario para que una cifra ambigua nunca termine como PT por defecto.
+  if (draft.waste > 0 && draft.wasteClassified !== true) {
+    draft.unclassifiedWaste ||= { quantity: draft.waste, cause: draft.reason || null };
+    draft.waste = null;
+    draft.reason = null;
+  }
   const materialMarker = MATERIAL_START.exec(String(rawText || ''));
   const damageMarker = materialLossCandidate(rawText);
   const closeText = materialMarker ? String(rawText).slice(0, materialMarker.index)
@@ -559,21 +642,39 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if ((!confirmed(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport) {
     await applyMaterialReport(db, draft, order, rawText, params);
   }
+  if (draft.unclassifiedWaste && !damageMarker && !draft.materialPending) {
+    await resolveUnclassifiedWaste(db, draft, order, rawText);
+  }
   if (parsed.conforming != null) {
     draft.conforming = parsed.conforming;
     draft.conformingClarification = null;
   } else if (draft.conforming == null) {
     draft.conformingClarification = ambiguousConformingQuantity(closeText) ?? draft.conformingClarification ?? null;
   }
-  if (parsed.waste != null) draft.waste = parsed.waste;
+  if (parsed.waste === 0) {
+    draft.waste = 0;
+    draft.wasteClassified = true;
+    draft.unclassifiedWaste = null;
+  } else if (parsed.waste > 0 && explicitFinishedWaste(closeText)) {
+    draft.waste = parsed.waste;
+    draft.wasteClassified = true;
+    draft.unclassifiedWaste = null;
+  } else if (parsed.waste > 0) {
+    draft.unclassifiedWaste = { quantity: parsed.waste, cause: parsed.reason || null };
+    draft.waste = null;
+    draft.reason = null;
+  }
   if (draft.waste === 0) draft.reason = null;
   if (draft.conforming === 0) draft.location = null;
   if (parsed.reason && draft.waste > 0) draft.reason = parsed.reason;
   if (parsed.location && !hadPendingMaterial) draft.location = parsed.location;
   const singleQuantity = quantity(rawText);
-  if (singleQuantity != null && parsed.conforming == null && parsed.waste == null && !hadPendingMaterial) {
+  if (singleQuantity != null && parsed.conforming == null && parsed.waste == null
+    && !hadPendingMaterial && !draft.unclassifiedWaste) {
     if (draft.conforming == null) draft.conforming = singleQuantity;
-    else if (draft.waste == null) draft.waste = singleQuantity;
+    else if (draft.waste == null) {
+      draft.unclassifiedWaste = { quantity: singleQuantity, cause: null };
+    }
   }
   if (draft.waste > 0 && !draft.reason && parsed.reason == null && !hadPendingMaterial
     && !damageMarker
@@ -606,7 +707,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const complete = draft.conforming != null && draft.waste != null
     && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
     && (draft.conforming === 0 || !!draft.location)
-    && draft.materialsAnswered && !draft.materialPending;
+    && draft.materialsAnswered && !draft.materialPending && !draft.unclassifiedWaste;
   if (confirmed(rawText) && complete && draft.reviewShown) {
     return { params: { id_orden: draft.orderId, cantidad_real: draft.conforming,
       merma: draft.waste, motivo_merma: draft.reason, ubicacion: draft.location,

@@ -101,3 +101,17 @@ test('un reporte de material dañado continúa el cierre en curso sin registrar 
   assert.ok(!writes.some(entry => /INSERT INTO produccion_merma_borradores/u.test(entry.sql)));
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
 });
+
+test('un borrador antiguo pregunta qué fue la merma y acepta el alias sin repetir OP ID', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 97, conforming: null, waste: 1, reason: null,
+    location: null, materials: [], materialsAnswered: false, materialPending: null,
+    reviewShown: false, candidateOrderId: null });
+  const old = await invoke('CERRAR_ORDEN_PRODUCCION', 'cerrar OP ID 97', { id_orden: 97 });
+  assert.match(old.body.mensaje, /¿se trató de \*producto terminado\* o de un \*insumo\*/u);
+  const alias = await invoke('MODO_CHARLA', 'tapas');
+  assert.equal(alias.statusCode, 200);
+  assert.match(alias.body.mensaje, /¿Cuántas und de TAPA/u);
+  assert.equal(JSON.parse(closeDraft).materialPending.cantidad, null);
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});

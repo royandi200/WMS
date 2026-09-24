@@ -5,8 +5,8 @@ const {
 } = require('../api/_lib/production-close-guide');
 const { hasProductionCloseIntent } = require('../api/_lib/production-close-input');
 
-function fakeDb({ orderId = 97, planned = 2 } = {}) {
-  let stored = null;
+function fakeDb({ orderId = 97, planned = 2, initialDraft = null } = {}) {
+  let stored = initialDraft;
   const writes = [];
   const aliasTerms = [];
   return {
@@ -53,7 +53,7 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
 
   const second = await advanceCloseGuide({ ...base, rawText: '2 conformes' });
   assert.match(second.message, /Unidades conformes: 2 und/u);
-  assert.match(second.message, /Falta informar:.*merma, ubicación del producto conforme/u);
+  assert.match(second.message, /Falta informar:.*merma de producto terminado, ubicación del producto conforme/u);
   assert.match(second.message, /0 merma/u);
 
   const third = await advanceCloseGuide({ ...base, rawText: 'cero merma' });
@@ -123,7 +123,7 @@ test('mantiene el candidato cuando el operario aclara el número y luego respond
   assert.equal(confirmedCandidate.params, undefined);
 });
 
-test('una unidad conforme y una merma se capturan juntas sin inferir cierre', async () => {
+test('una merma genérica queda sin clasificar hasta que el operario precise el tipo', async () => {
   assert.deepEqual(closeFields('quedó una unidad conforme y una merma por destrucción'), {
     conforming: 1, waste: 1, reason: 'destruccion', location: null,
   });
@@ -133,11 +133,14 @@ test('una unidad conforme y una merma se capturan juntas sin inferir cierre', as
   const result = await advanceCloseGuide({ ...base,
     rawText: 'quedó una unidad conforme y una merma por destrucción' });
   assert.match(result.message, /Unidades conformes: 1 und/u);
-  assert.match(result.message, /Merma de producto terminado: 1 und/u);
-  assert.match(result.message, /Motivo de la merma: destruccion/u);
-  assert.match(result.message, /Falta informar:.*ubicación del producto conforme/u);
-  assert.match(result.message, /Sugerida: \*C2\*/u);
+  assert.equal(result.draft.waste, null);
+  assert.deepEqual(result.draft.unclassifiedWaste, { quantity: 1, cause: 'destruccion' });
+  assert.match(result.message, /¿se trató de \*producto terminado\* o de un \*insumo\*/u);
   assert.equal(result.params, undefined);
+  const classified = await advanceCloseGuide({ ...base, rawText: 'sí, producto terminado' });
+  assert.equal(classified.draft.waste, 1);
+  assert.equal(classified.draft.reason, 'destruccion');
+  assert.match(classified.message, /Sugerida: \*C2\*/u);
 });
 
 test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cierre sin descontar inventario', async () => {
@@ -148,14 +151,17 @@ test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cier
     params: { id_orden: 100, cantidad_real: 4, merma: 1 } });
   assert.equal(first.draft.orderId, 100);
   assert.equal(first.draft.conforming, null);
-  assert.equal(first.draft.waste, 1);
-  assert.match(first.message, /¿Son \*4 productos terminados conformes\*/u);
+  assert.equal(first.draft.waste, null);
+  assert.equal(first.draft.unclassifiedWaste.quantity, 1);
+  assert.match(first.message, /¿se trató de \*producto terminado\* o de un \*insumo\*/u);
+  assert.match(first.message, /¿se trató de \*producto terminado\* o de un \*insumo\*/u);
   assert.equal(first.params, undefined);
 
   const second = await advanceCloseGuide({ ...base,
     rawText: 'hubo merma de dos tapas por destrucción',
     params: { avance_materiales: { items: [{ producto: 'tapas', cantidad: 2, motivo: 'destrucción' }] } } });
-  assert.equal(second.draft.waste, 1, 'el daño de tapas no cambia la merma del producto terminado');
+  assert.equal(second.draft.waste, null, 'el daño de tapas no clasifica la merma genérica como producto terminado');
+  assert.equal(second.draft.unclassifiedWaste.quantity, 1);
   assert.equal(second.draft.materialPending.cantidad, 2);
   assert.equal(second.draft.materialPending.sku, '00001-TPBI');
   assert.equal(second.draft.materialPending.motivo, 'destruccion');
@@ -166,10 +172,12 @@ test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cier
   const lot = await advanceCloseGuide({ ...base, rawText: 'lote ACC-260910-TPBI' });
   assert.equal(lot.draft.materials[0].cantidad, 2);
   assert.equal(lot.draft.materials[0].lote, 'ACC-260910-TPBI');
-  assert.equal(lot.draft.waste, 1);
+  assert.equal(lot.draft.waste, null);
   const conforming = await advanceCloseGuide({ ...base, rawText: '4 conformes' });
   assert.equal(conforming.draft.conforming, 4);
-  await advanceCloseGuide({ ...base, rawText: 'merma de producto terminado por rotura' });
+  const classified = await advanceCloseGuide({ ...base, rawText: 'merma de producto terminado por rotura' });
+  assert.equal(classified.draft.waste, 1);
+  assert.equal(classified.draft.reason, 'rotura');
   const review = await advanceCloseGuide({ ...base, rawText: 'ubicación C2' });
   assert.match(review.message, /confirmo cierre/u);
   const confirmation = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
@@ -180,6 +188,29 @@ test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cier
     motivo: 'destruccion', ubicacion: undefined,
   }]);
   assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
+});
+
+test('un borrador anterior con merma positiva exige reclasificación antes de confirmar', async () => {
+  const db = fakeDb({ orderId: 100, planned: 5, initialDraft: {
+    orderId: 100, conforming: 4, waste: 1, reason: 'rotura', location: 'C2',
+    materials: [], materialsAnswered: true, materialPending: null,
+    reviewShown: true, candidateOrderId: null,
+  } });
+  const base = { db, userId: 100 };
+  const blocked = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.equal(blocked.params, undefined);
+  assert.equal(blocked.draft.waste, null);
+  assert.deepEqual(blocked.draft.unclassifiedWaste, { quantity: 1, cause: 'rotura' });
+  assert.match(blocked.message, /Merma por clasificar:.*1 und/u);
+  const material = await advanceCloseGuide({ ...base, rawText: 'fue de las tapas' });
+  assert.equal(material.draft.unclassifiedWaste, null);
+  assert.equal(material.draft.waste, null);
+  assert.equal(material.draft.materialPending.sku, '00001-TPBI');
+  assert.equal(material.draft.materialPending.cantidad, null);
+  assert.match(material.message, /¿Cuántas und de TAPA/u);
+  const corrected = await advanceCloseGuide({ ...base, rawText: '2 tapas' });
+  assert.equal(corrected.draft.materialPending.cantidad, 2);
+  assert.match(corrected.message, /¿Repusiste 2 und de TAPA/u);
 });
 
 test('material repuesto se reúne por partes, exige lote y causa y solo sale en confirmación final', async () => {
@@ -259,6 +290,9 @@ test('parsea cantidades y causas expresas sin tomar el OP ID como unidades', () 
   });
   assert.deepEqual(closeFields('cerramos OP ID 57 con 47 conformes, 3 mermas por daño en etiquetas, dejar en PPAL-A-1-01'), {
     conforming: 47, waste: 3, reason: 'dano en etiquetas', location: 'PPAL-A-1-01',
+  });
+  assert.deepEqual(closeFields('1 producto terminado conforme, 1 producto terminado no conforme por ruptura'), {
+    conforming: 1, waste: 1, reason: 'ruptura', location: null,
   });
   assert.equal(confirmed('sí'), true);
   assert.equal(confirmed('confirmo cierre'), true);
