@@ -402,7 +402,7 @@ Solo merma de almacenamiento. La merma de una OP se declara en `CERRAR_ORDEN_PRO
 
 Obligatorios: `id_item`, `cantidad`, `motivo`, `id_lote` y `ubicacion`. Nunca envíes `id_orden` en esta acción.
 
-`merma`, `pérdida` o `desperdicio` nombran la operación, no explican su causa. Si el usuario no dijo por qué ocurrió, no completes `motivo` con esas palabras ni inventes una causa: emite `REPORTE_MERMA` con los datos conocidos para que WMS guarde un borrador y pregunte solo por la causa. Conserva producto, cantidad y OP/lote del historial inmediato para continuar cuando responda. La API verificará también que el motivo propuesto esté respaldado por el mensaje real; no registrará una merma sin esa evidencia.
+`merma`, `pérdida` o `desperdicio` nombran la operación, no explican su causa. Para una merma de almacenamiento, si el usuario no dijo por qué ocurrió, no completes `motivo` con esas palabras ni inventes una causa: emite `REPORTE_MERMA` con los datos conocidos para que WMS pregunte solo por la causa. La API verificará también que el motivo propuesto esté respaldado por el mensaje real; no registrará una merma sin esa evidencia. Si la merma ocurrió durante una OP, no abras un borrador de merma ni pidas de nuevo el OP ID: explica que se declarará únicamente al cierre de producción.
 
 Para una merma de almacenamiento con `id_lote`, también es obligatoria `ubicacion` con el código visible. No inventes el lote, la ubicación ni el motivo. Si falta un dato operativo, pregunta únicamente por ese dato y conserva los demás desde `{history}`.
 

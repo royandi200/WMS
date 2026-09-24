@@ -106,8 +106,22 @@ test('una merma sin causa expresada no llega a inventario aunque el modelo la in
     params: { id_orden: 97, id_item: 'etiqueta', cantidad: 1, motivo: 'daño de empaque' },
   });
   assert.equal(res.body.ok, true);
-  assert.match(res.body.mensaje, /merma de esta OP se declara al \*cerrar la producción\*/u);
+  assert.match(res.body.mensaje, /repórtalo únicamente al \*cerrar la producción\*/u);
   assert.deepEqual(mutations(), [], 'antes del cierre no se guarda merma ni se modifica inventario');
+});
+
+test('una merma de material sin OP ni lote no inicia un borrador ni vuelve a pedir el OP ID', async () => {
+  const res = await call({ action: 'MODO_CHARLA', text: 'merma de dos liners' });
+  assert.equal(res.body.ok, true);
+  assert.match(res.body.mensaje, /únicamente al \*cerrar la producción\*/u);
+  assert.doesNotMatch(res.body.mensaje, /¿En cuál \*OP ID\*/u);
+  assert.deepEqual(mutations(), [], 'no debe abrir un borrador de merma ni afectar inventario');
+});
+
+test('una merma anticipada clasificada erróneamente como cierre tampoco abre un borrador', async () => {
+  const res = await call({ action: 'CERRAR_ORDEN_PRODUCCION', text: 'merma de dos liners' });
+  assert.match(res.body.mensaje, /únicamente al \*cerrar la producción\*/u);
+  assert.deepEqual(mutations(), []);
 });
 
 test('un numero no registrado se rechaza antes de cualquier operacion', async () => {

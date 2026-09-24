@@ -98,7 +98,7 @@ const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
 const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
 const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
-  parseWasteMessage, pendingWasteDraft, recentOrderContext } = require('../../_lib/production-waste-guide');
+  parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const {
   assertCustomerOrderEvidence,
@@ -1568,11 +1568,17 @@ module.exports = async (req, res) => {
       params = { avance: {} };
     }
 
+    const standaloneMaterialWaste = Boolean(parseWasteMessage(rawText)?.product)
+      && !hasProductionCloseIntent(rawText);
+    if (action === 'CERRAR_ORDEN_PRODUCCION' && standaloneMaterialWaste) {
+      action = 'REPORTE_MERMA';
+      params = {};
+    }
     if (['UNKNOWN', 'MODO_CHARLA', 'REPORTE_MERMA'].includes(action) && rawText) {
       const activeClose = await pendingCloseDraft(db, user.id);
       const explicitWasteReport = /^\s*(?:reporta|registra|registrar)\s+(?:una\s+)?merma\b/iu.test(rawText);
       if ((['UNKNOWN', 'MODO_CHARLA'].includes(action) && hasProductionCloseIntent(rawText))
-        || (isCloseFollowup(rawText, activeClose) && !explicitWasteReport)) {
+        || (isCloseFollowup(rawText, activeClose) && !explicitWasteReport && !standaloneMaterialWaste)) {
         action = 'CERRAR_ORDEN_PRODUCCION';
         params = {};
       }
@@ -1634,8 +1640,8 @@ module.exports = async (req, res) => {
     let mensaje = '';
 
     if (action === 'REPORTE_MERMA' && !params.id_lote
-      && (params.id_orden || await recentOrderContext(db, from))) {
-      const msg = '🏭 La merma de esta OP se declara al *cerrar la producción*, junto con las unidades conformes, no conformes y cada material repuesto con cantidad, lote y causa. Todavía no se registró merma ni se modificó inventario. Di *cerrar OP ID* y el número cuando termine la operación.';
+      && !parseWasteReferences(rawText).id_lote) {
+      const msg = '🏭 Si el material se dañó durante una *orden de producción*, repórtalo únicamente al *cerrar la producción*. En ese cierre indicarás las unidades conformes y no conformes, y cada material repuesto con cantidad, lote y causa. No necesitas reportar la merma ahora ni volver a indicar la OP en este paso.\n\nSi se trata de una merma de bodega ajena a una OP, indica el lote y la ubicación para registrarla.\n\nTodavía no se registró merma ni se modificó inventario.';
       const body = { ok: true, message: msg, mensaje: msg, context: responseContext };
       await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
       return await finalizeHandledResponse(body);

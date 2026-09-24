@@ -81,3 +81,13 @@ test('un número de OP aclarado en conversación queda pendiente y sí continúa
   assert.match(third.body.mensaje, /¿Cuántas unidades conformes salieron/iu);
   assert.ok(!writes.some(entry => /UPDATE ordenes_produccion/u.test(entry.sql)));
 });
+
+test('un reporte suelto de material dañado no se confunde con el cierre en curso', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  await invoke('CERRAR_ORDEN_PRODUCCION', 'Cerramos producción OP ID 97', { id_orden: 97 });
+  const res = await invoke('MODO_CHARLA', 'merma de dos liners');
+  assert.match(res.body.mensaje, /únicamente al \*cerrar la producción\*/u);
+  assert.ok(!writes.some(entry => /INSERT INTO produccion_merma_borradores/u.test(entry.sql)));
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
+});
