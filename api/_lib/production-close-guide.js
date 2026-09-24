@@ -113,7 +113,8 @@ function finishedWasteReply(text) {
 }
 
 function materialReply(text) {
-  return normalize(text).replace(/[,;]+/gu, ' ').trim()
+  return normalize(text).replace(/^(?:correccion|corrijo)\s*[:,-]?\s*/u, '')
+    .replace(/[,;]+/gu, ' ').trim()
     .replace(/^(?:(?:no|solo|fue|fueron|eran|era|es|de|del|la|las|el|los|material(?:es)?|insumo(?:s)?)\s+)+/u, '')
     .replace(/[.!]+$/u, '').trim();
 }
@@ -250,12 +251,15 @@ async function resolveUnclassifiedWaste(db, draft, order, text) {
   const term = materialReply(text);
   if (!term || /\b(?:cerrar|cerramos|cierre|produccion|conformes?)\b/u.test(term)
     || /^(?:si|no|confirmo|confirmo cierre|por\b.*|lote\b.*|ubicacion\b.*)$/u.test(term)) return false;
-  const amountMatch = new RegExp(`^${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*(?:de\\s+)?(.+)$`, 'u').exec(term);
-  const productTerm = amountMatch?.[2]?.trim() || term;
+  const cause = term.match(/\b(?:por|causa|motivo|debido a)\s+([^.,;]+)$/u)?.[1]?.trim() || null;
+  const materialDescription = term.replace(/\s+\b(?:por|causa|motivo|debido a)\b.*$/u, '')
+    .replace(/\s+(?:danad[oa]s?|rot[oa]s?|perdid[oa]s?|defectuos[oa]s?)$/u, '').trim();
+  const amountMatch = new RegExp(`^${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*(?:de\\s+)?(.+)$`, 'u').exec(materialDescription);
+  const productTerm = amountMatch?.[2]?.trim() || materialDescription;
   try {
     await beginMaterialDamage(db, draft, order, {
       product: productTerm, quantity: amountMatch ? quantity(amountMatch[1]) : null,
-      cause: candidate.cause,
+      cause: cause || candidate.cause,
     });
   } catch (error) {
     if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND') return false;
@@ -513,38 +517,50 @@ async function finishDraft(db, userId, draft) {
 }
 
 function guideSummary(order, draft, locationHint) {
-  const lines = ['🏭 *Cierre de producción en preparación*', '',
-    `Orden: *OP ID ${order.id}* | ${order.codigo_orden}`,
+  const missing = [];
+  if (draft.unclassifiedWaste) missing.push('identificar la merma mencionada');
+  if (draft.conforming == null) missing.push('cantidad conforme');
+  if (draft.waste == null && !draft.unclassifiedWaste) missing.push('cantidad no conforme de producto terminado');
+  if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
+  if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto terminado');
+  if (!draft.materialsAnswered || draft.materialPending) missing.push('reposición de insumos');
+  const readyForReview = !missing.length && draft.conforming + draft.waste > 0;
+  const lines = ['🏭 *OP ID ' + order.id + ' — cierre en borrador*',
     `Producto: ${order.producto} (${order.sku})`,
-    `Cantidad planeada: ${Number(order.cantidad_planeada)} und`,
-    '', '*Datos del cierre*',
-    `• Unidades conformes: ${draft.conforming == null ? 'pendiente' : `${draft.conforming} und`}`,
-    `• Merma de producto terminado: ${draft.waste == null ? draft.unclassifiedWaste ? 'pendiente de aclarar el tipo de merma' : 'pendiente (indica 0 si no hubo)' : `${draft.waste} und`}`,
-    `• Motivo de la merma: ${draft.waste == null ? 'se requiere si hubo merma' : draft.waste === 0 ? 'no aplica' : draft.reason || 'pendiente'}`,
-    `• Ubicación del producto conforme: ${draft.conforming == null ? 'se requiere si hubo conformes' : draft.conforming === 0 ? 'no aplica' : draft.location || 'pendiente'}`,
-    '', '*Materiales repuestos durante la OP*',
-    ...(draft.materials || []).map((item, index) =>
-      `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`),
-    ...((draft.materials || []).length ? [] : ['• Ninguno registrado'])];
-  if (draft.unclassifiedWaste) {
-    lines.push('', `*Merma por clasificar:* ${draft.unclassifiedWaste.quantity} und${draft.unclassifiedWaste.cause ? ` | Causa mencionada: ${draft.unclassifiedWaste.cause}` : ''}. Todavía no se asignó a producto terminado ni a insumos.`);
+    `Plan: ${Number(order.cantidad_planeada)} und`, ''];
+  if (readyForReview) {
+    lines.push('*Resumen para confirmar*',
+      `• Producto terminado conforme: ${draft.conforming} und`,
+      `• Producto terminado no conforme: ${draft.waste} und${draft.waste ? ` | Causa: ${draft.reason}` : ''}`,
+      `• Ubicación del conforme: ${draft.conforming ? draft.location : 'no aplica'}`,
+      '', '*Insumos repuestos*');
+    lines.push(...(draft.materials || []).length
+      ? draft.materials.map((item, index) =>
+        `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`)
+      : ['• Ninguno']);
+    const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
+    if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
+    lines.push('', 'Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre*.');
+    lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
+    return lines.join('\n');
+  }
+  const captured = [];
+  if (draft.conforming != null) captured.push(`• Conformes: ${draft.conforming} und`);
+  if (draft.waste != null) captured.push(`• No conformes de producto terminado: ${draft.waste} und${draft.reason ? ` | Causa: ${draft.reason}` : ''}`);
+  if (draft.location) captured.push(`• Ubicación del terminado: ${draft.location}`);
+  if (draft.unclassifiedWaste) captured.push(`• Merma sin clasificar: ${draft.unclassifiedWaste.quantity} und${draft.unclassifiedWaste.cause ? ` | Causa indicada: ${draft.unclassifiedWaste.cause}` : ''}`);
+  for (const item of draft.materials || []) {
+    captured.push(`• Insumo repuesto: ${item.cantidad} ${item.unidad || ''} de ${item.producto} | Lote ${item.lote} | Causa: ${item.motivo}`);
   }
   if (draft.materialPending) {
     const item = draft.materialPending;
-    lines.push(`• En curso: ${item.producto || 'producto pendiente'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || 'pendiente'} | Causa: ${item.motivo || 'pendiente'}`);
+    captured.push(`• Insumo en curso: ${item.producto || 'sin identificar'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || 'pendiente'} | Causa: ${item.motivo || 'pendiente'}`);
   }
-  const missing = [];
-  if (draft.unclassifiedWaste) missing.push('tipo de merma');
-  if (draft.conforming == null) missing.push('unidades conformes');
-  if (draft.waste == null && !draft.unclassifiedWaste) missing.push('merma de producto terminado');
-  if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
-  if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto conforme');
-  if (!draft.materialsAnswered || draft.materialPending) missing.push('materiales repuestos (o confirma que no hubo)');
-  if (missing.length) lines.push('', `*Falta informar:* ${missing.join(', ')}.`);
-  lines.push('');
+  lines.push('*Registrado hasta ahora*', ...(captured.length ? captured : ['• Aún no hay datos del cierre.']),
+    '', `*Falta:* ${missing.length ? missing.join(', ') : 'revisar las cantidades'}.`, '', '*Siguiente paso*');
   if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
     if (draft.materialPending.cantidad == null) {
-      lines.push(`¿Cuántas ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} se dañaron? Antes se mencionó una merma sin identificar; confirma la cantidad real de este insumo.`);
+      lines.push(`¿Cuántas ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} se dañaron?`);
     } else {
       lines.push(`¿Repusiste ${draft.materialPending.cantidad} ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto}? Responde *sí* o *no*. Si las repusiste, indica de qué lote las sacaste.`);
     }
@@ -553,13 +569,12 @@ function guideSummary(order, draft, locationHint) {
   } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision && !draft.materialPending.motivo) {
     lines.push(`¿Cuál fue la causa concreta del daño de ${draft.materialPending.producto}?`);
   } else if (draft.unclassifiedWaste) {
-    lines.push(`Cuando dijiste *${draft.unclassifiedWaste.quantity} merma*, ¿se trató de *producto terminado* o de un *insumo*? Si fue un insumo, dime su nombre y cantidad real (por ejemplo, «2 tapas»).`);
+    lines.push(`Escuché «${draft.unclassifiedWaste.quantity} merma», pero no sé qué se dañó. ¿Fue *producto terminado* o un *insumo*? Puedes decir «producto terminado» o «corrección: fueron 2 tapas dañadas por ruptura».`);
   } else if (draft.conforming == null) {
     if (draft.conformingClarification != null) {
       lines.push(`Escuché ${draft.conformingClarification} unidades con un nombre de material. ¿Son *${draft.conformingClarification} productos terminados conformes*? Responde «${draft.conformingClarification} conformes» o corrige la cantidad.`);
     } else {
-      lines.push('¿Cuántas unidades conformes salieron? Puedes dar todos los datos juntos o por partes.');
-      lines.push('Ejemplo: «1 producto terminado conforme, 1 producto terminado no conforme por ruptura, ubicación C2». Ajusta los datos a lo ocurrido.');
+      lines.push('¿Cuántas unidades de producto terminado salieron conformes?');
     }
   }
   else if (draft.waste == null) lines.push('¿Cuántas unidades de producto terminado fueron no conformes? Di «0 merma de producto terminado» si no hubo.');
@@ -576,11 +591,10 @@ function guideSummary(order, draft, locationHint) {
   } else if (!draft.materialsAnswered) {
     lines.push('¿Repusiste algún material de esta OP? Puedes decir uno o varios productos con cantidad, lote y causa; también por partes. Si no repusiste ninguno, di *no repuse material*.');
   } else {
-    const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
-    if (difference !== 0) lines.push(`Diferencia frente al plan: ${difference} und. Verifica este dato.`);
-    lines.push('Revisa el resumen completo. Puedes agregar o corregir materiales; si está correcto, responde *confirmo cierre*.');
+    lines.push('Ambas cantidades están en cero. Corrige conformes o no conformes antes de cerrar.');
   }
-  lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
+  lines.push('', 'Puedes responder solo esta pregunta o dar varios datos juntos. Conservaré lo ya registrado.',
+    'Aún no se modifica inventario.');
   return lines.join('\n');
 }
 

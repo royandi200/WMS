@@ -65,7 +65,7 @@ test('un cierre incompleto devuelve la pregunta y finaliza la bandeja antes de c
   const res = await invoke('CERRAR_ORDEN_PRODUCCION', 'Cerramos producción OPIV 97', { id_orden: 97 });
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.ok, true);
-  assert.match(res.body.mensaje, /¿Cuántas unidades conformes/iu);
+  assert.match(res.body.mensaje, /¿Cuántas unidades de producto terminado salieron conformes/iu);
   assert.ok(writes.some(entry => /INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
   assert.ok(writes.some(entry => /UPDATE webhook_ingress_inbox[\s\S]*status = 'PROCESSED'/u.test(entry.sql)));
   assert.ok(!writes.some(entry => /INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
@@ -85,7 +85,7 @@ test('un número de OP aclarado en conversación queda pendiente y sí continúa
   const second = await invoke('MODO_CHARLA', 'El 97', { texto: 'Repite el OP ID' });
   assert.match(second.body.mensaje, /OP ID 97/u);
   const third = await invoke('MODO_CHARLA', 'Sí', { texto: 'Entendido' });
-  assert.match(third.body.mensaje, /¿Cuántas unidades conformes salieron/iu);
+  assert.match(third.body.mensaje, /¿Cuántas unidades de producto terminado salieron conformes/iu);
   assert.ok(!writes.some(entry => /UPDATE ordenes_produccion/u.test(entry.sql)));
 });
 
@@ -108,7 +108,7 @@ test('un borrador antiguo pregunta qué fue la merma y acepta el alias sin repet
     location: null, materials: [], materialsAnswered: false, materialPending: null,
     reviewShown: false, candidateOrderId: null });
   const old = await invoke('CERRAR_ORDEN_PRODUCCION', 'cerrar OP ID 97', { id_orden: 97 });
-  assert.match(old.body.mensaje, /¿se trató de \*producto terminado\* o de un \*insumo\*/u);
+  assert.match(old.body.mensaje, /¿Fue \*producto terminado\* o un \*insumo\*/u);
   const alias = await invoke('MODO_CHARLA', 'tapas');
   assert.equal(alias.statusCode, 200);
   assert.match(alias.body.mensaje, /¿Cuántas und de TAPA/u);
