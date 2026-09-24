@@ -26,7 +26,7 @@ require.cache[dbPath] = {
         if (/FROM ordenes_produccion op JOIN productos p/u.test(sql)) return [[{
           id: params[0], codigo_orden: `OP-20260924-${String(params[0]).padStart(6, '0')}`,
           estado: 'EN_PROCESO',
-          cantidad_planeada: '2.000', producto_id: 74,
+          cantidad_planeada: params[0] === 101 ? '3.000' : '2.000', producto_id: 74,
           sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
         }]];
         if (/FROM ubicaciones u JOIN bodegas b/u.test(sql)) return [[{ codigo: 'C2' }]];
@@ -105,6 +105,37 @@ test('un reporte de material dañado continúa el cierre en curso sin registrar 
   assert.equal(JSON.parse(closeDraft).waste, null);
   assert.ok(!writes.some(entry => /INSERT INTO produccion_merma_borradores/u.test(entry.sql)));
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
+});
+
+test('mensaje escrito «se dañaron 2 tapas por ruptura» continúa el cierre de OP 101', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 101, conforming: 3, waste: 0,
+    wasteClassified: true, reason: null, location: 'C2', materials: [],
+    materialsAnswered: false, materialPending: null, reviewShown: false,
+    candidateOrderId: null });
+  const res = await invoke('MODO_CHARLA', 'se dañaron 2 tapas por ruptura');
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body.mensaje, /¿Repusiste 2 und de TAPA/u);
+  const draft = JSON.parse(closeDraft);
+  assert.equal(draft.orderId, 101);
+  assert.equal(draft.materialPending.sku, '00001-TPBI');
+  assert.equal(draft.materialPending.cantidad, 2);
+  assert.equal(draft.materialPending.motivo, 'ruptura');
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});
+
+test('si la IA clasifica el daño como REPORTE_MERMA, permanece en el cierre abierto', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 101, conforming: 3, waste: 0,
+    wasteClassified: true, reason: null, location: 'C2', materials: [],
+    materialsAnswered: false, materialPending: null, reviewShown: false,
+    candidateOrderId: null });
+  const res = await invoke('REPORTE_MERMA', 'se dañaron 2 tapas por ruptura', {
+    id_item: '00001-TPBI', cantidad: 2, motivo: 'ruptura',
+  });
+  assert.match(res.body.mensaje, /¿Repusiste 2 und de TAPA/u);
+  assert.equal(JSON.parse(closeDraft).materialPending.motivo, 'ruptura');
+  assert.ok(!writes.some(entry => /INSERT INTO produccion_merma_borradores|INSERT INTO mermas|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 });
 
 test('un borrador antiguo pregunta qué fue la merma y acepta el alias sin repetir OP ID', async () => {

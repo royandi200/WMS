@@ -91,7 +91,9 @@ function materialLossCandidate(text) {
   const raw = normalize(text);
   // Solo una pérdida explícita de material: «merma de dos tapas». «Una merma
   // por ruptura» describe producto terminado y no debe abrir una reposición.
-  const match = new RegExp(`\\b(?:merma|perdida|desperdicio)\\s+(?:de\\s+)?${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*([a-z][a-z0-9\\s-]*?)(?=\\s+(?:por|debido a|causa|motivo)\\b|[,;.]|$)`, 'u').exec(raw);
+  const lossNoun = '(?:merma|perdida|desperdicio)\\s+(?:de\\s+)?';
+  const damageVerb = '(?:(?:se\\s+)?(?:danaron|dano|dane|danamos|rompieron|rompi|rompimos|perdieron|perdi|perdimos|destruyeron|destrui|destruimos))\\s+';
+  const match = new RegExp(`\\b(?:${lossNoun}|${damageVerb})${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*([a-z][a-z0-9\\s-]*?)(?=\\s+(?:por|debido a|causa|motivo)\\b|[,;.]|$)`, 'u').exec(raw);
   if (!match) return null;
   const product = match[2].trim();
   if (!product || /^(?:producto(?:s)?\s+terminado(?:s)?|unidades?\s+terminadas?|pt)$/u.test(product)) return null;
@@ -513,6 +515,7 @@ async function pendingCloseDraft(db, userId) {
 function isCloseFollowup(text, draft) {
   if (!draft) return false;
   const raw = normalize(text);
+  if (materialLossCandidate(raw)) return true;
   if (confirmed(raw) || rejected(raw)) return true;
   if (/^(?:corrige|cambia|modifica|quita|elimina|correccion|correcion|corrijo|perdon|perdona)\b/u.test(raw)) return true;
   if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;

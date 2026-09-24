@@ -81,6 +81,22 @@ test('an operator can begin a close using the sole notified OP without repeating
   assert.equal(result.params, undefined);
 });
 
+test('«se dañaron 2 tapas por ruptura» conserva el cierre y pregunta por su reposición', async () => {
+  const db = fakeDb({ orderId: 101, planned: 3, initialDraft: {
+    orderId: 101, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'se dañaron 2 tapas por ruptura' });
+  assert.equal(result.draft.orderId, 101);
+  assert.equal(result.draft.materialPending.sku, '00001-TPBI');
+  assert.equal(result.draft.materialPending.cantidad, 2);
+  assert.equal(result.draft.materialPending.motivo, 'ruptura');
+  assert.match(result.message, /¿Repusiste 2 und de TAPA/u);
+  assert.equal(result.params, undefined);
+});
+
 test('el audio sin cantidades no puede convertirse en cierre por los parámetros del modelo', async () => {
   const db = fakeDb();
   const result = await advanceCloseGuide({ db, userId: 9,
