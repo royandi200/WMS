@@ -97,6 +97,8 @@ const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_
 const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document-message-policy');
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
 const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow');
+const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
+  parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const {
   assertCustomerOrderEvidence,
@@ -134,7 +136,7 @@ const {
 const { nativePdfEvidence } = require('../../_lib/document-pdf-evidence');
 const { detectDocumentTypeMarkers } = require('../../_lib/document-type-markers');
 const { reconcileCustomerOrderId, reconcileCustomerOrderItemId } = require('../../_lib/customer-order-reference');
-const { reconcileProductionOrderId } = require('../../_lib/production-order-reference');
+const { explicitReferences, reconcileProductionOrderId } = require('../../_lib/production-order-reference');
 const { guideProductionReplenishment } = require('../../_lib/production-replenishment-guide');
 const { listCustomerOrders } = require('../customer-orders');
 const {
@@ -1563,6 +1565,15 @@ module.exports = async (req, res) => {
       params = { avance: {} };
     }
 
+    if (['UNKNOWN', 'MODO_CHARLA'].includes(action) && rawText) {
+      const activeWaste = parseCauseReply(rawText)
+        ? await pendingWasteDraft(db, user.id) : null;
+      if (parseWasteMessage(rawText) || activeWaste) {
+        action = 'REPORTE_MERMA';
+        params = activeWaste ? {} : params;
+      }
+    }
+
     const bodegaId = await getDefaultBodega(db);
 
     params = normalizeOperationalParams(action, params, rawText);
@@ -1611,6 +1622,34 @@ module.exports = async (req, res) => {
 
     assertOperationalIntent(action, rawBody, info);
     params = additionalOperationInput(action, params, rawBody, info);
+
+    let guidedWasteDraft = null;
+    let wasteReasonSupported = false;
+    if (action === 'REPORTE_MERMA' && params.motivo) {
+      try {
+        assertWasteReasonEvidence(currentText(rawBody, info), params.motivo);
+        wasteReasonSupported = true;
+      } catch (error) {
+        if (error.status !== 409) throw error;
+      }
+    }
+    if (action === 'REPORTE_MERMA' && !params.confirmar_nueva_merma
+      && (!params.id_item || !params.cantidad || !params.motivo
+        || isGenericWasteReason(params.motivo) || !wasteReasonSupported
+        || (!params.id_orden && !params.id_lote)
+        || (params.id_orden && !explicitReferences(currentText(rawBody, info)).length))) {
+      const guided = await advanceWasteGuide({ db, userId: user.id, from,
+        rawText: currentText(rawBody, info), params });
+      if (guided.message) {
+        const body = { ok: true, message: guided.message, mensaje: guided.message,
+          context: responseContext };
+        await saveLog(db, { from, action, priority, payload: rawBody,
+          response: body, status: 'PROCESSED' });
+        return finalizeHandledResponse(body);
+      }
+      params = guided.params;
+      guidedWasteDraft = guided.draft;
+    }
 
     switch (action) {
 
@@ -2275,6 +2314,7 @@ module.exports = async (req, res) => {
           user.id,
           { allowGeneratedReference: true }
         );
+        if (guidedWasteDraft) await finishWasteDraft(db, user.id, guidedWasteDraft);
         mensaje = result.requires_confirmation
           ? [
               `Ya existe una merma igual registrada como *${result.numero}*. No se modificó inventario.`,

@@ -18,6 +18,15 @@ require.cache[dbPath] = {
         executed.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
         if (/FROM usuarios u\s+LEFT JOIN roles r/.test(sql)) return [params[0] === ADMIN.telefono ? [ADMIN] : []];
         if (/FROM bodegas WHERE activa = 1/.test(sql)) return [[{ id: 1 }]];
+        if (/FROM ordenes_produccion WHERE id = \? LIMIT 1/.test(sql)) return [[{
+          id: 97, codigo_orden: 'OP-20260924-000097', estado: 'EN_PROCESO',
+        }]];
+        if (/FROM produccion_materiales pm JOIN productos p/.test(sql)) return [[{
+          producto_id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA', unidad: 'und',
+        }]];
+        if (/FROM producto_aliases pa/.test(sql)) return [[{
+          id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA', alias: 'etiqueta',
+        }]];
         if (/^\s*INSERT/i.test(sql)) return [{ insertId: 1 }];
         return [[]];
       },
@@ -96,9 +105,10 @@ test('una merma sin causa expresada no llega a inventario aunque el modelo la in
     outerText: 'en la orden OPID 97 reporta merma de una etiqueta',
     params: { id_orden: 97, id_item: 'etiqueta', cantidad: 1, motivo: 'daño de empaque' },
   });
-  assert.equal(res.body.ok, false);
+  assert.equal(res.body.ok, true);
   assert.match(res.body.mensaje, /causa concreta/u);
-  assert.deepEqual(mutations(), []);
+  assert.ok(mutations().every(e => /produccion_merma_borradores/u.test(e.sql)),
+    'solo puede guardar un borrador; no debe tocar inventario ni registrar merma');
 });
 
 test('un numero no registrado se rechaza antes de cualquier operacion', async () => {

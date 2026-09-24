@@ -16,7 +16,7 @@ function normalizedWords(value) {
 
 function causeWord(word) {
   if (/^(?:dan|dano)/u.test(word)) return 'dano';
-  if (/^(?:rotur|rot[ao]s?$|romp)/u.test(word)) return 'rotura';
+  if (/^(?:rotur|ruptur|rot[ao]s?$|romp)/u.test(word)) return 'rotura';
   if (/^derram/u.test(word)) return 'derrame';
   if (/^(?:venc|caduc)/u.test(word)) return 'vencimiento';
   if (/^contamin/u.test(word)) return 'contaminacion';

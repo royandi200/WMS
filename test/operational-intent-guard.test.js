@@ -17,6 +17,7 @@ test('waste reason must be a concrete cause supported by the user message', () =
   'daño de empaque');
   assert.equal(assertWasteReasonEvidence(
     'La etiqueta se rompió durante la producción', 'rotura'), 'rotura');
+  assert.equal(assertWasteReasonEvidence('ruptura', 'ruptura'), 'ruptura');
   assert.equal(assertWasteReasonEvidence(
     'Reporta merma de una tapa por mala manipulación', 'mala manipulación'), 'mala manipulación');
   assert.equal(isGenericWasteReason('pérdida de material en proceso'), true);
