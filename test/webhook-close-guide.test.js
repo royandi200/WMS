@@ -115,3 +115,19 @@ test('un borrador antiguo pregunta qué fue la merma y acepta el alias sin repet
   assert.equal(JSON.parse(closeDraft).materialPending.cantidad, null);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 });
+
+test('WhatsApp conserva el contexto y acepta sí con lote en el mismo mensaje', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 97, conforming: null, waste: null,
+    reason: null, location: null, materials: [], materialsAnswered: false,
+    reviewShown: false, candidateOrderId: null,
+    materialPending: { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 2, motivo: 'destruccion', lote: null,
+      ubicacion: null, damageReport: true, replacementDecision: null } });
+  const res = await invoke('MODO_CHARLA', 'Sí, fueron sacadas del lote ACC-260910-TPBI');
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.parse(closeDraft).materialPending, null);
+  assert.equal(JSON.parse(closeDraft).materials[0].lote, 'ACC-260910-TPBI');
+  assert.match(res.body.mensaje, /Insumo repuesto: 2 und/u);
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});

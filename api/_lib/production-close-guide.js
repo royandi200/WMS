@@ -296,7 +296,10 @@ async function applyMaterialReport(db, draft, order, text, params) {
         draft.materialsAnswered = false;
         return;
       }
-      if (/^si[.!]?$/u.test(answer) || /\b(?:si\s+repuse|repuse|las?\s+repuse|los?\s+repuse)\b/u.test(answer)) {
+      const affirmative = (/^si\b/u.test(answer)
+        || /\b(?:repuse|reponi|repusimos|saque|sacamos|fueron\s+sacad[oa]s?)\b/u.test(answer))
+        && !/\b(?:no|sin)\b/u.test(answer);
+      if (affirmative) {
         pending.replacementDecision = true;
       } else {
         return;

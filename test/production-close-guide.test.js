@@ -229,6 +229,28 @@ test('la corrección completa en un audio toma cantidad, alias y causa sin volve
   assert.equal(result.params, undefined);
 });
 
+test('sí y lote de reposición en una sola frase completan el insumo pendiente', async () => {
+  const db = fakeDb({ orderId: 100, planned: 5, initialDraft: {
+    orderId: 100, conforming: null, waste: null, reason: null, location: null,
+    materials: [], materialsAnswered: false, reviewShown: false,
+    materialPending: { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 2, motivo: 'destruccion', lote: null, ubicacion: null,
+      damageReport: true, replacementDecision: null },
+  } });
+  const answer = await advanceCloseGuide({ db, userId: 102,
+    rawText: 'Sí, fueron sacadas del lote ACC-260910-TPBI' });
+  assert.equal(answer.params, undefined);
+  assert.equal(answer.draft.materialPending, null);
+  assert.equal(answer.draft.materialsAnswered, true);
+  assert.deepEqual(answer.draft.materials[0], {
+    sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+    unidad: 'und', cantidad: 2, motivo: 'destruccion',
+    lote: 'ACC-260910-TPBI', ubicacion: null,
+  });
+  assert.match(answer.message, /Insumo repuesto: 2 und/u);
+  assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
+});
+
 test('material repuesto se reúne por partes, exige lote y causa y solo sale en confirmación final', async () => {
   const db = fakeDb();
   const base = { db, userId: 14 };
