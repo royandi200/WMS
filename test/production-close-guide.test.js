@@ -178,6 +178,36 @@ test('un solo audio puede cerrar el resultado y declarar dos materiales sin dupl
   assert.equal(done.params.materiales_repuestos[1].lote, 'L-ET');
 });
 
+test('si solo dice que repuso material, pregunta producto y conserva la OP', async () => {
+  const db = fakeDb();
+  const base = { db, userId: 16 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
+  await advanceCloseGuide({ ...base, rawText: '2 conformes, 0 merma, ubicación C2' });
+  const partial = await advanceCloseGuide({ ...base, rawText: 'sí repuse materiales' });
+  assert.match(partial.message, /¿Qué producto o alias repusiste/u);
+  assert.equal(partial.draft.orderId, 97);
+  const selected = await advanceCloseGuide({ ...base, rawText: 'tapa' });
+  assert.match(selected.message, /00001-TPBI/u);
+  assert.match(selected.message, /¿Cuánto/u);
+});
+
+test('corrige lote y cantidad dentro del borrador antes de confirmar', async () => {
+  const db = fakeDb();
+  const base = { db, userId: 17 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
+  await advanceCloseGuide({ ...base,
+    rawText: '2 conformes, 0 merma, ubicación C2; repuse una tapa lote L-VIEJO por ruptura',
+  });
+  const correctedLot = await advanceCloseGuide({ ...base, rawText: 'corrige lote de tapa a L-NUEVO' });
+  assert.match(correctedLot.message, /L-NUEVO/u);
+  assert.doesNotMatch(correctedLot.message, /L-VIEJO/u);
+  const correctedQuantity = await advanceCloseGuide({ ...base, rawText: 'corrige cantidad de tapa a 2' });
+  assert.match(correctedQuantity.message, /00001-TPBI\): 2 und/u);
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.equal(done.params.materiales_repuestos[0].lote, 'L-NUEVO');
+  assert.equal(done.params.materiales_repuestos[0].cantidad, 2);
+});
+
 test('parsea cantidades y causas expresas sin tomar el OP ID como unidades', () => {
   assert.equal(closeOrderReference('Cerramos producción OPIV 97', { id_orden: 97 }), 97);
   assert.equal(hasProductionCloseIntent('Cerramos OPIV97'), true);

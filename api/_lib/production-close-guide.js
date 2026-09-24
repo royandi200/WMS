@@ -107,7 +107,8 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
     const product = segment.slice(quantityMatch?.[0]?.length || 0)
       .split(/\b(?:del?\s+)?lote\b|\b(?:por|causa|motivo|debido a)\b/iu)[0]
       .replace(/^(?:de|del|la|el)\s+/iu, '').trim();
-    return { producto: product || null, cantidad: quantityMatch ? quantity(quantityMatch[1]) : null,
+    const productTerm = /^(?:material(?:es)?|insumo(?:s)?)$/iu.test(product) ? null : product;
+    return { producto: productTerm || null, cantidad: quantityMatch ? quantity(quantityMatch[1]) : null,
       lote: lot, motivo: cause };
   }).filter(item => item.producto || item.cantidad != null || item.lote || item.motivo);
 }
@@ -129,9 +130,58 @@ async function orderMaterials(db, orderId) {
   return rows;
 }
 
+async function applyMaterialCorrection(db, draft, order, text) {
+  const match = String(text || '').trim().match(/^(corrige|cambia|modifica|quita|elimina)\s+(?:(lote|cantidad|causa|motivo|ubicaci[oó]n)\s+de\s+)?(?:la\s+|el\s+)?(.+?)(?:\s+(?:a|por)\s+(.+))?$/iu);
+  if (!match || !draft.materials?.length) return false;
+  const [, operation, field, term, value] = match;
+  if (!['quita', 'elimina'].includes(normalize(operation)) && (!field || !value)) {
+    throw guideError('Para corregir un material, indica el dato nuevo. Ejemplo: «corrige lote de tapa a L-123».');
+  }
+  const available = await orderMaterials(db, order.id);
+  const product = await resolveProductReference(db, term, {
+    productIds: available.map(row => row.producto_id),
+    allowContextualPartial: true, allowScopedApproximate: true,
+  });
+  const matches = draft.materials.map((line, index) => ({ line, index }))
+    .filter(entry => entry.line.sku === product.siigo_code);
+  if (!matches.length) throw guideError(`No hay material repuesto registrado para ${product.nombre}.`);
+  if (matches.length > 1) throw guideError(`Hay varios lotes de ${product.nombre}. Indica el lote anterior que quieres corregir; no cambié el borrador.`);
+  const { line, index } = matches[0];
+  if (['quita', 'elimina'].includes(normalize(operation))) {
+    draft.materials.splice(index, 1);
+    draft.materialsAnswered = draft.materials.length > 0;
+    return true;
+  }
+  const newValue = value.trim();
+  if (normalize(field) === 'cantidad') {
+    const amount = quantity(newValue.replace(/\s*(?:und|unidades?|gramos?|g)$/iu, ''));
+    if (amount == null || amount <= 0 || Math.abs(amount * 1000 - Math.round(amount * 1000)) > 0.000001
+      || (!['g', 'gr', 'gramo', 'gramos'].includes(String(line.unidad).toLowerCase()) && !Number.isInteger(amount))) {
+      throw guideError('La nueva cantidad debe ser positiva y corresponder a la unidad de este material.');
+    }
+    line.cantidad = amount;
+  } else if (normalize(field) === 'lote') {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/u.test(newValue)) throw guideError('Indica un lote válido de máximo 80 caracteres.');
+    if (draft.materials.some((other, position) => position !== index && other.sku === line.sku && other.lote === newValue)) {
+      throw guideError('Ese material y lote ya tienen una partida; indica el total en una sola.');
+    }
+    line.lote = newValue;
+  } else if (['causa', 'motivo'].includes(normalize(field))) {
+    if (newValue.length > 255 || /^(?:merma|perdida|reposicion|material)$/iu.test(normalize(newValue))) {
+      throw guideError('Indica una causa concreta de máximo 255 caracteres.');
+    }
+    line.motivo = newValue;
+  } else {
+    line.ubicacion = newValue;
+  }
+  draft.materialsAnswered = true;
+  return true;
+}
+
 async function applyMaterialReport(db, draft, order, text, params) {
   draft.materials ||= [];
   draft.materialPending ||= null;
+  if (await applyMaterialCorrection(db, draft, order, text)) return;
   if (noReplacements(text)) {
     draft.materials = [];
     draft.materialPending = null;
@@ -142,12 +192,19 @@ async function applyMaterialReport(db, draft, order, text, params) {
     ? params.avance_materiales : {};
   if (replacementsFinished(text) || advance.finalizar === true) {
     if (draft.materialPending) throw guideError('Termina primero el material pendiente: faltan producto, cantidad, lote o causa.');
+    if (!draft.materials.length) throw guideError('Confirma expresamente si no repusiste material durante esta OP.');
     draft.materialsAnswered = true;
     return;
   }
   const readyForMaterials = draft.conforming != null && draft.waste != null
     && (draft.waste === 0 || draft.reason) && (draft.conforming === 0 || draft.location);
   const spoken = parseMaterialSegments(text, { allowImplicit: readyForMaterials && !draft.materialPending });
+  if (MATERIAL_START.test(String(text || '')) && !spoken.length && !draft.materialPending) {
+    draft.materialPending = { sku: null, producto: null, cantidad: null, lote: null,
+      motivo: null, unidad: null, ubicacion: null };
+    draft.materialsAnswered = false;
+    return;
+  }
   const hasNewMaterial = spoken.length > 0;
   const incoming = hasNewMaterial && Array.isArray(advance.items) && advance.items.length
     ? advance.items : hasNewMaterial && Array.isArray(params.materiales_repuestos) && params.materiales_repuestos.length
@@ -267,6 +324,7 @@ function isCloseFollowup(text, draft) {
   if (!draft) return false;
   const raw = normalize(text);
   if (confirmed(raw) || rejected(raw)) return true;
+  if (/^(?:corrige|cambia|modifica|quita|elimina)\s+/u.test(raw)) return true;
   if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por|repuse|repusimos|repuesto|lote|materiales?)\b/u.test(raw)) return true;
   if (noReplacements(raw) || replacementsFinished(raw)) return true;
@@ -339,7 +397,7 @@ function guideSummary(order, draft, locationHint) {
     ...((draft.materials || []).length ? [] : ['• Ninguno registrado'])];
   if (draft.materialPending) {
     const item = draft.materialPending;
-    lines.push(`• En curso: ${item.producto || 'producto pendiente'} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || 'pendiente'} | Causa: ${item.motivo || 'pendiente'}`);
+    lines.push(`• En curso: ${item.producto || 'producto pendiente'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || 'pendiente'} | Causa: ${item.motivo || 'pendiente'}`);
   }
   const missing = [];
   if (draft.conforming == null) missing.push('unidades conformes');
