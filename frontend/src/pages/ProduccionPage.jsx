@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Ban, X } from 'lucide-react'
+import { Ban, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 import { useProductionStore } from '../store/productionStore'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
@@ -229,12 +229,14 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
   const [drafts, setDrafts] = useState([])
   const [orders, setOrders] = useState([])
   const [file, setFile] = useState(null)
+  const [uploadOpen, setUploadOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState(null)
   const [releaseCandidate, setReleaseCandidate] = useState(null)
   const [duplicateOrderId, setDuplicateOrderId] = useState(null)
   const [discardTarget, setDiscardTarget] = useState(null)
   const [discardReason, setDiscardReason] = useState('')
+  const [discardConfirmed, setDiscardConfirmed] = useState(false)
   const [reviewTarget, setReviewTarget] = useState(null)
   const [reviewForm, setReviewForm] = useState(null)
 
@@ -287,7 +289,10 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
         ? `El PDF ya estaba registrado como borrador ID ${response.data.id}.`
         : `Borrador ID ${response.data.id} cargado. Revisa cliente, producto y cantidad antes de aprobarlo.`
     )
-    if (result) setFile(null)
+    if (result) {
+      setFile(null)
+      setUploadOpen(false)
+    }
   }
 
   const startReview = (draft) => {
@@ -303,6 +308,7 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
       confirmar_revision: false,
     })
     setDiscardTarget(null)
+    setDiscardConfirmed(false)
     setMessage(null)
   }
 
@@ -362,90 +368,157 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
     }
   }
 
+  const pendingDrafts = drafts.filter((draft) => !['VINCULADO', 'DESCARTADO'].includes(draft.estado))
+  const draftsById = new Map(drafts.map((draft) => [Number(draft.id), draft]))
+  const customerOrderTotals = (items = []) => `${items.reduce((sum, item) => sum + Number(item.cantidad_ordenada || 0), 0)} und`
+
   return <div className="space-y-6">
     {message && <ToastInline toast={message} />}
-    {canApprove && <form onSubmit={upload} className="rounded-lg border border-border bg-surface p-4 space-y-3">
-      <h2 className="font-semibold text-foreground">Cargar OC de cliente</h2>
-      <p className="text-sm text-muted">El PDF se guarda como borrador. No irá a recepciones ni liberará producción hasta que lo revises y apruebes.</p>
-      <input type="file" accept="application/pdf,.pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} className="block text-sm text-foreground" />
-      <button type="submit" disabled={busy || !file} className="btn-primary disabled:opacity-50">{busy ? 'Procesando...' : 'Cargar PDF'}</button>
+    {(pendingDrafts.length > 0 || discardTarget) && <section className="border-y border-border py-4 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">PDF recibidos por WhatsApp o dashboard</h2>
+        <p className="text-xs text-muted">Son borradores. No habilitan producción ni modifican inventario hasta su revisión.</p>
+      </div>
+      {pendingDrafts.map((draft) => <article key={draft.id} className="grid gap-3 border border-border bg-surface/40 p-4 lg:grid-cols-[minmax(0,1fr)_170px_150px_auto] lg:items-center">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm font-semibold text-foreground">{draft.referencia_documento}</span>
+            <span className={`px-2 py-1 text-xs font-semibold ${draft.estado === 'REQUIERE_CORRECCION' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-400/10 text-yellow-400'}`}>
+              {draft.estado === 'REQUIERE_CORRECCION' ? 'Requiere corrección' : 'Pendiente de revisión'}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted">{draft.destinatario_nombre} | {(draft.items || []).length} ítems | {(draft.items || []).reduce((sum, item) => sum + Number(item.cantidad || 0), 0)} und</p>
+          {(draft.advertencias || []).slice(0, 2).map((warning, index) => <p key={`${warning}-${index}`} className={`mt-1 text-xs ${draft.estado === 'REQUIERE_CORRECCION' ? 'text-red-400' : 'text-yellow-400'}`}>{warning}</p>)}
+        </div>
+        <div><p className="text-xs uppercase text-muted">Fecha OC</p><p className="text-sm text-foreground">{String(draft.fecha_documento || '').slice(0, 10) || '-'}</p></div>
+        <div><p className="text-xs uppercase text-muted">PDF</p>{draft.archivo_id ? <button type="button" onClick={() => downloadCustomerOrderPdf(draft.archivo_id, draft.archivo_nombre)} className="mt-1 inline-flex items-center gap-2 text-sm text-primary"><Download size={15} /> Descargar</button> : <p className="mt-1 text-xs text-danger">No conservado</p>}</div>
+        <div className="flex items-center justify-end gap-2">
+          {canApprove && <button type="button" disabled={busy || !draft.archivo_id} className="btn-primary disabled:opacity-40" onClick={() => startReview(draft)}>Revisar</button>}
+          {canApprove && <button type="button" disabled={busy} title="Descartar borrador" aria-label={`Descartar borrador ${draft.referencia_documento}`} onClick={() => { setDiscardTarget(draft); setDiscardReason(''); setDiscardConfirmed(false) }} className="inline-flex h-10 w-10 items-center justify-center border border-border text-muted hover:border-danger/50 hover:bg-danger/10 hover:text-danger disabled:opacity-50"><Trash2 size={17} /></button>}
+        </div>
+      </article>)}
+    </section>}
+
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <p className="text-sm font-medium text-foreground">Órdenes de cliente</p>
+        <p className="text-xs text-muted">No liberan producción hasta preparar y confirmar una OP.</p>
+      </div>
+      {canApprove && <button type="button" onClick={() => setUploadOpen((current) => !current)} className="btn-primary inline-flex items-center gap-2"><Plus size={16} /> Nueva OC</button>}
+    </div>
+
+    {canApprove && uploadOpen && <form onSubmit={upload} className="border-y border-border py-5 space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">Cargar OC de cliente</h2>
+        <p className="text-xs text-muted">El PDF se guarda como borrador. Revísalo y apruébalo antes de liberar producción.</p>
+      </div>
+      <label className="flex min-h-20 cursor-pointer items-center gap-3 border border-dashed border-border px-4 py-3 hover:border-primary/60">
+        <FileText size={20} className="text-primary" />
+        <span className="min-w-0 flex-1 text-sm text-foreground">{file ? file.name : 'Seleccionar PDF'}<span className="block text-xs text-muted">Máximo 2,5 MB.</span></span>
+        <input type="file" accept="application/pdf,.pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} className="sr-only" required />
+      </label>
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy || !file} className="btn-primary disabled:opacity-50">{busy ? 'Procesando...' : 'Cargar PDF'}</button>
+        <button type="button" onClick={() => { setUploadOpen(false); setFile(null) }} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground">Cancelar</button>
+      </div>
     </form>}
 
-    <section className="space-y-3">
-      <h2 className="font-semibold text-foreground">OC de cliente leídas para revisión</h2>
-      {!drafts.some((draft) => ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado)) && <p className="text-sm text-muted">No hay OC de cliente pendientes de revisión.</p>}
-      {drafts.filter((draft) => ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado)).map((draft) => <div key={draft.id} className="rounded-lg border border-border bg-surface p-4 space-y-2 text-sm">
-        <div className="font-semibold text-foreground">Borrador ID {draft.id} · {draft.referencia_documento} · {draft.destinatario_nombre}</div>
-        <div className="text-muted">Estado: {draft.estado} · Fecha: {safeDate(draft.fecha_documento)}</div>
-        <div className="space-y-1">{draft.items?.map((item, index) => <div key={`${item.sku_extraido}-${index}`}>
-          {item.sku_extraido} · {item.producto_catalogo || item.descripcion_extraida} · {Number(item.cantidad)} {item.unidad || 'und'}
-        </div>)}</div>
-        {!!draft.advertencias?.length && <div className="text-orange-400">{draft.advertencias.map((warning, index) => <div key={index}>{warning}</div>)}</div>}
-        <div className="flex gap-3 items-center">
-          {draft.archivo_id && <button type="button" className="text-primary hover:underline" onClick={() => downloadCustomerOrderPdf(draft.archivo_id, draft.archivo_nombre)}>Ver PDF</button>}
-          {canApprove && draft.archivo_id && <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => startReview(draft)}>Revisar</button>}
-          {canApprove && ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado) && <button type="button" disabled={busy} className="text-danger hover:underline" onClick={() => { setDiscardTarget(draft); setDiscardReason('') }}>Descartar borrador</button>}
-        </div>
-      </div>)}
-    </section>
-
-    {reviewTarget && reviewForm && <form onSubmit={submitReview} className="rounded-lg border border-primary/50 bg-surface p-4 space-y-4 text-sm">
+    {reviewTarget && reviewForm && <form onSubmit={submitReview} className="border-y border-border py-5 space-y-4 text-sm">
       <div>
-        <h2 className="font-semibold text-foreground">Revisar OC de cliente · Borrador ID {reviewTarget.id}</h2>
-        <p className="text-muted">Compara los datos con el PDF original. Las correcciones se guardarán en el pedido aprobado; el PDF permanecerá sin cambios.</p>
+        <h2 className="text-sm font-semibold text-foreground">Revisar OC de cliente · Borrador ID {reviewTarget.id}</h2>
+        <p className="text-xs text-muted">Compara cliente, fecha, SKU y cantidades con el PDF original. El PDF permanecerá sin cambios.</p>
       </div>
-      <button type="button" className="text-primary hover:underline" onClick={() => downloadCustomerOrderPdf(reviewTarget.archivo_id, reviewTarget.archivo_nombre)}>Ver PDF original</button>
+      <div className="flex items-center justify-between gap-3 border border-border bg-surface/40 px-4 py-3 text-sm text-foreground">
+        <FileText size={20} className="text-primary" />
+        <span className="flex-1">PDF recibido. Revisa los datos extraídos antes de crear la OC operativa.</span>
+        <button type="button" className="inline-flex items-center gap-2 text-primary hover:underline" onClick={() => downloadCustomerOrderPdf(reviewTarget.archivo_id, reviewTarget.archivo_nombre)}><Download size={15} /> Ver PDF original</button>
+      </div>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label="Referencia de OC *"><input value={reviewForm.referencia_documento} readOnly className="input-field opacity-70" /></Field>
         <Field label="Cliente final *"><input value={reviewForm.cliente_nombre} onChange={(event) => setReviewForm((current) => ({ ...current, cliente_nombre: event.target.value }))} maxLength={200} className="input-field" required /></Field>
         <Field label="Fecha de OC *"><input type="date" value={reviewForm.fecha_documento} onChange={(event) => setReviewForm((current) => ({ ...current, fecha_documento: event.target.value }))} className="input-field" required /></Field>
       </div>
       <div className="space-y-2">
-        <p className="font-medium text-foreground">Productos solicitados · cantidades en unidades</p>
+        <p className="text-xs font-medium text-muted">Ítems · cantidades en unidades</p>
         {reviewForm.items.map((item, index) => <div key={index} className="space-y-1">
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_90px]">
             <input value={item.sku} onChange={(event) => setReviewItem(index, 'sku', event.target.value)} placeholder="SKU de producto terminado" className="input-field" required />
             <input type="number" min="1" step="1" value={item.cantidad} onChange={(event) => setReviewItem(index, 'cantidad', event.target.value)} placeholder="Unidades" className="input-field" required />
-            <button type="button" disabled={reviewForm.items.length === 1} onClick={() => setReviewForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))} className="text-danger disabled:opacity-30">Eliminar</button>
+            <button type="button" disabled={reviewForm.items.length === 1} title="Eliminar ítem" onClick={() => setReviewForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))} className="inline-flex h-10 items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
           </div>
           {item.descripcion && <p className="text-xs text-muted">PDF: {item.descripcion}</p>}
         </div>)}
-        <button type="button" onClick={() => setReviewForm((current) => ({ ...current, items: [...current.items, { sku: '', cantidad: '', descripcion: '' }] }))} className="text-primary hover:underline">Agregar producto</button>
+        <button type="button" onClick={() => setReviewForm((current) => ({ ...current, items: [...current.items, { sku: '', cantidad: '', descripcion: '' }] }))} className="px-3 py-2 border border-border text-sm text-foreground hover:bg-white/5 inline-flex items-center gap-2"><Plus size={15} /> Agregar ítem</button>
       </div>
       {!!reviewTarget.advertencias?.length && <div className="text-orange-400">Advertencias del PDF: {reviewTarget.advertencias.join(' · ')}</div>}
       <Field label="Motivo de corrección o verificación de advertencias"><textarea value={reviewForm.motivo} onChange={(event) => setReviewForm((current) => ({ ...current, motivo: event.target.value }))} maxLength={300} rows={2} placeholder="Obligatorio si modificas datos o el PDF requiere corrección" className="input-field" /></Field>
-      <label className="flex items-start gap-2 text-foreground">
-        <input type="checkbox" checked={reviewForm.confirmar_revision} onChange={(event) => setReviewForm((current) => ({ ...current, confirmar_revision: event.target.checked }))} required />
+      <label className="flex cursor-pointer items-start gap-2 text-foreground">
+        <input type="checkbox" checked={reviewForm.confirmar_revision} onChange={(event) => setReviewForm((current) => ({ ...current, confirmar_revision: event.target.checked }))} className="mt-0.5 h-4 w-4 accent-orange-500" required />
         Confirmo que comparé cliente, fecha, SKU y cantidades con el PDF original.
       </label>
       <p className="text-xs text-muted">Esto crea el pedido disponible para producción. No genera inventario ni libera una orden de producción.</p>
-      <div className="flex gap-3">
-        <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">{busy ? 'Guardando...' : 'Confirmar y crear pedido'}</button>
-        <button type="button" disabled={busy} onClick={() => { setReviewTarget(null); setReviewForm(null) }} className="text-muted hover:text-foreground">Cancelar</button>
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy || !reviewForm.confirmar_revision} className="btn-primary disabled:opacity-50">{busy ? 'Guardando...' : 'Confirmar y crear OC'}</button>
+        <button type="button" disabled={busy} onClick={() => { setReviewTarget(null); setReviewForm(null) }} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground">Cancelar</button>
       </div>
     </form>}
 
-    {discardTarget && <div className="rounded-lg border border-danger/40 bg-surface p-4 space-y-3 text-sm">
-      <div className="font-semibold">Descartar borrador ID {discardTarget.id}</div>
-      <p className="text-muted">Esto permite volver a cargar una versión corregida de la misma OC. No modifica inventario.</p>
-      <input value={discardReason} onChange={(event) => setDiscardReason(event.target.value)} maxLength={300} placeholder="Motivo (mínimo 5 caracteres)" className="input-field" />
-      <div className="flex gap-3">
-        <button type="button" disabled={busy || discardReason.trim().length < 5} className="btn-primary disabled:opacity-50" onClick={async () => {
-          const result = await execute(() => discardCustomerOrderDraft(discardTarget.id, discardReason.trim()), () => `Borrador ID ${discardTarget.id} descartado. Puedes subir el PDF corregido.`)
-          if (result) setDiscardTarget(null)
-        }}>Confirmar descarte</button>
-        <button type="button" disabled={busy} onClick={() => setDiscardTarget(null)} className="text-muted hover:text-foreground">Volver</button>
-      </div>
+    {discardTarget && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="discard-customer-draft-title">
+      <form onSubmit={async (event) => {
+        event.preventDefault()
+        if (!discardConfirmed || discardReason.trim().length < 5) return
+        const result = await execute(() => discardCustomerOrderDraft(discardTarget.id, discardReason.trim()), () => `Borrador ID ${discardTarget.id} descartado. Puedes subir el PDF corregido.`)
+        if (result) { setDiscardTarget(null); setDiscardConfirmed(false) }
+      }} className="w-full max-w-lg border border-border bg-surface shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div><h2 id="discard-customer-draft-title" className="text-base font-semibold text-foreground">Descartar borrador</h2><p className="mt-1 font-mono text-xs text-muted">{discardTarget.referencia_documento}</p></div>
+          <button type="button" onClick={() => setDiscardTarget(null)} title="Cerrar" className="inline-flex h-8 w-8 items-center justify-center text-muted hover:text-foreground"><X size={18} /></button>
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <p className="text-sm text-muted">Se retirará de los borradores pendientes. El PDF y el registro se conservarán para auditoría; esta acción no modifica inventario.</p>
+          <Field label="Motivo *"><textarea value={discardReason} onChange={(event) => setDiscardReason(event.target.value)} maxLength={300} rows={3} className="input-field resize-y" placeholder="Ej. Lectura incorrecta o documento duplicado" autoFocus required /></Field>
+          <label className="flex cursor-pointer items-start gap-3 text-sm text-foreground"><input type="checkbox" checked={discardConfirmed} onChange={(event) => setDiscardConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" /><span>Confirmo que este borrador no debe convertirse en una orden de compra.</span></label>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <button type="button" disabled={busy} onClick={() => setDiscardTarget(null)} className="px-4 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50">Volver</button>
+          <button type="submit" disabled={busy || !discardConfirmed || discardReason.trim().length < 5} className="inline-flex items-center gap-2 bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90 disabled:opacity-50"><Trash2 size={15} /> {busy ? 'Descartando...' : 'Descartar borrador'}</button>
+        </div>
+      </form>
     </div>}
 
     <section className="space-y-3">
-      <h2 className="font-semibold text-foreground">Pedidos disponibles para producción</h2>
-      {!orders.some((order) => order.items.some((item) => item.cantidad_pendiente > 0)) && <p className="text-sm text-muted">No hay unidades pendientes de producir.</p>}
-      {orders.filter((order) => order.items.some((item) => item.cantidad_pendiente > 0)).map((order) => <div key={order.id} className="rounded-lg border border-border bg-surface p-4 space-y-2 text-sm">
+      <h2 className="text-sm font-semibold text-foreground">OC de cliente aprobadas</h2>
+      <div className="overflow-x-auto border border-border rounded-lg">
+        <table className="w-full min-w-[960px] text-sm">
+          <thead><tr className="bg-surface border-b border-border">
+            {['ID / Orden', 'PDF', 'Cliente', 'Fecha OC', 'Estado', 'Ítems', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
+          </tr></thead>
+          <tbody>
+            {orders.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Sin órdenes de compra de cliente aprobadas</td></tr>}
+            {orders.map((order) => {
+              const draft = draftsById.get(Number(order.documento_borrador_id))
+              const pending = (order.items || []).reduce((sum, item) => sum + Number(item.cantidad_pendiente || 0), 0)
+              return <tr key={order.id} className="border-b border-border/50 hover:bg-white/[0.02] align-top">
+                <td className="px-4 py-3 text-xs text-foreground"><span className="block font-mono font-semibold text-primary">PED ID {order.id}</span><span className="block font-mono mt-1">{order.referencia}</span></td>
+                <td className="px-4 py-3">{draft?.archivo_id ? <button type="button" title="Descargar PDF" onClick={() => downloadCustomerOrderPdf(draft.archivo_id, draft.archivo_nombre)} className="inline-flex h-8 w-8 items-center justify-center text-primary hover:bg-primary/10"><Download size={16} /></button> : <span className="text-xs text-danger">Falta</span>}</td>
+                <td className="px-4 py-3">{order.cliente_nombre || '-'}</td>
+                <td className="px-4 py-3 text-muted">{String(order.fecha_documento || '').slice(0, 10) || '-'}</td>
+                <td className="px-4 py-3"><span className={`text-xs font-semibold ${pending > 0 ? 'text-sky-400' : 'text-green-400'}`}>{pending > 0 ? 'PENDIENTE PRODUCCIÓN' : 'SIN SALDO PENDIENTE'}</span></td>
+                <td className="px-4 py-3 tabular-nums">{order.items?.length || 0}</td>
+                <td className="px-4 py-3 tabular-nums whitespace-nowrap"><span className="block">Solicitado: {customerOrderTotals(order.items)}</span><span className="block text-muted">Pendiente: {pending} und</span></td>
+                <td className="px-4 py-3">{order.aprobado_por_nombre || '-'}</td>
+                <td className="px-4 py-3 text-muted">{order.aprobado_en ? formatBogotaDateTime(order.aprobado_en) : '-'}</td>
+                <td className="px-4 py-3">{pending > 0 ? <a href={`#pedido-cliente-${order.id}`} className="text-primary hover:underline">Ver ítems</a> : <span className="text-muted">-</span>}</td>
+              </tr>
+            })}
+          </tbody>
+        </table>
+      </div>
+      {orders.filter((order) => order.items.some((item) => item.cantidad_pendiente > 0)).map((order) => <div key={order.id} id={`pedido-cliente-${order.id}`} className="border border-border bg-surface/40 p-4 space-y-2 text-sm">
         <div className="font-semibold text-primary">PED ID {order.id} · {order.cliente_nombre}</div>
         <div className="text-muted">OC: {order.referencia}</div>
         {order.items.filter((item) => item.cantidad_pendiente > 0).map((item) => <div key={item.id} className="flex flex-wrap justify-between items-center gap-2 border-t border-border pt-2">
-          <span>Item ID {item.id} · {item.producto} ({item.sku}) · Pendiente: {item.cantidad_pendiente} und</span>
+          <span>Ítem ID {item.id} · {item.producto} ({item.sku}) · Pendiente: {item.cantidad_pendiente} und</span>
           <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => { setReleaseCandidate({ order, item }); setDuplicateOrderId(null) }}>Preparar OP</button>
         </div>)}
       </div>)}

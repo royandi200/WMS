@@ -483,6 +483,8 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(EMPTY_PO)
   const [formError, setFormError] = useState('')
+  const [reviewConfirmed, setReviewConfirmed] = useState(false)
+  const selectedDraft = drafts.find((draft) => draft.id === form.document_draft_id)
   const setHeader = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
   const setItem = (index, key, value) => setForm((current) => ({
     ...current,
@@ -512,11 +514,13 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
       })),
     })
     setFormError('')
+    setReviewConfirmed(false)
     setCreating(true)
   }
   const closeForm = () => {
     setForm(EMPTY_PO)
     setFormError('')
+    setReviewConfirmed(false)
     setCreating(false)
   }
   const submit = async (event) => {
@@ -524,6 +528,10 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
     setFormError('')
     if (!form.documento_pdf && !form.document_draft_id) {
       setFormError('Debes seleccionar la orden de compra en PDF.')
+      return
+    }
+    if (form.document_draft_id && !reviewConfirmed) {
+      setFormError('Confirma que comparaste la OC con el PDF original.')
       return
     }
     try {
@@ -579,6 +587,10 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
 
       {creating && (
         <form onSubmit={submit} className="border-y border-border py-5 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">{form.document_draft_id ? `Revisar OC de proveedor · Borrador ID ${form.document_draft_id}` : 'Cargar OC de proveedor'}</h2>
+            <p className="text-xs text-muted">{form.document_draft_id ? 'Compara proveedor, fecha, SKU y cantidades con el PDF original antes de aprobar la OC.' : 'El PDF y los datos de la orden se conservarán para conciliar la recepción.'}</p>
+          </div>
           <div className="grid gap-4 md:grid-cols-3">
             <Field label="Número de OC *"><input value={form.numero} onChange={setHeader('numero')} readOnly={Boolean(form.document_draft_id)} className="input-field read-only:opacity-70" required /></Field>
             <Field label="Proveedor sincronizado *">
@@ -594,9 +606,10 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
             <Field label="Fecha de orden"><input type="date" value={form.fecha_orden} onChange={setHeader('fecha_orden')} className="input-field" /></Field>
           </div>
           {form.document_draft_id ? (
-            <div className="flex items-center gap-3 border border-border bg-surface/40 px-4 py-3 text-sm text-foreground">
+            <div className="flex items-center justify-between gap-3 border border-border bg-surface/40 px-4 py-3 text-sm text-foreground">
               <FileText size={20} className="text-primary" />
-              PDF recibido por WhatsApp. Revisa los datos extraídos antes de crear la OC operativa.
+              <span className="flex-1">PDF recibido. Revisa los datos extraídos antes de crear la OC operativa.</span>
+              {selectedDraft?.archivo_id && <button type="button" onClick={() => downloadPurchaseOrderDraftDocument(selectedDraft.archivo_id, selectedDraft.archivo_nombre)} className="inline-flex items-center gap-2 text-primary hover:underline"><Download size={15} /> Ver PDF original</button>}
             </div>
           ) : <Field label="Orden de compra en PDF *">
             <label className="flex min-h-20 cursor-pointer items-center gap-3 border border-dashed border-border px-4 py-3 hover:border-primary/60">
@@ -648,11 +661,16 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
               {formError}
             </div>
           )}
+          {form.document_draft_id && <label className="flex cursor-pointer items-start gap-2 text-sm text-foreground">
+            <input type="checkbox" checked={reviewConfirmed} onChange={(event) => setReviewConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" required />
+            Confirmo que comparé proveedor, fecha, SKU y cantidades con el PDF original.
+          </label>}
+          <p className="text-xs text-muted">Esto crea la OC esperada. No genera inventario hasta confirmar la recepción física.</p>
           <div className="flex gap-2">
             <button type="button" onClick={addItem} className="px-3 py-2 border border-border text-sm text-foreground hover:bg-white/5 inline-flex items-center gap-2">
               <Plus size={15} /> Agregar item
             </button>
-            <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Cargando...' : form.document_draft_id ? 'Confirmar y crear OC' : 'Cargar orden'}</button>
+            <button type="submit" disabled={loading || (Boolean(form.document_draft_id) && !reviewConfirmed)} className="btn-primary disabled:opacity-50">{loading ? 'Cargando...' : form.document_draft_id ? 'Confirmar y crear OC' : 'Cargar orden'}</button>
             <button type="button" onClick={closeForm} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground">Cancelar</button>
           </div>
         </form>

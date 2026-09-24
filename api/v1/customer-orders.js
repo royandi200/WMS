@@ -60,12 +60,14 @@ async function listCustomerOrders({ pendingOnly = false } = {}) {
   const rows = await query(
     `SELECT pc.id, pc.referencia, pc.cliente_nombre, pc.fecha_documento,
             pc.documento_borrador_id, pc.estado, pc.aprobado_en,
+            u.nombre AS aprobado_por_nombre,
             i.id AS item_id, i.producto_id, p.siigo_code AS sku, p.nombre AS producto,
             i.cantidad_ordenada, i.unidad,
             COALESCE(op.cantidad_liberada, 0) AS cantidad_liberada
        FROM pedidos_cliente pc
        JOIN pedido_cliente_items i ON i.pedido_cliente_id = pc.id
        JOIN productos p ON p.id = i.producto_id
+       LEFT JOIN usuarios u ON u.id = pc.aprobado_por
        LEFT JOIN (
          SELECT pedido_cliente_item_id,
                 SUM(CASE WHEN estado = 'CERRADA' THEN cantidad_real ELSE cantidad_planeada END) AS cantidad_liberada
@@ -89,6 +91,7 @@ async function listCustomerOrders({ pendingOnly = false } = {}) {
       documento_borrador_id: row.documento_borrador_id,
       estado: row.estado,
       aprobado_en: row.aprobado_en,
+      aprobado_por_nombre: row.aprobado_por_nombre,
       items: [],
     });
     const remaining = Math.max(0, Number(row.cantidad_ordenada) - Number(row.cantidad_liberada));
