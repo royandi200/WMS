@@ -52,6 +52,8 @@
     "data:user-whatsapp-aliases:apply": "node scripts/apply-user-whatsapp-aliases-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:customer-orders:dry-run": "node scripts/apply-customer-orders-migration.js",
     "data:customer-orders:apply": "node scripts/apply-customer-orders-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:discarded-document-reference:dry-run": "node scripts/apply-discarded-document-reference-migration.js",
+    "data:discarded-document-reference:apply": "node scripts/apply-discarded-document-reference-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:builderbot-ingress-dedupe:dry-run": "node scripts/apply-builderbot-ingress-dedupe-migration.js",
     "data:builderbot-ingress-dedupe:apply": "node scripts/apply-builderbot-ingress-dedupe-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:builderbot-durable-inbox:dry-run": "node scripts/apply-builderbot-durable-inbox-migration.js",
