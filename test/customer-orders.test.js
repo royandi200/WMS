@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { detectDocumentTypeMarkers, assertDocumentTypeMarker } = require('../api/_lib/document-type-markers');
 const { recoverWarehousePdfHeaders } = require('../api/_lib/document-pdf-headers');
 const { normalizeWarehouseDocumentInput } = require('../api/_lib/warehouse-document-intake');
@@ -47,6 +49,16 @@ test('document and pending-order actions stay in different workflows', () => {
   assert.equal(capabilityForAction('REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO'), CAPABILITIES.RECEPTION_CREATE);
   assert.equal(capabilityForAction('CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'), CAPABILITIES.PRODUCTION_RELEASE);
   assert.equal(capabilityForAction('CONSULTAR_RECEPCIONES_PENDIENTES'), CAPABILITIES.RECEPTION_READ);
+});
+
+test('a short customer-order answer lists selectable PED IDs instead of asking for OC reference', () => {
+  const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
+  const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
+  assert.match(prompt, /responde solo `pedido de cliente`[\s\S]*`CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES`/u);
+  assert.match(prompt, /no pidas referencia ni cliente final/u);
+  assert.match(webhook, /\*PED ID \$\{order\.id\}\*/u);
+  assert.match(webhook, /produce el PED ID \$\{orders\[0\]\.id\}/u);
+  assert.doesNotMatch(webhook, /produce el PED ID 1/u);
 });
 
 test('PED ID tolerates natural speech but refuses an invented or ambiguous ID', () => {

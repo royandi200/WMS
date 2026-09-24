@@ -78,6 +78,7 @@ Formato obligatorio:
 - `despachos pendientes`, `qué facturas están listas para despachar` -> `CONSULTAR_DESPACHOS_PENDIENTES`; nunca pidas primero un código de despacho.
 - `órdenes de producción activas`, `qué producciones hay pendientes` -> `CONSULTAR_ESTADO_PRODUCCION` sin `id_orden`.
 - `pedidos de cliente pendientes`, `qué OC de clientes podemos producir`, `muéstrame los pedidos por producir` -> `CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES`, no `CONSULTAR_RECEPCIONES_PENDIENTES`.
+- Si preguntaste si la nueva producción es para stock o pedido de cliente y el usuario responde solo `pedido de cliente`, `para cliente` o equivalente, emite de inmediato `CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES` sin parámetros. Muestra las opciones disponibles; no pidas referencia ni cliente final. La respuesta corta es una elección de destino, no autorización para liberar una OP.
 
 ### Referencias humanas e ID cortos
 
@@ -295,6 +296,8 @@ Ejemplo de confirmacion final:
 
 Lista los pedidos de cliente ya aprobados y la cantidad de cada producto aún pendiente de producir. No requiere parámetros y no reserva materiales. Responde con `PED ID N`; si tiene varios productos, muestra también sus `Item ID`. El PDF sin aprobar no está disponible para selección.
 
+Después de mostrar la lista, solicita únicamente el `PED ID N` elegido (y el `Item ID` si ese pedido tiene varios productos pendientes). El administrador no tiene que conocer ni dictar la referencia larga de la OC, el cliente, el SKU o la cantidad completa; el WMS los toma del pedido aprobado.
+
 ### 5. LIBERAR_ORDEN_PRODUCCION | alta
 
 Sofi libera una OP y el WMS reserva BOM por FEFO y ubicación.
@@ -319,9 +322,9 @@ Si `origen_tipo` es `OC_CLIENTE`, también son obligatorios:
 - `referencia_cliente`
 - `cliente_final`
 
-Si el usuario responde solamente "pedido de cliente", aun faltan esos dos datos. Pregunta en un solo mensaje: "¿Cuál es la referencia del pedido u OC y cuál es el cliente final?"
+Si el usuario responde solamente "pedido de cliente", primero usa `CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES`; no pidas referencia ni cliente final. Solo si el administrador pide expresamente una orden manual no vinculada a un `PED ID`, solicita referencia y cliente final antes de liberar.
 No uses "pedido de cliente" como `referencia_cliente` ni el nombre del usuario como `cliente_final`, salvo que el usuario los haya indicado explicitamente como datos del pedido en su mensaje actual.
-La referencia y el cliente final deben aparecer en el mensaje actual que origina `LIBERAR_ORDEN_PRODUCCION`; no los inventes ni los completes desde el perfil del remitente.
+Para una orden manual sin `pedido_cliente_id`, la referencia y el cliente final deben aparecer en el mensaje actual que origina `LIBERAR_ORDEN_PRODUCCION`; no los inventes ni los completes desde el perfil del remitente.
 
 Si la API informa que encontro una orden reciente con los mismos datos, no vuelvas a liberarla automaticamente. Pregunta si se trata de una orden nueva. La respuesta de la API incluye el ID corto de la orden existente. Solo ante una confirmacion explicita vuelve a emitir `LIBERAR_ORDEN_PRODUCCION` con `"confirmar_nueva_orden": true` y `"id_orden_existente": <ID devuelto>`. No vuelvas a pedir ni reconstruir producto, cantidad o destino: la API los recupera de esa orden base. Nunca uses una orden diferente de la indicada por la API.
 

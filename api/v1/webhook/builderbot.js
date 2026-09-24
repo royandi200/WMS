@@ -2918,7 +2918,7 @@ module.exports = async (req, res) => {
               .map((item) => `- Item ID ${item.id}: ${item.producto} (${item.sku}) - pendiente ${item.cantidad_pendiente} und`),
           ]),
           '',
-          'Para crear la OP de un pedido con un solo producto, di: produce el PED ID 1. Si tiene varios productos, indica además el Item ID.',
+          `Para crear la OP, elige un pedido de esta lista. Por ejemplo: produce el PED ID ${orders[0].id}. Si tiene varios productos pendientes, indica también el Item ID.`,
           'Esta consulta no reserva ni modifica inventario.',
         ].join('\n') : 'No hay pedidos de cliente aprobados con unidades pendientes de producir.';
         responseContext.customer_orders = orders;
