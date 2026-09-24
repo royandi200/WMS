@@ -4,6 +4,10 @@ const WASTE_REASON_STOP_WORDS = new Set([
   'a', 'al', 'con', 'de', 'del', 'el', 'en', 'la', 'las', 'lo', 'los', 'por', 'que',
   'se', 'su', 'un', 'una', 'unos', 'unas', 'y',
 ]);
+const KNOWN_CAUSE_WORDS = new Set([
+  'dano', 'rotura', 'derrame', 'vencimiento', 'contaminacion',
+  'defecto', 'caida', 'despegue',
+]);
 
 function normalizedWords(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/gu, '')
@@ -42,12 +46,16 @@ function assertWasteReasonEvidence(userText, proposedReason) {
     .filter(word => !WASTE_REASON_STOP_WORDS.has(word))
     .map(causeWord);
   const spokenWords = new Set(words.map(causeWord));
-  const causeCue = /\b(?:por|porque|motivo|causa|razon|debido)\b/u.test(text)
-    || [...spokenWords].some(word => [
-      'dano', 'rotura', 'derrame', 'vencimiento', 'contaminacion',
-      'defecto', 'caida', 'despegue',
-    ].includes(word));
-  if (!causeCue || !reasonWords.every(word => spokenWords.has(word))) {
+  const causeWordEvidence = reasonWords.some(word => KNOWN_CAUSE_WORDS.has(word)
+    && spokenWords.has(word));
+  const cuePositions = words.flatMap((word, index) =>
+    ['por', 'porque', 'motivo', 'causa', 'razon', 'debido'].includes(word) ? [index] : []);
+  const cuePhraseEvidence = cuePositions.some(index => {
+    const afterCue = new Set(words.slice(index + 1).map(causeWord));
+    return reasonWords.every(word => afterCue.has(word));
+  });
+  if (!text || !reasonWords.every(word => spokenWords.has(word))
+    || (!causeWordEvidence && !cuePhraseEvidence)) {
     throw Object.assign(new Error(ask), { status: 409 });
   }
   return reason;

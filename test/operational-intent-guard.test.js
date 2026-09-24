@@ -10,11 +10,15 @@ test('waste reason must be a concrete cause supported by the user message', () =
   assert.throws(() => assertWasteReasonEvidence(originalAudio, 'merma'), /causa concreta/u);
   assert.throws(() => assertWasteReasonEvidence(originalAudio, 'daño de empaque'), /causa concreta/u);
   assert.throws(() => assertWasteReasonEvidence('reporta una etiqueta por rotura', 'derrame'), /causa concreta/u);
+  assert.throws(() => assertWasteReasonEvidence('reporta merma de una etiqueta por 1 unidad', 'etiqueta'), /causa concreta/u);
+  assert.throws(() => assertWasteReasonEvidence('se rompió una etiqueta', 'etiqueta'), /causa concreta/u);
   assert.equal(assertWasteReasonEvidence(
     'Reporta merma de una etiqueta de OP ID 97 por daño de empaque', 'daño de empaque'),
   'daño de empaque');
   assert.equal(assertWasteReasonEvidence(
     'La etiqueta se rompió durante la producción', 'rotura'), 'rotura');
+  assert.equal(assertWasteReasonEvidence(
+    'Reporta merma de una tapa por mala manipulación', 'mala manipulación'), 'mala manipulación');
   assert.equal(isGenericWasteReason('pérdida de material en proceso'), true);
 });
 
