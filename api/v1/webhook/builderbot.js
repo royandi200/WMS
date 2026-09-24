@@ -1568,17 +1568,24 @@ module.exports = async (req, res) => {
       params = { avance: {} };
     }
 
+    const closeContextAction = ['CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA', 'UNKNOWN', 'MODO_CHARLA'].includes(action);
+    const activeCloseDraft = rawText && closeContextAction
+      ? await pendingCloseDraft(db, user.id) : null;
     const standaloneMaterialWaste = Boolean(parseWasteMessage(rawText)?.product)
       && !hasProductionCloseIntent(rawText);
-    if (action === 'CERRAR_ORDEN_PRODUCCION' && standaloneMaterialWaste) {
+    if (standaloneMaterialWaste && activeCloseDraft?.orderId
+      && ['UNKNOWN', 'MODO_CHARLA', 'REPORTE_MERMA'].includes(action)) {
+      action = 'CERRAR_ORDEN_PRODUCCION';
+      params = {};
+    } else if (action === 'CERRAR_ORDEN_PRODUCCION' && standaloneMaterialWaste
+      && !activeCloseDraft?.orderId) {
       action = 'REPORTE_MERMA';
       params = {};
     }
     if (['UNKNOWN', 'MODO_CHARLA', 'REPORTE_MERMA'].includes(action) && rawText) {
-      const activeClose = await pendingCloseDraft(db, user.id);
       const explicitWasteReport = /^\s*(?:reporta|registra|registrar)\s+(?:una\s+)?merma\b/iu.test(rawText);
       if ((['UNKNOWN', 'MODO_CHARLA'].includes(action) && hasProductionCloseIntent(rawText))
-        || (isCloseFollowup(rawText, activeClose) && !explicitWasteReport && !standaloneMaterialWaste)) {
+        || (isCloseFollowup(rawText, activeCloseDraft) && !explicitWasteReport && !standaloneMaterialWaste)) {
         action = 'CERRAR_ORDEN_PRODUCCION';
         params = {};
       }

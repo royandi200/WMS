@@ -81,6 +81,24 @@ function closeFields(text) {
   return { conforming, waste, reason, location };
 }
 
+function materialLossCandidate(text) {
+  const raw = normalize(text);
+  // Solo una pérdida explícita de material: «merma de dos tapas». «Una merma
+  // por ruptura» describe producto terminado y no debe abrir una reposición.
+  const match = new RegExp(`\\b(?:merma|perdida|desperdicio)\\s+(?:de\\s+)?${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*([a-z][a-z0-9\\s-]*?)(?=\\s+(?:por|debido a|causa|motivo)\\b|[,;.]|$)`, 'u').exec(raw);
+  if (!match) return null;
+  const product = match[2].trim();
+  if (!product || /^(?:producto(?:s)?\s+terminado(?:s)?|unidades?\s+terminadas?|pt)$/u.test(product)) return null;
+  const cause = raw.slice(match.index + match[0].length)
+    .match(/^\s*(?:por|debido a|causa|motivo)\s+([^.,;]+)/u)?.[1]?.trim() || null;
+  return { product, quantity: quantity(match[1]), cause, index: match.index };
+}
+
+function ambiguousConformingQuantity(text) {
+  const match = normalize(text).match(new RegExp(`\\b${NUMBER}\\s+(?!con\\b|de\\b|y\\b)[a-z]+(?:\\s+[a-z]+){0,2}\\s+conformes?\\b`, 'u'));
+  return match ? quantity(match[1]) : null;
+}
+
 function noReplacements(text) {
   return /\b(?:no\s+(?:repuse|repusimos|reponi|repusemos)|sin\s+(?:reposicion|material(?:es)?\s+adicional(?:es)?)|ningun(?:a|o)?\s+material\s+repuesto)\b/u.test(normalize(text));
 }
@@ -182,6 +200,53 @@ async function applyMaterialReport(db, draft, order, text, params) {
   draft.materials ||= [];
   draft.materialPending ||= null;
   if (await applyMaterialCorrection(db, draft, order, text)) return;
+  const damage = materialLossCandidate(text);
+  if (damage) {
+    if (draft.materialPending) throw guideError('Termina primero el material pendiente antes de reportar otro daño.');
+    const available = await orderMaterials(db, order.id);
+    const product = await resolveProductReference(db, damage.product, {
+      productIds: available.map(row => row.producto_id),
+      allowContextualPartial: true, allowScopedApproximate: true,
+    });
+    const material = available.find(row => Number(row.producto_id) === Number(product.id));
+    if (!material) throw guideError(`${damage.product} no es un material de OP ID ${order.id}`);
+    draft.materialPending = {
+      sku: material.sku, producto: material.nombre, unidad: material.unidad,
+      cantidad: damage.quantity, motivo: damage.cause, lote: null, ubicacion: null,
+      damageReport: true, replacementDecision: null,
+    };
+    draft.materialsAnswered = false;
+    return;
+  }
+  if (draft.materialPending?.damageReport) {
+    const pending = draft.materialPending;
+    const answer = normalize(text);
+    if (pending.replacementDecision == null) {
+      if (/^(?:no|no\s+(?:las?|los?)\s+repuse|no\s+repuse(?:\s+material)?)\b/u.test(answer)) {
+        draft.materialPending = null;
+        draft.materialsAnswered = false;
+        return;
+      }
+      if (/^si[.!]?$/u.test(answer) || /\b(?:si\s+repuse|repuse|las?\s+repuse|los?\s+repuse)\b/u.test(answer)) {
+        pending.replacementDecision = true;
+      } else {
+        return;
+      }
+    }
+    const followup = materialFollowup(text);
+    if (followup.lote) pending.lote = followup.lote;
+    if (pending.cantidad == null) pending.cantidad = quantity(text);
+    if (pending.motivo == null && followup.motivo) pending.motivo = followup.motivo;
+    if (pending.sku && pending.cantidad != null && pending.lote && pending.motivo) {
+      const { damageReport, replacementDecision, ...line } = pending;
+      const existing = draft.materials.findIndex(item => item.sku === line.sku && item.lote === line.lote);
+      if (existing >= 0) draft.materials[existing] = line;
+      else draft.materials.push(line);
+      draft.materialPending = null;
+      draft.materialsAnswered = true;
+    }
+    return;
+  }
   if (noReplacements(text)) {
     draft.materials = [];
     draft.materialPending = null;
@@ -407,9 +472,19 @@ function guideSummary(order, draft, locationHint) {
   if (!draft.materialsAnswered || draft.materialPending) missing.push('materiales repuestos (o confirma que no hubo)');
   if (missing.length) lines.push('', `*Falta informar:* ${missing.join(', ')}.`);
   lines.push('');
-  if (draft.conforming == null) {
-    lines.push('¿Cuántas unidades conformes salieron? Puedes dar todos los datos juntos o por partes.');
-    lines.push('Ejemplo: «1 conforme, 1 merma por ruptura, ubicación C2». Ajusta los datos a lo ocurrido.');
+  if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
+    lines.push(`¿Repusiste ${draft.materialPending.cantidad} ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto}? Responde *sí* o *no*. Si las repusiste, indica de qué lote las sacaste.`);
+  } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision && !draft.materialPending.lote) {
+    lines.push(`¿De qué lote sacaste ${draft.materialPending.cantidad} ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} para reponerlas?`);
+  } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision && !draft.materialPending.motivo) {
+    lines.push(`¿Cuál fue la causa concreta del daño de ${draft.materialPending.producto}?`);
+  } else if (draft.conforming == null) {
+    if (draft.conformingClarification != null) {
+      lines.push(`Escuché ${draft.conformingClarification} unidades con un nombre de material. ¿Son *${draft.conformingClarification} productos terminados conformes*? Responde «${draft.conformingClarification} conformes» o corrige la cantidad.`);
+    } else {
+      lines.push('¿Cuántas unidades conformes salieron? Puedes dar todos los datos juntos o por partes.');
+      lines.push('Ejemplo: «1 conforme, 1 merma por ruptura, ubicación C2». Ajusta los datos a lo ocurrido.');
+    }
   }
   else if (draft.waste == null) lines.push('¿Cuántas unidades terminadas fueron merma? Di «0 merma» si no hubo.');
   else if (draft.conforming === 0 && draft.waste === 0) lines.push('Ambas cantidades son cero. Corrige conformes o merma para poder cerrar.');
@@ -476,13 +551,20 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     throw guideError(`La OP ID ${order.id} está ${order.estado}. Confirma primero sus materiales; no se cerró.`);
   }
   const materialMarker = MATERIAL_START.exec(String(rawText || ''));
-  const closeText = materialMarker ? String(rawText).slice(0, materialMarker.index) : rawText;
+  const damageMarker = materialLossCandidate(rawText);
+  const closeText = materialMarker ? String(rawText).slice(0, materialMarker.index)
+    : damageMarker ? String(rawText).slice(0, damageMarker.index) : rawText;
   const parsed = closeFields(closeText);
   const hadPendingMaterial = Boolean(draft.materialPending);
-  if (!confirmed(rawText) && !rejected(rawText)) {
+  if ((!confirmed(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport) {
     await applyMaterialReport(db, draft, order, rawText, params);
   }
-  if (parsed.conforming != null) draft.conforming = parsed.conforming;
+  if (parsed.conforming != null) {
+    draft.conforming = parsed.conforming;
+    draft.conformingClarification = null;
+  } else if (draft.conforming == null) {
+    draft.conformingClarification = ambiguousConformingQuantity(closeText) ?? draft.conformingClarification ?? null;
+  }
   if (parsed.waste != null) draft.waste = parsed.waste;
   if (draft.waste === 0) draft.reason = null;
   if (draft.conforming === 0) draft.location = null;
@@ -494,6 +576,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     else if (draft.waste == null) draft.waste = singleQuantity;
   }
   if (draft.waste > 0 && !draft.reason && parsed.reason == null && !hadPendingMaterial
+    && !damageMarker
     && !spokenOrderId && !parsed.location && parsed.conforming == null && parsed.waste == null
     && !confirmed(rawText) && !rejected(rawText)) {
     const candidate = String(rawText || '').trim();

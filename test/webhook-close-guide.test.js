@@ -25,6 +25,13 @@ require.cache[dbPath] = {
           cantidad_planeada: '2.000', producto_id: 74,
           sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
         }]];
+        if (/FROM produccion_materiales pm JOIN productos/u.test(sql)) return [[{
+          producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
+        }]];
+        if (/FROM producto_aliases pa/u.test(sql)) return [[{
+          id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
+          unit_label: 'und', alias: 'tapa',
+        }]];
         if (/INSERT INTO produccion_cierre_borradores/u.test(sql)) closeDraft = params[2];
         if (/^\s*INSERT/u.test(sql)) return [{ insertId: 101, affectedRows: 1 }];
         if (/^\s*UPDATE/u.test(sql)) return [{ affectedRows: 1 }];
@@ -82,12 +89,15 @@ test('un número de OP aclarado en conversación queda pendiente y sí continúa
   assert.ok(!writes.some(entry => /UPDATE ordenes_produccion/u.test(entry.sql)));
 });
 
-test('un reporte suelto de material dañado no se confunde con el cierre en curso', async () => {
+test('un reporte de material dañado continúa el cierre en curso sin registrar merma anticipada', async () => {
   writes.length = 0;
   closeDraft = null;
   await invoke('CERRAR_ORDEN_PRODUCCION', 'Cerramos producción OP ID 97', { id_orden: 97 });
-  const res = await invoke('MODO_CHARLA', 'merma de dos liners');
-  assert.match(res.body.mensaje, /únicamente al \*cerrar la producción\*/u);
+  const res = await invoke('MODO_CHARLA', 'hubo merma de dos tapas por destrucción');
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body.mensaje, /¿Repusiste 2 und de TAPA/u);
+  assert.equal(JSON.parse(closeDraft).materialPending.sku, '00001-TPBI');
+  assert.equal(JSON.parse(closeDraft).waste, null);
   assert.ok(!writes.some(entry => /INSERT INTO produccion_merma_borradores/u.test(entry.sql)));
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
 });

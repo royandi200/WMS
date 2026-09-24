@@ -5,7 +5,7 @@ const {
 } = require('../api/_lib/production-close-guide');
 const { hasProductionCloseIntent } = require('../api/_lib/production-close-input');
 
-function fakeDb() {
+function fakeDb({ orderId = 97, planned = 2 } = {}) {
   let stored = null;
   const writes = [];
   const aliasTerms = [];
@@ -14,10 +14,10 @@ function fakeDb() {
     async execute(sql, params) {
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
       if (sql.includes('FROM webhook_logs')) return [[]];
-      if (sql.includes('FROM notificaciones_salida')) return [[{ evento: 'production_started:97' }]];
+      if (sql.includes('FROM notificaciones_salida')) return [[{ evento: `production_started:${orderId}` }]];
       if (sql.includes('FROM ordenes_produccion op')) return [[{
-        id: 97, codigo_orden: 'OP-20260924-000097', estado: 'EN_PROCESO',
-        cantidad_planeada: '2.000', producto_id: 74,
+        id: orderId, codigo_orden: `OP-20260924-${String(orderId).padStart(6, '0')}`, estado: 'EN_PROCESO',
+        cantidad_planeada: Number(planned).toFixed(3), producto_id: 74,
         sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
       }]];
       if (sql.includes('FROM producto_ubicaciones')) return [[{ codigo: 'C2' }]];
@@ -138,6 +138,48 @@ test('una unidad conforme y una merma se capturan juntas sin inferir cierre', as
   assert.match(result.message, /Falta informar:.*ubicación del producto conforme/u);
   assert.match(result.message, /Sugerida: \*C2\*/u);
   assert.equal(result.params, undefined);
+});
+
+test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cierre sin descontar inventario', async () => {
+  const db = fakeDb({ orderId: 100, planned: 5 });
+  const base = { db, userId: 100 };
+  const first = await advanceCloseGuide({ ...base,
+    rawText: 'cerramos op y de 100 con cuatro tarros conformes y una merma',
+    params: { id_orden: 100, cantidad_real: 4, merma: 1 } });
+  assert.equal(first.draft.orderId, 100);
+  assert.equal(first.draft.conforming, null);
+  assert.equal(first.draft.waste, 1);
+  assert.match(first.message, /¿Son \*4 productos terminados conformes\*/u);
+  assert.equal(first.params, undefined);
+
+  const second = await advanceCloseGuide({ ...base,
+    rawText: 'hubo merma de dos tapas por destrucción',
+    params: { avance_materiales: { items: [{ producto: 'tapas', cantidad: 2, motivo: 'destrucción' }] } } });
+  assert.equal(second.draft.waste, 1, 'el daño de tapas no cambia la merma del producto terminado');
+  assert.equal(second.draft.materialPending.cantidad, 2);
+  assert.equal(second.draft.materialPending.sku, '00001-TPBI');
+  assert.equal(second.draft.materialPending.motivo, 'destruccion');
+  assert.match(second.message, /¿Repusiste 2 und de TAPA/u);
+  assert.equal(second.params, undefined);
+  const affirmed = await advanceCloseGuide({ ...base, rawText: 'sí' });
+  assert.match(affirmed.message, /¿De qué lote sacaste 2 und/u);
+  const lot = await advanceCloseGuide({ ...base, rawText: 'lote ACC-260910-TPBI' });
+  assert.equal(lot.draft.materials[0].cantidad, 2);
+  assert.equal(lot.draft.materials[0].lote, 'ACC-260910-TPBI');
+  assert.equal(lot.draft.waste, 1);
+  const conforming = await advanceCloseGuide({ ...base, rawText: '4 conformes' });
+  assert.equal(conforming.draft.conforming, 4);
+  await advanceCloseGuide({ ...base, rawText: 'merma de producto terminado por rotura' });
+  const review = await advanceCloseGuide({ ...base, rawText: 'ubicación C2' });
+  assert.match(review.message, /confirmo cierre/u);
+  const confirmation = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.equal(confirmation.params.cantidad_real, 4);
+  assert.equal(confirmation.params.merma, 1);
+  assert.deepEqual(confirmation.params.materiales_repuestos, [{
+    sku: '00001-TPBI', cantidad: 2, lote: 'ACC-260910-TPBI',
+    motivo: 'destruccion', ubicacion: undefined,
+  }]);
+  assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
 });
 
 test('material repuesto se reúne por partes, exige lote y causa y solo sale en confirmación final', async () => {
