@@ -5,10 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const backup = JSON.parse(await readFile(resolve('.tmp', 'builderbot-pre-ai-close-followup-20260924.json'), 'utf8'));
-const afterPath = resolve('.tmp', 'builderbot-post-ai-close-followup-20260924.json');
+const correction = process.argv.includes('--change=correction');
+const changeName = correction ? 'close-correction' : 'ai-close-followup';
+const backup = JSON.parse(await readFile(resolve('.tmp', `builderbot-pre-${changeName}-20260924.json`), 'utf8'));
+const afterPath = resolve('.tmp', `builderbot-post-${changeName}-20260924.json`);
 const local = await readFile(new URL('../../docs/Prompt WMS.txt', import.meta.url), 'utf8');
-const baseline = execFileSync('git', ['show', '26fa680:docs/Prompt WMS.txt'], {
+const baseline = execFileSync('git', ['show', `${correction ? 'aba5385' : '26fa680'}:docs/Prompt WMS.txt`], {
   cwd: repoRoot, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024,
 });
 const env = await readFile(resolve('.env'), 'utf8');

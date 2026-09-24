@@ -180,7 +180,49 @@ async function orderMaterials(db, orderId) {
   return rows;
 }
 
-async function applyMaterialCorrection(db, draft, order, text) {
+function naturalLotCorrection(text, params) {
+  const raw = normalize(text);
+  const prefix = /^(?:correccion|correcion|corrijo|corrige|perdon|perdona)\b\s*[,;:-]?\s*/u.exec(raw);
+  if (!prefix) return null;
+  const remainder = raw.slice(prefix[0].length).trim();
+  const spoken = /^(?:(?:las?|los?)\s+)?(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?:und|unidades?)?\s*(?:de\s+)?(.+?)\s+(?:salieron|se\s+sacaron|(?:las?|los?)\s+(?:saque|tome))\s+(?:de|del)\s+(?:(?:lote|partida)\s+)?([a-z0-9][a-z0-9_-]{0,79})[.!]?\s*$/u.exec(remainder);
+  if (spoken) return { product: spoken[2].trim(), amount: quantity(spoken[1]),
+    lot: spoken[3].toUpperCase() };
+  const ai = params?.avance_materiales?.correccion_lote;
+  if (!ai || typeof ai !== 'object') return null;
+  const lot = groundedLotHint(text, ai.lote);
+  if (!lot) return null;
+  const amount = quantity(ai.cantidad);
+  const spokenAmount = /\b(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/u.exec(remainder)?.[1];
+  if (amount != null && quantity(spokenAmount) !== amount) return null;
+  return { product: String(ai.producto || '').trim(), amount, lot };
+}
+
+async function applyMaterialCorrection(db, draft, order, text, params) {
+  const natural = naturalLotCorrection(text, params);
+  if (natural && draft.materials?.length) {
+    if (draft.materials.length > 1 && (!natural.product
+      || !normalize(text).includes(normalize(natural.product)))) {
+      throw guideError('Hay varias partidas en el cierre. Menciona el material que quieres corregir; no cambié el borrador.');
+    }
+    const available = await orderMaterials(db, order.id);
+    const product = natural.product ? await resolveProductReference(db, natural.product, {
+      productIds: available.map(row => row.producto_id),
+      allowContextualPartial: true, allowScopedApproximate: true,
+    }) : null;
+    const matches = draft.materials.filter(line => (!product || line.sku === product.siigo_code)
+      && (natural.amount == null || Number(line.cantidad) === natural.amount));
+    if (matches.length !== 1) {
+      throw guideError('No pude identificar una sola partida para corregir. Indica el material y, si hay varios lotes, el lote anterior; no cambié el borrador.');
+    }
+    const line = matches[0];
+    if (draft.materials.some(other => other !== line && other.sku === line.sku && other.lote === natural.lot)) {
+      throw guideError('Ese material y lote ya tienen una partida; indica el total en una sola.');
+    }
+    line.lote = natural.lot;
+    draft.materialsAnswered = true;
+    return true;
+  }
   const match = String(text || '').trim().match(/^(corrige|cambia|modifica|quita|elimina)\s+(?:(lote|cantidad|causa|motivo|ubicaci[oó]n)\s+de\s+)?(?:la\s+|el\s+)?(.+?)(?:\s+(?:a|por)\s+(.+))?$/iu);
   if (!match || !draft.materials?.length) return false;
   const [, operation, field, term, value] = match;
@@ -279,7 +321,7 @@ async function resolveUnclassifiedWaste(db, draft, order, text) {
 async function applyMaterialReport(db, draft, order, text, params) {
   draft.materials ||= [];
   draft.materialPending ||= null;
-  if (await applyMaterialCorrection(db, draft, order, text)) return;
+  if (await applyMaterialCorrection(db, draft, order, text, params)) return;
   const damage = materialLossCandidate(text);
   if (damage) {
     await beginMaterialDamage(db, draft, order, damage);
@@ -472,7 +514,7 @@ function isCloseFollowup(text, draft) {
   if (!draft) return false;
   const raw = normalize(text);
   if (confirmed(raw) || rejected(raw)) return true;
-  if (/^(?:corrige|cambia|modifica|quita|elimina)\s+/u.test(raw)) return true;
+  if (/^(?:corrige|cambia|modifica|quita|elimina|correccion|correcion|corrijo|perdon|perdona)\b/u.test(raw)) return true;
   if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por|repuse|repusimos|repuesto|lote|materiales?)\b/u.test(raw)) return true;
   if (noReplacements(raw) || replacementsFinished(raw)) return true;

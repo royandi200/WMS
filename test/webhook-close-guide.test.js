@@ -25,6 +25,7 @@ require.cache[dbPath] = {
           cantidad_planeada: '2.000', producto_id: 74,
           sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
         }]];
+        if (/FROM ubicaciones u JOIN bodegas b/u.test(sql)) return [[{ codigo: 'C2' }]];
         if (/FROM produccion_materiales pm JOIN productos/u.test(sql)) return [[{
           producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
         }]];
@@ -146,5 +147,23 @@ test('la lectura contextual de IA llega al cierre y el WMS valida el lote mencio
   assert.equal(res.statusCode, 200);
   assert.equal(JSON.parse(closeDraft).materials[0].lote, 'ACC-260910-TPBI');
   assert.match(res.body.mensaje, /Insumo repuesto: 2 und/u);
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});
+
+test('WhatsApp corrige por alias el lote de una partida ya resumida sin repetir OP ID', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 97, conforming: 2, waste: 0,
+    reason: null, location: 'C2', materialsAnswered: true, materialPending: null,
+    reviewShown: true, materials: [{ sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      cantidad: 2, unidad: 'und', lote: 'ACC-260910-TPBI', motivo: 'destruccion' }] });
+  const res = await invoke('MODO_CHARLA', 'correción, las 2 tapas salieron de R2-260920-TPBI', {
+    avance_materiales: { correccion_lote: {
+      producto: 'tapas', cantidad: 2, lote: 'R2-260920-TPBI',
+    } },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.parse(closeDraft).materials[0].lote, 'R2-260920-TPBI');
+  assert.match(res.body.mensaje, /Lote R2-260920-TPBI/u);
+  assert.doesNotMatch(res.body.mensaje, /ACC-260910-TPBI/u);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 });
