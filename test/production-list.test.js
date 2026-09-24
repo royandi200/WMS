@@ -13,3 +13,10 @@ test('production list exposes and renders the finished-product lot', () => {
   assert.match(page, /'Lote PT'/);
   assert.match(page, /r\.output_lot/);
 });
+
+test('alistador notification requests confirmation with the short OP ID', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '../api/_lib/production-workflow.js'), 'utf8');
+  assert.match(workflow, /Confirma materiales e inicio de producción para OP ID \$\{created\.insertId\}\./u);
+  assert.match(workflow, /WHERE op\.id = \? OR op\.codigo_orden = \?/u);
+  assert.doesNotMatch(workflow, /Confirma materiales e inicio de produccion para \$\{code\}/u);
+});

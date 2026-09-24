@@ -303,7 +303,7 @@ async function releaseProductionOrder({
           '',
         ]),
         '*Siguiente paso*',
-        `Confirma materiales e inicio de produccion para ${code}.`,
+        `Confirma materiales e inicio de producción para OP ID ${created.insertId}.`,
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;
