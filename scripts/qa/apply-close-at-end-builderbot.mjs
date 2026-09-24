@@ -61,9 +61,7 @@ function patch(original) {
       let position = 0;
       while (position < Math.min(actual.length, expected.length)
         && actual[position] === expected[position]) position += 1;
-      const expectedLines = expected.split('\n').filter(Boolean);
-      const actualLines = actual.split('\n').filter(Boolean);
-      throw new Error(`Live prompt diverged in ${start} at ${position}; only baseline: ${JSON.stringify(expectedLines.filter(line => !actualLines.includes(line)))}; only live: ${JSON.stringify(actualLines.filter(line => !expectedLines.includes(line)))}`);
+      throw new Error(`Live prompt diverged in ${start} at ${position}; baseline ${hash(expected)}, live ${hash(actual)}`);
     }
     next = next.replace(current, unix(desired).replace(/\n/gu, newline));
   }
