@@ -13,6 +13,7 @@ test('merma spoken in two audios keeps quantity and product while waiting for th
         id_orden: 'OP ID 97',
       } }) }),
     }]];
+    if (sql.includes('FROM notificaciones_salida')) return [[]];
     if (sql.includes('FROM ordenes_produccion')) return [[{
       id: 97, codigo_orden: 'OP-20260924-000097', estado: 'EN_PROCESO',
     }]];
@@ -70,6 +71,17 @@ test('notifications for different OPs do not silently choose a production order'
     if (sql.includes('FROM notificaciones_salida')) return [[
       { evento: 'production_started:98' }, { evento: 'production_started:97' },
     ]];
+    throw new Error(`Unexpected query: ${sql}`);
+  } };
+  assert.equal(await recentOrderContext(db, '573001234567'), null);
+});
+
+test('an old chat OP and a new notified OP remain ambiguous', async () => {
+  const db = { async execute(sql) {
+    if (sql.includes('FROM webhook_logs')) return [[{
+      action: 'REPORTE_MERMA', payload: JSON.stringify({ info: { params: { id_orden: 97 } } }),
+    }]];
+    if (sql.includes('FROM notificaciones_salida')) return [[{ evento: 'production_started:98' }]];
     throw new Error(`Unexpected query: ${sql}`);
   } };
   assert.equal(await recentOrderContext(db, '573001234567'), null);

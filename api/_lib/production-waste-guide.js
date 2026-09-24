@@ -75,9 +75,8 @@ async function recentOrderContext(db, from) {
     for (const id of spoken) ids.add(id);
     if (ids.size > 1) return null;
   }
-  if (ids.size === 1) return [...ids][0];
   // El aviso de inicio de producción también establece contexto para quien cierra la OP.
-  // Nunca elegir una OP si llegaron avisos de dos órdenes distintas en este intervalo.
+  // Si el chat y los avisos apuntan a OP distintas, tampoco se elige una por accidente.
   const [notifications] = await db.execute(
     `SELECT evento FROM notificaciones_salida
       WHERE destinatario = ? AND estado = 'ENVIADA'
@@ -85,10 +84,11 @@ async function recentOrderContext(db, from) {
         AND creado_en >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
       ORDER BY id DESC LIMIT 20`, [from]
   );
-  const notifiedIds = new Set(notifications.map(row => referenceKey(
-    String(row.evento || '').split(':')[1]
-  )).filter(Boolean));
-  return notifiedIds.size === 1 ? [...notifiedIds][0] : null;
+  for (const row of notifications) {
+    const id = referenceKey(String(row.evento || '').split(':')[1]);
+    if (id) ids.add(id);
+  }
+  return ids.size === 1 ? [...ids][0] : null;
 }
 
 async function loadOrder(db, reference) {
