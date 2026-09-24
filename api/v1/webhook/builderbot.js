@@ -2032,7 +2032,9 @@ module.exports = async (req, res) => {
           draft.duplicate
             ? `La OC de cliente ${draft.referencia_documento} ya estaba registrada. No se duplicó.`
             : `OC de cliente ${draft.referencia_documento} guardada como borrador.`,
-          `Borrador ID ${draft.id} | ${draft.itemCount} producto(s)`,
+          `Borrador ID ${draft.id}`,
+          `Referencias: ${draft.skuCount} SKU`,
+          `Cantidad solicitada: ${await draftQuantitySummary(db, draft.id)}`,
           `Estado: ${draft.estado}`,
           warningLines.length ? 'Revisiones necesarias:' : null,
           ...warningLines,

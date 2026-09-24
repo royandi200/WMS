@@ -232,6 +232,7 @@ test('duplicate document returns persisted total and warnings without inserting'
     userId: 5,
   });
   assert.equal(result.duplicate, true);
+  assert.equal(result.skuCount, 2);
   assert.equal(result.totalUnits, 8200);
   assert.deepEqual(result.warnings, ['Revision persistida']);
   assert.ok(calls.includes('commit'));
