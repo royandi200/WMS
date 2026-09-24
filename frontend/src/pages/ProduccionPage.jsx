@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Ban, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 import { useProductionStore } from '../store/productionStore'
+import { getCustomerOrderMaterialAvailability } from '../api/production.api'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 import { formatBogotaDateTime } from '../utils/dateTime'
@@ -234,6 +235,11 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState(null)
   const [releaseCandidate, setReleaseCandidate] = useState(null)
+  const [availability, setAvailability] = useState(null)
+  const [availabilityLoading, setAvailabilityLoading] = useState(false)
+  const [availabilityError, setAvailabilityError] = useState('')
+  const [releaseMessage, setReleaseMessage] = useState('')
+  const availabilityRequest = useRef(0)
   const [duplicateOrderId, setDuplicateOrderId] = useState(null)
   const [discardTarget, setDiscardTarget] = useState(null)
   const [discardReason, setDiscardReason] = useState('')
@@ -337,33 +343,66 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
     }
   }
 
+  const prepareRelease = async (order, item) => {
+    const requestId = ++availabilityRequest.current
+    setReleaseCandidate({ order, item })
+    setDuplicateOrderId(null)
+    setAvailability(null)
+    setAvailabilityError('')
+    setReleaseMessage('')
+    setAvailabilityLoading(true)
+    try {
+      const response = await getCustomerOrderMaterialAvailability(order.id, item.id)
+      if (requestId === availabilityRequest.current) setAvailability(response.data)
+    } catch (error) {
+      if (requestId === availabilityRequest.current) {
+        setAvailabilityError(error.response?.data?.error || 'No fue posible comprobar los materiales. Intenta nuevamente.')
+      }
+    } finally {
+      if (requestId === availabilityRequest.current) setAvailabilityLoading(false)
+    }
+  }
+
+  const closeRelease = () => {
+    availabilityRequest.current += 1
+    setReleaseCandidate(null)
+    setAvailability(null)
+    setAvailabilityLoading(false)
+    setAvailabilityError('')
+    setReleaseMessage('')
+    setDuplicateOrderId(null)
+  }
+
   const release = async () => {
-    if (!releaseCandidate) return
+    if (!releaseCandidate || !availability?.ready || availabilityLoading || busy) return
     const { order, item } = releaseCandidate
+    if (Number(availability.order_id) !== Number(order.id)
+      || Number(availability.item_id) !== Number(item.id)) return
     setBusy(true)
-    setMessage(null)
+    setReleaseMessage('')
     try {
       const response = await onStart({
         pedido_cliente_id: order.id,
         pedido_cliente_item_id: item.id,
-        qty_planned: item.cantidad_pendiente,
+        qty_planned: availability.planned_quantity,
         confirmar_nueva_orden: Boolean(duplicateOrderId),
         id_orden_existente: duplicateOrderId || undefined,
       })
       if (!response.ok) {
-        setMessage({ ok: false, msg: response.message || 'No fue posible liberar la OP.' })
+        setReleaseMessage(response.message || 'No fue posible liberar la OP.')
+        const current = await getCustomerOrderMaterialAvailability(order.id, item.id).catch(() => null)
+        if (current?.data) setAvailability(current.data)
       } else if (response.data?.requires_confirmation) {
         setDuplicateOrderId(response.data.order_id)
-        setMessage({ ok: false, msg: `Ya existe OP ID ${response.data.order_id} con estos datos. Revisa si realmente necesitas otra antes de confirmar.` })
+        setReleaseMessage(`Ya existe OP ID ${response.data.order_id} con estos datos. Revisa si realmente necesitas otra antes de confirmar.`)
       } else {
         setMessage({ ok: true, msg: `OP ID ${response.data.order_id} liberada para PED ID ${order.id}.` })
-        setReleaseCandidate(null)
-        setDuplicateOrderId(null)
+        closeRelease()
         await refresh()
         onReleased()
       }
     } catch (error) {
-      setMessage({ ok: false, msg: error.response?.data?.error || error.message || 'No fue posible liberar la OP.' })
+      setReleaseMessage(error.response?.data?.error || error.message || 'No fue posible liberar la OP.')
     } finally {
       setBusy(false)
     }
@@ -372,6 +411,7 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
   const pendingDrafts = drafts.filter((draft) => !['VINCULADO', 'DESCARTADO'].includes(draft.estado))
   const draftsById = new Map(drafts.map((draft) => [Number(draft.id), draft]))
   const customerOrderTotals = (items = []) => `${items.reduce((sum, item) => sum + Number(item.cantidad_ordenada || 0), 0)} und`
+  const quantityText = (value) => new Intl.NumberFormat('es-CO', { maximumFractionDigits: 4 }).format(Number(value || 0))
 
   return <div className="space-y-6">
     {message && <ToastInline toast={message} />}
@@ -518,19 +558,45 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
       {orders.filter((order) => order.items.some((item) => item.cantidad_pendiente > 0)).map((order) => <div key={order.id} id={`pedido-cliente-${order.id}`} className="border border-border bg-surface/40 p-4 space-y-2 text-sm">
         <div className="font-semibold text-primary">PED ID {order.id} · {order.cliente_nombre}</div>
         <div className="text-muted">OC: {order.referencia}</div>
-        {order.items.filter((item) => item.cantidad_pendiente > 0).map((item) => <div key={item.id} className="flex flex-wrap justify-between items-center gap-2 border-t border-border pt-2">
-          <span>Ítem ID {item.id} · {item.producto} ({item.sku}) · Pendiente: {item.cantidad_pendiente} und</span>
-          <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => { setReleaseCandidate({ order, item }); setDuplicateOrderId(null) }}>Preparar OP</button>
+        {order.items.filter((item) => item.cantidad_pendiente > 0).map((item) => <div key={item.id} className="border-t border-border pt-2">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <span>Ítem ID {item.id} · {item.producto} ({item.sku}) · Pendiente: {item.cantidad_pendiente} und</span>
+            <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => prepareRelease(order, item)}>Preparar OP</button>
+          </div>
+          {Number(releaseCandidate?.order.id) === Number(order.id)
+            && Number(releaseCandidate?.item.id) === Number(item.id) && <div className="mt-3 rounded-lg border border-primary/50 bg-primary/5 p-4 space-y-3 text-sm">
+              <div className="font-semibold text-foreground">Comprobación de materiales · PED ID {order.id}</div>
+              <div className="text-muted">{item.producto} ({item.sku}) · {availability ? quantityText(availability.planned_quantity) : quantityText(item.cantidad_pendiente)} und por producir</div>
+              {availabilityLoading && <p role="status" className="text-muted">Comprobando stock disponible y reservas...</p>}
+              {availabilityError && <p role="alert" className="text-danger">{availabilityError}</p>}
+              {availability && !availabilityLoading && <>
+                <p role="status" className={availability.ready ? 'font-semibold text-emerald-400' : 'font-semibold text-orange-400'}>
+                  {availability.ready ? 'Material suficiente para esta OP.' : 'Material insuficiente: no se puede liberar esta OP.'}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] text-xs">
+                    <thead><tr className="border-b border-border text-left text-muted">
+                      {['Material', 'Necesario', 'Disponible', 'Faltante'].map((label) => <th key={label} className="px-2 py-2 font-semibold">{label}</th>)}
+                    </tr></thead>
+                    <tbody>{availability.materials.map((material) => <tr key={material.sku} className="border-b border-border/40">
+                      <td className="px-2 py-2"><span className="font-mono">{material.sku}</span><span className="block text-muted">{material.product}</span></td>
+                      <td className="px-2 py-2 tabular-nums">{quantityText(material.required)} {material.unit}</td>
+                      <td className="px-2 py-2 tabular-nums">{quantityText(material.available)} {material.unit}</td>
+                      <td className={`px-2 py-2 tabular-nums ${material.missing > 0 ? 'font-semibold text-orange-400' : 'text-muted'}`}>{quantityText(material.missing)} {material.unit}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-muted">Esta consulta no reserva inventario. Al confirmar, el sistema comprobará de nuevo el stock y reservará los lotes disponibles.</p>
+              </>}
+              {releaseMessage && <p role="alert" className="text-danger">{releaseMessage}</p>}
+              <div className="flex flex-wrap gap-3">
+                <button type="button" disabled={busy || availabilityLoading || !availability?.ready} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" onClick={release}>{duplicateOrderId ? 'Confirmar OP adicional' : 'Confirmar y liberar OP'}</button>
+                <button type="button" disabled={busy || availabilityLoading} className="text-primary hover:underline disabled:opacity-50" onClick={() => prepareRelease(order, item)}>Volver a comprobar</button>
+                <button type="button" disabled={busy} className="text-muted hover:text-foreground disabled:opacity-50" onClick={closeRelease}>Volver</button>
+              </div>
+            </div>}
         </div>)}
       </div>)}
-      {releaseCandidate && <div className="rounded-lg border border-primary/50 bg-primary/5 p-4 space-y-2 text-sm">
-        <div className="font-semibold">Confirma antes de reservar materiales</div>
-        <div>PED ID {releaseCandidate.order.id} · {releaseCandidate.order.cliente_nombre} · {releaseCandidate.item.producto} · {releaseCandidate.item.cantidad_pendiente} und</div>
-        <div className="flex gap-3">
-          <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={release}>{duplicateOrderId ? 'Confirmar OP adicional' : 'Confirmar y liberar OP'}</button>
-          <button type="button" disabled={busy} className="text-muted hover:text-foreground" onClick={() => { setReleaseCandidate(null); setDuplicateOrderId(null) }}>Volver</button>
-        </div>
-      </div>}
     </section>
   </div>
 }

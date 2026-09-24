@@ -5,16 +5,13 @@ const { notifyRoles } = require('./builderbot-notifications');
 const { assertInternalProductionProduct } = require('./product-modes');
 const { resolveProductReference } = require('./product-references');
 const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
+const { planProductionMaterials, roundQty } = require('./production-material-availability');
 
 function httpError(status, message, data) {
   const error = new Error(message);
   error.status = status;
   error.data = data;
   return error;
-}
-
-function roundQty(value) {
-  return Number(Number(value).toFixed(4));
 }
 
 function orderCodeForId(id) {
@@ -167,56 +164,10 @@ async function releaseProductionOrder({
       };
     }
     const warehouseId = await defaultWarehouse(conn);
-    const [bom] = await conn.execute(
-      `SELECT b.insumo_id, b.cantidad_por_unidad, b.unidad,
-              p.siigo_code AS sku, p.nombre
-       FROM bom b JOIN productos p ON p.id = b.insumo_id
-       WHERE b.producto_final_id = ? AND b.etapa = 'PRODUCCION' ORDER BY b.id`,
-      [finalProduct.id]
-    );
-    if (!bom.length) throw httpError(422, `No existe BOM para ${finalProduct.siigo_code}`);
-
-    const plan = [];
-    const shortages = [];
-    for (const component of bom) {
-      const required = roundQty(Number(component.cantidad_por_unidad) * qty);
-      let remaining = required;
-      const [stockRows] = await conn.execute(
-        `SELECT s.id, s.lote, s.ubicacion_id, COALESCE(l.expiry_date, s.fecha_venc) AS fecha_venc,
-                (s.cantidad - COALESCE(s.reservada, 0)) AS disponible,
-                u.codigo AS ubicacion_codigo
-         FROM stock s
-         JOIN lots l ON l.lpn = s.lote AND l.product_id = s.producto_id
-         JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.activa = 1
-         WHERE s.producto_id = ? AND s.bodega_id = ?
-           AND l.status = 'DISPONIBLE'
-           AND (s.cantidad - COALESCE(s.reservada, 0)) > 0
-           AND (COALESCE(l.expiry_date, s.fecha_venc) IS NULL
-                OR COALESCE(l.expiry_date, s.fecha_venc) >= CURDATE())
-         ORDER BY CASE WHEN COALESCE(l.expiry_date, s.fecha_venc) IS NULL THEN 1 ELSE 0 END,
-                  COALESCE(l.expiry_date, s.fecha_venc) ASC, l.created_at ASC, s.id ASC
-         FOR UPDATE`,
-        [component.insumo_id, warehouseId]
-      );
-      const allocations = [];
-      for (const stock of stockRows) {
-        if (remaining <= 0.0001) break;
-        const take = roundQty(Math.min(Number(stock.disponible), remaining));
-        allocations.push({
-          stockId: stock.id,
-          lot: stock.lote,
-          locationId: stock.ubicacion_id,
-          locationCode: stock.ubicacion_codigo,
-          expiryDate: stock.fecha_venc,
-          quantity: take,
-        });
-        remaining = roundQty(remaining - take);
-      }
-      if (remaining > 0.0001) {
-        shortages.push({ sku: component.sku, requerido: required, faltante: remaining });
-      }
-      plan.push({ component, required, allocations });
-    }
+    const { plan, shortages } = await planProductionMaterials(conn, {
+      productId: finalProduct.id, productSku: finalProduct.siigo_code,
+      quantity: qty, warehouseId, lockStock: true,
+    });
     if (shortages.length) throw httpError(409, 'Stock insuficiente para liberar la orden', { shortages });
 
     const temporaryCode = `TMP-${crypto.randomBytes(8).toString('hex')}`;

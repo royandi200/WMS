@@ -14,6 +14,9 @@ function withNormalizedOrder(body = {}) {
 export const listProductions  = (params) => client.get('/production',                   { params }).then(r => r.data)
 export const getProduction    = (id)     => client.get(`/production/${normalizeOrderReference(id)}`).then(r => r.data)
 export const startProduction  = (body)   => client.post('/production/start',             body).then(r => r.data)
+export const getCustomerOrderMaterialAvailability = (orderId, itemId) => client.get('/production/availability', {
+  params: { pedido_cliente_id: orderId, pedido_cliente_item_id: itemId },
+}).then(r => r.data)
 export const confirmMaterials = (body)   => client.post('/production/confirm',           withNormalizedOrder(body)).then(r => r.data)
 export const advancePhase     = (body)   => client.post('/production/advance',           withNormalizedOrder(body)).then(r => r.data)
 export const closeProduction  = (body)   => client.post('/production/close',             withNormalizedOrder(body)).then(r => r.data)
