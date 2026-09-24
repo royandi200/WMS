@@ -89,7 +89,7 @@ const {
 const https  = require('https');
 const { randomUUID, timingSafeEqual } = require('crypto');
 const { requireWebhookSecret } = require('../../_lib/auth');
-const { capabilityForAction, hasCapability } = require('../../_lib/capabilities');
+const { CAPABILITIES, capabilityForAction, hasCapability } = require('../../_lib/capabilities');
 const { loadUserRolesFromConnection } = require('../../_lib/user-roles');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { confirmOutsourcingShipment } = require('../../_lib/outsourcing-workflow');
@@ -112,7 +112,7 @@ const {
 } = require('../../_lib/production-replenishment');
 const { closeProductionOrder } = require('../../_lib/production-close');
 const { advanceCloseGuide,
-  finishDraft: finishCloseDraft, isCloseFollowup, pendingCloseDraft } = require('../../_lib/production-close-guide');
+  closeOrderReference, finishDraft: finishCloseDraft, isCloseFollowup, pendingCloseDraft } = require('../../_lib/production-close-guide');
 const {
   hasProductionCloseIntent,
   normalizeProductionCloseParams,
@@ -480,6 +480,28 @@ async function findRecentReceptionPreparationQuestion(db, from, rawText) {
   const previousBotMessage = response.message || response.mensaje;
   return confirmedPreparationReference(rawText, previousUserText, previousBotMessage)
     || clarifiedPreparationReference(rawText, previousUserText, previousBotMessage);
+}
+
+async function notifiedProductionCloseReference(db, from, text) {
+  if (!from) return null;
+  const normalized = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase().replace(/\s+/gu, ' ').trim();
+  // An audio can lose the verb "cerrar" and leave only "Orden OPIV 101".
+  // Treat that as the close flow only when it matches the latest start notice
+  // delivered to this closer; this merely opens a draft, never closes stock.
+  if (!/^(?:(?:la|el)\s+)?(?:orden(?:\s+de\s+produccion)?\s+)?op\s*(?:i\s*[dv]?|iv|y\s+de)?\s*#?\s*[1-9]\d*[.!]?$/u.test(normalized)) {
+    return null;
+  }
+  const orderId = closeOrderReference(text);
+  if (!orderId) return null;
+  const [notices] = await db.execute(
+    `SELECT evento FROM notificaciones_salida
+      WHERE destinatario = ? AND estado = 'ENVIADA'
+        AND evento LIKE 'production_started:%'
+        AND creado_en >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+      ORDER BY id DESC LIMIT 1`, [from]
+  );
+  return notices[0]?.evento === `production_started:${orderId}` ? orderId : null;
 }
 
 function firstDefined(...values) {
@@ -1566,6 +1588,15 @@ module.exports = async (req, res) => {
       && await hasSelectedGuidedSku(db, user.id)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
+    }
+
+    if (['UNKNOWN', 'MODO_CHARLA'].includes(action) && rawText
+      && hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_CLOSE)) {
+      const notifiedOrderId = await notifiedProductionCloseReference(db, from, rawText);
+      if (notifiedOrderId) {
+        action = 'CERRAR_ORDEN_PRODUCCION';
+        params = { id_orden: notifiedOrderId };
+      }
     }
 
     const closeContextAction = ['CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA', 'UNKNOWN', 'MODO_CHARLA'].includes(action);

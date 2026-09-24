@@ -5,6 +5,7 @@ const path = require('node:path');
 const dbPath = path.resolve(__dirname, '../api/_lib/db.js');
 const writes = [];
 let closeDraft = null;
+let latestStartedNotice = null;
 const user = { id: 7, nombre: 'Operario QA', telefono: '573150000059', activo: 1,
   rol_nombre: 'admin', email: 'qa@wms.co' };
 
@@ -20,8 +21,11 @@ require.cache[dbPath] = {
         if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
         if (/FROM produccion_cierre_borradores/u.test(sql)) return [closeDraft
           ? [{ payload_json: closeDraft }] : []];
+        if (/FROM notificaciones_salida/u.test(sql)) return [latestStartedNotice
+          ? [{ evento: `production_started:${latestStartedNotice}` }] : []];
         if (/FROM ordenes_produccion op JOIN productos p/u.test(sql)) return [[{
-          id: 97, codigo_orden: 'OP-20260924-000097', estado: 'EN_PROCESO',
+          id: params[0], codigo_orden: `OP-20260924-${String(params[0]).padStart(6, '0')}`,
+          estado: 'EN_PROCESO',
           cantidad_planeada: '2.000', producto_id: 74,
           sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
         }]];
@@ -166,4 +170,44 @@ test('WhatsApp corrige por alias el lote de una partida ya resumida sin repetir 
   assert.match(res.body.mensaje, /Lote de reposición: R2-260920-TPBI/u);
   assert.doesNotMatch(res.body.mensaje, /ACC-260910-TPBI/u);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});
+
+test('audio «Orden OPIV 101» inicia borrador de cierre si coincide con el último aviso al encargado', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  latestStartedNotice = 101;
+  const res = await invoke('UNKNOWN', 'Orden OPIV 101');
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.match(res.body.mensaje, /OP ID 101/u);
+  assert.match(res.body.mensaje, /¿Cuántas unidades de producto terminado salieron conformes/iu);
+  assert.equal(JSON.parse(closeDraft).orderId, 101);
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+  latestStartedNotice = null;
+});
+
+test('una referencia OPIV aislada no inicia cierre si el aviso reciente corresponde a otra orden', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  latestStartedNotice = 100;
+  const res = await invoke('UNKNOWN', 'Orden OPIV 101');
+  assert.equal(res.statusCode, 200);
+  assert.equal(closeDraft, null);
+  assert.ok(!writes.some(entry => /INSERT INTO produccion_cierre_borradores|UPDATE ordenes_produccion/u.test(entry.sql)));
+  latestStartedNotice = null;
+});
+
+test('una referencia OPIV aislada no abre cierre desde el rol de alistamiento', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  latestStartedNotice = 101;
+  user.rol_nombre = 'alistador';
+  try {
+    await invoke('UNKNOWN', 'Orden OPIV 101');
+    assert.equal(closeDraft, null);
+    assert.ok(!writes.some(entry => /INSERT INTO produccion_cierre_borradores|UPDATE ordenes_produccion/u.test(entry.sql)));
+  } finally {
+    user.rol_nombre = 'admin';
+    latestStartedNotice = null;
+  }
 });
