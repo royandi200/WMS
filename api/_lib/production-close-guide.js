@@ -40,8 +40,19 @@ function closeOrderReference(text, params = {}) {
   return spoken;
 }
 
+function contextualOrderCandidate(text, hasDraft) {
+  const raw = normalize(text);
+  const ambiguous = raw.match(/\b(?:oc\s*i\s*d|ocid|id)\s*#?\s*([1-9]\d*)\b/u);
+  if (ambiguous && /\b(?:cerrar|cerramos|cierre|produccion)\b/u.test(raw)) return Number(ambiguous[1]);
+  if (hasDraft) {
+    const reply = raw.match(/^(?:(?:el|numero|id)\s+)?([1-9]\d*)[.!]?$/u);
+    if (reply) return Number(reply[1]);
+  }
+  return null;
+}
+
 function fieldMatch(text, before, after) {
-  const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidades?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
+  const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
     || text.match(new RegExp(`${before}\\s*(?:de|son|fueron|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
   return quantity(value);
 }
@@ -94,6 +105,7 @@ function isCloseFollowup(text, draft) {
   if (!draft) return false;
   const raw = normalize(text);
   if (confirmed(raw) || rejected(raw)) return true;
+  if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por)\b/u.test(raw)) return true;
   if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(raw) && /\d/u.test(raw)) return true;
   if (quantity(raw) != null) return true;
@@ -177,9 +189,29 @@ async function advanceCloseGuide({ db, userId, rawText, params = {} }) {
     throw guideError(`Tienes un cierre pendiente para OP ID ${prior.orderId}. Termínalo o cancélalo antes de cambiar de OP.`);
   }
   const draft = prior || { orderId: null, conforming: null, waste: null,
-    reason: null, location: null, reviewShown: false };
-  draft.orderId = spokenOrderId || draft.orderId;
+    reason: null, location: null, reviewShown: false, candidateOrderId: null };
+  if (spokenOrderId) {
+    draft.orderId = spokenOrderId;
+    draft.candidateOrderId = null;
+  }
+  if (!draft.orderId && confirmed(rawText) && draft.candidateOrderId) {
+    draft.orderId = draft.candidateOrderId;
+    draft.candidateOrderId = null;
+  }
+  if (!draft.orderId && rejected(rawText) && draft.candidateOrderId) {
+    draft.candidateOrderId = null;
+  }
   if (!draft.orderId) {
+    const candidate = contextualOrderCandidate(rawText, !!prior);
+    if (candidate) {
+      const order = await loadOrder(db, candidate);
+      if (order.estado !== 'EN_PROCESO') {
+        throw guideError(`La OP ID ${candidate} está ${order.estado}. Indica una OP en proceso; no se cerró nada.`);
+      }
+      draft.candidateOrderId = candidate;
+      await saveDraft(db, userId, draft);
+      return { message: `🏭 ¿Te refieres al cierre de *OP ID ${candidate}*? Responde *sí* para continuar o indica otro OP ID. No se modificó inventario.`, draft };
+    }
     await saveDraft(db, userId, draft);
     return { message: '🏭 ¿Cuál es el *OP ID* de la producción que vas a cerrar? No se modificó inventario.', draft };
   }

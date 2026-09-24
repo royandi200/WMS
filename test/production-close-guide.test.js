@@ -64,6 +64,50 @@ test('el audio sin cantidades no puede convertirse en cierre por los parámetros
   assert.match(result.message, /Merma de producto terminado: pendiente/u);
 });
 
+test('conserva el OP ID propuesto ante una transcripción OCID y acepta sí sin repetir el prefijo', async () => {
+  const db = fakeDb();
+  const base = { db, userId: 11 };
+  const first = await advanceCloseGuide({ ...base,
+    rawText: 'Cerramos producción OCID 97', params: { id_orden: 97 } });
+  assert.match(first.message, /¿Te refieres al cierre de \*OP ID 97\*/u);
+  assert.equal(first.draft.orderId, null);
+  assert.equal(first.draft.candidateOrderId, 97);
+
+  const second = await advanceCloseGuide({ ...base, rawText: 'Sí' });
+  assert.match(second.message, /¿Cuántas unidades conformes salieron/iu);
+  assert.equal(second.draft.orderId, 97);
+  assert.equal(second.params, undefined);
+});
+
+test('mantiene el candidato cuando el operario aclara el número y luego responde sí', async () => {
+  const db = fakeDb();
+  const base = { db, userId: 12 };
+  await advanceCloseGuide({ ...base, rawText: 'Cerramos producción' });
+  const candidate = await advanceCloseGuide({ ...base, rawText: 'El 97' });
+  assert.match(candidate.message, /OP ID 97/u);
+  assert.equal(candidate.draft.candidateOrderId, 97);
+  assert.equal(isCloseFollowup('El 97', candidate.draft), true);
+  const confirmedCandidate = await advanceCloseGuide({ ...base, rawText: 'sí' });
+  assert.match(confirmedCandidate.message, /¿Cuántas unidades conformes salieron/iu);
+  assert.equal(confirmedCandidate.draft.orderId, 97);
+  assert.equal(confirmedCandidate.params, undefined);
+});
+
+test('una unidad conforme y una merma se capturan juntas sin inferir cierre', async () => {
+  assert.deepEqual(closeFields('quedó una unidad conforme y una merma por destrucción'), {
+    conforming: 1, waste: 1, reason: 'destruccion', location: null,
+  });
+  const db = fakeDb();
+  const base = { db, userId: 13 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
+  const result = await advanceCloseGuide({ ...base,
+    rawText: 'quedó una unidad conforme y una merma por destrucción' });
+  assert.match(result.message, /Conformes: 1 und/u);
+  assert.match(result.message, /Merma de producto terminado: 1 und/u);
+  assert.match(result.message, /Sugerida: \*C2\*/u);
+  assert.equal(result.params, undefined);
+});
+
 test('parsea cantidades y causas expresas sin tomar el OP ID como unidades', () => {
   assert.equal(closeOrderReference('Cerramos producción OPIV 97', { id_orden: 97 }), 97);
   assert.equal(hasProductionCloseIntent('Cerramos OPIV97'), true);

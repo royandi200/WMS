@@ -69,3 +69,15 @@ test('un cierre incompleto devuelve la pregunta y finaliza la bandeja antes de c
   assert.match(waste.body.mensaje, /ubicación quedará/iu);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
 });
+
+test('un número de OP aclarado en conversación queda pendiente y sí continúa el cierre', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  const first = await invoke('CERRAR_ORDEN_PRODUCCION', 'Cerramos producción OCID 97', { id_orden: 97 });
+  assert.match(first.body.mensaje, /¿Te refieres al cierre de \*OP ID 97\*/u);
+  const second = await invoke('MODO_CHARLA', 'El 97', { texto: 'Repite el OP ID' });
+  assert.match(second.body.mensaje, /OP ID 97/u);
+  const third = await invoke('MODO_CHARLA', 'Sí', { texto: 'Entendido' });
+  assert.match(third.body.mensaje, /¿Cuántas unidades conformes salieron/iu);
+  assert.ok(!writes.some(entry => /UPDATE ordenes_produccion/u.test(entry.sql)));
+});
