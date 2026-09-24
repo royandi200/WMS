@@ -309,7 +309,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
         `Materiales repuestos al cierre: ${additionalMaterials.length} partida(s)`,
         ...additionalMaterials.flatMap(item => [
           `• *${item.sku}* — ${item.producto}: ${item.cantidad} ${item.unidad}`,
-          `  Lote: ${item.lote} | Ubicación: ${item.ubicacion} | Causa: ${item.motivo}`,
+          `  Lote de reposición: ${item.lote} | Ubicación: ${item.ubicacion} | Causa: ${item.motivo}`,
         ]),
         `Faltante frente al plan: ${shortfall} und`,
         `Cumplimiento: ${planCompliance}% | No conforme: ${nonconformityRate}%`,

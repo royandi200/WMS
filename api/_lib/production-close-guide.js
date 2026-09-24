@@ -592,7 +592,7 @@ function guideSummary(order, draft, locationHint) {
       '', '*Insumos repuestos*');
     lines.push(...(draft.materials || []).length
       ? draft.materials.map((item, index) =>
-        `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`)
+        `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote de reposición: ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`)
       : ['• Ninguno']);
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);

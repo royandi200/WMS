@@ -37,8 +37,8 @@ test('nunca descuenta un lote ambiguo o sin saldo disponible', async () => {
 
 test('descuenta y registra la merma del material solo al consumir el cierre', async () => {
   const queries = [];
-  const conn = { async execute(sql) {
-    queries.push(sql);
+  const conn = { async execute(sql, params) {
+    queries.push({ sql, params });
     if (sql.startsWith('SELECT qty_current FROM lots')) return [[{ qty_current: 3 }]];
     if (sql.includes('FROM lots')) return [[{ id: 'lot-1', status: 'DISPONIBLE', qty_current: 4, bodega_id: 1 }]];
     if (sql.includes('FROM stock')) return [[{
@@ -54,8 +54,15 @@ test('descuenta y registra la merma del material solo al consumir el cierre', as
   });
   assert.equal(consumed[0].lote, 'L-1');
   assert.equal(consumed[0].motivo, 'ruptura');
-  assert.equal(queries.some((sql) => sql.includes('INSERT INTO produccion_material_lotes')), true);
-  assert.equal(queries.some((sql) => sql.includes('INSERT INTO movimientos')), true);
-  assert.equal(queries.some((sql) => sql.includes('INSERT INTO kardex')), true);
-  assert.equal(queries.some((sql) => sql.includes('INSERT INTO mermas')), true);
+  assert.equal(queries.some(({ sql }) => sql.includes('INSERT INTO produccion_material_lotes')), true);
+  assert.equal(queries.some(({ sql }) => sql.includes('INSERT INTO movimientos')), true);
+  assert.equal(queries.some(({ sql }) => sql.includes('INSERT INTO kardex')), true);
+  const waste = queries.find(({ sql }) => sql.includes('INSERT INTO mermas'));
+  assert.ok(waste);
+  assert.match(waste.sql, /VALUES \(\?, 'PROCESO', \?, NULL, \?, NULL, \?, \?, \?, \?, 'APROBADO'/u);
+  assert.equal(waste.params.includes('L-1'), false,
+    'el lote repuesto no es evidencia del lote que se dañó');
+  assert.equal(queries.find(({ sql }) => sql.includes('INSERT INTO movimientos')).params.includes('L-1'), true);
+  assert.equal(queries.find(({ sql }) => sql.includes('INSERT INTO kardex')).params.some(value =>
+    String(value).includes('Lote L-1')), true);
 });

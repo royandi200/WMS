@@ -126,13 +126,15 @@ async function consumeCloseMaterials(conn, { order, materials, lines, userId }) 
         `Material repuesto al cierre | ${line.reason} | Lote ${line.lot} | Ubicación ${stock.ubicacion}`, userId]
     );
     const wasteNumber = `MER-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    // El lote y la ubicación informados identifican el material de reposición,
+    // no necesariamente las unidades dañadas. No atribuirles una merma sin evidencia.
     await conn.execute(
       `INSERT INTO mermas
         (numero, tipo, producto_id, lote, orden_produccion_id, ubicacion_id, cantidad,
          motivo, usuario_id, aprobado_por, estado, creado_en)
-       VALUES (?, 'PROCESO', ?, ?, ?, ?, ?, ?, ?, ?, 'APROBADO', NOW())`,
-      [wasteNumber, material.producto_id, line.lot, order.id, stock.ubicacion_id,
-        line.quantity, line.reason, userId, userId]
+       VALUES (?, 'PROCESO', ?, NULL, ?, NULL, ?, ?, ?, ?, 'APROBADO', NOW())`,
+      [wasteNumber, material.producto_id, order.id, line.quantity,
+        line.reason, userId, userId]
     );
     consumed.push({ sku: material.sku, producto: material.nombre, unidad: material.unidad,
       cantidad: line.quantity, lote: line.lot, ubicacion: stock.ubicacion,

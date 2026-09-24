@@ -355,7 +355,7 @@ test('corrige el lote con la frase natural y su transcripción imperfecta sin ce
     assert.equal(isCloseFollowup(phrase, { orderId: 100 }), true);
     const corrected = await advanceCloseGuide({ db, userId: 105, rawText: phrase });
     assert.equal(corrected.params, undefined);
-    assert.match(corrected.message, /Lote R2-260920-TPBI/u);
+    assert.match(corrected.message, /Lote de reposición: R2-260920-TPBI/u);
     assert.doesNotMatch(corrected.message, /ACC-260910-TPBI/u);
     assert.equal(corrected.draft.materials[0].lote, 'R2-260920-TPBI');
     assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));

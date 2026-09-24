@@ -3174,7 +3174,7 @@ module.exports = async (req, res) => {
               '*Materiales repuestos*',
               ...(closure.materiales_repuestos.length
                 ? closure.materiales_repuestos.flatMap(item => [
-                  `• *${item.sku}*: ${item.cantidad} ${item.unidad} · lote ${item.lote}`,
+                  `• *${item.sku}*: ${item.cantidad} ${item.unidad} · lote de reposición ${item.lote}`,
                   `  Causa: ${item.motivo} · ubicación ${item.ubicacion}`,
                 ]) : ['• Ninguno']),
               '',

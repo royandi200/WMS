@@ -163,7 +163,7 @@ test('WhatsApp corrige por alias el lote de una partida ya resumida sin repetir 
   });
   assert.equal(res.statusCode, 200);
   assert.equal(JSON.parse(closeDraft).materials[0].lote, 'R2-260920-TPBI');
-  assert.match(res.body.mensaje, /Lote R2-260920-TPBI/u);
+  assert.match(res.body.mensaje, /Lote de reposición: R2-260920-TPBI/u);
   assert.doesNotMatch(res.body.mensaje, /ACC-260910-TPBI/u);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 });
