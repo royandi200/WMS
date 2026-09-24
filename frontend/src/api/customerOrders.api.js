@@ -1,8 +1,8 @@
 import client from './client'
 
 export const listCustomerOrders = (params = {}) => client.get('/customer-orders', { params }).then((r) => r.data)
-export const approveCustomerOrder = (documentDraftId) => client
-  .post('/customer-orders', { document_draft_id: documentDraftId }).then((r) => r.data)
+export const approveCustomerOrder = (documentDraftId, review) => client
+  .post('/customer-orders', { document_draft_id: documentDraftId, revision: review }).then((r) => r.data)
 export const listCustomerOrderDrafts = () => client
   .get('/warehouse-documents', { params: { type: 'ORDEN_COMPRA_CLIENTE' } }).then((r) => r.data)
 export const uploadCustomerOrderPdf = (pdf) => client

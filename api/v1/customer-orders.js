@@ -18,6 +18,44 @@ function warningsFromJson(value) {
   }
 }
 
+function cleanText(value, maxLength) {
+  return String(value || '').replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, maxLength);
+}
+
+function dateOnly(value) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value || '').slice(0, 10);
+}
+
+function normalizeCustomerOrderReview(body = {}) {
+  if (body.confirmar_revision !== true) {
+    throw httpError(400, 'Confirma que revisaste los datos contra el PDF original');
+  }
+  const clientName = cleanText(body.cliente_nombre, 200);
+  const documentDate = cleanText(body.fecha_documento, 10);
+  const reason = cleanText(body.motivo, 300);
+  const reference = cleanText(body.referencia_documento, 80);
+  if (!clientName) throw httpError(400, 'Indica el cliente final');
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(documentDate)
+    || Number.isNaN(new Date(`${documentDate}T00:00:00Z`).getTime())
+    || new Date(`${documentDate}T00:00:00Z`).toISOString().slice(0, 10) !== documentDate) {
+    throw httpError(400, 'Indica una fecha de OC válida');
+  }
+  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 100) {
+    throw httpError(400, 'La OC debe tener entre 1 y 100 productos');
+  }
+  const items = body.items.map((item, index) => {
+    const sku = cleanText(item?.sku, 80).toUpperCase();
+    const quantity = Number(item?.cantidad);
+    if (!sku) throw httpError(400, `El producto ${index + 1} requiere SKU`);
+    if (!Number.isSafeInteger(quantity) || quantity <= 0 || quantity > 999999999) {
+      throw httpError(400, `La cantidad de ${sku} debe ser un número entero positivo de unidades (máximo 999999999)`);
+    }
+    return { sku, quantity };
+  });
+  return { clientName, documentDate, reason, reference, items };
+}
+
 async function listCustomerOrders({ pendingOnly = false } = {}) {
   const rows = await query(
     `SELECT pc.id, pc.referencia, pc.cliente_nombre, pc.fecha_documento,
@@ -68,10 +106,11 @@ async function listCustomerOrders({ pendingOnly = false } = {}) {
   return pendingOnly ? orders.filter((order) => order.items.some((item) => item.cantidad_pendiente > 0)) : orders;
 }
 
-async function approveCustomerOrderDraft(conn, { draftId, userId }) {
+async function approveCustomerOrderDraft(conn, { draftId, userId, review }) {
   if (!Number.isSafeInteger(Number(draftId)) || Number(draftId) <= 0) {
     throw httpError(400, 'Indica un borrador de OC de cliente válido');
   }
+  const input = normalizeCustomerOrderReview(review);
   const [drafts] = await conn.execute(
     `SELECT d.id, d.tipo_documento, d.estado, d.referencia_documento,
             d.destinatario_nombre, d.fecha_documento, d.advertencias,
@@ -89,52 +128,71 @@ async function approveCustomerOrderDraft(conn, { draftId, userId }) {
     [draft.id]
   );
   if (existing.length) return { id: existing[0].id, duplicate: true };
-  if (draft.estado === 'DESCARTADO' || draft.estado === 'VINCULADO') {
+  if (!['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado)) {
     throw httpError(409, 'El borrador ya no está pendiente de aprobación');
   }
-  if (documentDraftStatus(warningsFromJson(draft.advertencias)) !== 'PENDIENTE_REVISION') {
-    throw httpError(409, 'Corrige las advertencias del PDF antes de aprobar el pedido');
-  }
   if (!Number(draft.archivos)) throw httpError(409, 'El borrador no conserva el PDF original');
-  if (!draft.referencia_documento || !draft.destinatario_nombre || !draft.fecha_documento) {
-    throw httpError(409, 'Faltan referencia, cliente o fecha en la OC');
+  if (!draft.referencia_documento || input.reference !== draft.referencia_documento) {
+    throw httpError(409, 'La referencia revisada debe coincidir con el PDF original');
+  }
+  const [extractedItems] = await conn.execute(
+    `SELECT sku_extraido, cantidad, unidad
+       FROM documento_bodega_borrador_items i
+      WHERE i.documento_id = ? ORDER BY i.id FOR UPDATE`,
+    [draft.id]
+  );
+  const warnings = warningsFromJson(draft.advertencias);
+  const before = {
+    clientName: draft.destinatario_nombre,
+    documentDate: dateOnly(draft.fecha_documento),
+    items: extractedItems.map((item) => ({
+      sku: String(item.sku_extraido || '').toUpperCase(),
+      quantity: Number(item.cantidad),
+    })),
+  };
+  const after = {
+    clientName: input.clientName,
+    documentDate: input.documentDate,
+    items: input.items,
+  };
+  const changed = JSON.stringify(before) !== JSON.stringify(after);
+  if ((changed || documentDraftStatus(warnings) === 'REQUIERE_CORRECCION') && input.reason.length < 5) {
+    throw httpError(400, 'Explica la corrección o cómo verificaste las advertencias del PDF');
+  }
+  const resolvedItems = [];
+  for (const item of input.items) {
+    const [products] = await conn.execute(
+      `SELECT id, siigo_code, modalidad_operativa
+         FROM productos WHERE UPPER(siigo_code) = ? AND activo = 1 LIMIT 1`,
+      [item.sku]
+    );
+    if (!products.length || products[0].modalidad_operativa !== 'PR') {
+      throw httpError(409, `El SKU ${item.sku} no es un producto terminado de producción propia activo`);
+    }
+    resolvedItems.push({ ...item, productId: products[0].id });
   }
   const [sameReference] = await conn.execute(
     `SELECT id FROM pedidos_cliente
       WHERE cliente_nombre = ? AND referencia = ? LIMIT 1 FOR UPDATE`,
-    [draft.destinatario_nombre, draft.referencia_documento]
+    [input.clientName, draft.referencia_documento]
   );
   if (sameReference.length) {
     throw httpError(409, `Ese cliente ya tiene aprobado ${draft.referencia_documento} como PED ID ${sameReference[0].id}`);
-  }
-  const [items] = await conn.execute(
-    `SELECT i.id, i.producto_id, i.cantidad, i.unidad,
-            p.modalidad_operativa, p.activo
-       FROM documento_bodega_borrador_items i
-       LEFT JOIN productos p ON p.id = i.producto_id
-      WHERE i.documento_id = ? ORDER BY i.id FOR UPDATE`,
-    [draft.id]
-  );
-  if (!items.length) throw httpError(409, 'La OC de cliente no tiene productos');
-  if (items.some((item) => !item.producto_id || !item.activo
-    || item.modalidad_operativa !== 'PR' || item.unidad !== 'und'
-    || !Number.isFinite(Number(item.cantidad)) || Number(item.cantidad) <= 0)) {
-    throw httpError(409, 'La OC contiene productos no válidos para producción propia');
   }
   const [created] = await conn.execute(
     `INSERT INTO pedidos_cliente
        (referencia, cliente_nombre, fecha_documento, documento_borrador_id,
         estado, aprobado_por, aprobado_en)
      VALUES (?, ?, ?, ?, 'ACTIVO', ?, NOW())`,
-    [draft.referencia_documento, draft.destinatario_nombre,
-      draft.fecha_documento, draft.id, userId]
+    [draft.referencia_documento, input.clientName,
+      input.documentDate, draft.id, userId]
   );
-  for (const item of items) {
+  for (const item of resolvedItems) {
     await conn.execute(
       `INSERT INTO pedido_cliente_items
          (pedido_cliente_id, producto_id, cantidad_ordenada, unidad)
        VALUES (?, ?, ?, 'und')`,
-      [created.insertId, item.producto_id, Number(item.cantidad)]
+      [created.insertId, item.productId, item.quantity]
     );
   }
   await conn.execute(
@@ -143,7 +201,15 @@ async function approveCustomerOrderDraft(conn, { draftId, userId }) {
       WHERE id = ? AND estado IN ('PENDIENTE_REVISION','REQUIERE_CORRECCION')`,
     [userId, draft.id]
   );
-  return { id: created.insertId, identificador: `PED ID ${created.insertId}`, duplicate: false };
+  await conn.execute(
+    `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
+     VALUES ('customer_orders', 'INFO', ?, ?, ?, NOW())`,
+    [`OC de cliente ${draft.referencia_documento} revisada y aprobada`, userId,
+      JSON.stringify({ document_draft_id: draft.id, customer_order_id: created.insertId,
+        before, after, original_warnings: warnings, reason: input.reason || null })]
+  );
+  return { id: created.insertId, identificador: `PED ID ${created.insertId}`, duplicate: false,
+    corrected: changed };
 }
 
 module.exports = async (req, res) => {
@@ -163,6 +229,7 @@ module.exports = async (req, res) => {
         const result = await approveCustomerOrderDraft(conn, {
           draftId: req.body?.document_draft_id,
           userId: user.id,
+          review: req.body?.revision,
         });
         await conn.commit();
         return res.status(result.duplicate ? 200 : 201).json({ ok: true, data: result });
@@ -184,3 +251,4 @@ module.exports = async (req, res) => {
 
 module.exports.listCustomerOrders = listCustomerOrders;
 module.exports.approveCustomerOrderDraft = approveCustomerOrderDraft;
+module.exports.normalizeCustomerOrderReview = normalizeCustomerOrderReview;

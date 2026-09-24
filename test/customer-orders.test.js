@@ -62,26 +62,110 @@ test('PED ID tolerates natural speech but refuses an invented or ambiguous ID', 
   assert.throws(() => reconcileCustomerOrderItemId({ pedido_cliente_item_id: 12 }, 'PED ID 38, Item ID 13'), /no coincide/u);
 });
 
-test('approval links a reviewed customer PDF without creating a supplier OC or inventory', async () => {
+function reviewedOrder(overrides = {}) {
+  return {
+    referencia_documento: 'Pedido 1', cliente_nombre: 'Farmacia Central Demo',
+    fecha_documento: '2026-09-23', items: [{ sku: '00102-PTASH60', cantidad: 3 }],
+    confirmar_revision: true, motivo: '', ...overrides,
+  };
+}
+
+function approvalConnection({ status = 'PENDIENTE_REVISION', warnings = null, extractedItems = null } = {}) {
   const writes = [];
   const conn = { execute: async (sql, params) => {
     if (sql.includes('FROM documentos_bodega_borrador d')) return [[{
-      id: 42, tipo_documento: 'ORDEN_COMPRA_CLIENTE', estado: 'PENDIENTE_REVISION',
+      id: 42, tipo_documento: 'ORDEN_COMPRA_CLIENTE', estado: status,
       referencia_documento: 'Pedido 1', destinatario_nombre: 'Farmacia Central Demo',
-      fecha_documento: '2026-09-23', advertencias: null, archivos: 1,
+      fecha_documento: '2026-09-23', advertencias: warnings, archivos: 1,
     }]];
     if (sql.includes('FROM pedidos_cliente WHERE documento_borrador_id')) return [[]];
     if (sql.includes('FROM pedidos_cliente\n')) return [[]];
-    if (sql.includes('FROM documento_bodega_borrador_items i')) return [[{
-      id: 1, producto_id: 102, cantidad: 3, unidad: 'und', modalidad_operativa: 'PR', activo: 1,
+    if (sql.includes('FROM documento_bodega_borrador_items i')) return [extractedItems ?? [{
+      sku_extraido: '00102-PTASH60', cantidad: 3, unidad: 'und',
     }]];
+    if (sql.includes('FROM productos WHERE UPPER(siigo_code)')) return [params[0] === '00102-PTASH60' ? [{
+      id: 102, siigo_code: '00102-PTASH60', modalidad_operativa: 'PR',
+    }] : []];
     writes.push({ sql, params });
     if (sql.includes('INSERT INTO pedidos_cliente\n')) return [{ insertId: 7 }];
     return [{ affectedRows: 1 }];
   } };
-  const result = await approveCustomerOrderDraft(conn, { draftId: 42, userId: 2 });
+  return { conn, writes };
+}
+
+test('approval links a reviewed customer PDF without creating a supplier OC or inventory', async () => {
+  const { conn, writes } = approvalConnection();
+  const result = await approveCustomerOrderDraft(conn, { draftId: 42, userId: 2, review: reviewedOrder() });
   assert.equal(result.identificador, 'PED ID 7');
-  assert.equal(writes.length, 3);
+  assert.equal(result.corrected, false);
+  assert.equal(writes.length, 4);
   assert.ok(writes.some(({ sql }) => sql.includes('INSERT INTO pedido_cliente_items')));
+  assert.ok(writes.some(({ sql }) => sql.includes('INSERT INTO system_logs')));
   assert.ok(writes.every(({ sql }) => !/ordenes_compra_proveedor|\bstock\b|\bkardex\b/iu.test(sql)));
+});
+
+test('customer order corrections require a reason and preserve original evidence in the audit', async () => {
+  const { conn, writes } = approvalConnection();
+  const corrected = reviewedOrder({ items: [{ sku: '00102-PTASH60', cantidad: 4 }] });
+  await assert.rejects(
+    approveCustomerOrderDraft(conn, { draftId: 42, userId: 2, review: corrected }),
+    /Explica la corrección/u
+  );
+  assert.equal(writes.length, 0);
+  const result = await approveCustomerOrderDraft(conn, {
+    draftId: 42, userId: 2, review: { ...corrected, motivo: 'Cantidad cotejada con el PDF' },
+  });
+  assert.equal(result.corrected, true);
+  const audit = writes.find(({ sql }) => sql.includes('INSERT INTO system_logs'));
+  const payload = JSON.parse(audit.params[2]);
+  assert.equal(payload.before.items[0].quantity, 3);
+  assert.equal(payload.after.items[0].quantity, 4);
+});
+
+test('customer order approval needs explicit PDF confirmation', async () => {
+  const { conn, writes } = approvalConnection();
+  await assert.rejects(
+    approveCustomerOrderDraft(conn, {
+      draftId: 42, userId: 2, review: reviewedOrder({ confirmar_revision: false }),
+    }),
+    /Confirma que revisaste/u
+  );
+  assert.equal(writes.length, 0);
+});
+
+test('customer order corrections cannot approve an unknown product', async () => {
+  const { conn, writes } = approvalConnection();
+  await assert.rejects(
+    approveCustomerOrderDraft(conn, {
+      draftId: 42, userId: 2,
+      review: reviewedOrder({ items: [{ sku: 'SKU-DESCONOCIDO', cantidad: 3 }], motivo: 'SKU cotejado con el PDF' }),
+    }),
+    /no es un producto terminado/u
+  );
+  assert.equal(writes.length, 0);
+});
+
+test('a draft with extraction warnings can be approved only after explained review', async () => {
+  const { conn, writes } = approvalConnection({
+    status: 'REQUIERE_CORRECCION', warnings: JSON.stringify(['La tabla extraída está incompleta']),
+  });
+  await assert.rejects(
+    approveCustomerOrderDraft(conn, { draftId: 42, userId: 2, review: reviewedOrder() }),
+    /Explica la corrección/u
+  );
+  assert.equal(writes.length, 0);
+  const result = await approveCustomerOrderDraft(conn, {
+    draftId: 42, userId: 2,
+    review: reviewedOrder({ motivo: 'Confirmé las filas con el PDF original' }),
+  });
+  assert.equal(result.identificador, 'PED ID 7');
+});
+
+test('reviewer can complete an OC whose PDF items were not extracted', async () => {
+  const { conn } = approvalConnection({ extractedItems: [] });
+  const result = await approveCustomerOrderDraft(conn, {
+    draftId: 42, userId: 2,
+    review: reviewedOrder({ motivo: 'Transcribí el producto del PDF original' }),
+  });
+  assert.equal(result.corrected, true);
 });

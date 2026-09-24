@@ -235,6 +235,8 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
   const [duplicateOrderId, setDuplicateOrderId] = useState(null)
   const [discardTarget, setDiscardTarget] = useState(null)
   const [discardReason, setDiscardReason] = useState('')
+  const [reviewTarget, setReviewTarget] = useState(null)
+  const [reviewForm, setReviewForm] = useState(null)
 
   const refresh = async () => {
     const [draftResult, orderResult] = await Promise.all([listCustomerOrderDrafts(), listCustomerOrders()])
@@ -286,6 +288,46 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
         : `Borrador ID ${response.data.id} cargado. Revisa cliente, producto y cantidad antes de aprobarlo.`
     )
     if (result) setFile(null)
+  }
+
+  const startReview = (draft) => {
+    setReviewTarget(draft)
+    setReviewForm({
+      referencia_documento: draft.referencia_documento || '',
+      cliente_nombre: draft.destinatario_nombre || '',
+      fecha_documento: String(draft.fecha_documento || '').slice(0, 10),
+      items: draft.items?.length
+        ? draft.items.map((item) => ({ sku: item.sku_extraido || '', cantidad: String(item.cantidad ?? ''), descripcion: item.descripcion_extraida || '' }))
+        : [{ sku: '', cantidad: '', descripcion: '' }],
+      motivo: '',
+      confirmar_revision: false,
+    })
+    setDiscardTarget(null)
+    setMessage(null)
+  }
+
+  const setReviewItem = (index, key, value) => setReviewForm((current) => ({
+    ...current,
+    items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item),
+  }))
+
+  const submitReview = async (event) => {
+    event.preventDefault()
+    if (!reviewTarget || !reviewForm) return
+    const payload = {
+      ...reviewForm,
+      cliente_nombre: reviewForm.cliente_nombre.trim(),
+      motivo: reviewForm.motivo.trim(),
+      items: reviewForm.items.map((item) => ({ sku: item.sku.trim(), cantidad: Number(item.cantidad) })),
+    }
+    const result = await execute(
+      () => approveCustomerOrder(reviewTarget.id, payload),
+      (response) => `OC de cliente revisada y aprobada como PED ID ${response.data.id}. Ya puede seleccionarse para producción.`
+    )
+    if (result) {
+      setReviewTarget(null)
+      setReviewForm(null)
+    }
   }
 
   const release = async () => {
@@ -341,14 +383,47 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
         {!!draft.advertencias?.length && <div className="text-orange-400">{draft.advertencias.map((warning, index) => <div key={index}>{warning}</div>)}</div>}
         <div className="flex gap-3 items-center">
           {draft.archivo_id && <button type="button" className="text-primary hover:underline" onClick={() => downloadCustomerOrderPdf(draft.archivo_id, draft.archivo_nombre)}>Ver PDF</button>}
-          {canApprove && draft.estado === 'PENDIENTE_REVISION' && <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => execute(
-            () => approveCustomerOrder(draft.id),
-            (response) => `Pedido aprobado como PED ID ${response.data.id}. Ya puede seleccionarse para producción.`
-          )}>Aprobar pedido</button>}
+          {canApprove && draft.archivo_id && <button type="button" disabled={busy} className="btn-primary disabled:opacity-50" onClick={() => startReview(draft)}>Revisar</button>}
           {canApprove && ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(draft.estado) && <button type="button" disabled={busy} className="text-danger hover:underline" onClick={() => { setDiscardTarget(draft); setDiscardReason('') }}>Descartar borrador</button>}
         </div>
       </div>)}
     </section>
+
+    {reviewTarget && reviewForm && <form onSubmit={submitReview} className="rounded-lg border border-primary/50 bg-surface p-4 space-y-4 text-sm">
+      <div>
+        <h2 className="font-semibold text-foreground">Revisar OC de cliente · Borrador ID {reviewTarget.id}</h2>
+        <p className="text-muted">Compara los datos con el PDF original. Las correcciones se guardarán en el pedido aprobado; el PDF permanecerá sin cambios.</p>
+      </div>
+      <button type="button" className="text-primary hover:underline" onClick={() => downloadCustomerOrderPdf(reviewTarget.archivo_id, reviewTarget.archivo_nombre)}>Ver PDF original</button>
+      <div className="grid gap-3 md:grid-cols-3">
+        <Field label="Referencia de OC *"><input value={reviewForm.referencia_documento} readOnly className="input-field opacity-70" /></Field>
+        <Field label="Cliente final *"><input value={reviewForm.cliente_nombre} onChange={(event) => setReviewForm((current) => ({ ...current, cliente_nombre: event.target.value }))} maxLength={200} className="input-field" required /></Field>
+        <Field label="Fecha de OC *"><input type="date" value={reviewForm.fecha_documento} onChange={(event) => setReviewForm((current) => ({ ...current, fecha_documento: event.target.value }))} className="input-field" required /></Field>
+      </div>
+      <div className="space-y-2">
+        <p className="font-medium text-foreground">Productos solicitados · cantidades en unidades</p>
+        {reviewForm.items.map((item, index) => <div key={index} className="space-y-1">
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_90px]">
+            <input value={item.sku} onChange={(event) => setReviewItem(index, 'sku', event.target.value)} placeholder="SKU de producto terminado" className="input-field" required />
+            <input type="number" min="1" step="1" value={item.cantidad} onChange={(event) => setReviewItem(index, 'cantidad', event.target.value)} placeholder="Unidades" className="input-field" required />
+            <button type="button" disabled={reviewForm.items.length === 1} onClick={() => setReviewForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))} className="text-danger disabled:opacity-30">Eliminar</button>
+          </div>
+          {item.descripcion && <p className="text-xs text-muted">PDF: {item.descripcion}</p>}
+        </div>)}
+        <button type="button" onClick={() => setReviewForm((current) => ({ ...current, items: [...current.items, { sku: '', cantidad: '', descripcion: '' }] }))} className="text-primary hover:underline">Agregar producto</button>
+      </div>
+      {!!reviewTarget.advertencias?.length && <div className="text-orange-400">Advertencias del PDF: {reviewTarget.advertencias.join(' · ')}</div>}
+      <Field label="Motivo de corrección o verificación de advertencias"><textarea value={reviewForm.motivo} onChange={(event) => setReviewForm((current) => ({ ...current, motivo: event.target.value }))} maxLength={300} rows={2} placeholder="Obligatorio si modificas datos o el PDF requiere corrección" className="input-field" /></Field>
+      <label className="flex items-start gap-2 text-foreground">
+        <input type="checkbox" checked={reviewForm.confirmar_revision} onChange={(event) => setReviewForm((current) => ({ ...current, confirmar_revision: event.target.checked }))} required />
+        Confirmo que comparé cliente, fecha, SKU y cantidades con el PDF original.
+      </label>
+      <p className="text-xs text-muted">Esto crea el pedido disponible para producción. No genera inventario ni libera una orden de producción.</p>
+      <div className="flex gap-3">
+        <button type="submit" disabled={busy} className="btn-primary disabled:opacity-50">{busy ? 'Guardando...' : 'Confirmar y crear pedido'}</button>
+        <button type="button" disabled={busy} onClick={() => { setReviewTarget(null); setReviewForm(null) }} className="text-muted hover:text-foreground">Cancelar</button>
+      </div>
+    </form>}
 
     {discardTarget && <div className="rounded-lg border border-danger/40 bg-surface p-4 space-y-3 text-sm">
       <div className="font-semibold">Descartar borrador ID {discardTarget.id}</div>
