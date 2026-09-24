@@ -3,7 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const projectId = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
-const backupPath = resolve('.tmp', 'builderbot-pre-guided-replenishment-20260923.json');
+const copyFix = process.argv.includes('--copy-fix');
+const backupPath = resolve('.tmp', copyFix
+  ? 'builderbot-pre-guided-replenishment-copy-fix-20260923.json'
+  : 'builderbot-pre-guided-replenishment-20260923.json');
 const checkpoint = JSON.parse(await readFile(backupPath, 'utf8'));
 const local = await readFile(new URL('../../docs/Prompt WMS.txt', import.meta.url), 'utf8');
 const apply = process.argv.includes('--apply');
@@ -34,11 +37,23 @@ if (!opHint) throw new Error('The local OP transcription hint is missing');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 
 function patchedPrompt(original) {
+  const newline = original.includes('\r\n') ? '\r\n' : '\n';
+  if (original.split(sectionEnd).length !== 2) throw new Error('Replenishment anchor diverged');
+  if (copyFix) {
+    if (original.split(sectionStart).length !== 2) throw new Error('Guided section anchor diverged');
+    const oldSection = original.slice(original.indexOf(sectionStart), original.indexOf(sectionEnd));
+    const oldWasteLine = original.split(/\r?\n/u)
+      .find(line => line.startsWith('En una merma de proceso, `id_item`'));
+    const newWasteLine = local.split(/\r?\n/u)
+      .find(line => line.startsWith('En una merma de proceso, `id_item`'));
+    if (!oldWasteLine || !newWasteLine || oldWasteLine === newWasteLine
+      || original.split(oldWasteLine).length !== 2) throw new Error('Waste copy anchor diverged');
+    return original.replace(oldSection, guidedSection.replace(/\r?\n/gu, newline))
+      .replace(oldWasteLine, newWasteLine);
+  }
   if (original.includes(sectionStart) || original.includes(opHint)) {
     throw new Error('The prompt already contains part of the guided change');
   }
-  const newline = original.includes('\r\n') ? '\r\n' : '\n';
-  if (original.split(sectionEnd).length !== 2) throw new Error('Replenishment anchor diverged');
   const idAnchor = original.split(/\r?\n/u).find(line => line.startsWith('- En texto y audio, `PEDID1`'));
   if (!idAnchor || original.split(idAnchor).length !== 2) throw new Error('OP ID hint anchor diverged');
   return original
@@ -73,7 +88,7 @@ const changes = checkpoint.prompts.map(saved => {
 });
 
 if (!apply) {
-  process.stdout.write(`${JSON.stringify({ mode: restore ? 'restore-dry-run' : 'dry-run',
+  process.stdout.write(`${JSON.stringify({ mode: restore ? 'restore-dry-run' : 'dry-run', copyFix,
     projectId, prompts: changes.map(({ saved, before, after }) => ({
       name: saved.name, beforeSha256: sha256(before), afterSha256: sha256(after),
       changed: before !== after,
@@ -165,7 +180,7 @@ for (const change of changes) {
     throw new Error(`Readback mismatch for ${change.saved.name}`);
   }
 }
-process.stdout.write(`${JSON.stringify({ mode: restore ? 'restored' : 'applied',
+process.stdout.write(`${JSON.stringify({ mode: restore ? 'restored' : 'applied', copyFix,
   rebootRequested: reboot, prompts: changes.map(({ saved, after }) => ({
     name: saved.name, sha256: sha256(after),
   })) })}\n`);
