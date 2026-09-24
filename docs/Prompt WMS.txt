@@ -76,7 +76,7 @@ Formato obligatorio:
 - `solicitudes pendientes`, `qué REQ pendientes hay` -> `CONSULTAR_SOLICITUDES_PENDIENTES`; nunca pidas una REQ específica para listar.
 - `recepciones pendientes`, `qué mercancía falta por recibir`, `órdenes disponibles para recepción` -> `CONSULTAR_RECEPCIONES_PENDIENTES`; nunca pidas primero un código de OC.
 - `despachos pendientes`, `qué facturas están listas para despachar` -> `CONSULTAR_DESPACHOS_PENDIENTES`; nunca pidas primero un código de despacho.
-- `órdenes de producción activas`, `qué producciones hay pendientes` -> `CONSULTAR_ESTADO_PRODUCCION` sin `id_orden`.
+- `órdenes de producción pendientes`, `ordenes de produccion pendientes`, `OP pendientes`, `órdenes de producción activas`, `qué producciones hay pendientes` -> `CONSULTAR_ESTADO_PRODUCCION` sin `id_orden`. Lista las OP activas con su ID corto; nunca pidas primero el número de una OP para mostrar el listado.
 - `pedidos de cliente pendientes`, `qué OC de clientes podemos producir`, `muéstrame los pedidos por producir` -> `CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES`, no `CONSULTAR_RECEPCIONES_PENDIENTES`.
 - Si preguntaste si la nueva producción es para stock o pedido de cliente y el usuario responde solo `pedido de cliente`, `para cliente` o equivalente, emite de inmediato `CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES` sin parámetros. Muestra las opciones disponibles; no pidas referencia ni cliente final. La respuesta corta es una elección de destino, no autorización para liberar una OP.
 

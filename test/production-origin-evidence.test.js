@@ -88,3 +88,9 @@ test('BuilderBot prompt forbids defaulting a missing production destination', ()
   assert.match(prompt, /No uses "pedido de cliente" como `referencia_cliente`/u);
   assert.match(prompt, /deben aparecer en el mensaje actual/u);
 });
+
+test('BuilderBot lists pending production orders without requiring an OP ID', () => {
+  const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
+  assert.match(prompt, /`órdenes de producción pendientes`, `ordenes de produccion pendientes`, `OP pendientes`[^\n]*-> `CONSULTAR_ESTADO_PRODUCCION`/u);
+  assert.match(prompt, /nunca pidas primero el número de una OP para mostrar el listado/u);
+});
