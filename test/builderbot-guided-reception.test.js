@@ -416,11 +416,29 @@ test('a bare yes is scoped to a stored SKU review, not final inventory confirmat
   assert.equal(skuReviewReply('No está bien'), 'NO');
   assert.equal(skuReviewReply('Sí, pero cambia la cantidad'), null);
   assert.equal(skuReviewReply('Confirmo la recepción OC ID 37'), null);
+  const echoedYes = 'Sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:16:03]: Sí';
+  assert.equal(skuReviewReply(echoedYes), 'YES');
+  assert.equal(skuReviewReply('Sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:16:03]: No'), null);
+  assert.equal(skuReviewReply('Sí\nOtro dato de la recepción'), null);
   assert.equal(await hasPendingSkuReview(db, 5), false);
   await advanceGuidedReception({ db, user: { id: 5 }, rawText: 'OC ID 37',
     params: { avance: { producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
   assert.equal(await hasPendingSkuReview(db, 5), true);
   assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('BuilderBot history echo does not block a reviewed SKU yes', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',
+    params: { avance: { producto: 'tapa', cantidad: 2,
+      condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  const accepted = await advanceGuidedReception({ db, user,
+    rawText: 'sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:05:47]:  sí',
+    params: { avance: {} } });
+  assert.match(accepted.message, /00001-TPBI quedó revisado en el borrador/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
   assert.equal(state.inventoryWrites, 0);
 });
 
