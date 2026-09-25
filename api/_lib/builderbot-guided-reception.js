@@ -18,15 +18,16 @@ function inputError(message, status = 400) {
 
 function skuReviewReply(rawText) {
   const original = String(rawText || '').trim();
-  // BuilderBot a veces agrega al mensaje actual un eco del historial. Solo
-  // quitamos ese sufijo si repite literalmente la primera línea; esto valida
-  // un SKU en borrador, nunca la confirmación final que mueve inventario.
+  // BuilderBot a veces entrega un eco del historial, con o sin la primera
+  // línea. Solo aceptamos el texto de un único mensaje etiquetado; esto
+  // valida un SKU en borrador, nunca el cierre que mueve inventario.
   const echo = original.match(/^([^\r\n]+)\r?\n(?:\r?\n)?\{name\}="[^"\r\n]+"\r?\n\[[^\]\r\n]+\]:\s*([^\r\n]+)$/u);
+  const taggedOnly = original.match(/^\{name\}="[^"\r\n]+"\r?\n\[[^\]\r\n]+\]:\s*([^\r\n]+)$/u);
   const normalized = value => value.trim().normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toUpperCase()
     .replace(/[.!?]+$/u, '').replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
   const text = normalized(echo && normalized(echo[1]) === normalized(echo[2])
-    ? echo[1] : original);
+    ? echo[1] : taggedOnly ? taggedOnly[1] : original);
   if (/^(?:SI(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO)$/u.test(text)) return 'YES';
   if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO ES CORRECTO|ESTA MAL)$/u.test(text)) return 'NO';
   return null;
