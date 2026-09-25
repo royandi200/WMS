@@ -66,13 +66,13 @@ function closeFields(text) {
     '(?:conformes?|buenas?|buenos|resultantes?|producidas?)',
     '(?:conformes?|buenas?|buenos|resultantes?|producidas?)');
   if (conforming == null) {
-    conforming = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?\\s+terminado(?:s)?|unidades?\\s+terminadas?)\\s+conformes?\\b`, 'u'))?.[1]);
+    conforming = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?(?:\\s+terminad[oa]s?)?|unidades?(?:\\s+terminad[oa]s?)?|terminad[oa]s?)\\s+conformes?\\b`, 'u'))?.[1]);
   }
   let waste = fieldMatch(raw,
     '(?:mermas?|no\\s+conformes?|rechazos?|desperdicios?)',
     '(?:mermas?|no\\s+conformes?|rechazos?|desperdicios?)');
   if (waste == null) {
-    waste = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?\\s+terminado(?:s)?|unidades?\\s+terminadas?)\\s+no\\s+conformes?\\b`, 'u'))?.[1]);
+    waste = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?(?:\\s+terminad[oa]s?)?|unidades?(?:\\s+terminad[oa]s?)?|terminad[oa]s?)\\s+no\\s+conformes?\\b`, 'u'))?.[1]);
   }
   if (waste == null && /\b(?:sin|ninguna|no hubo)\s+(?:merma|mermas|rechazos?)\b/u.test(raw)) waste = 0;
   const locationCandidate = [...raw.matchAll(/\b(?:ubicacion\s*[:\-]?|quedan?\s+en|dejar\s+en|ubicar\s+en|en)\s*([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b/gu)]
@@ -694,7 +694,10 @@ function guideSummary(order, draft, locationHint) {
   const readyForReview = !missing.length && draft.conforming + draft.waste > 0;
   const lines = ['🏭 *OP ID ' + order.id + ' — cierre en borrador*',
     `Producto: ${order.producto} (${order.sku})`,
-    `Plan: ${Number(order.cantidad_planeada)} und`, ''];
+    `Plan: ${Number(order.cantidad_planeada)} und`,
+    locationHint && draft.conforming !== 0
+      ? `Ubicación sugerida para el producto terminado conforme: *${locationHint}* (verifica físicamente).` : null,
+    ''].filter(line => line != null);
   if (readyForReview) {
     lines.push('*Resumen para confirmar*',
       `• Producto terminado conforme: ${draft.conforming} und`,
@@ -746,11 +749,11 @@ function guideSummary(order, draft, locationHint) {
       lines.push('¿Cuántas unidades de producto terminado salieron conformes?');
     }
   }
-  else if (draft.waste == null) lines.push('¿Cuántas unidades de producto terminado fueron no conformes? Di «0 merma de producto terminado» si no hubo.');
+  else if (draft.waste == null) lines.push('¿Cuántas unidades de producto terminado fueron no conformes? Si ninguna, responde «0 no conformes».');
   else if (draft.conforming === 0 && draft.waste === 0) lines.push('Ambas cantidades son cero. Corrige conformes o merma para poder cerrar.');
   else if (draft.waste > 0 && !draft.reason) lines.push('¿Cuál fue la causa de la merma de producto terminado?');
   else if (draft.conforming > 0 && !draft.location) {
-    lines.push(`¿En qué ubicación quedará el producto terminado?${locationHint ? ` Sugerida: *${locationHint}*; verifica físicamente.` : ''}`);
+    lines.push('¿En qué ubicación quedará el producto terminado conforme?');
   } else if (draft.materialPending) {
     const item = draft.materialPending;
     if (!item.sku) lines.push('¿Qué producto o alias repusiste? Debe ser un material de esta OP.');
@@ -811,6 +814,10 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (order.estado === 'CERRADA') return { message: `La *OP ID ${order.id}* ya estaba cerrada. No se modificó inventario.`, draft };
   if (order.estado !== 'EN_PROCESO') {
     throw guideError(`La OP ID ${order.id} está ${order.estado}. Confirma primero sus materiales; no se cerró.`);
+  }
+  if (!draft.locationSuggestionLoaded) {
+    draft.suggestedLocation = await suggestedLocation(db, order.producto_id);
+    draft.locationSuggestionLoaded = true;
   }
   // Los borradores previos no guardaban el tipo de merma. Se reclasifican sin
   // inventario para que una cifra ambigua nunca termine como PT por defecto.
@@ -906,10 +913,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (rejected(rawText)) draft.reviewShown = false;
   else draft.reviewShown = complete;
   await saveDraft(db, userId, draft);
-  const locationHint = draft.conforming > 0 && draft.waste != null
-    && (draft.waste === 0 || draft.reason) && !draft.location
-    ? await suggestedLocation(db, order.producto_id) : null;
-  return { message: guideSummary(order, draft, locationHint), draft };
+  return { message: guideSummary(order, draft, draft.suggestedLocation), draft };
 }
 
 module.exports = { advanceCloseGuide, closeFields, closeOrderReference, confirmed,

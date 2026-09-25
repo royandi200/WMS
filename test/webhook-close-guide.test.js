@@ -82,7 +82,7 @@ test('un cierre incompleto devuelve la pregunta y finaliza la bandeja antes de c
   assert.ok(!writes.some(entry => /INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 
   const quantity = await invoke('MODO_CHARLA', '2 conformes', { texto: 'Entendido' });
-  assert.match(quantity.body.mensaje, /0 merma/u);
+  assert.match(quantity.body.mensaje, /0 no conformes/u);
   const waste = await invoke('REPORTE_MERMA', '0 merma', { motivo: 'merma' });
   assert.match(waste.body.mensaje, /ubicación quedará/iu);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));

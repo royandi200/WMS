@@ -59,16 +59,17 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
     rawText: 'Cerramos producción OPIV 97', params: { id_orden: 97 } });
   assert.match(first.message, /OP ID 97/u);
   assert.match(first.message, /2 und/u);
+  assert.match(first.message, /Ubicación sugerida para el producto terminado conforme: \*C2\*/u);
   assert.match(first.message, /¿Cuántas unidades de producto terminado salieron conformes/iu);
   assert.equal(first.params, undefined);
 
   const second = await advanceCloseGuide({ ...base, rawText: '2 conformes' });
   assert.match(second.message, /Conformes: 2 und/u);
   assert.match(second.message, /Falta:.*cantidad no conforme de producto terminado, ubicación del producto terminado/u);
-  assert.match(second.message, /0 merma/u);
+  assert.match(second.message, /0 no conformes/u);
 
   const third = await advanceCloseGuide({ ...base, rawText: 'cero merma' });
-  assert.match(third.message, /Sugerida: \*C2\*/u);
+  assert.match(third.message, /Ubicación sugerida para el producto terminado conforme: \*C2\*/u);
 
   const fourth = await advanceCloseGuide({ ...base, rawText: 'C2' });
   assert.match(fourth.message, /¿Repusiste algún material/u);
@@ -81,6 +82,26 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   assert.deepEqual(sixth.params, { id_orden: 97, cantidad_real: 2, merma: 0,
     motivo_merma: null, ubicacion: 'C2', materiales_repuestos: [] });
   assert.equal(db.writes.length, 5);
+});
+
+test('transcripciones reales de OP 103 registran conformes y cero no conformes sin repetir la pregunta', async () => {
+  const db = fakeDb({ orderId: 103, planned: 10 });
+  const base = { db, userId: 23 };
+  const first = await advanceCloseGuide({ ...base, rawText: 'cerramos op y de 103',
+    params: { id_orden: 103 } });
+  assert.match(first.message, /Ubicación sugerida para el producto terminado conforme: \*C2\*/u);
+  const amounts = await advanceCloseGuide({ ...base,
+    rawText: '10 productos conformes, 0 productos no conformes',
+    params: { avance_materiales: { cantidad_real: 10, merma: 0 } } });
+  assert.equal(amounts.draft.conforming, 10);
+  assert.equal(amounts.draft.waste, 0);
+  assert.match(amounts.message, /Conformes: 10 und/u);
+  assert.match(amounts.message, /No conformes de producto terminado: 0 und/u);
+  assert.doesNotMatch(amounts.message, /Falta:.*cantidad no conforme/u);
+  const repeated = await advanceCloseGuide({ ...base, rawText: 'cero productos no conformes' });
+  assert.equal(repeated.draft.waste, 0);
+  assert.match(repeated.message, /¿En qué ubicación quedará/u);
+  assert.equal(repeated.params, undefined);
 });
 
 test('el operario puede declarar conformes y no conformes juntos y completar lo faltante por partes', async () => {
@@ -320,7 +341,7 @@ test('una merma genérica queda sin clasificar hasta que el operario precise el 
   const classified = await advanceCloseGuide({ ...base, rawText: 'sí, producto terminado' });
   assert.equal(classified.draft.waste, 1);
   assert.equal(classified.draft.reason, 'destruccion');
-  assert.match(classified.message, /Sugerida: \*C2\*/u);
+  assert.match(classified.message, /Ubicación sugerida para el producto terminado conforme: \*C2\*/u);
 });
 
 test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cierre sin descontar inventario', async () => {
