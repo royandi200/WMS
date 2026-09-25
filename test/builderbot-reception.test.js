@@ -2,9 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 
 const {
   explicitConfirmation,
+  contextualReceptionConfirmation,
+  activeFinalReceptionPreview,
   explicitPurchaseOrderConfirmation,
   purchaseOrderTextReference,
   purchaseOrderReceptionIdentifier,
@@ -28,6 +31,43 @@ const {
   newKardexEntryIds,
 } = require('../api/_lib/reception-distributions');
 const { formatWhatsAppMessage } = require('../api/_lib/whatsapp-message');
+
+test('final reception confirmation accepts one active OC preview, not a different ID or flow', () => {
+  const order = { id: 40, numero: 'OC-PROV-40', tipo_recepcion: 'INSUMOS_MP' };
+  for (const text of [
+    'confirmó la recepción',
+    'confirmó la recepción o ib 40',
+    'confirmó recepción oce y de 40',
+    'confirmo la recepción OC ID 40',
+  ]) assert.equal(contextualReceptionConfirmation(text, order), true, text);
+  for (const text of [
+    'sí', 'recibí 40', 'confirmo la recepción 41',
+    'confirmo la recepción IO ID 40', 'confirmo la recepción MQ ID 40',
+    'confirmo la recepción OC ID 40 o IO ID 40',
+    'confirmo la recepción 40 pero corrige el lote',
+  ]) assert.equal(contextualReceptionConfirmation(text, order), false, text);
+  assert.equal(contextualReceptionConfirmation('confirmo la recepción IO ID 40',
+    { id: 40, tipo_recepcion: 'IN_OUT' }), true);
+});
+
+test('contextual reception confirmation requires one valid final preview owned by the operator', async () => {
+  const payload = { version: 1, orderId: 40, receptionId: 126,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 2 }] }] };
+  const hash = createHash('sha256').update(canonicalJson(payload)).digest('hex');
+  const row = { recepcion_id: 126, orden_compra_id: 40, usuario_id: 20,
+    payload_json: JSON.stringify(payload), payload_hash: hash };
+  const db = rows => ({ execute: async sql => {
+    assert.match(sql, /FROM recepcion_confirmacion_borradores d/u);
+    return [rows];
+  } });
+  assert.equal((await activeFinalReceptionPreview(db([row]), 20)).orden_compra_id, 40);
+  assert.equal(await activeFinalReceptionPreview(db([]), 20), null);
+  await assert.rejects(activeFinalReceptionPreview(db([row, row]), 20), /varias recepciones/u);
+  await assert.rejects(activeFinalReceptionPreview(db([{ ...row, payload_hash: 'wrong' }]), 20),
+    /no es valido/u);
+  assert.equal(await activeFinalReceptionPreview(db([{ ...row,
+    payload_json: JSON.stringify({ ...payload, version: 2 }) }]), 20), null);
+});
 
 test('WhatsApp purchase order and reception require an exact explicit confirmation', () => {
   assert.equal(explicitPurchaseOrderConfirmation(

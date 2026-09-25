@@ -151,6 +151,9 @@ const {
   confirmPurchaseOrderDocumentDraft,
   prepareReceptionFromPurchaseOrder,
   confirmReceptionFromWhatsApp,
+  activeFinalReceptionPreview,
+  contextualReceptionConfirmation,
+  findPurchaseOrder,
   prepareReceptionFromOutsourcing,
   confirmOutsourcingReceptionFromWhatsApp,
   validateOutsourcingReceiptDocument,
@@ -164,6 +167,7 @@ const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope'
 const { receptionPartidas } = require('../../_lib/reception-partidas');
 const {
   preparationIntentFromText,
+  typedReceptionReferences,
   preparationClarificationCandidate,
   purchaseOrderParamsFromText,
   confirmedPreparationReference,
@@ -1589,6 +1593,18 @@ module.exports = async (req, res) => {
       && await hasActiveReceptionSession(db, user.id)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
+    }
+    if (['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_RECEPCION_OC'].includes(action)
+      && /^\s*(?:s[ií][,.:]?\s+)?confirm[oó]\s+(?:la\s+)?recepci[oó]n\b/iu.test(rawText)
+      && typedReceptionReferences(rawText).length === 0) {
+      const preview = await activeFinalReceptionPreview(db, user.id);
+      if (preview) {
+        const activeOrder = await findPurchaseOrder(db, { orden_compra_id: preview.orden_compra_id });
+        if (contextualReceptionConfirmation(rawText, activeOrder)) {
+          action = 'CONFIRMAR_RECEPCION_OC';
+          params = { orden_compra_id: activeOrder.id, confirmacion_final: true };
+        }
+      }
     }
     const mismatch = documentMismatch(rawText);
     if (!selectedPreparationReference && (mismatch.lote || mismatch.fecha_vencimiento)

@@ -582,6 +582,25 @@ function explicitConfirmation(rawText, order, params = {}) {
     && purchaseOrderTextReference(text, order);
 }
 
+function contextualReceptionConfirmation(rawText, order) {
+  const text = normalizeCommandText(rawText).toUpperCase().replace(/\s+/gu, ' ').trim();
+  const match = text.match(/^(?:SI[,.:]?\s+)?CONFIRMO\s+(?:LA\s+)?RECEPCION(?:\s+(.+))?$/u);
+  if (!match) return false;
+  const rest = String(match[1] || '').replace(/[.!?]+$/gu, '').trim();
+  if (!rest) return true;
+  if (/\b(?:NO|PERO|EXCEPTO|SALVO|CAMBIA|CAMBIAR|CORRIGE|CORREGIR|PENDIENTE)\b/u.test(rest)) {
+    return false;
+  }
+  const kind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
+  const typed = typedReceptionReferences(rest);
+  if (typed.length) return typed.length === 1 && typed[0].kind === kind
+    && typed[0].id === Number(order.id);
+  if (/\b(?:IO|MQ|MAQUILA|IN\s*(?:AND|Y|&)\s*OUT)\b/u.test(rest)) return false;
+  const numbers = [...rest.matchAll(/\d+/gu)].map(result => Number(result[0]));
+  return numbers.length === 1 && numbers[0] === Number(order.id)
+    && rest.length <= 60 && /^[A-Z0-9\s,.:#/-]+$/u.test(rest);
+}
+
 function explicitOutsourcingConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
   const text = normalizeCommandText(rawText);
@@ -991,6 +1010,33 @@ async function loadReceptionDraft(db, { orderId, receptionId, userId }) {
   return parseReceptionDraft(rows[0], { orderId, receptionId, userId });
 }
 
+async function activeFinalReceptionPreview(db, userId) {
+  const [rows] = await db.execute(
+    `SELECT d.recepcion_id, d.orden_compra_id, d.usuario_id, d.payload_json, d.payload_hash
+       FROM recepcion_confirmacion_borradores d
+       JOIN recepciones r ON r.id = d.recepcion_id
+      WHERE d.usuario_id = ? AND d.estado = 'PENDIENTE' AND d.expira_en > NOW()
+        AND r.estado IN ('borrador', 'en_proceso')
+      ORDER BY d.actualizado_en DESC LIMIT 2`,
+    [userId]
+  );
+  if (rows.length > 1) {
+    throw inputError('Hay varias recepciones listas para confirmar. Indica OC ID N o IO ID N', 409);
+  }
+  const row = rows[0];
+  if (!row) return null;
+  let payload;
+  try {
+    payload = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : row.payload_json;
+  } catch {
+    throw inputError('El borrador fisico de recepcion no es valido; vuelve a registrar los datos', 409);
+  }
+  if (payload?.version !== 1) return null;
+  parseReceptionDraft(row, { orderId: row.orden_compra_id,
+    receptionId: row.recepcion_id, userId });
+  return row;
+}
+
 async function consumeReceptionDraft(db, receptionId, userId) {
   await db.execute(
     `UPDATE recepcion_confirmacion_borradores
@@ -1002,8 +1048,16 @@ async function consumeReceptionDraft(db, receptionId, userId) {
 
 async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const order = await findPurchaseOrder(db, params);
-  assertPurchaseOrderTextReference(rawText, order);
-  const isExplicitConfirmation = explicitConfirmation(rawText, order, params);
+  let contextualConfirmation = false;
+  if (!purchaseOrderTextReference(rawText, order)) {
+    const preview = await activeFinalReceptionPreview(db, user.id);
+    contextualConfirmation = Boolean(preview
+      && Number(preview.orden_compra_id) === Number(order.id)
+      && contextualReceptionConfirmation(rawText, order));
+    if (!contextualConfirmation) assertPurchaseOrderTextReference(rawText, order);
+  }
+  const isExplicitConfirmation = contextualConfirmation
+    || explicitConfirmation(rawText, order, params);
   const requestedReception = await findPreparedReception(db, order.id, params, {
     allowCompleted: order.estado === 'CERRADA' || isExplicitConfirmation,
   });
@@ -1269,6 +1323,7 @@ module.exports = {
   findPurchaseOrder,
   prepareReceptionFromPurchaseOrder,
   explicitConfirmation,
+  contextualReceptionConfirmation,
   explicitOutsourcingConfirmation,
   receptionConfirmationKey,
   findPreparedReception,
@@ -1285,6 +1340,7 @@ module.exports = {
   parseReceptionDraft,
   saveReceptionDraft,
   loadReceptionDraft,
+  activeFinalReceptionPreview,
   confirmReceptionFromWhatsApp,
   confirmOutsourcingReceptionFromWhatsApp,
 };
