@@ -64,11 +64,9 @@ test('webhook enforces origin evidence before creating or reserving production',
   assert.match(source, /resolveProductionOrigin\(contractUserText, releaseParams\.origen_tipo\)[\s\S]*releaseProductionOrder\(\{/u);
   assert.match(source, /assertCustomerOrderEvidence\([\s\S]*contractUserText,[\s\S]*releaseParams\.referencia_cliente[\s\S]*releaseParams\.cliente_final/u);
   assert.match(source, /originType,/u);
-  assert.match(source, /function getContractUserText\(rawBody, info\)[\s\S]*info\.body[\s\S]*info\.text[\s\S]*info\.query/u);
-  assert.doesNotMatch(
-    source.match(/function getContractUserText[\s\S]*?\n\}/u)?.[0] || '',
-    /info\.(?:message|mensaje|texto|content)/u
-  );
+  assert.match(source, /function getContractUserText\(rawBody, info\)\s*\{\s*return currentUserText\(rawBody, info, \{ allowParams: false \}\);/u);
+  const transport = fs.readFileSync(path.join(__dirname, '../api/_lib/builderbot-user-text.js'), 'utf8');
+  assert.match(transport, /\['body', 'text', 'query'\]/u);
 });
 
 test('a confirmed duplicate production reconstructs immutable order data by ID', () => {

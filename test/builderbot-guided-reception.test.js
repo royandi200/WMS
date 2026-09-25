@@ -458,6 +458,56 @@ test('BuilderBot tagged-only written yes advances only the reviewed SKU', async 
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('guided reception keeps available and quarantine partitions of one SKU', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas', { producto: 'tapas' });
+  const incomplete = await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en Q1', {});
+  assert.match(incomplete.message, /motivo de partida 2 \(CUARENTENA\)/u);
+  const review = await send('partida 2, motivo empaque roto');
+  assert.equal(review.sku_review, true);
+  assert.match(review.message, /Partida 1: 1 und · DISPONIBLE · ubicación A8/u);
+  assert.match(review.message, /Partida 2: 1 und · CUARENTENA · ubicación Q1/u);
+  assert.match(review.message, /Motivo: empaque roto/u);
+  const entry = JSON.parse(state.draft.payload_json).entries['00001-TPBI'];
+  assert.equal(entry.partidas.length, 2);
+  assert.equal(entry.cantidad, 2);
+  assert.equal(state.inventoryWrites, 0);
+  await send('sí');
+  await send('gomas: 100 g disponibles en B16', {
+    producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16',
+  });
+  const preview = await send('sí');
+  assert.equal(preview.requires_confirmation, true);
+  assert.match(preview.message, /Partida 1: 1 und/u);
+  assert.match(preview.message, /Partida 2: 1 und/u);
+  assert.match(preview.message, /CUARENTENA/u);
+  assert.equal(state.inventoryWrites, 0);
+  const correction = await send('Corrección: ubicación de la partida 2 de tapas a Q2');
+  assert.equal(correction.sku_review, true);
+  assert.match(correction.message, /Partida 2: 1 und · CUARENTENA · ubicación Q2/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].partidas[0].ubicacion, 'A8');
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a final-preview correction without a partition number cannot alter a split SKU', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas', { producto: 'tapas' });
+  await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en Q1 por empaque roto');
+  await send('sí');
+  const before = JSON.parse(state.draft.payload_json);
+  assert.equal(before.version, 1);
+  await assert.rejects(send('Corrección: ubicación de tapas a Q2'),
+    /Indica cuál corriges.*partida 1.*partida 2/u);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('an in-progress draft from before this change stops for its first SKU review', async () => {
   const { db, state } = guidedDb();
   const user = { id: 5 };

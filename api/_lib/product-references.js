@@ -12,6 +12,9 @@ function normalizeProductReference(value) {
   normalized = normalized
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    // Transcripciones frecuentes de «ashwagandha». La presentación numérica
+    // sigue siendo obligatoria para desambiguar 60 frente a 120.
+    .replace(/\b(?:ashagwanda|ashawanda|ashaguanda|ashwaganda|hachahuanda)\b/g, 'ashwagandha')
     .replace(/\bciento\s+cuarenta\b/g, '140')
     .replace(/\bciento\s+veinte\b/g, '120')
     .replace(/\bsesenta\b/g, '60')

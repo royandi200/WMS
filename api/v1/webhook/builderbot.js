@@ -80,6 +80,8 @@
 // =============================================================
 const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
+const { currentUserText } = require('../../_lib/builderbot-user-text');
+const { stockProductionIntent } = require('../../_lib/stock-production-intent');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
 const {
@@ -234,33 +236,11 @@ function parseBuilderBotInfo(rawBody) {
 }
 
 function getUserText(rawBody, info) {
-  return info.body ||
-         info.text ||
-         info.query ||
-         info.texto ||
-         info.content ||
-         info.message ||
-         info.params?.body ||
-         info.params?.text ||
-         info.params?.query ||
-         info.params?.texto ||
-         info.params?.message ||
-         rawBody.body ||
-         rawBody.text ||
-         rawBody.query ||
-         rawBody.texto ||
-         rawBody.message ||
-         '';
+  return currentUserText(rawBody, info);
 }
 
 function getContractUserText(rawBody, info) {
-  return info.body ||
-         info.text ||
-         info.query ||
-         rawBody.body ||
-         rawBody.text ||
-         rawBody.query ||
-         '';
+  return currentUserText(rawBody, info, { allowParams: false });
 }
 
 function isGreeting(text) {
@@ -1565,6 +1545,17 @@ module.exports = async (req, res) => {
         console.log(`[webhook] Documento recuperado por texto nativo: "${action}" → "${recoveredDocument.action}"`);
         action = recoveredDocument.action;
         params = recoveredDocument.params;
+      }
+    }
+
+    // Audio transcrito puede llegar sin clasificación de BuilderBot. Solo
+    // recuperamos una orden de stock si el mensaje actual declara producto,
+    // cantidad y destino de manera explícita; el servicio valida el producto.
+    if (['UNKNOWN', 'MODO_CHARLA'].includes(action)) {
+      const stockIntent = stockProductionIntent(contractUserText);
+      if (stockIntent) {
+        action = 'LIBERAR_ORDEN_PRODUCCION';
+        params = stockIntent;
       }
     }
 
