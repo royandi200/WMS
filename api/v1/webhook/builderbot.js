@@ -111,6 +111,7 @@ const {
   prepareProductionReplenishment,
 } = require('../../_lib/production-replenishment');
 const { closeProductionOrder } = require('../../_lib/production-close');
+const { closedProductionMessage } = require('../../_lib/production-close-message');
 const { advanceCloseGuide,
   closeOrderReference, finishDraft: finishCloseDraft, isCloseFollowup, pendingCloseDraft } = require('../../_lib/production-close-guide');
 const {
@@ -3193,26 +3194,26 @@ module.exports = async (req, res) => {
         const closedWhen = closure.closed_at
           ? new Date(closure.closed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' })
           : null;
+        let suggestedLocation = null;
+        if (!closure.already_closed && closure.qty_real > 0) {
+          try {
+            const [locations] = await db.execute(
+              `SELECT u.codigo FROM ordenes_produccion op
+               JOIN producto_ubicaciones pu ON pu.producto_id = op.producto_id AND pu.activa = 1
+               JOIN ubicaciones u ON u.id = pu.ubicacion_id AND u.activa = 1
+               JOIN bodegas b ON b.id = u.bodega_id AND b.activa = 1
+               WHERE op.id = ? ORDER BY pu.prioridad, u.codigo LIMIT 1`,
+              [closure.order_id]
+            );
+            suggestedLocation = locations[0]?.codigo || null;
+          } catch (error) {
+            // El cierre ya se confirmó: una sugerencia opcional no debe ocultar el resultado.
+            console.error('[webhook] No se pudo consultar la ubicación sugerida del PT:', error.message);
+          }
+        }
         mensaje = closure.already_closed
           ? `🏭 La *OP ID ${closure.order_id}* | ${closure.order_code} ya estaba cerrada${closure.closed_by ? ` por ${closure.closed_by}` : ''}${closedWhen ? ` el ${closedWhen}` : ''}. No se modificó inventario.`
-          : [
-              '🏭 ✅ *Producción cerrada*',
-              '',
-              `Orden: *OP ID ${closure.order_id}* | ${closure.order_code}`,
-              `Unidades conformes: ${closure.qty_real}`,
-              `No conformes: ${closure.qty_waste}`,
-              '',
-              '*Materiales repuestos*',
-              ...(closure.materiales_repuestos.length
-                ? closure.materiales_repuestos.flatMap(item => [
-                  `• *${item.sku}*: ${item.cantidad} ${item.unidad} · lote de reposición ${item.lote}`,
-                  `  Causa: ${item.motivo} · ubicación ${item.ubicacion}`,
-                ]) : ['• Ninguno']),
-              '',
-              `Lote PT: ${closure.lpn_terminado || 'Sin lote conforme'}`,
-              `Vencimiento: ${closure.fecha_venc || 'No aplica'}`,
-              `Ubicación: ${closure.ubicacion || closure.ubicacion_id || 'No aplica'}`,
-            ].join('\n');
+          : closedProductionMessage(closure, suggestedLocation);
         responseContext.production_close = closure;
         break;
       }

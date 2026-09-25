@@ -347,9 +347,10 @@ test('production close normalizes LLM aliases', () => {
 
 test('production close idempotency response includes actor and timestamp', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'v1', 'webhook', 'builderbot.js'), 'utf8');
+  const messageSource = fs.readFileSync(path.join(__dirname, '..', 'api', '_lib', 'production-close-message.js'), 'utf8');
   assert.match(source, /closure\.closed_by/u);
   assert.match(source, /closure\.closed_at/u);
-  assert.match(source, /Vencimiento: \$\{closure\.fecha_venc/u);
+  assert.match(messageSource, /Vencimiento: \$\{closure\.fecha_venc/u);
   assert.match(source, /No se modifico inventario/u);
 });
 

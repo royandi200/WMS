@@ -21,8 +21,9 @@ require.cache[dbPath] = {
         if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
         if (/FROM produccion_cierre_borradores/u.test(sql)) return [closeDraft
           ? [{ payload_json: closeDraft }] : []];
-        if (/FROM lots/u.test(sql) && /BINARY lpn/u.test(sql)) return [params[0] === '123456'
-          ? [] : [{ id: 1, qty_current: 100, status: 'DISPONIBLE', bodega_id: 1 }]];
+        if (/FROM lots/u.test(sql) && /UPPER\(lpn\)/u.test(sql)) return [params[0] === '123456'
+          ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
+            status: 'DISPONIBLE', bodega_id: 1 }]];
         if (/FROM stock s JOIN ubicaciones u/u.test(sql)) return [[{
           id: 1, ubicacion_id: 8, cantidad: 100, reservada: 0, ubicacion: 'A8',
         }]];

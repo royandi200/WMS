@@ -14,8 +14,9 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
     writes, aliasTerms,
     async execute(sql, params) {
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
-      if (sql.includes('FROM lots') && sql.includes('BINARY lpn')) return [invalidLots.includes(params[0])
-        ? [] : [{ id: 1, qty_current: 100, status: 'DISPONIBLE', bodega_id: 1 }]];
+      if (sql.includes('FROM lots') && sql.includes('UPPER(lpn)')) return [invalidLots.includes(params[0])
+        ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
+          status: 'DISPONIBLE', bodega_id: 1 }]];
       if (sql.includes('FROM stock s JOIN ubicaciones u')) return [[{
         id: 1, ubicacion_id: 8, cantidad: stockAvailable, reservada: 0, ubicacion: 'A8',
       }]];
@@ -30,9 +31,13 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       if (sql.includes('FROM ubicaciones u JOIN bodegas b')) return [[{ codigo: 'C2' }]];
       if (sql.includes('FROM produccion_materiales pm JOIN productos')) return [[{
         producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
-      }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' }]];
+      }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
+      { producto_id: 35, unidad: 'und', sku: '00035-LNTP60', nombre: 'LINER TARRO x 60' }]];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
-      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[params[0] === 'etiqueta' ? {
+      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[params[0] === 'liners' ? {
+        id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60',
+        unit_label: 'und', alias: 'liners',
+      } : params[0] === 'etiqueta' ? {
         id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA',
         unit_label: 'und', alias: 'etiqueta',
       } : {
@@ -101,6 +106,103 @@ test('«se dañaron 2 tapas por ruptura» conserva el cierre y pregunta por su r
   assert.equal(result.draft.materialPending.motivo, 'ruptura');
   assert.match(result.message, /¿Repusiste 2 und de TAPA/u);
   assert.equal(result.params, undefined);
+});
+
+test('el lote de un liner dañado no se mezcla con el nombre ni se supone que fue repuesto', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Se dañaron dos liners del lote 1234.' });
+  assert.equal(result.draft.materialPending.sku, '00035-LNTP60');
+  assert.equal(result.draft.materialPending.cantidad, 2);
+  assert.equal(result.draft.materialPending.lote, null);
+  assert.equal(result.draft.materialPending.replacementDecision, null);
+  assert.match(result.message, /¿Repusiste 2 und de LINER/u);
+  assert.deepEqual(db.aliasTerms, ['liners']);
+});
+
+test('la reposición narrada junto al daño separa el liner y valida su lote antes del cierre', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, invalidLots: ['1234'], initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Se dañaron dos liners y fueron repuestos del lote 1234' });
+  assert.equal(result.draft.materialPending.sku, '00035-LNTP60');
+  assert.equal(result.draft.materialPending.replacementDecision, true);
+  assert.equal(result.draft.materialPending.lote, null);
+  assert.equal(result.draft.materialPending.loteIntentado, '1234');
+  assert.match(result.message, /lote \*1234\* no está registrado/u);
+  assert.match(result.message, /¿De qué lote sacaste 2 und/u);
+  assert.deepEqual(db.aliasTerms, ['liners']);
+});
+
+test('una causa seguida de reposición conserva ambos datos del liner', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Se dañaron dos liners por ruptura y fueron repuestos del lote R2-LINER' });
+  assert.equal(result.draft.materialPending, null);
+  assert.equal(result.draft.materials[0].sku, '00035-LNTP60');
+  assert.equal(result.draft.materials[0].motivo, 'ruptura');
+  assert.equal(result.draft.materials[0].lote, 'R2-LINER');
+  assert.match(result.message, /confirmo cierre/u);
+});
+
+test('el lote «es el 1234» no se interpreta como «es» y la causa excluye el lote', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, invalidLots: ['1234'], initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+      unidad: 'und', cantidad: 2, lote: null, motivo: null, ubicacion: null },
+    reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'La causa fue por ruptura y el lote es el 1234.' });
+  assert.equal(result.draft.materials[0].motivo, 'ruptura');
+  assert.equal(result.draft.materials[0].loteIntentado, '1234');
+  assert.match(result.message, /lote \*1234\* no está registrado/u);
+});
+
+test('una corrección breve de causa y lote repara la partida de liner en curso', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [{
+      sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und', cantidad: 2,
+      lote: null, loteIntentado: 'es', motivo: 'fue por ruptura y el lote es el 1234.', ubicacion: null,
+    }], materialsAnswered: false, materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const lot = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Salieron del lote R5-260923-Liner' });
+  assert.equal(lot.draft.materials[0].lote, 'R5-260923-LINER');
+  const reason = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Corrección, la causa fue ruptura.',
+    params: { avance_materiales: { items: [{ motivo: 'ruptura' }] } } });
+  assert.equal(reason.draft.materials[0].motivo, 'ruptura');
+  assert.equal(reason.draft.materials[0].lote, 'R5-260923-LINER');
+  assert.match(reason.message, /confirmo cierre/u);
+});
+
+test('«Corrección, el lote es ...» acepta el identificador existente sin exigir SKU', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [{
+      sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und', cantidad: 2,
+      lote: null, loteIntentado: '1234', motivo: 'ruptura', ubicacion: null,
+    }], materialsAnswered: false, materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Corrección, el lote es R5-260923-Liner' });
+  assert.equal(result.draft.materials[0].lote, 'R5-260923-LINER');
+  assert.equal(result.draft.materials[0].motivo, 'ruptura');
+  assert.match(result.message, /confirmo cierre/u);
 });
 
 test('el audio sin cantidades no puede convertirse en cierre por los parámetros del modelo', async () => {

@@ -95,11 +95,21 @@ function materialLossCandidate(text) {
   const damageVerb = '(?:(?:se\\s+)?(?:danaron|dano|dane|danamos|rompieron|rompi|rompimos|perdieron|perdi|perdimos|destruyeron|destrui|destruimos))\\s+';
   const match = new RegExp(`\\b(?:${lossNoun}|${damageVerb})${NUMBER}\\s+(?:und|unidades?|gramos?|g)?\\s*([a-z][a-z0-9\\s-]*?)(?=\\s+(?:por|debido a|causa|motivo)\\b|[,;.]|$)`, 'u').exec(raw);
   if (!match) return null;
-  const product = match[2].trim();
+  // El lote y una posible reposición son datos del movimiento, no parte del
+  // nombre del insumo: «dos liners del lote X» sigue refiriéndose a liners.
+  const product = match[2].split(/\s+(?:(?:del?|desde)\s+lote\b|y\s+(?:(?:fueron|han\s+sido)\s+)?repuest[oa]s?\b|y\s+se\s+repusieron\b)/u)[0].trim();
   if (!product || /^(?:producto(?:s)?\s+terminado(?:s)?|unidades?\s+terminadas?|pt)$/u.test(product)) return null;
-  const cause = raw.slice(match.index + match[0].length)
-    .match(/^\s*(?:por|debido a|causa|motivo)\s+([^.,;]+)/u)?.[1]?.trim() || null;
-  return { product, quantity: quantity(match[1]), cause, index: match.index };
+  const tail = raw.slice(match.index + match[0].length);
+  const cause = tail.match(/^\s*(?:por|debido a|causa|motivo)\s+([^.,;]+)/u)?.[1]
+    ?.replace(/\s+y\s+(?:(?:fueron|han\s+sido)\s+)?repuest[oa]s?\b.*$/u, '').trim() || null;
+  const materialDetails = match[2] + tail;
+  const replacement = materialDetails.match(/\b(?:(?:fueron|han\s+sido)\s+)?repuest[oa]s?\b|\bse\s+repusieron\b/u);
+  const replacementLot = replacement
+    ? materialDetails.slice(replacement.index + replacement[0].length)
+      .match(/\b(?:del?|desde\s+el)\s+lote\s+([a-z0-9][a-z0-9_-]*)\b/u)?.[1]?.toUpperCase() || null
+    : null;
+  return { product, quantity: quantity(match[1]), cause, replacement: !!replacement,
+    replacementLot, index: match.index };
 }
 
 function explicitFinishedWaste(text) {
@@ -160,8 +170,9 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
 
 function materialFollowup(text) {
   const raw = String(text || '').trim();
-  const lot = raw.match(/\blote\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
-  const cause = raw.match(/\b(?:por|causa|motivo|debido a)\s+(.+)$/iu)?.[1]?.trim()
+  const lot = raw.match(/\blote(?:\s+es)?(?:\s+el)?\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
+  const cause = raw.match(/\b(?:causa|motivo)(?:\s+(?:fue|es))?\s*(?:[:\-]|por)?\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
+    || raw.match(/\b(?:por|debido a)\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || (/^(?:ruptura|rotura|derrame|contaminacion|contaminación|defecto|caida|caída|daño|dano|despegue)$/iu.test(raw) ? raw : null);
   return { lote: lot, motivo: cause };
 }
@@ -186,11 +197,14 @@ async function validateReplacementLot(db, material, line) {
   const key = [line.sku, line.cantidad, line.lote, line.ubicacion || ''].join('|');
   if (line.validatedLotKey === key) return null;
   const [lots] = await db.execute(
-    `SELECT id, qty_current, status, bodega_id FROM lots
-      WHERE BINARY lpn = BINARY ? AND product_id = ? LIMIT 1`,
+    `SELECT id, lpn, qty_current, status, bodega_id FROM lots
+      WHERE UPPER(lpn) = UPPER(?) AND product_id = ? LIMIT 2`,
     [line.lote, material.producto_id]
   );
   if (!lots.length) return `El lote *${line.lote}* no está registrado para *${line.sku}*.`;
+  if (lots.length > 1) return `Hay más de un lote que coincide con *${line.lote}* para *${line.sku}*. Revisa el identificador exacto.`;
+  // Conservar el código real para las consultas BINARY y el descuento de inventario.
+  line.lote = lots[0].lpn;
   if (lots[0].status !== 'DISPONIBLE') return `El lote *${line.lote}* de *${line.sku}* no está disponible.`;
   const [stocks] = await db.execute(
     `SELECT s.id, s.ubicacion_id, s.cantidad, s.reservada, u.codigo AS ubicacion
@@ -214,7 +228,7 @@ async function validateReplacementLot(db, material, line) {
     || Number(lots[0].qty_current) + 0.000001 < Number(line.cantidad)) {
     return `Saldo insuficiente de *${line.sku}*, lote *${line.lote}*, ubicación *${candidates[0].ubicacion}*: pediste ${line.cantidad} ${line.unidad || ''} y hay ${Math.min(free, Number(lots[0].qty_current))} libres.`;
   }
-  line.validatedLotKey = key;
+  line.validatedLotKey = [line.sku, line.cantidad, line.lote, line.ubicacion || ''].join('|');
   return null;
 }
 
@@ -264,6 +278,25 @@ function naturalLotCorrection(text, params) {
 }
 
 async function applyMaterialCorrection(db, draft, order, text, params) {
+  const raw = normalize(text);
+  const followup = materialFollowup(text);
+  const causeCorrection = /^(?:correccion|correcion|corrijo|corrige|perdon|perdona)\b\s*[,;:-]?\s*(?:la\s+)?(?:causa|motivo)\b/u.test(raw);
+  const lotReply = /^(?:(?:salieron|se\s+sacaron|las?\s+saque|los?\s+saque)\s+(?:de|del)\s+lote|(?:correccion|correcion|perdon|perdona)\b\s*[,;:-]?\s*(?:el\s+)?lote)\b/u.test(raw);
+  if (causeCorrection || lotReply) {
+    const lines = [...(draft.materials || []), draft.materialPending].filter(Boolean);
+    if (lines.length !== 1) throw guideError('Hay varios materiales en este cierre. Indica cuál quieres corregir; no cambié el borrador.');
+    const line = lines[0];
+    if (causeCorrection && followup.motivo) line.motivo = followup.motivo;
+    if (lotReply && followup.lote) {
+      line.previousLot = line.lote || line.loteAnterior || null;
+      line.lote = followup.lote;
+    }
+    if (line === draft.materialPending) finishPendingDamage(draft);
+    draft.materialsAnswered = !draft.materialPending && draft.materials.length > 0
+      && draft.materials.every(item => item.sku && item.cantidad != null && item.lote && item.motivo);
+    draft.reviewShown = false;
+    return true;
+  }
   const natural = naturalLotCorrection(text, params);
   if (natural && draft.materials?.length) {
     if (draft.materials.length > 1 && (!natural.product
@@ -354,6 +387,17 @@ async function beginMaterialDamage(db, draft, order, damage) {
   draft.materialsAnswered = false;
 }
 
+function finishPendingDamage(draft) {
+  const pending = draft.materialPending;
+  if (!pending?.sku || pending.cantidad == null || !pending.lote || !pending.motivo) return;
+  const { damageReport, replacementDecision, ...line } = pending;
+  const existing = draft.materials.findIndex(item => item.sku === line.sku && item.lote === line.lote);
+  if (existing >= 0) draft.materials[existing] = line;
+  else draft.materials.push(line);
+  draft.materialPending = null;
+  draft.materialsAnswered = true;
+}
+
 async function resolveUnclassifiedWaste(db, draft, order, text) {
   const candidate = draft.unclassifiedWaste;
   if (!candidate) return false;
@@ -392,6 +436,11 @@ async function applyMaterialReport(db, draft, order, text, params) {
   const damage = materialLossCandidate(text);
   if (damage) {
     await beginMaterialDamage(db, draft, order, damage);
+    if (damage.replacement) {
+      draft.materialPending.replacementDecision = true;
+      draft.materialPending.lote = damage.replacementLot;
+    }
+    finishPendingDamage(draft);
     return;
   }
   if (draft.materialPending?.damageReport) {
@@ -429,14 +478,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
     if (followup.lote || aiLot) pending.lote = followup.lote || aiLot;
     if (pending.cantidad == null) pending.cantidad = quantity(text);
     if (pending.motivo == null && followup.motivo) pending.motivo = followup.motivo;
-    if (pending.sku && pending.cantidad != null && pending.lote && pending.motivo) {
-      const { damageReport, replacementDecision, ...line } = pending;
-      const existing = draft.materials.findIndex(item => item.sku === line.sku && item.lote === line.lote);
-      if (existing >= 0) draft.materials[existing] = line;
-      else draft.materials.push(line);
-      draft.materialPending = null;
-      draft.materialsAnswered = true;
-    }
+    finishPendingDamage(draft);
     return;
   }
   if (noReplacements(text)) {
