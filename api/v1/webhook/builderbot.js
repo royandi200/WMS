@@ -156,6 +156,7 @@ const {
   validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
 const { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
+  hasActiveReceptionSession, isReceptionCorrectionRequest,
   skuReviewReply, documentMismatch } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
@@ -1582,6 +1583,12 @@ module.exports = async (req, res) => {
       && await hasPendingSkuReview(db, user.id)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
+    }
+    if (!selectedPreparationReference && isReceptionCorrectionRequest(rawText)
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
+      && await hasActiveReceptionSession(db, user.id)) {
+      action = 'AVANZAR_RECEPCION_GUIADA_OC';
+      params = { avance: params.avance || {}, correccion: true };
     }
     const mismatch = documentMismatch(rawText);
     if (!selectedPreparationReference && (mismatch.lote || mismatch.fecha_vencimiento)

@@ -275,6 +275,59 @@ test('guided OC reception can correct its own preview without confirming invento
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('final summary accepts a spoken location correction without repeating OC ID or model correction flag', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas, dos disponibles en A8', {
+    producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  await send('sí', {});
+  await send('Gomas, cien disponibles en B16', {
+    producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16',
+  });
+  await send('sí', {});
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+
+  const corrected = await send('Corrección ubicación de tapas A1', { ubicacion: 'A1' });
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Ubicación registrada: A1/u);
+  assert.match(corrected.message, /¿Está correcto este SKU\?/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, false);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00051-MPASH'].verified, true);
+  const reviewed = await send('sí', {});
+  assert.equal(reviewed.requires_confirmation, true);
+  assert.match(reviewed.message, /00001-TPBI[\s\S]*Ubicación: A1/u);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a generic correction opens the final preview and keeps context for a following SKU', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas, dos disponibles en A8', {
+    producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  await send('sí', {});
+  await send('Gomas, cien disponibles en B16', {
+    producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16',
+  });
+  await send('sí', {});
+  const ask = await send('Corrección del resumen', {});
+  assert.match(ask.message, /Indica qué SKU o producto quieres corregir/u);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  const selected = await send('Las tapas', { producto: 'tapa' });
+  assert.equal(selected.sku_review, true);
+  assert.match(selected.message, /Ubicación registrada: A8/u);
+  const corrected = await send('En A1', { ubicacion: 'A1' });
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Ubicación registrada: A1/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('an incorrect SKU is corrected and reviewed again before the next one', async () => {
   const { db, state } = guidedDb();
   const user = { id: 5 };

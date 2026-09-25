@@ -36,6 +36,33 @@ function documentMismatch(rawText) {
   };
 }
 
+function isReceptionCorrectionRequest(rawText) {
+  const text = String(rawText || '').trim().normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '').toLowerCase();
+  return /^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir)\b/u.test(text)
+    && !/\b(?:op\s*id|orden de produccion|despacho)\b/u.test(text);
+}
+
+function correctionFieldsFromText(rawText) {
+  if (!isReceptionCorrectionRequest(rawText)) return {};
+  const text = String(rawText).trim().normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .replace(/^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir)\b\s*[,;:-]?\s*/iu, '')
+    .replace(/[.!?]+$/u, '').trim();
+  const patterns = [
+    ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:de|del)\s+(.+?)\s+(?:(?:a|en|es|fue)\s+)?([a-z]+\d[a-z0-9-]*)$/iu],
+    ['cantidad', /^(?:la\s+)?cantidad\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|gramos?|g)?$/iu],
+    ['lote', /^(?:el\s+)?lote\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?([a-z0-9][a-z0-9_-]*\d[a-z0-9_-]*)$/iu],
+    ['fecha_vencimiento', /^(?:el\s+)?(?:vencimiento|fecha de vencimiento)\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?(\d{4}-\d{2}-\d{2})$/iu],
+    ['condicion', /^(?:la\s+)?condicion\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?(disponible|cuarentena|rechazado|pendiente de disposicion)$/iu],
+  ];
+  for (const [field, pattern] of patterns) {
+    const match = text.match(pattern);
+    if (match) return { producto: match[1].trim(), [field]: match[2].trim() };
+  }
+  return {};
+}
+
 function digest(payload) {
   return createHash('sha256').update(canonicalJson(payload)).digest('hex');
 }
@@ -109,6 +136,10 @@ async function hasSelectedGuidedSku(db, userId) {
   if (!session) return false;
   const payload = parseDraft(session, session.orden_compra_id, session.recepcion_id, userId);
   return payload.version === 2 && Boolean(payload.reviewSku || payload.selectedSku);
+}
+
+async function hasActiveReceptionSession(db, userId) {
+  return Boolean(await activeUserSession(db, userId, { allowPreview: true }));
 }
 
 async function recentlyPreparedSession(db, from) {
@@ -317,7 +348,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   if (params.confirmacion_final === true || params.confirmacion_final === 'true') {
     throw inputError('Los avances no confirman inventario; revisa primero el resumen');
   }
-  const advance = cleanAdvance(params);
+  const correctionRequested = params.correccion === true || isReceptionCorrectionRequest(rawText);
+  const advance = { ...cleanAdvance(params), ...correctionFieldsFromText(rawText) };
   const explicitId = typedOrderId(rawText);
   let order;
   if (explicitId) {
@@ -327,10 +359,13 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     order = await findPurchaseOrder(db, { numero_oc: params.numero_oc });
     assertPurchaseOrderTextReference(rawText, order);
   } else {
-    const recent = await recentlyPreparedSession(db, from);
-    const session = recent || await activeUserSession(db, user.id, {
-      allowPreview: params.correccion === true,
-    });
+    // An explicit correction belongs to the operator's active draft, even if
+    // another OC was prepared recently in the same chat.
+    const session = correctionRequested
+      ? await activeUserSession(db, user.id, { allowPreview: true })
+        || await recentlyPreparedSession(db, from)
+      : await recentlyPreparedSession(db, from)
+        || await activeUserSession(db, user.id);
     if (!session) {
       throw inputError('Para empezar, indica OC ID N o IO ID N de la recepción preparada', 409);
     }
@@ -356,7 +391,7 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       [reception.id]
     );
     const existing = parseDraft(rows[0], order.id, reception.id, user.id);
-    if (existing?.version === 1 && params.correccion !== true) {
+    if (existing?.version === 1 && !correctionRequested) {
       await db.commit();
       return { message: buildReceptionReview(order, reception, existing.items),
         inventory_changed: false, requires_confirmation: true };
@@ -365,6 +400,19 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       ? fromCompletedPreview(existing)
       : existing || { version: 2, orderId: Number(order.id), receptionId: Number(reception.id),
         selectedSku: null, entries: {} };
+    if (existing?.version === 1 && correctionRequested) payload.editingSummary = true;
+    if (payload.editingSummary && !payload.selectedSku && !payload.reviewSku
+      && !String(advance.producto || advance.sku || '').trim()) {
+      await saveGuidedDraft(db, order, reception, user.id, payload);
+      await db.commit();
+      return { message: [
+        `🧾 Corrección del resumen ${purchaseOrderReceptionIdentifier(order)} | ${reception.numero}`,
+        'Indica qué SKU o producto quieres corregir y el dato nuevo (cantidad, condición, ubicación, lote o vencimiento).',
+        'Productos de esta recepción:',
+        ...preparedItems.map(item => `- ${item.sku} - ${item.producto}`),
+        'El inventario no se modifica hasta que revises de nuevo el resumen y confirmes la recepción.',
+      ].join('\n'), inventory_changed: false };
+    }
     if (!payload.reviewSku) {
       // Borradores creados antes de esta revisión pueden tener un SKU completo
       // sin validar. Muéstralo antes de aceptar cualquier siguiente producto.
@@ -474,7 +522,7 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       if (updated.condicion === 'DISPONIBLE') updated.motivo = null;
       payload.entries[selected.sku].verified = false;
       payload.reviewSku = null;
-    } else if (selected && params.correccion === true) {
+    } else if (selected && (correctionRequested || payload.editingSummary)) {
       payload.entries[selected.sku].verified = false;
     }
     const entry = selected ? payload.entries[selected.sku] : null;
@@ -558,5 +606,6 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
 }
 
 module.exports = { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
+  hasActiveReceptionSession, isReceptionCorrectionRequest,
   skuReviewReply, documentMismatch,
   parseDraft, missingFields, itemFromEntry };
