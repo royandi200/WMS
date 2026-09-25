@@ -47,10 +47,15 @@ function purchaseOrderParamsFromText(params = {}, rawText = '') {
   return { ...clean, orden_compra_id: reference.id };
 }
 
-function preparationRequestFromText(rawText) {
+function preparationRequestFromText(rawText, { allowTruncated = false } = {}) {
   const text = normalizedSpeech(rawText).trim();
   const match = text.match(/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:(?:LA\s+)?RECEPCION\b\s*|(?:LA\s+)?ORDEN\b\s*(?=(?:O\s*C|I\s*O|M\s*Q))|(?=(?:O\s*C|I\s*O|M\s*Q)))/u);
-  return match ? text.slice(match[0].length).trim() : null;
+  if (match) return text.slice(match[0].length).trim();
+  if (!allowTruncated) return null;
+  // Solo si el clasificador ya eligió PREPARAR: el audio puede perder
+  // «prepara» o transcribirlo como «pregunta». Nunca se usa al confirmar.
+  const truncated = text.match(/^(?:PARA|PREGUNTA\s+DE)\s+LA\s+ORDEN\s+(?=(?:O\s*C|I\s*O|M\s*Q))/u);
+  return truncated ? text.slice(truncated[0].length).trim() : null;
 }
 
 function noisySpokenPreparationReference(rawText) {
@@ -58,20 +63,20 @@ function noisySpokenPreparationReference(rawText) {
     .replace(/\s+/gu, ' ').trim();
   // Variantes frecuentes de "OC ID" / "IO ID" / "MQ ID" en audio: OCIP, OCIB,
   // "O, C y D". Solo se usan al PREPARAR, nunca al confirmar inventario.
-  const match = text.match(/^(O\s*C|I\s*O|M\s*Q)\s*(?:I|Y)\s*(?:D|B|P)\s*(\d+)$/u);
+  const match = text.match(/^(O\s*C|I\s*O|M\s*Q)\s*(?:I|Y)\s*(?:D|B|P|V)\s*(\d+)$/u);
   const id = Number(match?.[2]);
   return match && Number.isSafeInteger(id) && id > 0
     ? { kind: match[1].replace(/\s/gu, ''), id }
     : null;
 }
 
-function preparationIntentFromText(rawText) {
-  const remainder = preparationRequestFromText(rawText);
+function preparationIntentFromText(rawText, options = {}) {
+  const remainder = preparationRequestFromText(rawText, options);
   if (remainder === null) return null;
   const normalized = normalizedSpeech(remainder).replace(/[.,;:]+/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
   const references = typedReceptionReferences(rawText);
-  for (const match of normalized.matchAll(/(?:^|[^A-Z0-9])(O\s*C|I\s*O|M\s*Q)\s*(?:I|Y)\s*(?:D|B|P)\s*(\d+)(?![A-Z0-9_-])/gu)) {
+  for (const match of normalized.matchAll(/(?:^|[^A-Z0-9])(O\s*C|I\s*O|M\s*Q)\s*(?:I|Y)\s*(?:D|B|P|V)\s*(\d+)(?![A-Z0-9_-])/gu)) {
     const id = Number(match[2]);
     if (Number.isSafeInteger(id) && id > 0) {
       references.push({ kind: match[1].replace(/\s/gu, ''), id });
@@ -85,7 +90,7 @@ function preparationIntentFromText(rawText) {
 function preparationClarificationCandidate(rawText) {
   const text = normalizedSpeech(rawText).replace(/[.,;:]+/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
-  if (!/^(?:NO\s+)?(?:ES\s+)?(?:O\s*C|I\s*O|M\s*Q)\s*(?:(?:I\s*D|NUMERO|NRO|[IY]\s*[DBP])\s*)?#?\s*\d+$/u.test(text)) {
+  if (!/^(?:NO\s+)?(?:ES\s+)?(?:O\s*C|I\s*O|M\s*Q)\s*(?:(?:I\s*D|NUMERO|NRO|[IY]\s*[DBPV])\s*)?#?\s*\d+$/u.test(text)) {
     return null;
   }
   const selected = typedReceptionReferences(rawText);

@@ -336,6 +336,20 @@ test('a single pending SKU keeps context through final-summary corrections and d
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('guided reception joins a spoken section letter and location number without inventing a missing letter', async () => {
+  const { db, state } = guidedDb({ singleSku: '00276-PTZNASHWA' });
+  const user = { id: 5 };
+  const review = await advanceGuidedReception({ db, user,
+    rawText: 'OC ID 37: llegó una unidad, buena, ubicación b 13',
+    params: { avance: { producto: '00276-PTZNASHWA', cantidad: 1,
+      condicion: 'DISPONIBLE', ubicacion: 'b 13' } },
+  });
+  assert.equal(review.sku_review, true);
+  assert.match(review.message, /Ubicación registrada: B13/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00276-PTZNASHWA'].ubicacion, 'B13');
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('a single pending SKU does not turn an unrelated explicit product into that SKU', async () => {
   const { db, state } = guidedDb({ singleSku: '00276-PTZNASHWA' });
   await assert.rejects(advanceGuidedReception({ db, user: { id: 5 },

@@ -1572,7 +1572,9 @@ module.exports = async (req, res) => {
     let selectedPreparationReference = null;
     if (['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA',
       'CONFIRMAR_RECEPCION_OC'].includes(action)) {
-      const receptionIntent = preparationIntentFromText(rawText);
+      const receptionIntent = preparationIntentFromText(rawText, {
+        allowTruncated: ['PREPARAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA'].includes(action),
+      });
       confirmedReceptionReference = receptionIntent
         ? null
         : await findRecentReceptionPreparationQuestion(db, from, rawText);

@@ -435,7 +435,7 @@ async function prepareReceptionFromPurchaseOrder({
   const order = await findPurchaseOrder(db, params);
   if (requireExplicitTextReference) {
     const expectedKind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
-    const alternate = confirmedReference || preparationIntentFromText(rawText);
+    const alternate = confirmedReference || preparationIntentFromText(rawText, { allowTruncated: true });
     if (!alternate || alternate.kind !== expectedKind || alternate.id !== Number(order.id)) {
       assertPurchaseOrderTextReference(rawText, order);
     }
@@ -552,7 +552,7 @@ async function prepareReceptionFromOutsourcing({
 }) {
   const order = await findOutsourcingOrder(db, params);
   if (requireExplicitTextReference) {
-    const alternate = confirmedReference || preparationIntentFromText(rawText);
+    const alternate = confirmedReference || preparationIntentFromText(rawText, { allowTruncated: true });
     if (!alternate || alternate.kind !== 'MQ' || alternate.id !== Number(order.id)) {
       assertOutsourcingTextReference(rawText, order);
     }

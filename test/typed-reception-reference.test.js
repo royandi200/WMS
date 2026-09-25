@@ -59,7 +59,7 @@ test('spoken OCID 38 works for preparation and final confirmation but not IO', (
 
 test('clear preparation intent is recoverable even when the model chooses chat', () => {
   const webhook = fs.readFileSync(path.join(__dirname, '../api/v1/webhook/builderbot.js'), 'utf8');
-  assert.match(webhook, /const receptionIntent = preparationIntentFromText\(rawText\)/u);
+  assert.match(webhook, /const receptionIntent = preparationIntentFromText\(rawText, \{/u);
   assert.match(webhook, /selected\.kind === 'MQ' \? 'PREPARAR_RECEPCION_MAQUILA'/u);
   assert.ok(webhook.indexOf('const receptionIntent = preparationIntentFromText(rawText)')
     < webhook.indexOf("case 'PREPARAR_RECEPCION_OC':"));
@@ -68,6 +68,12 @@ test('clear preparation intent is recoverable even when the model chooses chat',
   assert.deepEqual(preparationIntentFromText('Por favor, prepara la recepción IOID 34'),
     { kind: 'IO', id: 34 });
   assert.deepEqual(preparationIntentFromText('Prepara la orden IOIB34'),
+    { kind: 'IO', id: 34 });
+  assert.deepEqual(preparationIntentFromText('Prepara la orden IOIV34'),
+    { kind: 'IO', id: 34 });
+  assert.deepEqual(preparationIntentFromText('para la orden IOIB34', { allowTruncated: true }),
+    { kind: 'IO', id: 34 });
+  assert.deepEqual(preparationIntentFromText('Pregunta de la orden IOIV34', { allowTruncated: true }),
     { kind: 'IO', id: 34 });
   assert.deepEqual(preparationIntentFromText('Prepara la recepción MQIB 13'),
     { kind: 'MQ', id: 13 });
@@ -91,6 +97,8 @@ test('clear preparation intent is recoverable even when the model chooses chat',
     'Prepara la orden de producción OCID 38',
     'Prepara la recepción OCID 38 o IOID 34',
     'Prepara la recepción MQIB38 o OCID 38',
+    'para la orden IOIB34',
+    'Pregunta de la orden IOIV34',
   ]) assert.equal(preparationIntentFromText(phrase), null, phrase);
 });
 
@@ -140,12 +148,18 @@ test('preparation checks the selected order namespace without loosening final re
     });
   await assert.rejects(attempt('INSUMOS_MP', 'Prepara la recepción OC y B38'),
     /La orden de compra esta CANCELADA/u);
+  await assert.rejects(attempt('IN_OUT', 'Prepara la orden IOIV38'),
+    /La orden de compra esta CANCELADA/u);
+  await assert.rejects(attempt('IN_OUT', 'para la orden IOIB38'),
+    /La orden de compra esta CANCELADA/u);
   await assert.rejects(attempt('IN_OUT', 'Prepara la recepción OC y B38'),
     /El ID 38 es ambiguo/u);
   await assert.rejects(attempt('INSUMOS_MP', 'sí', { kind: 'OC', id: 38 }),
     /La orden de compra esta CANCELADA/u);
   await assert.rejects(attempt('INSUMOS_MP', 'sí', { kind: 'IO', id: 38 }),
     /El ID 38 es ambiguo/u);
+  assert.equal(purchaseOrderTextReference('Confirmo la recepción IOIV38',
+    { id: 38, tipo_recepcion: 'IN_OUT' }), false);
 });
 
 test('MQ audio preparation stays in its own namespace and does not relax final confirmation', async () => {

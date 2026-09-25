@@ -256,7 +256,14 @@ function applyFields(entry, advance) {
       throw inputError('La condición debe ser disponible, cuarentena, rechazado o pendiente de disposición');
     }
   }
-  if (entry.ubicacion) entry.ubicacion = entry.ubicacion.toUpperCase();
+  if (entry.ubicacion) {
+    const location = entry.ubicacion.toUpperCase();
+    // Una pausa de voz separa con frecuencia «B13» como «B 13».
+    // Solo unimos una letra de sección seguida de dígitos explícitos;
+    // nunca inferimos la letra de un número aislado como «13».
+    entry.ubicacion = /^[A-Z](?:\s+\d+)+$/u.test(location)
+      ? location.replace(/\s+/gu, '') : location;
+  }
 }
 
 function missingFields(entry, prepared) {
