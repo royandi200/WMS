@@ -49,7 +49,7 @@ function purchaseOrderParamsFromText(params = {}, rawText = '') {
 
 function preparationRequestFromText(rawText) {
   const text = normalizedSpeech(rawText).trim();
-  const match = text.match(/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:(?:LA\s+)?(?:RECEPCION|ORDEN)\b\s*|(?=(?:O\s*C|I\s*O|M\s*Q)))/u);
+  const match = text.match(/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:(?:LA\s+)?RECEPCION\b\s*|(?:LA\s+)?ORDEN\b\s*(?=(?:O\s*C|I\s*O|M\s*Q))|(?=(?:O\s*C|I\s*O|M\s*Q)))/u);
   return match ? text.slice(match[0].length).trim() : null;
 }
 

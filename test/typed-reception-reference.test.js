@@ -88,6 +88,7 @@ test('clear preparation intent is recoverable even when the model chooses chat',
     'No prepares la recepción OCID 38',
     'Prepara la recepción ID 38',
     'Prepara pedido de cliente OCID 38',
+    'Prepara la orden de producción OCID 38',
     'Prepara la recepción OCID 38 o IOID 34',
     'Prepara la recepción MQIB38 o OCID 38',
   ]) assert.equal(preparationIntentFromText(phrase), null, phrase);
