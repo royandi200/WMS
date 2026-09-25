@@ -71,7 +71,7 @@ function correctionFieldsFromText(rawText) {
       partida: Number(indexed[2]), [field]: indexed[4].trim() };
   }
   const patterns = [
-    ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:de|del)\s+(.+?)\s+(?:(?:a|en|es|fue)\s+)?([a-z]+\d[a-z0-9-]*)$/iu],
+    ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:de|del)\s+(.+?)\s+(?:(?:a|en|es|fue)\s+)?([a-z][a-z0-9-]*\d[a-z0-9-]*)$/iu],
     ['cantidad', /^(?:la\s+)?cantidad\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|gramos?|g)?$/iu],
     ['lote', /^(?:el\s+)?lote\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?([a-z0-9][a-z0-9_-]*\d[a-z0-9_-]*)$/iu],
     ['fecha_vencimiento', /^(?:el\s+)?(?:vencimiento|fecha de vencimiento)\s+(?:de|del)\s+(.+?)\s+(?:(?:a|es|fue)\s+)?(\d{4}-\d{2}-\d{2})$/iu],
@@ -82,7 +82,7 @@ function correctionFieldsFromText(rawText) {
     if (match) return { producto: match[1].trim(), [field]: match[2].trim() };
   }
   const withoutProduct = [
-    ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:a|en|es|fue)?\s*([a-z]+\d[a-z0-9-]*)$/iu],
+    ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:a|en|es|fue)?\s*([a-z][a-z0-9-]*\d[a-z0-9-]*)$/iu],
     ['cantidad', /^(?:la\s+)?cantidad\s+(?:a|es|fue)?\s*(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|gramos?|g)?$/iu],
     ['lote', /^(?:el\s+)?lote\s+(?:a|es|fue)?\s*([a-z0-9][a-z0-9_-]*\d[a-z0-9_-]*)$/iu],
     ['fecha_vencimiento', /^(?:el\s+)?(?:vencimiento|fecha de vencimiento)\s+(?:a|es|fue)?\s*(\d{4}-\d{2}-\d{2})$/iu],
@@ -103,7 +103,7 @@ function mixedPartsFromText(rawText) {
   const parts = match[2].split(/\s*;\s*/u);
   if (parts.length < 2 || parts.length > 20) return {};
   const parsed = parts.map(part => {
-    const row = part.match(/^(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|g|gramos?)?\s*(disponibles?|en cuarentena|cuarentena|rechazad[ao]s?|pendiente de disposicion)\s+en\s+([a-z]+\s*\d+[a-z0-9-]*)(?:\s+por\s+(.+))?$/iu);
+    const row = part.match(/^(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|g|gramos?)?\s*(disponibles?|en cuarentena|cuarentena|rechazad[ao]s?|pendiente de disposicion)\s+en\s+([a-z][a-z0-9-]*(?:\s+\d+)?)(?:\s+por\s+(.+))?$/iu);
     if (!row) return null;
     const condition = /^disponible/iu.test(row[2]) ? 'DISPONIBLE'
       : /cuarentena/iu.test(row[2]) ? 'CUARENTENA'

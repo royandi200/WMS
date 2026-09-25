@@ -464,12 +464,12 @@ test('guided reception keeps available and quarantine partitions of one SKU', as
   const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
     params: { avance } });
   await send('OC ID 37: tapas', { producto: 'tapas' });
-  const incomplete = await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en Q1', {});
+  const incomplete = await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en CUAR-C-1-01', {});
   assert.match(incomplete.message, /motivo de partida 2 \(CUARENTENA\)/u);
   const review = await send('partida 2, motivo empaque roto');
   assert.equal(review.sku_review, true);
   assert.match(review.message, /Partida 1: 1 und · DISPONIBLE · ubicación A8/u);
-  assert.match(review.message, /Partida 2: 1 und · CUARENTENA · ubicación Q1/u);
+  assert.match(review.message, /Partida 2: 1 und · CUARENTENA · ubicación CUAR-C-1-01/u);
   assert.match(review.message, /Motivo: empaque roto/u);
   const entry = JSON.parse(state.draft.payload_json).entries['00001-TPBI'];
   assert.equal(entry.partidas.length, 2);
@@ -498,7 +498,7 @@ test('a final-preview correction without a partition number cannot alter a split
   const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
     params: { avance } });
   await send('OC ID 37: tapas', { producto: 'tapas' });
-  await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en Q1 por empaque roto');
+  await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en CUAR-C-1-01 por empaque roto');
   await send('sí');
   const before = JSON.parse(state.draft.payload_json);
   assert.equal(before.version, 1);
