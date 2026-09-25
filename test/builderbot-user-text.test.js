@@ -28,7 +28,8 @@ test('a written reply never reuses the previous audio transcript', () => {
 test('PDF events do not turn stale voice text into a production request', () => {
   const body = { body: marker, document_url: 'https://example.test/document/file-1.pdf',
     voice_text: 'Vamos a producir 4 tarros de Ashawanda 60 para stock de seguridad' };
-  assert.equal(currentUserText(body, {}), '');
+  assert.equal(currentUserText(body, {}), marker);
+  assert.equal(stockProductionIntent(currentUserText(body, {})), null);
 });
 
 test('explicit stock-production speech accepts numbers and words but not missing data', () => {

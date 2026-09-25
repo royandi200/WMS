@@ -4,12 +4,13 @@ const AUDIO_URL = /\.(?:oga|ogg|opus|mp3|m4a|wav|aac)(?:[?#]|$)/iu;
 function currentUserText(rawBody = {}, info = {}, { allowParams = true } = {}) {
   const keys = allowParams ? ['body', 'text', 'query', 'texto', 'content', 'message']
     : ['body', 'text', 'query'];
+  let documentMarker = '';
   for (const source of [info, ...(allowParams ? [info?.params] : []), rawBody]) {
     for (const key of keys) {
       const value = source?.[key];
-      if (typeof value === 'string' && value.trim() && !DOCUMENT_MARKER.test(value.trim())) {
-        return value;
-      }
+      if (typeof value !== 'string' || !value.trim()) continue;
+      if (DOCUMENT_MARKER.test(value.trim())) documentMarker ||= value;
+      else return value;
     }
   }
   // In the voice flow BuilderBot may leave a PDF trigger in body/text/query.
@@ -19,7 +20,9 @@ function currentUserText(rawBody = {}, info = {}, { allowParams = true } = {}) {
     && typeof rawBody.voice_text === 'string' && rawBody.voice_text.trim()) {
     return rawBody.voice_text;
   }
-  return '';
+  // A real PDF upload still needs its transport marker for native-document
+  // recovery when the model did not classify it.
+  return AUDIO_URL.test(String(rawBody.document_url || '')) ? '' : documentMarker;
 }
 
 module.exports = { currentUserText };
