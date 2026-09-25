@@ -765,7 +765,7 @@ function guideSummary(order, draft, locationHint) {
   } else {
     lines.push('Ambas cantidades están en cero. Corrige conformes o no conformes antes de cerrar.');
   }
-  lines.push('', 'Puedes responder solo esta pregunta o dar varios datos juntos. Conservaré lo ya registrado.',
+  lines.push('', 'Puedes responder paso a paso o dar juntos conformes, no conformes, causa, ubicación y materiales repuestos. Conservaré lo ya registrado.',
     'Aún no se modifica inventario.');
   return lines.join('\n');
 }

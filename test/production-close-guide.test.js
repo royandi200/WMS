@@ -83,6 +83,48 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   assert.equal(db.writes.length, 5);
 });
 
+test('el operario puede declarar conformes y no conformes juntos y completar lo faltante por partes', async () => {
+  const db = fakeDb({ planned: 20 });
+  const base = { db, userId: 7 };
+  const first = await advanceCloseGuide({ ...base,
+    rawText: 'Cerramos OP ID 97: hay 10 conformes y 10 no conformes' });
+  assert.equal(first.draft.conforming, 10);
+  assert.equal(first.draft.waste, 10);
+  assert.equal(first.draft.wasteClassified, true);
+  assert.match(first.message, /Conformes: 10 und/u);
+  assert.match(first.message, /No conformes de producto terminado: 10 und/u);
+  assert.match(first.message, /Falta:.*motivo de la merma.*ubicación del producto terminado.*reposición de insumos/u);
+  assert.equal(first.params, undefined);
+
+  const reason = await advanceCloseGuide({ ...base, rawText: 'por ruptura' });
+  assert.equal(reason.draft.reason, 'ruptura');
+  const location = await advanceCloseGuide({ ...base, rawText: 'C2' });
+  assert.equal(location.draft.location, 'C2');
+  const preview = await advanceCloseGuide({ ...base, rawText: 'no repuse material' });
+  assert.match(preview.message, /Resumen para confirmar/u);
+  assert.equal(preview.params, undefined);
+  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.deepEqual(confirmedClose.params, { id_orden: 97, cantidad_real: 10, merma: 10,
+    motivo_merma: 'ruptura', ubicacion: 'C2', materiales_repuestos: [] });
+});
+
+test('el operario puede dar todos los datos del cierre en un mensaje y aun debe revisar antes de confirmar', async () => {
+  const db = fakeDb({ planned: 20 });
+  const base = { db, userId: 8 };
+  const preview = await advanceCloseGuide({ ...base,
+    rawText: 'Cerramos OP ID 97: 10 conformes y 10 no conformes por ruptura, ubicación C2, no repuse material' });
+  assert.equal(preview.draft.conforming, 10);
+  assert.equal(preview.draft.waste, 10);
+  assert.equal(preview.draft.reason, 'ruptura');
+  assert.equal(preview.draft.location, 'C2');
+  assert.equal(preview.draft.materialsAnswered, true);
+  assert.match(preview.message, /Resumen para confirmar/u);
+  assert.equal(preview.params, undefined);
+  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  assert.deepEqual(confirmedClose.params, { id_orden: 97, cantidad_real: 10, merma: 10,
+    motivo_merma: 'ruptura', ubicacion: 'C2', materiales_repuestos: [] });
+});
+
 test('an operator can begin a close using the sole notified OP without repeating its ID', async () => {
   const db = fakeDb();
   const result = await advanceCloseGuide({ db, userId: 21, from: '573001234567',
@@ -229,7 +271,7 @@ test('el audio sin cantidades no puede convertirse en cierre por los parámetros
   assert.match(result.message, /Aún no hay datos del cierre/u);
   assert.match(result.message, /Falta:.*cantidad conforme, cantidad no conforme de producto terminado/u);
   assert.match(result.message, /¿Cuántas unidades de producto terminado salieron conformes/iu);
-  assert.match(result.message, /dar varios datos juntos/u);
+  assert.match(result.message, /responder paso a paso o dar juntos conformes, no conformes/u);
 });
 
 test('conserva el OP ID propuesto ante una transcripción OCID y acepta sí sin repetir el prefijo', async () => {
