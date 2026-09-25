@@ -5,7 +5,8 @@ const {
 } = require('../api/_lib/production-close-guide');
 const { hasProductionCloseIntent } = require('../api/_lib/production-close-input');
 
-function fakeDb({ orderId = 97, planned = 2, initialDraft = null } = {}) {
+function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
+  invalidLots = [], stockAvailable = 100 } = {}) {
   let stored = initialDraft;
   const writes = [];
   const aliasTerms = [];
@@ -13,6 +14,11 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null } = {}) {
     writes, aliasTerms,
     async execute(sql, params) {
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
+      if (sql.includes('FROM lots') && sql.includes('BINARY lpn')) return [invalidLots.includes(params[0])
+        ? [] : [{ id: 1, qty_current: 100, status: 'DISPONIBLE', bodega_id: 1 }]];
+      if (sql.includes('FROM stock s JOIN ubicaciones u')) return [[{
+        id: 1, ubicacion_id: 8, cantidad: stockAvailable, reservada: 0, ubicacion: 'A8',
+      }]];
       if (sql.includes('FROM webhook_logs')) return [[]];
       if (sql.includes('FROM notificaciones_salida')) return [[{ evento: `production_started:${orderId}` }]];
       if (sql.includes('FROM ordenes_produccion op')) return [[{
@@ -258,13 +264,86 @@ test('sí y lote de reposición en una sola frase completan el insumo pendiente'
   assert.equal(answer.params, undefined);
   assert.equal(answer.draft.materialPending, null);
   assert.equal(answer.draft.materialsAnswered, true);
-  assert.deepEqual(answer.draft.materials[0], {
+  const { validatedLotKey, ...material } = answer.draft.materials[0];
+  assert.equal(validatedLotKey, '00001-TPBI|2|ACC-260910-TPBI|');
+  assert.deepEqual(material, {
     sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
     unidad: 'und', cantidad: 2, motivo: 'destruccion',
     lote: 'ACC-260910-TPBI', ubicacion: null,
   });
   assert.match(answer.message, /Insumo repuesto: 2 und/u);
   assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
+});
+
+test('un lote inexistente se rechaza al informarlo, antes de confirmar el cierre', async () => {
+  const db = fakeDb({ orderId: 101, planned: 3, invalidLots: ['123456'], initialDraft: {
+    orderId: 101, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    reviewShown: false, materialPending: { sku: '00001-TPBI',
+      producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und', cantidad: 2,
+      motivo: 'ruptura', lote: null, ubicacion: null,
+      damageReport: true, replacementDecision: null },
+  } });
+  const invalid = await advanceCloseGuide({ db, userId: 102,
+    rawText: 'Sí, salieron del lote 123456' });
+  assert.match(invalid.message, /El lote \*123456\* no está registrado para \*00001-TPBI\*/u);
+  assert.equal(invalid.draft.materials[0].lote, null);
+  assert.equal(invalid.draft.reviewShown, false);
+  const premature = await advanceCloseGuide({ db, userId: 102, rawText: 'confirmo cierre' });
+  assert.equal(premature.params, undefined);
+  assert.match(premature.message, /lote válido del material repuesto/u);
+});
+
+test('una corrección a lote inválido pausa el cierre hasta recibir uno válido', async () => {
+  const db = fakeDb({ orderId: 101, planned: 3, invalidLots: ['123456'], initialDraft: {
+    orderId: 101, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materialsAnswered: true, reviewShown: true,
+    materialPending: null, materials: [{ sku: '00001-TPBI',
+      producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und', cantidad: 2,
+      lote: 'R4-260921-TPBI', motivo: 'ruptura', ubicacion: null }],
+  } });
+  const invalid = await advanceCloseGuide({ db, userId: 103,
+    rawText: 'corrección, las 2 tapas salieron del lote 123456' });
+  assert.match(invalid.message, /El lote \*123456\* no está registrado para \*00001-TPBI\*/u);
+  assert.equal(invalid.draft.materials[0].lote, null);
+  assert.equal(invalid.draft.materials[0].loteAnterior, 'R4-260921-TPBI');
+  assert.equal(invalid.draft.reviewShown, false);
+  const blocked = await advanceCloseGuide({ db, userId: 103, rawText: 'confirmo cierre' });
+  assert.equal(blocked.params, undefined);
+  const corrected = await advanceCloseGuide({ db, userId: 103,
+    rawText: 'corrección, las 2 tapas salieron del lote R4-260921-TPBI' });
+  assert.equal(corrected.draft.materials[0].lote, 'R4-260921-TPBI');
+  assert.equal(corrected.draft.materials[0].loteAnterior, undefined);
+  assert.match(corrected.message, /Resumen para confirmar/u);
+});
+
+test('un borrador anterior con lote inválido tampoco puede cerrarse tras el despliegue', async () => {
+  const db = fakeDb({ orderId: 101, planned: 3, invalidLots: ['123456'], initialDraft: {
+    orderId: 101, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materialsAnswered: true, reviewShown: true,
+    materialPending: null, materials: [{ sku: '00001-TPBI',
+      producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und', cantidad: 2,
+      lote: '123456', motivo: 'ruptura', ubicacion: null }],
+  } });
+  const result = await advanceCloseGuide({ db, userId: 105, rawText: 'confirmo cierre' });
+  assert.equal(result.params, undefined);
+  assert.equal(result.draft.materials[0].lote, null);
+  assert.match(result.message, /El lote \*123456\* no está registrado/u);
+  assert.equal(result.draft.reviewShown, false);
+});
+
+test('un lote existente sin saldo suficiente se rechaza en el borrador', async () => {
+  const db = fakeDb({ orderId: 101, planned: 3, stockAvailable: 1, initialDraft: {
+    orderId: 101, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materialsAnswered: true, reviewShown: false,
+    materialPending: null, materials: [{ sku: '00001-TPBI',
+      producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und', cantidad: 2,
+      lote: 'R4-260921-TPBI', motivo: 'ruptura', ubicacion: null }],
+  } });
+  const result = await advanceCloseGuide({ db, userId: 104, rawText: 'revisa el cierre' });
+  assert.match(result.message, /Saldo insuficiente de \*00001-TPBI\*/u);
+  assert.equal(result.draft.materials[0].lote, null);
+  assert.equal(result.draft.reviewShown, false);
 });
 
 test('la interpretación de IA ayuda con una frase libre pero no puede inventar el lote', async () => {

@@ -21,6 +21,11 @@ require.cache[dbPath] = {
         if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
         if (/FROM produccion_cierre_borradores/u.test(sql)) return [closeDraft
           ? [{ payload_json: closeDraft }] : []];
+        if (/FROM lots/u.test(sql) && /BINARY lpn/u.test(sql)) return [params[0] === '123456'
+          ? [] : [{ id: 1, qty_current: 100, status: 'DISPONIBLE', bodega_id: 1 }]];
+        if (/FROM stock s JOIN ubicaciones u/u.test(sql)) return [[{
+          id: 1, ubicacion_id: 8, cantidad: 100, reservada: 0, ubicacion: 'A8',
+        }]];
         if (/FROM notificaciones_salida/u.test(sql)) return [latestStartedNotice
           ? [{ evento: `production_started:${latestStartedNotice}` }] : []];
         if (/FROM ordenes_produccion op JOIN productos p/u.test(sql)) return [[{
@@ -201,6 +206,21 @@ test('WhatsApp corrige por alias el lote de una partida ya resumida sin repetir 
   assert.match(res.body.mensaje, /Lote de reposición: R2-260920-TPBI/u);
   assert.doesNotMatch(res.body.mensaje, /ACC-260910-TPBI/u);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
+});
+
+test('WhatsApp rechaza el lote 123456 al corregir y bloquea confirmar cierre', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 101, conforming: 3, waste: 0,
+    wasteClassified: true, reason: null, location: 'C2', materialsAnswered: true,
+    materialPending: null, reviewShown: true, materials: [{ sku: '00001-TPBI',
+      producto: 'TAPA TARRO CUADRADO BLANCO', cantidad: 2, unidad: 'und',
+      lote: 'R4-260921-TPBI', motivo: 'ruptura' }] });
+  const invalid = await invoke('MODO_CHARLA', 'corrección, las 2 tapas salieron del lote 123456');
+  assert.match(invalid.body.mensaje, /lote \*123456\* no está registrado/u);
+  assert.equal(JSON.parse(closeDraft).materials[0].lote, null);
+  const premature = await invoke('MODO_CHARLA', 'confirmo cierre');
+  assert.doesNotMatch(premature.body.mensaje, /Producción cerrada/u);
+  assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO stock|UPDATE ordenes_produccion/u.test(entry.sql)));
 });
 
 test('audio «Orden OPIV 101» inicia borrador de cierre si coincide con el último aviso al encargado', async () => {

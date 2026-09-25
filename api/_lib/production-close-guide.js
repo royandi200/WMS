@@ -182,6 +182,69 @@ async function orderMaterials(db, orderId) {
   return rows;
 }
 
+async function validateReplacementLot(db, material, line) {
+  const key = [line.sku, line.cantidad, line.lote, line.ubicacion || ''].join('|');
+  if (line.validatedLotKey === key) return null;
+  const [lots] = await db.execute(
+    `SELECT id, qty_current, status, bodega_id FROM lots
+      WHERE BINARY lpn = BINARY ? AND product_id = ? LIMIT 1`,
+    [line.lote, material.producto_id]
+  );
+  if (!lots.length) return `El lote *${line.lote}* no está registrado para *${line.sku}*.`;
+  if (lots[0].status !== 'DISPONIBLE') return `El lote *${line.lote}* de *${line.sku}* no está disponible.`;
+  const [stocks] = await db.execute(
+    `SELECT s.id, s.ubicacion_id, s.cantidad, s.reservada, u.codigo AS ubicacion
+       FROM stock s JOIN ubicaciones u ON u.id = s.ubicacion_id
+      WHERE s.producto_id = ? AND BINARY s.lote = BINARY ?
+        AND s.bodega_id = ? AND u.activa = 1
+        AND (s.cantidad - s.reservada) > 0
+      ORDER BY u.codigo, s.id`,
+    [material.producto_id, line.lote, lots[0].bodega_id]
+  );
+  const candidates = line.ubicacion
+    ? stocks.filter(stock => String(stock.ubicacion_id) === String(line.ubicacion)
+      || stock.ubicacion.toUpperCase() === String(line.ubicacion).toUpperCase())
+    : stocks;
+  if (!candidates.length) return `No hay saldo libre de *${line.sku}*, lote *${line.lote}*${line.ubicacion ? ` en ${line.ubicacion}` : ''}.`;
+  if (candidates.length > 1) {
+    return `El lote *${line.lote}* está en varias ubicaciones: ${candidates.map(stock => stock.ubicacion).join(', ')}. Indica de cuál tomaste el material.`;
+  }
+  const free = Number(candidates[0].cantidad) - Number(candidates[0].reservada);
+  if (free + 0.000001 < Number(line.cantidad)
+    || Number(lots[0].qty_current) + 0.000001 < Number(line.cantidad)) {
+    return `Saldo insuficiente de *${line.sku}*, lote *${line.lote}*, ubicación *${candidates[0].ubicacion}*: pediste ${line.cantidad} ${line.unidad || ''} y hay ${Math.min(free, Number(lots[0].qty_current))} libres.`;
+  }
+  line.validatedLotKey = key;
+  return null;
+}
+
+async function validateDraftReplacementLots(db, draft, order) {
+  draft.lotValidationMessage = null;
+  const lines = [...(draft.materials || []), draft.materialPending].filter(Boolean);
+  if (!lines.some(line => line.sku && line.cantidad != null && line.lote)) return;
+  const materials = await orderMaterials(db, order.id);
+  for (const line of lines) {
+    if (!line.sku || line.cantidad == null || !line.lote) continue;
+    const material = materials.find(item => item.sku === line.sku);
+    const error = material
+      ? await validateReplacementLot(db, material, line)
+      : `El material *${line.sku}* no pertenece a *OP ID ${order.id}*.`;
+    if (error) {
+      line.loteIntentado = line.lote;
+      line.loteAnterior ||= line.previousLot || null;
+      line.lote = null;
+      line.validatedLotKey = null;
+      draft.materialsAnswered = false;
+      draft.reviewShown = false;
+      draft.lotValidationMessage ||= `${error} No se aceptó la corrección ni se modificó inventario. Indica el lote correcto de *${line.producto || line.sku}*.`;
+    } else {
+      delete line.loteIntentado;
+      delete line.loteAnterior;
+      delete line.previousLot;
+    }
+  }
+}
+
 function naturalLotCorrection(text, params) {
   const raw = normalize(text);
   const prefix = /^(?:correccion|correcion|corrijo|corrige|perdon|perdona)\b\s*[,;:-]?\s*/u.exec(raw);
@@ -221,6 +284,7 @@ async function applyMaterialCorrection(db, draft, order, text, params) {
     if (draft.materials.some(other => other !== line && other.sku === line.sku && other.lote === natural.lot)) {
       throw guideError('Ese material y lote ya tienen una partida; indica el total en una sola.');
     }
+    if (line.lote !== natural.lot) line.previousLot = line.lote || line.loteAnterior || null;
     line.lote = natural.lot;
     draft.materialsAnswered = true;
     return true;
@@ -259,6 +323,7 @@ async function applyMaterialCorrection(db, draft, order, text, params) {
     if (draft.materials.some((other, position) => position !== index && other.sku === line.sku && other.lote === newValue)) {
       throw guideError('Ese material y lote ya tienen una partida; indica el total en una sola.');
     }
+    if (line.lote !== newValue) line.previousLot = line.lote || line.loteAnterior || null;
     line.lote = newValue;
   } else if (['causa', 'motivo'].includes(normalize(field))) {
     if (newValue.length > 255 || /^(?:merma|perdida|reposicion|material)$/iu.test(normalize(newValue))) {
@@ -583,6 +648,7 @@ function guideSummary(order, draft, locationHint) {
   if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
   if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto terminado');
   if (!draft.materialsAnswered || draft.materialPending) missing.push('reposición de insumos');
+  if ((draft.materials || []).some(item => !item.lote)) missing.push('lote válido del material repuesto');
   const readyForReview = !missing.length && draft.conforming + draft.waste > 0;
   const lines = ['🏭 *OP ID ' + order.id + ' — cierre en borrador*',
     `Producto: ${order.producto} (${order.sku})`,
@@ -609,14 +675,16 @@ function guideSummary(order, draft, locationHint) {
   if (draft.location) captured.push(`• Ubicación del terminado: ${draft.location}`);
   if (draft.unclassifiedWaste) captured.push(`• Merma sin clasificar: ${draft.unclassifiedWaste.quantity} und${draft.unclassifiedWaste.cause ? ` | Causa indicada: ${draft.unclassifiedWaste.cause}` : ''}`);
   for (const item of draft.materials || []) {
-    captured.push(`• Insumo repuesto: ${item.cantidad} ${item.unidad || ''} de ${item.producto} | Lote ${item.lote} | Causa: ${item.motivo}`);
+    const lot = item.lote || `pendiente${item.loteIntentado ? ` (se rechazó ${item.loteIntentado})` : ''}`;
+    captured.push(`• Insumo ${item.lote ? 'repuesto' : 'en corrección'}: ${item.cantidad} ${item.unidad || ''} de ${item.producto} | Lote ${lot} | Causa: ${item.motivo}${item.loteAnterior ? ` | Lote anterior sin ratificar: ${item.loteAnterior}` : ''}`);
   }
   if (draft.materialPending) {
     const item = draft.materialPending;
-    captured.push(`• Insumo en curso: ${item.producto || 'sin identificar'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || 'pendiente'} | Causa: ${item.motivo || 'pendiente'}`);
+    captured.push(`• Insumo en curso: ${item.producto || 'sin identificar'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || `pendiente${item.loteIntentado ? ` (se rechazó ${item.loteIntentado})` : ''}`} | Causa: ${item.motivo || 'pendiente'}`);
   }
   lines.push('*Registrado hasta ahora*', ...(captured.length ? captured : ['• Aún no hay datos del cierre.']),
-    '', `*Falta:* ${missing.length ? missing.join(', ') : 'revisar las cantidades'}.`, '', '*Siguiente paso*');
+    '', ...(draft.lotValidationMessage ? [`⚠️ ${draft.lotValidationMessage}`, ''] : []),
+    `*Falta:* ${missing.length ? missing.join(', ') : 'revisar las cantidades'}.`, '', '*Siguiente paso*');
   if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
     if (draft.materialPending.cantidad == null) {
       lines.push(`¿Cuántas ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} se dañaron?`);
@@ -647,6 +715,9 @@ function guideSummary(order, draft, locationHint) {
     else if (item.cantidad == null) lines.push(`¿Cuánto ${item.producto} repusiste? Indica la unidad correspondiente.`);
     else if (!item.lote) lines.push(`¿De qué lote sacaste ${item.cantidad} ${item.producto}?`);
     else if (!item.motivo) lines.push(`¿Cuál fue la causa concreta de reponer ${item.producto} del lote ${item.lote}?`);
+  } else if ((draft.materials || []).some(item => !item.lote)) {
+    const item = draft.materials.find(line => !line.lote);
+    lines.push(`Indica el lote correcto de ${item.producto}. Por ejemplo: «corrige lote de ${item.producto} a [lote]». El cierre sigue en borrador.`);
   } else if (!draft.materialsAnswered) {
     lines.push('¿Repusiste algún material de esta OP? Puedes decir uno o varios productos con cantidad, lote y causa; también por partes. Si no repusiste ninguno, di *no repuse material*.');
   } else {
@@ -777,10 +848,12 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     if (!locations.length) throw guideError(`La ubicación ${draft.location} no existe o no está activa. Indica otra.`);
     draft.location = locations[0].codigo;
   }
+  await validateDraftReplacementLots(db, draft, order);
   const complete = draft.conforming != null && draft.waste != null
     && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
     && (draft.conforming === 0 || !!draft.location)
-    && draft.materialsAnswered && !draft.materialPending && !draft.unclassifiedWaste;
+    && draft.materialsAnswered && !draft.materialPending && !draft.unclassifiedWaste
+    && draft.materials.every(item => !!item.lote);
   if (confirmed(rawText) && complete && draft.reviewShown) {
     return { params: { id_orden: draft.orderId, cantidad_real: draft.conforming,
       merma: draft.waste, motivo_merma: draft.reason, ubicacion: draft.location,
