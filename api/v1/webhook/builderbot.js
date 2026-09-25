@@ -1570,7 +1570,8 @@ module.exports = async (req, res) => {
 
     let confirmedReceptionReference = null;
     let selectedPreparationReference = null;
-    if (['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)) {
+    if (['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA',
+      'CONFIRMAR_RECEPCION_OC'].includes(action)) {
       const receptionIntent = preparationIntentFromText(rawText);
       confirmedReceptionReference = receptionIntent
         ? null
@@ -1578,8 +1579,10 @@ module.exports = async (req, res) => {
       const selected = receptionIntent || confirmedReceptionReference;
       if (selected) {
         selectedPreparationReference = selected;
-        action = 'PREPARAR_RECEPCION_OC';
-        params = { orden_compra_id: selected.id };
+        action = selected.kind === 'MQ' ? 'PREPARAR_RECEPCION_MAQUILA' : 'PREPARAR_RECEPCION_OC';
+        params = selected.kind === 'MQ'
+          ? { orden_maquila_id: selected.id }
+          : { orden_compra_id: selected.id };
       }
     }
     if (!selectedPreparationReference && skuReviewReply(rawText)
@@ -1970,6 +1973,7 @@ module.exports = async (req, res) => {
           userId: user.id,
           rawText,
           requireExplicitTextReference: true,
+          confirmedReference: selectedPreparationReference,
         });
         if (prepared.alreadyCompleted) {
           mensaje = `La orden ${prepared.order.codigo} ya fue recibida en ${prepared.reception.numero}. No se modifico inventario.`;

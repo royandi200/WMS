@@ -49,16 +49,16 @@ function purchaseOrderParamsFromText(params = {}, rawText = '') {
 
 function preparationRequestFromText(rawText) {
   const text = normalizedSpeech(rawText).trim();
-  const match = text.match(/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:LA\s+)?RECEPCION\b/u);
+  const match = text.match(/^(?:POR FAVOR[\s,]+)?(?:PREPARA|PREPARAR|PREPARAME|QUIERO PREPARAR|VAMOS A PREPARAR)\s+(?:(?:LA\s+)?(?:RECEPCION|ORDEN)\b\s*|(?=(?:O\s*C|I\s*O|M\s*Q)))/u);
   return match ? text.slice(match[0].length).trim() : null;
 }
 
 function noisySpokenPreparationReference(rawText) {
   const text = normalizedSpeech(rawText).replace(/[.,;:]+/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
-  // Variantes frecuentes de "OC ID" / "IO ID" en audio: OCIP, OCIB,
+  // Variantes frecuentes de "OC ID" / "IO ID" / "MQ ID" en audio: OCIP, OCIB,
   // "O, C y D". Solo se usan al PREPARAR, nunca al confirmar inventario.
-  const match = text.match(/^(O\s*C|I\s*O)\s*(?:I|Y)\s*(?:D|B|P)\s*(\d+)$/u);
+  const match = text.match(/^(O\s*C|I\s*O|M\s*Q)\s*(?:I|Y)\s*(?:D|B|P)\s*(\d+)$/u);
   const id = Number(match?.[2]);
   return match && Number.isSafeInteger(id) && id > 0
     ? { kind: match[1].replace(/\s/gu, ''), id }
@@ -68,19 +68,24 @@ function noisySpokenPreparationReference(rawText) {
 function preparationIntentFromText(rawText) {
   const remainder = preparationRequestFromText(rawText);
   if (remainder === null) return null;
+  const normalized = normalizedSpeech(remainder).replace(/[.,;:]+/gu, ' ')
+    .replace(/\s+/gu, ' ').trim();
   const references = typedReceptionReferences(rawText);
-  if (references.length) {
-    return references.length === 1 && ['OC', 'IO'].includes(references[0].kind)
-      ? references[0]
-      : null;
+  for (const match of normalized.matchAll(/(?:^|[^A-Z0-9])(O\s*C|I\s*O|M\s*Q)\s*(?:I|Y)\s*(?:D|B|P)\s*(\d+)(?![A-Z0-9_-])/gu)) {
+    const id = Number(match[2]);
+    if (Number.isSafeInteger(id) && id > 0) {
+      references.push({ kind: match[1].replace(/\s/gu, ''), id });
+    }
   }
-  return noisySpokenPreparationReference(remainder);
+  const distinct = [...new Map(references.map(reference =>
+    [`${reference.kind}:${reference.id}`, reference])).values()];
+  return distinct.length === 1 ? distinct[0] : null;
 }
 
 function preparationClarificationCandidate(rawText) {
   const text = normalizedSpeech(rawText).replace(/[.,;:]+/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
-  if (!/^(?:NO\s+)?(?:ES\s+)?(?:O\s*C|I\s*O)\s*(?:(?:I\s*D|NUMERO|NRO|[IY]\s*[DBP])\s*)?#?\s*\d+$/u.test(text)) {
+  if (!/^(?:NO\s+)?(?:ES\s+)?(?:O\s*C|I\s*O|M\s*Q)\s*(?:(?:I\s*D|NUMERO|NRO|[IY]\s*[DBP])\s*)?#?\s*\d+$/u.test(text)) {
     return null;
   }
   const selected = typedReceptionReferences(rawText);
@@ -94,7 +99,7 @@ function clarifiedPreparationReference(rawText, previousUserText, previousBotMes
   if (!/\b(?:TE REFIERES|ME CONFIRMAS|CONFIRMAS|ES ESA)\b/u.test(reply)
     || !reply.includes('?')) return null;
   const reference = preparationClarificationCandidate(rawText);
-  if (!reference || !['OC', 'IO'].includes(reference.kind)) return null;
+  if (!reference || !['OC', 'IO', 'MQ'].includes(reference.kind)) return null;
   const proposed = typedReceptionReferences(reply);
   return proposed.some(item => item.kind === reference.kind && item.id === reference.id)
     ? reference : null;
@@ -107,7 +112,7 @@ function confirmedPreparationReference(rawText, previousUserText, previousBotMes
   if (!/\b(?:TE REFIERES|ME CONFIRMAS|CONFIRMAS|ES ESA)\b/u.test(reply)
     || !reply.includes('?')) return null;
   const references = typedReceptionReferences(reply);
-  return references.length === 1 && ['OC', 'IO'].includes(references[0].kind)
+  return references.length === 1 && ['OC', 'IO', 'MQ'].includes(references[0].kind)
     ? references[0]
     : null;
 }

@@ -4,10 +4,11 @@ const { createHash } = require('node:crypto');
 const { advanceGuidedReception, hasPendingSkuReview, skuReviewReply } = require('../api/_lib/builderbot-guided-reception');
 const { canonicalJson } = require('../api/_lib/builderbot-reception');
 
-function guidedDb() {
+function guidedDb({ singleSku = null } = {}) {
   const products = [
     { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO (60 UNID)', alias: 'tapa' },
     { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
+    { id: 276, siigo_code: '00276-PTZNASHWA', nombre: 'PRODUCTO TERMINADO ZENOVA ASHWAGANDHA', alias: 'Zenova Ashwagandha' },
   ];
   const state = { draft: null, recentLog: [], inventoryWrites: 0, transactions: 0 };
   const db = {
@@ -36,14 +37,18 @@ function guidedDb() {
           estado: 'borrador', bodega_id: 1 }]];
       }
       if (/FROM recepcion_items ri/u.test(sql)) {
-        return [[
+        const items = [
           { item_id: 1, producto_id: 19, sku: '00001-TPBI', producto: products[0].nombre,
             cantidad_pendiente: 2, unidad: 'und', lote_documento: 'T-1',
             fecha_vencimiento_documento: '2027-12-31' },
           { item_id: 2, producto_id: 60, sku: '00051-MPASH', producto: products[1].nombre,
             cantidad_pendiente: 100, unidad: 'g', lote_documento: 'G-1',
             fecha_vencimiento_documento: '2027-12-31' },
-        ]];
+          { item_id: 3, producto_id: 276, sku: '00276-PTZNASHWA', producto: products[2].nombre,
+            cantidad_pendiente: 1, unidad: 'und', lote_documento: 'Z-1',
+            fecha_vencimiento_documento: '2027-12-31' },
+        ];
+        return [singleSku ? items.filter(item => item.sku === singleSku) : items.slice(0, 2)];
       }
       if (/FROM producto_ubicaciones pu/u.test(sql)) return [[
         { producto_id: 19, prioridad: 1, tipo_asignacion: 'PRIMARIA',
@@ -63,10 +68,13 @@ function guidedDb() {
         return [{ affectedRows: 1 }];
       }
       if (/FROM productos p/u.test(sql) && !/LEFT JOIN producto_aliases/u.test(sql)) {
-        return [products.filter(product => product.siigo_code === values[1])];
+        return [products.filter(product => product.siigo_code === values[1]
+          && (!singleSku || product.siigo_code === singleSku))];
       }
       if (/FROM producto_aliases pa/u.test(sql)) return [[]];
-      if (/LEFT JOIN producto_aliases/u.test(sql)) return [products];
+      if (/LEFT JOIN producto_aliases/u.test(sql)) {
+        return [products.filter(product => values.includes(product.id))];
+      }
       if (/FROM ubicaciones/u.test(sql)) {
         return [[{ id: values[0] === 'A8' ? 8 : 16, codigo: values[0] }]];
       }
@@ -300,6 +308,39 @@ test('final summary accepts a spoken location correction without repeating OC ID
   assert.equal(reviewed.requires_confirmation, true);
   assert.match(reviewed.message, /00001-TPBI[\s\S]*Ubicación: A1/u);
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a single pending SKU keeps context through final-summary corrections and difficult speech aliases', async () => {
+  const { db, state } = guidedDb({ singleSku: '00276-PTZNASHWA' });
+  const user = { id: 5 };
+  const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  const selected = await send('OC ID 37: registremos Sinova Ashawanda',
+    { producto: 'Sinova Ashawanda' });
+  assert.match(selected.message, /00276-PTZNASHWA/u);
+  assert.match(selected.message, /Interpreté «Sinova Ashawanda»/u);
+  const review = await send('Llegó una unidad, estado bueno y ubicación B13',
+    { cantidad: 1, condicion: 'DISPONIBLE', ubicacion: 'B13' });
+  assert.equal(review.sku_review, true);
+  await send('Sí');
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+
+  const corrected = await send('Corrección ubicación B14');
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Ubicación registrada: B14/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00276-PTZNASHWA'].ubicacion, 'B14');
+  const preview = await send('Sí');
+  assert.equal(preview.requires_confirmation, true);
+  assert.match(preview.message, /Ubicación: B14/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a single pending SKU does not turn an unrelated explicit product into that SKU', async () => {
+  const { db, state } = guidedDb({ singleSku: '00276-PTZNASHWA' });
+  await assert.rejects(advanceGuidedReception({ db, user: { id: 5 },
+    rawText: 'OC ID 37: recibí tapas', params: { avance: { producto: 'tapas' } } }),
+  /Producto "tapas" no encontrado/u);
   assert.equal(state.inventoryWrites, 0);
 });
 

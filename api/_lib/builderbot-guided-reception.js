@@ -39,7 +39,7 @@ function documentMismatch(rawText) {
 function isReceptionCorrectionRequest(rawText) {
   const text = String(rawText || '').trim().normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toLowerCase();
-  return /^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir)\b/u.test(text)
+  return /^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir|quiero cambiar|quisiera cambiar|necesito corregir)\b/u.test(text)
     && !/\b(?:op\s*id|orden de produccion|despacho)\b/u.test(text);
 }
 
@@ -47,7 +47,7 @@ function correctionFieldsFromText(rawText) {
   if (!isReceptionCorrectionRequest(rawText)) return {};
   const text = String(rawText).trim().normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '')
-    .replace(/^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir)\b\s*[,;:-]?\s*/iu, '')
+    .replace(/^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir|quiero cambiar|quisiera cambiar|necesito corregir)\b\s*[,;:-]?\s*/iu, '')
     .replace(/[.!?]+$/u, '').trim();
   const patterns = [
     ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:de|del)\s+(.+?)\s+(?:(?:a|en|es|fue)\s+)?([a-z]+\d[a-z0-9-]*)$/iu],
@@ -59,6 +59,17 @@ function correctionFieldsFromText(rawText) {
   for (const [field, pattern] of patterns) {
     const match = text.match(pattern);
     if (match) return { producto: match[1].trim(), [field]: match[2].trim() };
+  }
+  const withoutProduct = [
+    ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:a|en|es|fue)?\s*([a-z]+\d[a-z0-9-]*)$/iu],
+    ['cantidad', /^(?:la\s+)?cantidad\s+(?:a|es|fue)?\s*(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|gramos?|g)?$/iu],
+    ['lote', /^(?:el\s+)?lote\s+(?:a|es|fue)?\s*([a-z0-9][a-z0-9_-]*\d[a-z0-9_-]*)$/iu],
+    ['fecha_vencimiento', /^(?:el\s+)?(?:vencimiento|fecha de vencimiento)\s+(?:a|es|fue)?\s*(\d{4}-\d{2}-\d{2})$/iu],
+    ['condicion', /^(?:la\s+)?condicion\s+(?:a|es|fue)?\s*(disponible|cuarentena|rechazado|pendiente de disposicion)$/iu],
+  ];
+  for (const [field, pattern] of withoutProduct) {
+    const match = text.match(pattern);
+    if (match) return { [field]: match[1].trim() };
   }
   return {};
 }
@@ -401,6 +412,10 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       : existing || { version: 2, orderId: Number(order.id), receptionId: Number(reception.id),
         selectedSku: null, entries: {} };
     if (existing?.version === 1 && correctionRequested) payload.editingSummary = true;
+    if (payload.editingSummary && preparedItems.length === 1
+      && !payload.selectedSku && !payload.reviewSku) {
+      payload.selectedSku = preparedItems[0].sku;
+    }
     if (payload.editingSummary && !payload.selectedSku && !payload.reviewSku
       && !String(advance.producto || advance.sku || '').trim()) {
       await saveGuidedDraft(db, order, reception, user.id, payload);

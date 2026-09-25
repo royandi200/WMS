@@ -117,7 +117,21 @@ function oneEditApart(left, right) {
   return edits + Number(leftIndex < left.length || rightIndex < right.length) === 1;
 }
 
-function scopedApproximateMatches(term, rows) {
+function editDistanceAtMost(left, right, limit) {
+  if (Math.abs(left.length - right.length) > limit) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= right.length; j += 1) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1,
+        previous[j - 1] + Number(left[i - 1] !== right[j - 1]));
+    }
+    previous = current;
+  }
+  return previous[right.length] <= limit;
+}
+
+function scopedApproximateMatches(term, rows, { singleProduct = false } = {}) {
   const expected = contextualTokens(term);
   if (!expected.length || expected.some(token => /^\d+$/u.test(token))) return [];
   const products = new Map();
@@ -128,13 +142,18 @@ function scopedApproximateMatches(term, rows) {
       let approximateCount = 0;
       const matches = expected.every(token => {
         if (tokens.some(candidate => equivalentToken(token, candidate))) return true;
-        if (token.length < 4 || !tokens.some(candidate =>
-          candidate.length >= 4 && oneEditApart(token, candidate)
-        )) return false;
+        if (token.length < 4 || !tokens.some(candidate => {
+          if (candidate.length < 4) return false;
+          if (oneEditApart(token, candidate)) return true;
+          if (!singleProduct || token.length < 6 || candidate.length < 6) return false;
+          return editDistanceAtMost(token, candidate,
+            Math.min(3, Math.max(2, Math.floor(Math.max(token.length, candidate.length) * 0.3))));
+        })) return false;
         approximateCount += 1;
         return true;
       });
-      if (matches && approximateCount === 1) products.set(Number(row.id), row);
+      if (matches && approximateCount > 0
+        && (singleProduct || approximateCount === 1)) products.set(Number(row.id), row);
     }
   }
   return [...products.values()];
@@ -208,7 +227,8 @@ async function resolveProductReference(conn, value, options = {}) {
     }
     if (contextual.length > 1) throw ambiguousProductError(term, contextual);
     if (contextualIsScoped && options.allowScopedApproximate && !/^\S*\d\S*[-_]\S+/u.test(term)) {
-      const approximate = scopedApproximateMatches(term, contextRows);
+      const approximate = scopedApproximateMatches(term, contextRows,
+        { singleProduct: new Set(contextRows.map(row => Number(row.id))).size === 1 });
       if (approximate.length === 1) {
         return { ...approximate[0], matched_by: 'scoped_approximate', matched_term: term };
       }

@@ -548,9 +548,15 @@ async function prepareReceptionFromOutsourcing({
   userId,
   rawText,
   requireExplicitTextReference = false,
+  confirmedReference = null,
 }) {
   const order = await findOutsourcingOrder(db, params);
-  if (requireExplicitTextReference) assertOutsourcingTextReference(rawText, order);
+  if (requireExplicitTextReference) {
+    const alternate = confirmedReference || preparationIntentFromText(rawText);
+    if (!alternate || alternate.kind !== 'MQ' || alternate.id !== Number(order.id)) {
+      assertOutsourcingTextReference(rawText, order);
+    }
+  }
   const completed = order.estado === 'COMPLETADA'
     ? await findCompletedOutsourcingReception(db, order.id)
     : null;
