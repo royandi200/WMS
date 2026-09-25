@@ -508,6 +508,26 @@ test('a final-preview correction without a partition number cannot alter a split
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('a completed single-condition preview can be corrected into two partitions', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: dos tapas disponibles en A8', {
+    producto: 'tapas', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  await send('sí');
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  const corrected = await send('Corrección: partidas de tapas: 1 disponible en A8; 1 en cuarentena en CUAR-C-1-01 por golpe');
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Partida 2: 1 und · CUARENTENA · ubicación CUAR-C-1-01/u);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 2);
+  const preview = await send('sí');
+  assert.equal(preview.requires_confirmation, true);
+  assert.match(preview.message, /Partida 2: 1 und/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('an in-progress draft from before this change stops for its first SKU review', async () => {
   const { db, state } = guidedDb();
   const user = { id: 5 };
