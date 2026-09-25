@@ -170,7 +170,7 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
 
 function materialFollowup(text) {
   const raw = String(text || '').trim();
-  const lot = raw.match(/\blote(?:\s+es)?(?:\s+el)?\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
+  const lot = raw.match(/\blote(?:\s+(?:es|fue|era|sería|seria))?(?:\s+el)?\s*[:#-]?\s*((?!(?:es|fue|era|el|de|del)\b)[A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
   const cause = raw.match(/\b(?:causa|motivo)(?:\s+(?:fue|es))?\s*(?:[:\-]|por)?\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || raw.match(/\b(?:por|debido a)\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || (/^(?:ruptura|rotura|derrame|contaminacion|contaminación|defecto|caida|caída|daño|dano|despegue)$/iu.test(raw) ? raw : null);

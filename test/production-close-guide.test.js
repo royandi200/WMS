@@ -205,6 +205,21 @@ test('«Corrección, el lote es ...» acepta el identificador existente sin exig
   assert.match(result.message, /confirmo cierre/u);
 });
 
+test('«Corrección, el lote fue ...» no interpreta «fue» como identificador', async () => {
+  const db = fakeDb({ orderId: 102, planned: 3, initialDraft: {
+    orderId: 102, conforming: 3, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [{
+      sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und', cantidad: 2,
+      lote: null, loteIntentado: 'fue', motivo: 'ruptura', ubicacion: null,
+    }], materialsAnswered: false, materialPending: null, reviewShown: false, candidateOrderId: null,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Corrección, el lote fue R5-260923-Liner' });
+  assert.equal(result.draft.materials[0].lote, 'R5-260923-LINER');
+  assert.equal(result.draft.materials[0].motivo, 'ruptura');
+  assert.match(result.message, /confirmo cierre/u);
+});
+
 test('el audio sin cantidades no puede convertirse en cierre por los parámetros del modelo', async () => {
   const db = fakeDb();
   const result = await advanceCloseGuide({ db, userId: 9,
