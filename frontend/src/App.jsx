@@ -21,7 +21,6 @@ const WebhookLogsPage  = lazy(() => import('./pages/WebhookLogsPage'))
 const UsuariosPage     = lazy(() => import('./pages/UsuariosPage'))
 const NotificacionesPage = lazy(() => import('./pages/NotificacionesPage'))
 const OutsourcingPage = lazy(() => import('./pages/OutsourcingPage'))
-const AlertSettingsPage = lazy(() => import('./pages/AlertSettingsPage'))
 
 function AdminRoute({ children }) {
   const user = useAuthStore((state) => state.user)
@@ -109,7 +108,7 @@ export default function App() {
             <Route path="productos"    element={<CapabilityRoute capability="catalog.read"><ErrorBoundary><ProductosPage /></ErrorBoundary></CapabilityRoute>} />
             <Route path="webhook-logs" element={<CapabilityRoute capability="webhook.logs.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><WebhookLogsPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
             <Route path="usuarios" element={<CapabilityRoute capability="users.manage"><ErrorBoundary><Suspense fallback={<PageLoader />}><UsuariosPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
-            <Route path="configuracion-alertas" element={<AdminRoute><ErrorBoundary><Suspense fallback={<PageLoader />}><AlertSettingsPage /></Suspense></ErrorBoundary></AdminRoute>} />
+            <Route path="configuracion-alertas" element={<AdminRoute><Navigate to="/productos#configuracion" replace /></AdminRoute>} />
             <Route path="notificaciones" element={<CapabilityRoute capability="webhook.logs.read"><ErrorBoundary><Suspense fallback={<PageLoader />}><NotificacionesPage /></Suspense></ErrorBoundary></CapabilityRoute>} />
           </Route>
         </Route>

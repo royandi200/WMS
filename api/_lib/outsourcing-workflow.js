@@ -1016,6 +1016,14 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
   );
     if (!orders.length) throw httpError(404, 'Orden de maquila no encontrada');
     const order = orders[0];
+    const [lotRules] = await conn.execute(
+      `SELECT sigla, dias_retroceso FROM recepcion_lote_reglas
+        WHERE producto_id = ? AND tercero_id = ? AND activa = 1 LIMIT 1`,
+      [order.producto_id, order.tercero_id || 0]
+    );
+    const internalLotHint = (receptionId, createdAt) => lotRules.length
+      ? require('./reception-auto-lot').generatedReceptionLot({ receptionId, itemNumber: 1,
+        receivedOn: createdAt, ...lotRules[0] }) : null;
     if (!order.orden_compra_id) {
       throw httpError(409, `Vincula una orden de compra a ${order.codigo} antes de recibir producto terminado`);
     }
@@ -1025,7 +1033,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
 
   const preparationKey = `MAQUILA_3Q:${order.id}`;
   const [preparedRows] = await conn.execute(
-    `SELECT r.id, r.numero, r.estado, r.bodega_id, ri.id AS item_id, ri.cantidad_esp
+    `SELECT r.id, r.numero, r.estado, r.bodega_id, r.creado_en, ri.id AS item_id, ri.cantidad_esp
        FROM recepciones r
        JOIN recepcion_items ri ON ri.recepcion_id = r.id AND ri.producto_id = ?
       WHERE r.preparacion_clave = ? AND r.estado IN ('borrador','en_proceso')
@@ -1044,6 +1052,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
       unidad: order.unidad || 'und',
       orden_maquila_id: order.id,
       orden_maquila_codigo: order.codigo,
+      lote_interno_sugerido: internalLotHint(preparedRows[0].id, preparedRows[0].creado_en),
     }]);
     return {
       id: preparedRows[0].id,
@@ -1097,6 +1106,10 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
      VALUES (?, ?, ?, 0)`,
     [created.insertId, order.producto_id, deliveryQuantity]
   );
+  const [createdRows] = await conn.execute(
+    'SELECT creado_en FROM recepciones WHERE id = ? LIMIT 1', [created.insertId]
+  );
+  if (!createdRows.length) throw httpError(409, 'No se pudo verificar la fecha de la recepción');
   const items = await addPreferredLocations(conn, [{
     item_id: createdItem.insertId,
     producto_id: order.producto_id,
@@ -1111,6 +1124,7 @@ async function prepareOutsourcingReception(conn, { orderId, quantity, userId }) 
     unidad: order.unidad || 'und',
     orden_maquila_id: order.id,
     orden_maquila_codigo: order.codigo,
+    lote_interno_sugerido: internalLotHint(created.insertId, createdRows[0].creado_en),
   }]);
   return {
     id: created.insertId,

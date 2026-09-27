@@ -43,7 +43,8 @@ module.exports = async (req, res) => {
          u.zona AS ubicacion_zona,
          u.activa AS ubicacion_activa,
          l.lpn AS lote,
-         rd.lote_proveedor,
+         COALESCE(rd.lote_proveedor, rd.lote_interno_origen) AS lote_proveedor,
+         rd.lote_interno_origen,
          s.fecha_venc,
          COALESCE(s.cantidad, l.qty_current) AS cantidad,
          COALESCE(s.reservada, 0) AS reservada,
@@ -62,7 +63,8 @@ module.exports = async (req, res) => {
        -- Las partidas bloqueadas de recepcion (RECBLK) no tienen fila en stock:
        -- su ubicacion y lote de proveedor se conservan en la distribucion.
        LEFT JOIN (
-         SELECT lote, MIN(ubicacion_id) AS ubicacion_id, MIN(lote_proveedor) AS lote_proveedor
+         SELECT lote, MIN(ubicacion_id) AS ubicacion_id, MIN(lote_proveedor) AS lote_proveedor,
+                MIN(lote_interno_origen) AS lote_interno_origen
            FROM recepcion_distribuciones
           GROUP BY lote
        ) rd ON BINARY rd.lote = BINARY l.lpn
@@ -74,7 +76,7 @@ module.exports = async (req, res) => {
          s.id AS stock_id, s.producto_id, s.bodega_id,
          b.codigo AS bodega_codigo, b.nombre AS bodega_nombre, b.activa AS bodega_activa,
          s.ubicacion_id, u.codigo AS ubicacion_codigo, u.zona AS ubicacion_zona,
-         u.activa AS ubicacion_activa, s.lote, NULL AS lote_proveedor, s.fecha_venc, s.cantidad,
+         u.activa AS ubicacion_activa, s.lote, NULL AS lote_proveedor, NULL AS lote_interno_origen, s.fecha_venc, s.cantidad,
          COALESCE(s.reservada, 0) AS reservada,
          (s.cantidad - COALESCE(s.reservada, 0)) AS disponible,
          NULL AS lot_id, NULL AS lpn, NULL AS lot_status, NULL AS lot_origin,

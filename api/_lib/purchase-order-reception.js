@@ -1,5 +1,15 @@
 const { resolvePrimaryWarehouse } = require('./warehouses');
 const { addPreferredLocations } = require('./product-locations');
+const { generatedReceptionLot, receptionDate } = require('./reception-auto-lot');
+
+function withInternalLotHints(items, reception) {
+  return items.map((item, index) => ({ ...item,
+    lote_interno_sugerido: Number(item.regla_activa) === 1
+      ? generatedReceptionLot({ receptionId: reception.id, itemNumber: index + 1,
+        receivedOn: reception.creado_en, sigla: item.regla_sigla,
+        dias_retroceso: item.regla_dias }) : null,
+  }));
+}
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -111,7 +121,7 @@ function remainingPurchaseOrderItems(orderedItems = [], acceptedItems = []) {
 
 async function loadPreparedReception(conn, preparationKey) {
   const [rows] = await conn.execute(
-    `SELECT id, numero, orden_compra_id, proveedor_nombre, estado, bodega_id
+    `SELECT id, numero, orden_compra_id, tercero_id, proveedor_nombre, estado, bodega_id, creado_en
        FROM recepciones
       WHERE preparacion_clave = ? AND estado IN ('borrador', 'en_proceso')
       LIMIT 1`,
@@ -122,6 +132,8 @@ async function loadPreparedReception(conn, preparationKey) {
   const [loadedItems] = await conn.execute(
     `SELECT ri.id AS item_id, ri.producto_id, p.siigo_code AS sku,
             p.nombre AS producto, p.modalidad_operativa, p.requiere_lote,
+            MAX(rlr.sigla) AS regla_sigla, MAX(rlr.dias_retroceso) AS regla_dias,
+            MAX(rlr.activa) AS regla_activa,
             ri.cantidad_esp AS cantidad_pendiente,
             COALESCE(
               CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
@@ -134,15 +146,17 @@ async function loadPreparedReception(conn, preparationKey) {
                  THEN DATE_FORMAT(MIN(oci.fecha_vencimiento_documento), '%Y-%m-%d') ELSE NULL END AS fecha_vencimiento_documento
        FROM recepcion_items ri
        JOIN productos p ON p.id = ri.producto_id
+       LEFT JOIN recepcion_lote_reglas rlr
+         ON rlr.producto_id = ri.producto_id AND rlr.tercero_id = ?
        LEFT JOIN orden_compra_proveedor_items oci
          ON oci.orden_compra_id = ? AND oci.producto_id = ri.producto_id
       WHERE ri.recepcion_id = ?
       GROUP BY ri.id, ri.producto_id, p.siigo_code, p.nombre,
                p.modalidad_operativa, p.requiere_lote, ri.cantidad_esp, p.unit_label
       ORDER BY ri.id`,
-    [reception.orden_compra_id, reception.id]
+    [reception.tercero_id, reception.orden_compra_id, reception.id]
   );
-  const items = await addPreferredLocations(conn, loadedItems);
+  const items = await addPreferredLocations(conn, withInternalLotHints(loadedItems, reception));
   return { ...reception, items, duplicate: true };
 }
 
@@ -170,6 +184,8 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
   const [orderedItems] = await conn.execute(
     `SELECT oci.producto_id, p.siigo_code AS sku, p.nombre AS producto,
             p.modalidad_operativa, p.requiere_lote,
+            MAX(rlr.sigla) AS regla_sigla, MAX(rlr.dias_retroceso) AS regla_dias,
+            MAX(rlr.activa) AS regla_activa,
             SUM(oci.cantidad_ordenada) AS cantidad_ordenada,
             CASE WHEN COUNT(DISTINCT COALESCE(NULLIF(oci.unidad, ''), 'und')) = 1
                  THEN MIN(COALESCE(NULLIF(oci.unidad, ''), 'und')) ELSE NULL END AS unidad,
@@ -179,10 +195,12 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
                  THEN DATE_FORMAT(MIN(oci.fecha_vencimiento_documento), '%Y-%m-%d') ELSE NULL END AS fecha_vencimiento_documento
        FROM orden_compra_proveedor_items oci
        JOIN productos p ON p.id = oci.producto_id
+       LEFT JOIN recepcion_lote_reglas rlr
+         ON rlr.producto_id = oci.producto_id AND rlr.tercero_id = ?
       WHERE oci.orden_compra_id = ?
       GROUP BY oci.producto_id, p.siigo_code, p.nombre, p.modalidad_operativa, p.requiere_lote
       ORDER BY MIN(oci.id)`,
-    [orderId]
+    [order.tercero_id, orderId]
   );
   if (!orderedItems.length) throw httpError(409, 'La orden de compra no tiene items');
   const internal = orderedItems.filter((item) => item.modalidad_operativa === 'PR');
@@ -253,9 +271,18 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
       unidad: item.unidad,
       lote_documento: item.lote_documento || null,
       fecha_vencimiento_documento: item.fecha_vencimiento_documento || null,
+      regla_sigla: item.regla_sigla,
+      regla_dias: item.regla_dias,
+      regla_activa: item.regla_activa,
     });
   }
-  const itemsWithLocations = await addPreferredLocations(conn, preparedItems);
+  const [createdRows] = await conn.execute(
+    'SELECT creado_en FROM recepciones WHERE id = ? LIMIT 1', [inserted.insertId]
+  );
+  if (!createdRows.length) throw httpError(409, 'No se pudo verificar la fecha de la recepción');
+  const createdDate = receptionDate(createdRows[0].creado_en);
+  const itemsWithLocations = await addPreferredLocations(conn,
+    withInternalLotHints(preparedItems, { id: inserted.insertId, creado_en: createdDate }));
   return {
     id: inserted.insertId,
     numero: number,
@@ -264,6 +291,8 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
     proveedor_nombre: order.proveedor_nombre,
     bodega_id: bodegaId,
     estado: 'borrador',
+    tercero_id: order.tercero_id,
+    creado_en: createdDate,
     items: itemsWithLocations,
     duplicate: false,
   };

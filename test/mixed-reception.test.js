@@ -32,7 +32,7 @@ function routeWith(conn) {
 }
 
 // Transactional SQL double: unrecognised queries fail; no network or real database.
-function database({ failAt, invalidLocation = false, knownLots = [] } = {}) {
+function database({ failAt, invalidLocation = false, knownLots = [], autoRule = null } = {}) {
   let state = { completed: false, lots: [], stock: [], distributions: [], kardex: [], movements: [], reconciliation: [] };
   let snapshot;
   const calls = [];
@@ -45,10 +45,12 @@ function database({ failAt, invalidLocation = false, knownLots = [] } = {}) {
       calls.push({ sql, values });
       if (failAt && sql.includes(failAt)) throw new Error('Injected persistence failure');
       if (sql.startsWith('SELECT * FROM recepciones')) return [[{ id: 61, numero: 'REC-OC-6-001',
-        orden_compra_id: 6, proveedor_nombre: 'Proveedor QA', bodega_id: 1, estado: state.completed ? 'completada' : 'borrador' }]];
+        orden_compra_id: 6, tercero_id: 9, creado_en: '2026-09-27 10:00:00',
+        proveedor_nombre: 'Proveedor QA', bodega_id: 1, estado: state.completed ? 'completada' : 'borrador' }]];
       if (sql.startsWith('SELECT * FROM ordenes_compra_proveedor')) return [[{ id: 6, estado: 'CARGADA' }]];
       if (sql.startsWith('SELECT ri.*')) return [[{ id: 87, producto_id: 104, siigo_code: '00276-PTZNASHWA',
         cantidad_esp: 5, modalidad_operativa: 'IO', requiere_lote: 1 }]];
+      if (sql.startsWith('SELECT sigla, dias_retroceso FROM recepcion_lote_reglas')) return [autoRule ? [autoRule] : []];
       if (sql.startsWith('SELECT id FROM ubicaciones')) return [values.slice(1, invalidLocation ? -1 : undefined).map(id => ({ id }))];
       if (sql.startsWith('SELECT l.product_id')) return [knownLots];
       if (sql.startsWith('SELECT id, product_id')) return [state.lots.filter(lot => lot.lpn === values[0])];
@@ -135,6 +137,29 @@ test('mixed reception rolls back every inventory write if a distribution cannot 
   assert.equal(conn.state.completed, false);
 });
 
+test('configured supplier without lot receives a unique internal lot and preserves physical status', async () => {
+  const conn = database({ autoRule: { sigla: 'CA', dias_retroceso: 4 } });
+  const input = mixed();
+  input.distributions.forEach(entry => { delete entry.lote; });
+  const result = await routeWith(conn).confirmReceptionForUser({
+    body: { recepcion_id: 61, items: [input] }, user: { id: 7 },
+  });
+  assert.equal(result.items[0].disponible, 3);
+  assert.equal(conn.state.lots.find(lot => lot.status === 'DISPONIBLE').lpn, 'R61-01-23092026-CA');
+  assert.ok(conn.state.distributions.every(distribution => distribution[4] === null));
+  assert.ok(conn.state.distributions.every(distribution => distribution[10] === 'R61-01-23092026-CA'));
+  assert.equal(conn.state.stock[0][3], 'R61-01-23092026-CA');
+});
+
+test('configured supplier rejects a different lot before changing inventory', async () => {
+  const conn = database({ autoRule: { sigla: 'CA', dias_retroceso: 4 } });
+  await assert.rejects(routeWith(conn).confirmReceptionForUser({
+    body: { recepcion_id: 61, items: [mixed()] }, user: { id: 7 },
+  }), /lote interno/u);
+  assert.equal(conn.state.lots.length, 0);
+  assert.equal(conn.state.completed, false);
+});
+
 test('single-condition receipts and a blocked lot in two locations retain exact physical balances', async () => {
   for (const condition of ['DISPONIBLE', 'CUARENTENA', 'RECHAZADO']) {
     const input = mixed();
@@ -202,6 +227,13 @@ test('WhatsApp preview validates the same mixed payload and rejects omissions be
   } };
   const prepared = [{ item_id: 87, producto_id: 104, cantidad_pendiente: 5 }];
   assert.equal((await buildConfirmationItems(db, prepared, { items: [mixed()] }))[0].distributions.length, 3);
+  const withoutSupplierLot = mixed();
+  withoutSupplierLot.distributions.forEach(entry => { delete entry.lote; });
+  const withInternalHint = await buildConfirmationItems(db,
+    [{ ...prepared[0], lote_interno_sugerido: 'R61-01-23092026-CA' }],
+    { items: [withoutSupplierLot] });
+  assert.ok(withInternalHint[0].distributions.every(entry => entry.lote === 'R61-01-23092026-CA'
+    && entry.lote_fuente === 'INTERNO'));
   const mutations = [
     d => { d.distributions[1].motivo = ''; },
     d => { d.distributions[1].fecha_venc = '2027-02-31'; },

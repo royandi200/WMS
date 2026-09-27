@@ -735,7 +735,8 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
         entry.ubicacion || entry.codigo_ubicacion || entry.location_code,
         options.warehouseId
       );
-      const reportedLot = String(entry.lote || entry.lpn || entry.lot_id || '').trim();
+      const reportedLot = String(entry.lote || entry.lpn || entry.lot_id
+        || prepared.lote_interno_sugerido || '').trim();
       const reportedExpiry = String(
         entry.fecha_venc || entry.fecha_vencimiento || entry.expiry_date || ''
       ).trim();
@@ -745,7 +746,8 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
       distributions.push({
         cantidad: entry.cantidad ?? entry.quantity,
         lote: reportedLot,
-        lote_fuente: 'OPERARIO',
+        lote_fuente: prepared.lote_interno_sugerido
+          && reportedLot === prepared.lote_interno_sugerido ? 'INTERNO' : 'OPERARIO',
         lote_documento: prepared.lote_documento || null,
         fecha_venc: reportedExpiry,
         fecha_venc_fuente: 'OPERARIO',
@@ -826,7 +828,9 @@ function buildReceptionReview(order, reception, items) {
       `  Condición: ${String(entry.condicion || '').toUpperCase()}.`,
       `  Ubicación: ${entry.ubicacion || 'sin ubicación'}.`,
       entry.lote
-        ? entry.lote_fuente === 'DOCUMENTO'
+        ? entry.lote_fuente === 'INTERNO'
+          ? `  Lote interno a generar: ${entry.lote} (proveedor sin lote).`
+          : entry.lote_fuente === 'DOCUMENTO'
           ? `  Lote: ${entry.lote} (propuesto por PDF; verifica la etiqueta física).`
           : entry.lote_documento && entry.lote !== entry.lote_documento
             ? `  Lote físico: ${entry.lote} (PDF: ${entry.lote_documento}).`

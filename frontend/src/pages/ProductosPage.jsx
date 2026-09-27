@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
+import { useAuthStore } from '../store/authStore'
+import AlertSettingsPage from './AlertSettingsPage'
 
 const TYPES = [
   { value: 'PT', label: 'Producto terminado' },
@@ -38,7 +40,7 @@ const EMPTY_FORM = {
   unit: 'und',
 }
 
-const TABS = ['Catálogo', 'Nuevo producto']
+const TABS = ['Catálogo', 'Nuevo producto', 'Configuración operativa']
 
 const SEMAFORO_STYLE = {
   OK:       'text-green-400 bg-green-400/10 border-green-400/20',
@@ -55,7 +57,9 @@ const LOTE_STATUS_STYLE = {
 }
 
 export default function ProductosPage() {
-  const [tab,      setTab]      = useState(0)
+  const [tab,      setTab]      = useState(() => window.location.hash === '#configuracion' ? 2 : 0)
+  const roles = useAuthStore((state) => state.user?.roles || [state.user?.rol].filter(Boolean))
+  const isAdmin = roles.some((role) => String(role).toLowerCase() === 'admin')
   const [search,   setSearch]   = useState('')
   const [typeF,    setTypeF]    = useState('')
   const [expanded, setExpanded] = useState(null)
@@ -127,7 +131,7 @@ export default function ProductosPage() {
       <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Productos</h1>
 
       <div className="flex gap-1 mb-4 md:mb-6 border-b border-border overflow-x-auto pb-px scrollbar-none">
-        {TABS.map((t, i) => (
+        {TABS.filter((_, i) => i !== 2 || isAdmin).map((t, i) => (
           <button key={t} onClick={() => { setTab(i); if (i === 0) cancelEdit() }}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               tab === i ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-foreground'
@@ -325,6 +329,8 @@ export default function ProductosPage() {
           )}
         </div>
       )}
+
+      {tab === 2 && isAdmin && <AlertSettingsPage embedded />}
 
       {tab === 1 && (
         <form onSubmit={handleSubmit} className="max-w-xl bg-surface border border-border rounded-lg p-6 space-y-4">

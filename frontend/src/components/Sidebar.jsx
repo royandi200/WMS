@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Bell, Boxes, ClipboardList, Factory, FileClock, LayoutDashboard,
-  PackageCheck, PackageOpen, PackageSearch, RefreshCcw, RotateCcw, Settings2, Trash2,
+  PackageCheck, PackageOpen, PackageSearch, RefreshCcw, RotateCcw, Trash2,
   Truck, Users, X,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
@@ -23,7 +23,6 @@ const NAV = [
   { group: 'Catálogos', items: [{ to: '/productos', icon: PackageSearch, label: 'Productos', capability: 'catalog.read' }] },
   { group: 'Sistema', items: [
     { to: '/usuarios', icon: Users, label: 'Usuarios', capability: 'users.manage' },
-    { to: '/configuracion-alertas', icon: Settings2, label: 'Configurar alertas', capability: 'alert_settings.manage', adminOnly: true },
     { to: '/notificaciones', icon: Bell, label: 'Notificaciones', capability: 'webhook.logs.read' },
     { to: '/webhook-logs', icon: RefreshCcw, label: 'Webhook Logs', capability: 'webhook.logs.read' },
   ] },

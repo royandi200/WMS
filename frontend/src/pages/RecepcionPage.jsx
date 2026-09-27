@@ -312,12 +312,13 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
       unit: item.unidad || 'und',
       outsourcingOrderId: item.orden_maquila_id || reception.orden_maquila_id || null,
       requiresLot: true,
+      internalLot: item.lote_interno_sugerido || '',
       suggestedLocation: item.ubicacion_sugerida || '',
       suggestedLocations: Array.isArray(item.ubicaciones_sugeridas) ? item.ubicaciones_sugeridas : [],
       documentLot: item.lote_documento || '',
       documentExpiry: String(item.fecha_vencimiento_documento || '').slice(0, 10),
       reason: '',
-      distributions: [{ condicion: '', cantidad: '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
+      distributions: [{ condicion: '', cantidad: '', lote: item.lote_interno_sugerido || '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
     })))
   }
   const setDistribution = (itemIndex, distributionIndex, key, value) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
@@ -326,7 +327,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
   }))
   const addDistribution = (itemIndex) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
     ...item,
-    distributions: [...item.distributions, { condicion: '', cantidad: '', lote: '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
+    distributions: [...item.distributions, { condicion: '', cantidad: '', lote: item.internalLot || '', ubicacion_id: '', fecha_venc: '', motivo: '' }],
   }))
   const removeDistribution = (itemIndex, distributionIndex) => setItems((current) => current.map((item, index) => index !== itemIndex ? item : {
     ...item,
@@ -422,6 +423,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
             <p className="text-sm font-medium text-foreground">{item.sku} - {item.producto}</p>
             <p className="text-xs text-muted">{item.outsourcingOrderId ? 'Cantidad de esta entrega 3Q' : 'Pendiente de la OC'}: {formatQuantity(item.expected)} {item.unit}</p>
             {item.suggestedLocation && <p className="text-xs text-primary">Ubicación preferida: {item.suggestedLocation}. Puedes seleccionar otra ubicación activa si la operación lo requiere.</p>}
+            {item.internalLot && <p className="text-xs text-primary">Este SKU no trae lote del proveedor. Se generará el lote interno {item.internalLot} al confirmar; verifica siempre el vencimiento físico.</p>}
             {(item.documentLot || item.documentExpiry) && <p className="text-xs text-muted">Referencia del PDF: lote {item.documentLot || 'no informado'} | vence {item.documentExpiry || 'no informado'}. Coteja ambos contra la etiqueta física.</p>}
             <p className="text-xs text-muted">Registra los datos físicos completos. El PDF y la ubicación preferida no se confirman automáticamente.</p>
           </div>
@@ -433,7 +435,7 @@ function ConfirmReceptionPanel({ purchaseOrders, outsourcingOrders, locations, l
                   setDistribution(itemIndex, distributionIndex, 'condicion', condition)
                 }} className="input-field" required><option value="">Selecciona condición</option><option>DISPONIBLE</option><option>CUARENTENA</option><option>RECHAZADO</option><option>PENDIENTE_DISPOSICION</option></select></Field>
                 <Field label="Cantidad física *"><input type="number" min="0.0001" step="any" value={distribution.cantidad} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'cantidad', event.target.value)} className="input-field" required /></Field>
-                <Field label="Lote proveedor *"><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" required /></Field>
+                <Field label={item.internalLot ? 'Lote interno generado' : 'Lote proveedor *'}><input value={distribution.lote} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'lote', event.target.value)} className="input-field" readOnly={Boolean(item.internalLot)} required /></Field>
                 <Field label="Ubicación *"><select value={distribution.ubicacion_id} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'ubicacion_id', event.target.value)} className="input-field" required><option value="">Selecciona ubicación</option>{receptionLocations.map((location) => <option key={location.id} value={location.id}>{item.suggestedLocations.some((suggested) => Number(suggested.id) === Number(location.id)) ? 'Preferida - ' : ''}{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
                 <Field label="Vencimiento *"><input type="date" value={distribution.fecha_venc} onChange={(event) => setDistribution(itemIndex, distributionIndex, 'fecha_venc', event.target.value)} className="input-field" required /></Field>
                 <button type="button" title="Eliminar distribución" onClick={() => removeDistribution(itemIndex, distributionIndex)} disabled={item.distributions.length === 1} className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
@@ -982,8 +984,9 @@ function ReceptionTable({ rows, loading }) {
               <td className="px-4 py-3">{r.producto_nombre || '-'}</td>
                 <td className="px-4 py-3 text-xs min-w-64">{r.distribuciones?.length
                   ? r.distribuciones.map((d, index) => <div key={index} className="mb-2 last:mb-0">
-                      <span className="font-mono break-all">{d.lote_proveedor || d.lote}</span>
-                      {d.lote_proveedor && d.lote !== d.lote_proveedor && <span className="block text-muted break-all">Partida: {d.lote}</span>}
+                      <span className="font-mono break-all">{d.lote_proveedor || d.lote_interno_origen || d.lote}</span>
+                      {d.lote_interno_origen && <span className="block text-muted">Generado internamente</span>}
+                      {(d.lote_proveedor || d.lote_interno_origen) && d.lote !== (d.lote_proveedor || d.lote_interno_origen) && <span className="block text-muted break-all">Partida: {d.lote}</span>}
                       <span className="block">{Number(d.cantidad)} | {d.condicion} | {d.ubicacion || '-'}</span>
                       {d.motivo && <span className="block text-muted">{d.motivo}</span>}
                     </div>)

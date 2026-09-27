@@ -28,6 +28,8 @@
     "data:purchase-order-documents:apply": "node scripts/apply-purchase-order-document-intake-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:direct-receptions:dry-run": "node scripts/apply-direct-purchase-order-reception-migration.js",
     "data:direct-receptions:apply": "node scripts/apply-direct-purchase-order-reception-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:reception-auto-lots:dry-run": "node scripts/apply-reception-auto-lot-rules-migration.js",
+    "data:reception-auto-lots:apply": "node scripts/apply-reception-auto-lot-rules-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:reception-confirmation:dry-run": "node scripts/apply-reception-confirmation-idempotency-migration.js",
     "data:reception-confirmation:apply": "node scripts/apply-reception-confirmation-idempotency-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:reception-drafts:dry-run": "node scripts/apply-reception-confirmation-drafts-migration.js",

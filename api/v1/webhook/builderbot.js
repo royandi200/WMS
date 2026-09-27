@@ -1805,7 +1805,7 @@ module.exports = async (req, res) => {
               `Proveedor: ${order.proveedor_nombre || 'N/A'}`,
               `Fecha: ${formatDateOnly(order.fecha_orden)}`,
               ...order.items.map(item =>
-                `- ${item.sku} - ${item.producto}\n  Pendiente: ${Number(item.cantidad_pendiente)} ${item.unidad}\n  Lote y vencimiento del proveedor requeridos`
+                `- ${item.sku} - ${item.producto}\n  Pendiente: ${Number(item.cantidad_pendiente)} ${item.unidad}\n  Vencimiento requerido; lote del proveedor o interno según configuración del SKU`
               ),
               '',
             ]),
@@ -1818,7 +1818,7 @@ module.exports = async (req, res) => {
               `Proveedor: ${order.proveedor_nombre || '3Q'}`,
               `- ${order.sku} - ${order.producto}`,
               `  Pendiente: ${order.cantidad_pendiente} ${order.unidad}`,
-              '  Lote y vencimiento de 3Q requeridos al recibir',
+              '  Vencimiento requerido; lote de 3Q o interno según configuración del SKU',
               '',
             ]),
             `Para recibir por WhatsApp responde, por ejemplo: prepara la recepcion MQ ID ${outsourcing[0].id} por ${outsourcing[0].cantidad_pendiente} ${outsourcing[0].unidad}.`,
@@ -1917,7 +1917,8 @@ module.exports = async (req, res) => {
         }
         const pending = prepared.reception.items.map(item =>
           `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
-          + `${item.lote_documento ? ` | PDF propone lote ${item.lote_documento}` : ' | lote proveedor requerido'}`
+          + `${item.lote_interno_sugerido ? ` | lote interno a generar ${item.lote_interno_sugerido} (proveedor sin lote)`
+            : item.lote_documento ? ` | PDF propone lote ${item.lote_documento}` : ' | lote proveedor requerido'}`
           + `${item.fecha_vencimiento_documento ? ` | PDF propone vencimiento ${item.fecha_vencimiento_documento}` : ''}`
           + `${item.ubicacion_sugerida ? ` | ubicacion sugerida ${item.ubicacion_sugerida}` : ''}`
         );
@@ -1928,9 +1929,11 @@ module.exports = async (req, res) => {
           'Pendiente fisico:',
           ...pending,
           '¿Con qué SKU o producto quieres comenzar? Responde solo con el SKU o nombre; esta recepción ya está seleccionada. Después puedes enviar cantidad, condición y ubicación juntas o por separado. Si el PDF trae lote y vencimiento, se propondrán para que los verifiques con la etiqueta física.',
+          prepared.reception.items.some(item => item.lote_interno_sugerido)
+            ? 'Los SKU configurados sin lote del proveedor tendrán el lote interno indicado; no necesitas dictarlo. El vencimiento siempre debe verificarse con el producto físico.' : null,
           'Tambien puedes enviar el reporte completo de todos los productos como hasta ahora. Si interpreto una palabra por contexto, lo mostrare en el resumen para que la verifiques.',
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion ${purchaseOrderReceptionIdentifier(prepared.order)}`,
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         responseContext.reception = {
           reception_id: prepared.reception.id,
           reception_number: prepared.reception.numero,
@@ -2011,6 +2014,7 @@ module.exports = async (req, res) => {
         }
         const pending = prepared.reception.items.map(item =>
           `- ${item.sku} - ${item.producto}: ${Number(item.cantidad_pendiente)} ${item.unidad || ''}`
+          + `${item.lote_interno_sugerido ? ` | lote interno a generar ${item.lote_interno_sugerido} (proveedor sin lote)` : ''}`
           + `${item.ubicacion_sugerida ? ` | ubicacion sugerida ${item.ubicacion_sugerida}` : ''}`
         );
         mensaje = [
@@ -2021,8 +2025,10 @@ module.exports = async (req, res) => {
           'Pendiente fisico:',
           ...pending,
           'Indica cantidad, condicion, lote, vencimiento y ubicacion. Puedes escribir los datos o adjuntar el PDF de entrega 3Q con la instruccion y el MQ ID.',
+          prepared.reception.items.some(item => item.lote_interno_sugerido)
+            ? 'Para los SKU configurados sin lote del proveedor, no necesitas dictar el lote interno indicado. Verifica siempre el vencimiento físico.' : null,
           `Antes de afectar inventario deberas escribir: Confirmo la recepcion MQ ID ${prepared.order.id}`,
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         responseContext.reception = {
           reception_id: prepared.reception.id,
           reception_number: prepared.reception.numero,

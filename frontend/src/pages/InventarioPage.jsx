@@ -306,6 +306,7 @@ function LotResult({ data }) {
     <div className="space-y-4">
       <p className="text-xs text-muted mb-1">Lote</p>
       <h2 className="text-lg font-semibold font-mono text-foreground break-all">{lot.lote_proveedor || lot.lpn || lot.lote || '-'}</h2>
+      {lot.lote_interno_origen && <p className="text-xs text-muted">Lote generado internamente en recepción; el proveedor no informó lote.</p>}
       {lot.lote_proveedor && lot.lpn !== lot.lote_proveedor && <p className="text-xs text-muted break-all">Partida consultada: {lot.lpn}</p>}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
         <Metric label="SKU" value={lot.sku || lot.siigo_code || '-'} />

@@ -18,6 +18,7 @@ const {
   reconcileOutsourcingReception,
 } = require('../_lib/outsourcing-workflow');
 const { preparePurchaseOrderReception } = require('../_lib/purchase-order-reception');
+const { generatedReceptionLot } = require('../_lib/reception-auto-lot');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -143,7 +144,7 @@ async function handleGet(req, res) {
   );
   const ids = [...new Set(rows.map(row => row.recepcion_item_id).filter(Boolean))];
   const distributions = ids.length ? await query(
-    `SELECT rd.recepcion_item_id, rd.lote, rd.lote_proveedor, rd.cantidad, rd.condicion, rd.motivo,
+    `SELECT rd.recepcion_item_id, rd.lote, rd.lote_proveedor, rd.lote_interno_origen, rd.cantidad, rd.condicion, rd.motivo,
             u.codigo AS ubicacion, rd.fecha_venc
        FROM recepcion_distribuciones rd
        LEFT JOIN ubicaciones u ON u.id = rd.ubicacion_id
@@ -170,7 +171,23 @@ function receivedItemInput(body, item, totalItems) {
   return totalItems === 1 ? body : null;
 }
 
-async function processDistributedItem(conn, { item, input, reception, user, receptionId, body, txId }) {
+async function processDistributedItem(conn, { item, input, reception, user, receptionId, body, txId, itemNumber }) {
+  const [lotRules] = await conn.execute(
+    `SELECT sigla, dias_retroceso FROM recepcion_lote_reglas
+      WHERE producto_id = ? AND tercero_id = ? AND activa = 1 LIMIT 1`,
+    [item.producto_id, reception.tercero_id || 0]
+  );
+  if (lotRules.length) {
+    const internalLot = generatedReceptionLot({ receptionId, itemNumber,
+      receivedOn: reception.creado_en, ...lotRules[0] });
+    input = { ...input, distributions: input.distributions.map((entry) => {
+      const suppliedLot = String(entry.lote || entry.lpn || entry.lot_id || '').trim();
+      if (suppliedLot && suppliedLot !== internalLot) {
+        throw httpError(409, `El SKU ${item.siigo_code} está configurado sin lote del proveedor. El lote interno de esta recepción es ${internalLot}; corrige el borrador o la regla del producto antes de confirmar`);
+      }
+      return { ...entry, lote: internalLot, lote_fuente: 'INTERNO' };
+    }) };
+  }
   const normalized = assignReceptionPartitions(validateReceptionItem(
     input, item.cantidad_esp, item.siigo_code, body.reason || body.motivo
   ), receptionId, item.id);
@@ -203,7 +220,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
          FROM lots l
         WHERE BINARY l.lpn = BINARY ? OR EXISTS (
           SELECT 1 FROM recepcion_distribuciones rd
-          WHERE BINARY rd.lote = BINARY l.lpn AND BINARY rd.lote_proveedor = BINARY ?
+          WHERE BINARY rd.lote = BINARY l.lpn AND BINARY COALESCE(rd.lote_proveedor, rd.lote_interno_origen) = BINARY ?
         ) FOR UPDATE`, [supplierLot, supplierLot]
     );
     for (const known of knownLots) {
@@ -256,7 +273,9 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     const lotNotes = [
       body.notes,
       `Recepcion ${reception.numero}`,
-      lot.internalLot
+      lot.internalSource
+        ? `Lote interno generado por recepción ${reception.numero}`
+        : lot.internalLot
         ? `Partida bloqueada ${lot.condition} | Lote proveedor ${lot.supplierLot}`
         : 'Lote informado por el proveedor',
     ].filter(Boolean).join(' | ');
@@ -278,10 +297,12 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
     await conn.execute(
       `INSERT INTO recepcion_distribuciones
          (recepcion_id, recepcion_item_id, ubicacion_id, lote, lote_proveedor, fecha_venc,
-          condicion, cantidad, motivo, usuario_id, creado_en)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [receptionId, item.id, entry.locationId, entry.lot, entry.supplierLot, entry.expiryDate,
-       entry.condition, entry.quantity, entry.reason, user.id]
+          condicion, cantidad, motivo, usuario_id, lote_interno_origen, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [receptionId, item.id, entry.locationId, entry.lot,
+       entry.internalSource ? null : entry.supplierLot, entry.expiryDate,
+       entry.condition, entry.quantity, entry.reason, user.id,
+       entry.internalSource ? entry.supplierLot : null]
     );
     if (entry.condition === 'DISPONIBLE') {
       const [stockRows] = await conn.execute(
@@ -335,7 +356,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
          VALUES (?, ?, ?, ?, ?, 'INGRESO_RECEPCION', ?, ?, ?, ?, ?, NOW())`,
         [blockedIds.id, blockedIds.txId, groupedLots.get(entry.lot).id, item.producto_id,
          user.id, entry.quantity, balanceAfter, `recepcion:${reception.numero}`,
-         `Ingreso fisico bloqueado; disponible +0 | Lote proveedor ${entry.supplierLot} | ${entry.condition} | Ubicacion ${entry.locationId} | ${entry.reason} | Operacion ${txId}`, user.id]
+         `Ingreso fisico bloqueado; disponible +0 | ${entry.internalSource ? 'Lote interno' : 'Lote proveedor'} ${entry.supplierLot} | ${entry.condition} | Ubicacion ${entry.locationId} | ${entry.reason} | Operacion ${txId}`, user.id]
       );
     }
   }
@@ -527,7 +548,7 @@ async function confirmReceptionForUser({ body = {}, user }) {
     const results = [];
     const receptionTxId = crypto.randomUUID();
     let hasDifference = false;
-    for (const item of items) {
+    for (const [itemIndex, item] of items.entries()) {
       const input = receivedItemInput(body, item, items.length);
       if (!input) throw httpError(400, `Falta confirmar el item ${item.siigo_code}`);
       if (!Array.isArray(input.distributions) || !input.distributions.length) {
@@ -536,6 +557,7 @@ async function confirmReceptionForUser({ body = {}, user }) {
 
       const distributed = await processDistributedItem(conn, {
         item, input, reception, user, receptionId, body, txId: receptionTxId,
+        itemNumber: itemIndex + 1,
       });
       if (distributed) {
         hasDifference = hasDifference || distributed.hasDifference;

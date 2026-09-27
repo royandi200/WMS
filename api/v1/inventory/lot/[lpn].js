@@ -79,6 +79,7 @@ module.exports = async (req, res) => {
         ...row,
         lote_consultado: lpn,
         lote_proveedor: selected?.lote_proveedor || lpn,
+        lote_interno_origen: selected?.lote_interno_origen || null,
         partidas_recepcion: partitions,
         movements: movements.map((movement) => ({
           ...movement,

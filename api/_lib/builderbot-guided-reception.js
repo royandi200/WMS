@@ -405,7 +405,8 @@ function missingFields(entry, prepared) {
       if (!part.cantidad) missing.push(`cantidad de ${label}`);
       if (!part.condicion) missing.push(`condición de ${label}`);
       if (!part.ubicacion) missing.push(`ubicación de ${label}`);
-      if (!part.lote && (entry.lote_discrepa_pdf || !prepared.lote_documento)) {
+      if (!part.lote && !prepared.lote_interno_sugerido
+        && (entry.lote_discrepa_pdf || !prepared.lote_documento)) {
         missing.push(`lote de ${label}`);
       }
       if (!part.fecha_vencimiento
@@ -427,7 +428,8 @@ function missingFields(entry, prepared) {
   if (!entry.cantidad) missing.push('cantidad');
   if (!entry.condicion) missing.push('condición');
   if (!entry.ubicacion) missing.push('ubicación');
-  if (!entry.lote && (entry.lote_discrepa_pdf || !prepared.lote_documento)) {
+  if (!entry.lote && !prepared.lote_interno_sugerido
+    && (entry.lote_discrepa_pdf || !prepared.lote_documento)) {
     missing.push(entry.lote_discrepa_pdf ? 'lote físico correcto' : 'lote de la etiqueta');
   }
   if (!entry.fecha_vencimiento
@@ -455,12 +457,12 @@ function itemFromEntry(entry, prepared) {
       cantidad: entry.cantidad,
       condicion: entry.condicion,
       ubicacion: entry.ubicacion,
-      lote: entry.lote || prepared.lote_documento,
+      lote: entry.lote || prepared.lote_interno_sugerido || prepared.lote_documento,
       fecha_vencimiento: entry.fecha_vencimiento || prepared.fecha_vencimiento_documento,
       motivo: entry.motivo || null,
     }]).map(row => ({
       cantidad: row.cantidad, condicion: row.condicion, ubicacion: row.ubicacion,
-      lote: row.lote || prepared.lote_documento,
+      lote: row.lote || prepared.lote_interno_sugerido || prepared.lote_documento,
       fecha_vencimiento: row.fecha_vencimiento || prepared.fecha_vencimiento_documento,
       motivo: row.motivo || null,
     })),
@@ -493,7 +495,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
       `Total recibido: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)} ${prepared.unidad || 'und'}).`,
       ...entry.partidas.flatMap((part, index) => [
         `Partida ${index + 1}: ${part.cantidad} ${prepared.unidad || 'und'} · ${part.condicion} · ubicación ${part.ubicacion}.`,
-        `Lote: ${part.lote || prepared.lote_documento}${!part.lote && prepared.lote_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
+        `Lote: ${part.lote || prepared.lote_interno_sugerido || prepared.lote_documento}${!part.lote && prepared.lote_interno_sugerido ? ' (interno generado; el proveedor no lo informa)' : !part.lote && prepared.lote_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
         `Vencimiento: ${part.fecha_vencimiento || prepared.fecha_vencimiento_documento}${!part.fecha_vencimiento && prepared.fecha_vencimiento_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),
@@ -502,7 +504,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
       'Este paso no confirma la recepción ni modifica inventario.',
     ].filter(Boolean).join('\n');
   }
-  const loteFromPdf = !entry.lote && Boolean(prepared.lote_documento);
+  const loteFromPdf = !entry.lote && !prepared.lote_interno_sugerido && Boolean(prepared.lote_documento);
   const expiryFromPdf = !entry.fecha_vencimiento && Boolean(prepared.fecha_vencimiento_documento);
   return [
     `🧾 Revisa ${purchaseOrderReceptionIdentifier(order)} | ${reception.numero}`,
@@ -514,7 +516,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
     `Ubicación registrada: ${entry.ubicacion}.`,
     prepared.ubicacion_sugerida
       ? `Ubicación sugerida: ${prepared.ubicacion_sugerida} (verifica físicamente).` : null,
-    `Lote: ${entry.lote || prepared.lote_documento}${loteFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
+    `Lote: ${entry.lote || prepared.lote_interno_sugerido || prepared.lote_documento}${loteFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : !entry.lote && prepared.lote_interno_sugerido ? ' (interno generado; el proveedor no lo informa)' : ''}.`,
     `Vencimiento: ${entry.fecha_vencimiento || prepared.fecha_vencimiento_documento}${expiryFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
     entry.motivo ? `Motivo de condición: ${entry.motivo}.` : null,
     entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
@@ -787,7 +789,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
         selected.ubicacion_sugerida
           ? `Ubicación sugerida: ${selected.ubicacion_sugerida} (verifica físicamente; no se asigna automáticamente).` : null,
         !entry.partidas && entry.lote ? `Lote registrado: ${entry.lote}.`
-          : selected.lote_documento ? `Lote propuesto por PDF: ${selected.lote_documento}${entry.lote_discrepa_pdf ? ' (no coincide; indica el lote físico correcto)' : ''}.` : null,
+          : selected.lote_interno_sugerido ? `Lote interno que se generará: ${selected.lote_interno_sugerido} (el proveedor no lo informa).`
+            : selected.lote_documento ? `Lote propuesto por PDF: ${selected.lote_documento}${entry.lote_discrepa_pdf ? ' (no coincide; indica el lote físico correcto)' : ''}.` : null,
         !entry.partidas && entry.fecha_vencimiento ? `Vencimiento registrado: ${entry.fecha_vencimiento}.`
           : selected.fecha_vencimiento_documento
             ? `Vencimiento propuesto por PDF: ${selected.fecha_vencimiento_documento}${entry.vencimiento_discrepa_pdf ? ' (no coincide; indica el vencimiento físico correcto)' : ''}.` : null,

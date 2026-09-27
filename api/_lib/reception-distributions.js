@@ -62,6 +62,7 @@ function normalizeReceptionDistributions(input = {}, options = {}) {
       quantity,
       lot,
       supplierLot,
+      internalSource: entry.lote_fuente === 'INTERNO',
       internalLot: false,
       locationId,
       expiryDate,

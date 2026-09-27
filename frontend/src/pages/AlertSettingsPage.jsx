@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, RefreshCw, Save, Search } from 'lucide-react'
 import { listAlertSettings, updateAlertSettings } from '../api/alertSettings.api'
+import { listReceptionLotRules, updateReceptionLotRule } from '../api/receptionLotRules.api'
+
+function todayBogota() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota',
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+}
+
+function lotPreview(date, days, initials) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(Number(days)) || !/^[A-Z]{1,8}$/.test(initials)) return ''
+  const value = new Date(`${date}T12:00:00Z`)
+  value.setUTCDate(value.getUTCDate() - Number(days))
+  const day = String(value.getUTCDate()).padStart(2, '0')
+  const month = String(value.getUTCMonth() + 1).padStart(2, '0')
+  return `R41-01-${day}${month}${value.getUTCFullYear()}-${initials}`
+}
 
 function normalizeDraft(row) {
   return {
@@ -9,22 +24,33 @@ function normalizeDraft(row) {
   }
 }
 
-export default function AlertSettingsPage() {
+export default function AlertSettingsPage({ embedded = false }) {
   const [rows, setRows] = useState([])
   const [drafts, setDrafts] = useState({})
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState(null)
   const [message, setMessage] = useState(null)
+  const [suppliers, setSuppliers] = useState([])
+  const [lotRules, setLotRules] = useState([])
+  const [selectedProduct, setSelectedProduct] = useState('')
+  const [selectedSupplier, setSelectedSupplier] = useState('')
+  const [initials, setInitials] = useState('')
+  const [offsetDays, setOffsetDays] = useState('4')
+  const [ruleEnabled, setRuleEnabled] = useState(true)
+  const [exampleDate, setExampleDate] = useState(todayBogota)
+  const [savingRule, setSavingRule] = useState(false)
 
   const load = async () => {
     setLoading(true)
     setMessage(null)
     try {
-      const payload = await listAlertSettings()
+      const [payload, lotPayload] = await Promise.all([listAlertSettings(), listReceptionLotRules()])
       const nextRows = payload?.data?.rows || []
       setRows(nextRows)
       setDrafts(Object.fromEntries(nextRows.map((row) => [row.id, normalizeDraft(row)])))
+      setSuppliers(lotPayload?.data?.suppliers || [])
+      setLotRules(lotPayload?.data?.rules || [])
     } catch (error) {
       setMessage({ ok: false, text: error.response?.data?.error || 'No fue posible cargar los umbrales' })
     } finally {
@@ -45,6 +71,34 @@ export default function AlertSettingsPage() {
       ...(row.clientes || []),
     ].some((value) => String(value || '').toLowerCase().includes(term)))
   }, [rows, search])
+
+  useEffect(() => {
+    const rule = lotRules.find((item) => String(item.producto_id) === selectedProduct
+      && String(item.tercero_id) === selectedSupplier)
+    setInitials(rule?.sigla || '')
+    setOffsetDays(String(rule?.dias_retroceso ?? 4))
+    setRuleEnabled(rule ? Boolean(Number(rule.activa)) : true)
+  }, [selectedProduct, selectedSupplier, lotRules])
+
+  const saveLotRule = async (event) => {
+    event.preventDefault()
+    setSavingRule(true)
+    setMessage(null)
+    try {
+      await updateReceptionLotRule({ producto_id: Number(selectedProduct),
+        tercero_id: Number(selectedSupplier), sigla: initials.trim().toUpperCase(),
+        dias_retroceso: Number(offsetDays), activa: ruleEnabled })
+      const payload = await listReceptionLotRules()
+      setLotRules(payload?.data?.rules || [])
+      setMessage({ ok: true, text: ruleEnabled
+        ? 'Regla guardada. Este SKU y proveedor usarán un lote interno en las nuevas recepciones.'
+        : 'Regla desactivada. En las nuevas recepciones se exigirá el lote del proveedor.' })
+    } catch (error) {
+      setMessage({ ok: false, text: error.response?.data?.error || 'No fue posible guardar la regla de lote' })
+    } finally {
+      setSavingRule(false)
+    }
+  }
 
   const setField = (id, field, value) => {
     setDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }))
@@ -90,8 +144,9 @@ export default function AlertSettingsPage() {
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-lg md:text-xl font-semibold text-foreground">Configuración de alertas</h1>
-        <p className="text-xs text-muted mt-1">Umbrales operativos por SKU. Estos cambios no modifican saldos ni movimientos de inventario.</p>
+        {embedded ? <h2 className="text-lg md:text-xl font-semibold text-foreground">Configuración operativa por SKU</h2>
+          : <h1 className="text-lg md:text-xl font-semibold text-foreground">Configuración operativa por SKU</h1>}
+        <p className="text-xs text-muted mt-1">Alertas y reglas de lote de recepción. Cambiar estas opciones no modifica inventario existente.</p>
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5 border-y border-border py-4">
@@ -160,6 +215,46 @@ export default function AlertSettingsPage() {
           </tbody>
         </table>
       </div>
+      <section className="mt-8 border border-border rounded-lg bg-surface p-4 md:p-5">
+        <h3 className="text-base font-semibold text-foreground">Lote automático al recibir sin lote del proveedor</h3>
+        <p className="mt-1 text-xs text-muted">Configura cada combinación de SKU y proveedor que normalmente llega sin lote. Mientras la regla esté activa, el WMS generará y validará el lote interno antes de confirmar; si el proveedor comienza a informar un lote físico, desactiva la regla. El vencimiento siempre se solicita.</p>
+        <form onSubmit={saveLotRule} className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <label className="text-xs text-muted">SKU
+            <select required className="input-field mt-1 w-full" value={selectedProduct} onChange={(event) => setSelectedProduct(event.target.value)}>
+              <option value="">Selecciona un SKU</option>
+              {rows.map((row) => <option key={row.id} value={row.id}>{row.sku} — {row.nombre}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-muted">Proveedor
+            <select required className="input-field mt-1 w-full" value={selectedSupplier} onChange={(event) => setSelectedSupplier(event.target.value)}>
+              <option value="">Selecciona un proveedor</option>
+              {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-muted">Sigla (por ejemplo, CA)
+            <input required maxLength={8} pattern="[A-Za-z]{1,8}" value={initials} onChange={(event) => setInitials(event.target.value.toUpperCase())} className="input-field mt-1 w-full" />
+          </label>
+          <label className="text-xs text-muted">Días calendario a restar
+            <input required type="number" min="0" max="365" step="1" value={offsetDays} onChange={(event) => setOffsetDays(event.target.value)} className="input-field mt-1 w-full" />
+          </label>
+          <label className="text-xs text-muted">Fecha de ejemplo
+            <input type="date" value={exampleDate} onChange={(event) => setExampleDate(event.target.value)} className="input-field mt-1 w-full" />
+          </label>
+          <div className="text-xs text-muted self-end">Vista previa (R41 y partida 01 de ejemplo):
+            <span className="block mt-1 font-mono text-sm text-primary">{lotPreview(exampleDate, offsetDays, initials) || 'Completa fecha, días y sigla'}</span>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-foreground self-end">
+            <input type="checkbox" checked={ruleEnabled} onChange={(event) => setRuleEnabled(event.target.checked)} /> Regla activa
+          </label>
+          <button type="submit" disabled={savingRule || !selectedProduct || !selectedSupplier} className="btn-primary self-end disabled:opacity-40">{savingRule ? 'Guardando...' : 'Guardar regla'}</button>
+        </form>
+        {!!lotRules.length && <div className="mt-5 text-xs text-muted">
+          <p className="font-semibold text-foreground mb-2">Reglas configuradas</p>
+          {lotRules.map((rule) => <p key={`${rule.producto_id}:${rule.tercero_id}`} className="py-1 border-t border-border/50">
+            {rule.sku} · {rule.proveedor} · {rule.activa ? 'Activa' : 'Inactiva'} · restar {rule.dias_retroceso} días · sigla {rule.sigla}
+          </p>)}
+        </div>}
+      </section>
     </div>
   )
 }
