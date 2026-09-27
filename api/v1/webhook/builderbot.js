@@ -81,7 +81,8 @@
 const { createConnection: DB } = require('../../_lib/db');
 const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { currentUserText } = require('../../_lib/builderbot-user-text');
-const { stockProductionIntent } = require('../../_lib/stock-production-intent');
+const { productionRequestIntent, productionDestinationReply,
+  contextualProductionReply } = require('../../_lib/stock-production-intent');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
 const {
@@ -466,6 +467,25 @@ async function findRecentReceptionPreparationQuestion(db, from, rawText) {
   const previousBotMessage = response.message || response.mensaje;
   return confirmedPreparationReference(rawText, previousUserText, previousBotMessage)
     || clarifiedPreparationReference(rawText, previousUserText, previousBotMessage);
+}
+
+async function findRecentProductionDestinationQuestion(db, from, rawText) {
+  if (!from || !productionDestinationReply(rawText)) return null;
+  const [rows] = await db.execute(
+    `SELECT payload, response
+       FROM webhook_logs
+      WHERE from_phone = ? AND status IN ('PROCESSED', 'REJECTED', 'ERROR')
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+      ORDER BY id DESC LIMIT 1`,
+    [from]
+  );
+  const prior = rows[0];
+  if (!prior) return null;
+  const payload = asObject(prior.payload);
+  const response = asObject(prior.response);
+  return contextualProductionReply(rawText,
+    getUserText(payload, parseBuilderBotInfo(payload)),
+    response.message || response.mensaje || response.error);
 }
 
 async function notifiedProductionCloseReference(db, from, text) {
@@ -1548,14 +1568,24 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Audio transcrito puede llegar sin clasificación de BuilderBot. Solo
-    // recuperamos una orden de stock si el mensaje actual declara producto,
-    // cantidad y destino de manera explícita; el servicio valida el producto.
-    if (['UNKNOWN', 'MODO_CHARLA'].includes(action)) {
-      const stockIntent = stockProductionIntent(contractUserText);
-      if (stockIntent) {
+    // El mensaje inicial puede omitir el destino. Guardamos la solicitud en el
+    // log de la pregunta; una respuesta corta solo retoma la pregunta más
+    // reciente del mismo remitente, nunca una OP ni un destino por defecto.
+    const productionRequest = productionRequestIntent(contractUserText);
+    if (productionRequest && ['UNKNOWN', 'MODO_CHARLA', 'LIBERAR_ORDEN_PRODUCCION',
+      'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'].includes(action)) {
+      action = 'LIBERAR_ORDEN_PRODUCCION';
+      params = productionRequest;
+    } else if (['UNKNOWN', 'MODO_CHARLA', 'LIBERAR_ORDEN_PRODUCCION',
+      'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'].includes(action)) {
+      const pendingProduction = await findRecentProductionDestinationQuestion(db, from, contractUserText);
+      if (pendingProduction?.origin === 'STOCK_SEGURIDAD') {
         action = 'LIBERAR_ORDEN_PRODUCCION';
-        params = stockIntent;
+        params = { ...pendingProduction.request, origen_tipo: 'STOCK_SEGURIDAD' };
+      } else if (pendingProduction?.origin === 'OC_CLIENTE') {
+        action = 'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES';
+        params = {};
+        responseContext.pending_production = pendingProduction.request;
       }
     }
 
@@ -3081,7 +3111,11 @@ module.exports = async (req, res) => {
 
       case 'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES': {
         const orders = await listCustomerOrders({ pendingOnly: true });
+        const requestReminder = responseContext.pending_production
+          ? `Entendí que quieres producir ${responseContext.pending_production.cantidad_planificada} und de ${responseContext.pending_production.id_producto_final}. Todavía no se creó ni reservó una OP.\n\n`
+          : '';
         mensaje = orders.length ? [
+          ...(requestReminder ? [requestReminder.trimEnd(), ''] : []),
           `*Pedidos de cliente pendientes (${orders.length})*`,
           ...orders.flatMap((order) => [
             '',
@@ -3093,7 +3127,7 @@ module.exports = async (req, res) => {
           '',
           `Para crear la OP, elige un pedido de esta lista. Por ejemplo: produce el PED ID ${orders[0].id}. Si tiene varios productos pendientes, indica también el Item ID.`,
           'Esta consulta no reserva ni modifica inventario.',
-        ].join('\n') : 'No hay pedidos de cliente aprobados con unidades pendientes de producir.';
+        ].join('\n') : `${requestReminder}No hay pedidos de cliente aprobados con unidades pendientes de producir.`;
         responseContext.customer_orders = orders;
         responseContext.inventory_changed = false;
         break;
@@ -3126,10 +3160,18 @@ module.exports = async (req, res) => {
           };
         }
         const selectedCustomerOrderId = reconcileCustomerOrderId(releaseParams, contractUserText);
-        const originType = selectedCustomerOrderId ? 'OC_CLIENTE'
+        let originType;
+        try {
+          originType = selectedCustomerOrderId ? 'OC_CLIENTE'
           : params.confirmar_nueva_orden === true && params.id_orden_existente
           ? releaseParams.origen_tipo
           : resolveProductionOrigin(contractUserText, releaseParams.origen_tipo);
+        } catch (error) {
+          if (error.status === 400 && productionRequest && !productionRequest.origen_tipo) {
+            error.message = `Entendí ${productionRequest.cantidad_planificada} und de ${productionRequest.id_producto_final}. ¿Es para stock de seguridad o para un pedido de cliente? Responde solo el destino; conservaré el producto y la cantidad. No se creó la orden ni se reservó inventario.`;
+          }
+          throw error;
+        }
         const customerOrder = selectedCustomerOrderId
           ? { customerReference: null, finalCustomer: null }
           : originType === 'OC_CLIENTE'

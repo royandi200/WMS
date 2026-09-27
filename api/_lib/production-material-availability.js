@@ -56,7 +56,8 @@ async function planProductionMaterials(conn, { productId, productSku, quantity, 
       remaining = roundQty(remaining - take);
     }
     if (remaining > 0.0001) {
-      shortages.push({ sku: component.sku, requerido: required, faltante: remaining });
+      shortages.push({ sku: component.sku, producto: component.nombre,
+        unidad: component.unidad, requerido: required, disponible: available, faltante: remaining });
     }
     plan.push({ component, required, available, missing: Math.max(0, remaining), allocations });
   }

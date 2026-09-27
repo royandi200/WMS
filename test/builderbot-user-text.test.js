@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { currentUserText } = require('../api/_lib/builderbot-user-text');
-const { stockProductionIntent } = require('../api/_lib/stock-production-intent');
+const { stockProductionIntent, productionRequestIntent, contextualProductionReply } =
+  require('../api/_lib/stock-production-intent');
 const { normalizeProductReference } = require('../api/_lib/product-references');
 
 const marker = '_event_document__15dbae31-ac11-49d8-9aef-93c5e805b7e7';
@@ -39,4 +40,25 @@ test('explicit stock-production speech accepts numbers and words but not missing
   assert.equal(stockProductionIntent('Vamos a producir tarros de Ashawanda 60 para stock de seguridad'), null);
   assert.equal(normalizeProductReference('Ashawanda 60'), 'ashwagandha 60');
   assert.equal(normalizeProductReference('Ashagwanda 60'), 'ashwagandha 60');
+});
+
+test('a short destination retains only the immediately pending product and quantity', () => {
+  const prior = 'vamos a producir 1 tarro de ashwagandha 120';
+  const question = 'Entendí 1 und de ashwagandha 120. ¿Es para stock de seguridad o para un pedido de cliente? No se creó la OP.';
+  assert.deepEqual(productionRequestIntent(prior), {
+    id_producto_final: 'ashwagandha 120', cantidad_planificada: 1,
+  });
+  assert.deepEqual(contextualProductionReply('stock de seguridad', prior, question), {
+    origin: 'STOCK_SEGURIDAD', request: productionRequestIntent(prior),
+  });
+  assert.deepEqual(contextualProductionReply('pedido de cliente', prior, question), {
+    origin: 'OC_CLIENTE', request: productionRequestIntent(prior),
+  });
+  assert.deepEqual(contextualProductionReply('stock de seguridad',
+    'vamos a producir 1 tarro de ashwagandha 60', question).request,
+  { id_producto_final: 'ashwagandha 60', cantidad_planificada: 1 });
+  assert.equal(contextualProductionReply('stock de seguridad', prior, 'Stock insuficiente'), null);
+  assert.equal(contextualProductionReply('stock de seguridad', 'hola', question), null);
+  assert.equal(contextualProductionReply('stock de seguridad',
+    'vamos a producir 1 tarro de ashwagandha 120 para stock de seguridad', question), null);
 });

@@ -10,6 +10,7 @@ const { additionalOperationInput } = require('../api/_lib/additional-operation-i
 function harness({ operationError, role = 'admin' } = {}) {
   const calls = [];
   const baseReads = [];
+  const logged = [];
   let inboxId = 1;
   const filename = path.resolve(__dirname, '../api/v1/webhook/builderbot.js');
   const nativeRequire = createRequire(filename);
@@ -18,7 +19,12 @@ function harness({ operationError, role = 'admin' } = {}) {
     async execute(sql, args) {
       if (sql.includes('INSERT INTO webhook_ingress_inbox')) return [{ insertId: inboxId++ }];
       if (sql.includes('UPDATE webhook_ingress_inbox')) return [{ affectedRows: 1 }];
-      if (sql.includes('INSERT INTO webhook_logs')) return [{ affectedRows: 1 }];
+      if (sql.includes('INSERT INTO webhook_logs')) {
+        if (args[5] !== 'RECEIVED') logged.push({ payload: args[3], response: args[4],
+          status: args[5] });
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.includes('FROM webhook_logs')) return [logged.length ? [logged.at(-1)] : []];
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM usuario_roles ur')) return [[{ rol: role }]];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];
@@ -84,6 +90,7 @@ function harness({ operationError, role = 'admin' } = {}) {
     },
     '../../_lib/db': { createConnection: async () => db },
     '../../_lib/auth': { requireWebhookSecret() {} },
+    '../customer-orders': { listCustomerOrders: async () => [] },
     '../../_lib/production-workflow': { releaseProductionOrder: async input => {
       calls.push(input);
       return { order_id: 79, order_code: 'OP-79', already_released: true,
@@ -125,6 +132,26 @@ test('N1-05 real webhook: partial intent never reaches dispatch; complete confir
   assert.equal(h.calls.length, 1);
   await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60 con 2 unidades.', { id_despacho: 60 });
   assert.equal(h.calls[1].expectedQuantity, 2);
+});
+
+test('production destination reply carries only the latest asked product and quantity', async () => {
+  const h = harness();
+  const first = await h.send('MODO_CHARLA', 'vamos a producir 1 tarro de ashwagandha 120', {});
+  assert.equal(first.ok, false);
+  assert.match(first.mensaje, /1 und de ashwagandha 120/u);
+  assert.equal(h.calls.length, 0);
+  const stock = await h.send('MODO_CHARLA', 'stock de seguridad', {});
+  assert.equal(stock.ok, true, stock.mensaje);
+  assert.deepEqual([h.calls[0].product, h.calls[0].quantity, h.calls[0].originType],
+    ['ashwagandha 120', 1, 'STOCK_SEGURIDAD']);
+
+  const second = await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'vamos a producir 1 tarro de ashwagandha 60', { id_producto_final: 'ashwagandha 120', cantidad_planificada: 10 });
+  assert.equal(second.ok, false);
+  const customer = await h.send('MODO_CHARLA', 'pedido de cliente', {});
+  assert.equal(customer.ok, true, customer.mensaje);
+  assert.match(customer.mensaje, /1 und de ashwagandha 60/u);
+  assert.equal(h.calls.length, 1);
 });
 
 test('WhatsApp lists and confirms a pending 3Q dispatch through its typed ID', async () => {

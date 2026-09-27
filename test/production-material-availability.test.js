@@ -62,6 +62,12 @@ test('señala exactamente el material faltante y no marca lista la OP', async ()
   assert.equal(result.ready, false);
   assert.equal(result.materials[0].missing, 2);
   assert.equal(result.materials[1].missing, 0);
+  const conn = await require.cache[dbPath].exports.createConnection();
+  const planned = await planProductionMaterials(conn, {
+    productId: 74, quantity: 5, warehouseId: 1,
+  });
+  assert.deepEqual(planned.shortages, [{ sku: '00001-TPBI', producto: 'Tapa', unidad: 'und',
+    requerido: 5, disponible: 3, faltante: 2 }]);
 });
 
 test('la liberación usa el mismo plan FEFO pero bloquea stock para reservar', async () => {

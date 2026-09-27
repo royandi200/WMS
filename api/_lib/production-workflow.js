@@ -169,7 +169,14 @@ async function releaseProductionOrder({
       productId: finalProduct.id, productSku: finalProduct.siigo_code,
       quantity: qty, warehouseId, lockStock: true,
     });
-    if (shortages.length) throw httpError(409, 'Stock insuficiente para liberar la orden', { shortages });
+    if (shortages.length) {
+      const detail = shortages.map(item =>
+        `- ${item.producto} (${item.sku}): requiere ${item.requerido} ${item.unidad}, disponible ${item.disponible} ${item.unidad}, faltan ${item.faltante} ${item.unidad}`
+      ).join('\n');
+      throw httpError(409,
+        `No hay material suficiente para liberar la OP. Falta:\n${detail}\nNo se creó la orden ni se reservó inventario.`,
+        { shortages });
+    }
 
     const temporaryCode = `TMP-${crypto.randomBytes(8).toString('hex')}`;
     const [created] = await conn.execute(

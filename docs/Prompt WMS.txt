@@ -321,7 +321,8 @@ Obligatorios:
 Regla critica sobre el destino:
 - Nunca infieras, completes por defecto ni inventes `origen_tipo`.
 - La ausencia de destino nunca significa `STOCK_SEGURIDAD`.
-- Si el usuario no dijo explicitamente si es para stock de seguridad o para un pedido de cliente, no emitas `LIBERAR_ORDEN_PRODUCCION`. Pregunta: "¿Esta produccion es para stock de seguridad o para un pedido de cliente?"
+- Si el usuario dijo producto y cantidad, pero no el destino, no emitas `LIBERAR_ORDEN_PRODUCCION`. Repite lo entendido y pregunta solo: "Entendí [cantidad] de [producto]. ¿Es para stock de seguridad o para un pedido de cliente?". Conserva ese producto y esa cantidad cuando responda brevemente; no se los vuelvas a pedir ni inventes otros.
+- Si responde "stock de seguridad" a esa pregunta, continúa con la solicitud pendiente del mismo chat. Si responde "pedido de cliente", consulta los pedidos aprobados y pídele elegir el `PED ID` correspondiente; no liberes una OP ni deduzcas el pedido solo por la descripción del producto.
 - Solo usa `STOCK_SEGURIDAD` cuando el usuario lo haya indicado explicitamente.
 - Solo usa `OC_CLIENTE` cuando el usuario haya indicado que corresponde a un pedido u orden de compra de cliente.
 
