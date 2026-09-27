@@ -25,6 +25,7 @@ function normalizeDraft(row) {
 }
 
 export default function AlertSettingsPage({ embedded = false }) {
+  const [configurationSection, setConfigurationSection] = useState('lots')
   const [rows, setRows] = useState([])
   const [drafts, setDrafts] = useState({})
   const [search, setSearch] = useState('')
@@ -149,14 +150,26 @@ export default function AlertSettingsPage({ embedded = false }) {
         <p className="text-xs text-muted mt-1">Alertas y reglas de lote de recepción. Cambiar estas opciones no modifica inventario existente.</p>
       </div>
 
+      <div role="tablist" aria-label="Tipo de configuración" className="flex flex-wrap gap-2 mb-4">
+        {[{ value: 'lots', label: 'Lotes de recepción' }, { value: 'alerts', label: 'Alertas de inventario' }].map((section) => (
+          <button key={section.value} type="button" role="tab" id={`configuration-tab-${section.value}`}
+            aria-selected={configurationSection === section.value} aria-controls={`configuration-panel-${section.value}`}
+            onClick={() => { setConfigurationSection(section.value); setMessage(null) }}
+            className={`px-4 py-2 rounded-lg border text-sm font-medium ${configurationSection === section.value
+              ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted hover:text-foreground'}`}>
+            {section.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5 border-y border-border py-4">
-        <label className="text-xs text-muted w-full max-w-md">
+        {configurationSection === 'alerts' && <label className="text-xs text-muted w-full max-w-md">
           Buscar SKU, producto, alias, proveedor o cliente
           <span className="relative block mt-1">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} className="input-field pl-9" placeholder="Ej: 00102 o Ashwagandha" />
           </span>
-        </label>
+        </label>}
         <button type="button" onClick={load} disabled={loading} className="inline-flex items-center gap-2 px-3 py-2 border border-border text-sm text-muted hover:text-foreground disabled:opacity-50">
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Actualizar
         </button>
@@ -164,6 +177,7 @@ export default function AlertSettingsPage({ embedded = false }) {
 
       {message && <div className={`mb-4 px-4 py-3 border text-sm ${message.ok ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-danger/10 border-danger/30 text-danger'}`}>{message.text}</div>}
 
+      {configurationSection === 'alerts' && <section role="tabpanel" id="configuration-panel-alerts" aria-labelledby="configuration-tab-alerts">
       <div className="mb-4 flex items-start gap-2 text-xs text-muted">
         <AlertTriangle size={15} className="mt-0.5 text-yellow-400 flex-shrink-0" />
         <p>El stock mínimo se expresa en la unidad del SKU. La permanencia máxima genera una alerta cuando un lote conserva saldo durante ese número de días.</p>
@@ -215,8 +229,9 @@ export default function AlertSettingsPage({ embedded = false }) {
           </tbody>
         </table>
       </div>
-      <section className="mt-8 border border-border rounded-lg bg-surface p-4 md:p-5">
-        <h3 className="text-base font-semibold text-foreground">Lote automático al recibir sin lote del proveedor</h3>
+      </section>}
+      {configurationSection === 'lots' && <section role="tabpanel" id="configuration-panel-lots" aria-labelledby="configuration-tab-lots" className="border border-border rounded-lg bg-surface p-4 md:p-5">
+        <h3 className="text-base font-semibold text-foreground">Asignar recepción sin lote del proveedor</h3>
         <p className="mt-1 text-xs text-muted">Configura cada combinación de SKU y proveedor que normalmente llega sin lote. Mientras la regla esté activa, el WMS generará y validará el lote interno antes de confirmar; si el proveedor comienza a informar un lote físico, desactiva la regla. El vencimiento siempre se solicita.</p>
         <form onSubmit={saveLotRule} className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           <label className="text-xs text-muted">SKU
@@ -244,7 +259,7 @@ export default function AlertSettingsPage({ embedded = false }) {
             <span className="block mt-1 font-mono text-sm text-primary">{lotPreview(exampleDate, offsetDays, initials) || 'Completa fecha, días y sigla'}</span>
           </div>
           <label className="flex items-center gap-2 text-sm text-foreground self-end">
-            <input type="checkbox" checked={ruleEnabled} onChange={(event) => setRuleEnabled(event.target.checked)} /> Regla activa
+            <input type="checkbox" checked={ruleEnabled} onChange={(event) => setRuleEnabled(event.target.checked)} /> El proveedor entrega este SKU sin lote
           </label>
           <button type="submit" disabled={savingRule || !selectedProduct || !selectedSupplier} className="btn-primary self-end disabled:opacity-40">{savingRule ? 'Guardando...' : 'Guardar regla'}</button>
         </form>
@@ -254,7 +269,7 @@ export default function AlertSettingsPage({ embedded = false }) {
             {rule.sku} · {rule.proveedor} · {rule.activa ? 'Activa' : 'Inactiva'} · restar {rule.dias_retroceso} días · sigla {rule.sigla}
           </p>)}
         </div>}
-      </section>
+      </section>}
     </div>
   )
 }

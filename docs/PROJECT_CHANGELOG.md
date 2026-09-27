@@ -5,6 +5,7 @@
 ## 2026-09-27 - Lotes internos de recepción configurables
 
 - Administración en Productos > Configuración operativa: umbrales existentes y regla explícita por SKU + proveedor (sigla, días calendario a restar, activa/inactiva y vista previa).
+- Acceso inmediato mediante dos opciones: Lotes de recepción (vista inicial) y Alertas de inventario. La asignación sin lote ya no queda debajo del catálogo de umbrales.
 - Formato sin SKU: `R41-01-23092026-CA`. El número de recepción distingue entregas; el ordinal distingue productos de la misma recepción. La fecha usa la recepción preparada menos los días configurados (4 para el caso CA).
 - Dashboard y WhatsApp muestran el lote interno antes de confirmar. Vencimiento físico obligatorio; ninguna regla activada de oficio y ningún ajuste de inventario al configurar.
 - Confirmación transaccional vuelve a validar el código. El origen generado se conserva en `lote_interno_origen`, separado del lote del proveedor, incluyendo partidas disponibles y bloqueadas.

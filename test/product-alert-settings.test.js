@@ -65,6 +65,11 @@ test('dashboard keeps alert settings in an admin-only section', () => {
   assert.match(page, /Proveedor:/u);
   assert.match(page, /Clientes:/u);
   assert.match(page, /row\.aliases/u);
+  assert.match(page, /useState\('lots'\)/u);
+  assert.match(page, /Lotes de recepción/u);
+  assert.match(page, /Alertas de inventario/u);
+  assert.match(page, /El proveedor entrega este SKU sin lote/u);
+  assert.match(page, /configurationSection === 'alerts'/u);
   const route = fs.readFileSync(path.join(__dirname, '../api/v1/inventory/alert-settings.js'), 'utf8');
   assert.match(route, /producto_relaciones_comerciales/u);
   assert.match(route, /pa\.origen = 'CLIENTE'/u);
