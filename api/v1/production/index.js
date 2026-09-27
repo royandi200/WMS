@@ -2,6 +2,7 @@
 const { query } = require('../../_lib/db');
 const { cors, requireCapability } = require('../../_lib/auth');
 const { CAPABILITIES } = require('../../_lib/capabilities');
+const { assignedFinishedLot } = require('../../_lib/production-lot');
 
 module.exports = async (req, res) => {
   cors(res, 'GET');
@@ -71,7 +72,12 @@ module.exports = async (req, res) => {
       if (!wasteByOrder.has(orderId)) wasteByOrder.set(orderId, []);
       wasteByOrder.get(orderId).push({ ...waste, cantidad: Number(waste.cantidad || 0) });
     }
-    for (const row of rows) row.mermas = wasteByOrder.get(Number(row.id)) || [];
+    for (const row of rows) {
+      if (row.estado === 'EN_PROCESO' && row.materiales_conf_en) {
+        row.lpn_terminado = assignedFinishedLot(row.codigo_orden);
+      }
+      row.mermas = wasteByOrder.get(Number(row.id)) || [];
+    }
     const countRows = await query(
       `SELECT COUNT(*) AS total FROM ordenes_produccion${estado ? ' WHERE estado=?' : ''}`,
       estado ? [estado] : []

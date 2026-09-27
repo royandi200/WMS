@@ -4105,10 +4105,15 @@ module.exports = async (req, res) => {
       case 'CONFIRMAR_MATERIALES_PRODUCCION': {
         const confirmation = await confirmProductionMaterials({ orderId: params.id_orden, userId: user.id });
         mensaje = confirmation.already_confirmed
-          ? `Los materiales de OP ID ${confirmation.order_id} | ${confirmation.order_code} ya estaban confirmados. No se modifico inventario.`
+          ? [
+              `Los materiales de OP ID ${confirmation.order_id} | ${confirmation.order_code} ya estaban confirmados. No se modifico inventario.`,
+              `Lote asignado de producto terminado: *${confirmation.lpn_terminado}*.`,
+            ].join('\n')
           : [
               `Materiales confirmados para OP ID ${confirmation.order_id} | ${confirmation.order_code}.`,
               'Orden en proceso.',
+              `Lote asignado de producto terminado: *${confirmation.lpn_terminado}*.`,
+              'Identifica con este lote la producción. El PT conforme ingresará a inventario al cerrar la OP.',
               ...confirmation.consumed.map(item => `- ${item.product} (${item.sku}): ${item.qty_taken} ${item.unit || ''} | lote ${item.lpn} | ubicacion ${item.location || 'N/A'}`),
             ].join('\n');
         responseContext.production_confirmation = confirmation;

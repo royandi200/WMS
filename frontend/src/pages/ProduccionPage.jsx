@@ -143,7 +143,12 @@ export default function ProduccionPage() {
                             <span className="block max-w-[220px] text-muted">{merma.motivo || 'Sin motivo'}{merma.registrado_por ? ` · ${merma.registrado_por}` : ''}{merma.creado_en ? ` · ${safeDate(merma.creado_en)}` : ''}</span>
                           </span>
                         )) : empty}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-foreground">{r.output_lot ?? empty}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">
+                          {r.output_lot ?? empty}
+                          {r.output_lot && r.status === 'EN_PROCESO' && (
+                            <span className="block font-sans text-[11px] text-muted">Asignado · ingresa al cerrar</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">{r.current_phase ?? empty}</td>
                         <td className="px-4 py-3">
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${st.css}`}>{st.label}</span>
@@ -672,7 +677,7 @@ function ConfirmMaterialsForm({ loading, onSubmit }) {
     event.preventDefault()
     const result = await onSubmit({ order_id: orderId.trim() })
     setToast(result.ok
-      ? { msg: result.data?.already_confirmed ? 'Los materiales ya estaban confirmados' : 'Materiales confirmados; producción iniciada', ok: true }
+      ? { msg: `${result.data?.already_confirmed ? 'Los materiales ya estaban confirmados' : 'Materiales confirmados; producción iniciada'}. Lote PT asignado: ${result.data?.lpn_terminado || 'no disponible'}. El PT conforme ingresará al cerrar la OP.`, ok: true }
       : { msg: result.message, ok: false })
   }
   return (

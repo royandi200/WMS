@@ -6,6 +6,7 @@ const { assertInternalProductionProduct } = require('./product-modes');
 const { resolveProductReference } = require('./product-references');
 const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
 const { planProductionMaterials, roundQty } = require('./production-material-availability');
+const { assignedFinishedLot } = require('./production-lot');
 
 function httpError(status, message, data) {
   const error = new Error(message);
@@ -282,9 +283,11 @@ async function confirmProductionMaterials({ orderId, userId }) {
     );
     if (!orders.length) throw httpError(404, 'Orden no encontrada');
     const order = orders[0];
+    const finishedLot = assignedFinishedLot(order.codigo_orden);
     if (order.estado === 'EN_PROCESO' && order.materiales_conf_en) {
       await conn.commit();
-      return { order_id: order.id, order_code: order.codigo_orden, phase: order.fase, already_confirmed: true, consumed: [] };
+      return { order_id: order.id, order_code: order.codigo_orden, phase: order.fase,
+        lpn_terminado: finishedLot, already_confirmed: true, consumed: [] };
     }
     if (order.estado !== 'APROBADA' || order.fase !== 'F0') {
       throw httpError(409, `La orden esta ${order.estado} en fase ${order.fase} y no puede iniciar`);
@@ -383,7 +386,8 @@ async function confirmProductionMaterials({ orderId, userId }) {
     );
     const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
-    const result = { order_id: order.id, order_code: order.codigo_orden, phase: 'F1', already_confirmed: false, consumed };
+    const result = { order_id: order.id, order_code: order.codigo_orden, phase: 'F1',
+      lpn_terminado: finishedLot, already_confirmed: false, consumed };
     const startedAt = new Date().toLocaleString('es-CO', {
       timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short',
     });
@@ -399,6 +403,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
         `Producto: ${order.producto_nombre}`,
         `SKU: ${order.producto_sku}`,
         `Cantidad planeada: ${Number(order.cantidad_planeada)} und`,
+        `Lote asignado de producto terminado: *${finishedLot}*`,
         `Origen: ${order.origen_tipo === 'OC_CLIENTE' ? `OC ${order.referencia_cliente} - ${order.cliente_final}` : 'stock de seguridad'}`,
         `Confirmo: ${actors[0]?.nombre || 'Usuario WMS'} | ${startedAt}`,
         '',
@@ -412,6 +417,7 @@ async function confirmProductionMaterials({ orderId, userId }) {
           '',
         ]),
         '*Estado: EN_PROCESO*',
+        'El lote identifica esta producción; el PT conforme ingresará a inventario al cerrar la OP.',
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;

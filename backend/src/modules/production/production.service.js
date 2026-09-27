@@ -133,7 +133,12 @@ exports.confirmMaterials = async ({ order_id, exception_lot_id }, usuario) => {
       materiales_conf_en:       new Date(),
     }, { transaction: t });
 
-    return { order_code: orden.codigo_orden, phase: 'F1', consumed: consumido };
+    return {
+      order_code: orden.codigo_orden,
+      phase: 'F1',
+      lpn_terminado: `LPN-${orden.codigo_orden}`,
+      consumed: consumido,
+    };
   });
 };
 

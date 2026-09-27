@@ -3,6 +3,7 @@ const { createConnection } = require('./db');
 const { normalizeExpiryDate } = require('./production-close-input');
 const { notifyRoles } = require('./builderbot-notifications');
 const { consumeCloseMaterials, normalizeCloseMaterials } = require('./production-close-materials');
+const { assignedFinishedLot } = require('./production-lot');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -106,7 +107,7 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
     );
     if (!orders.length) throw httpError(404, 'Orden no encontrada');
     const order = orders[0];
-    const lpn = `LPN-${order.codigo_orden}`;
+    const lpn = assignedFinishedLot(order.codigo_orden);
     if (order.estado === 'CERRADA') {
       const [existingLots] = await conn.execute(
         `SELECT l.lpn, u.codigo AS ubicacion FROM lots l
