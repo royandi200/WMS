@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
 import { useAuthStore } from '../store/authStore'
 import AlertSettingsPage from './AlertSettingsPage'
+
+const PAGE_SIZE = 50
 
 const TYPES = [
   { value: 'PT', label: 'Producto terminado' },
@@ -62,23 +64,45 @@ export default function ProductosPage() {
   const isAdmin = roles.some((role) => String(role).toLowerCase() === 'admin')
   const [search,   setSearch]   = useState('')
   const [typeF,    setTypeF]    = useState('')
+  const [page,     setPage]     = useState(1)
   const [expanded, setExpanded] = useState(null)
   const [editing,  setEditing]  = useState(null)
   const [form,     setForm]     = useState(EMPTY_FORM)
   const [toast,    setToast]    = useState(null)
 
-  const { list, detail, loading, error, fetchList, fetchOne, create, update, toggle, clearError } = useProductsStore()
-  useEffect(() => { fetchList() }, [])
+  const { list, total, detail, loading, error, fetchList, fetchOne, create, update, toggle, clearError } = useProductsStore()
+
+  // El buscador consulta el catalogo completo en el servidor (no solo la
+  // pagina visible). classifyProduct es una heuristica de nombre/SKU que
+  // el servidor no conoce, asi que el filtro de tipo se sigue aplicando
+  // en el cliente, sobre la pagina ya cargada.
+  //
+  // La pagina [page] es la unica que dispara la consulta al servidor. El
+  // buscador, con un pequeño retraso para no consultar en cada tecla,
+  // solo mueve la pagina a 1; si ya estaba en 1, no hay cambio de pagina
+  // que dispare la consulta, asi que la pide directamente.
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) return
+    const timer = setTimeout(() => {
+      if (page === 1) fetchList({ search, page: 1, limit: PAGE_SIZE })
+      else setPage(1)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    fetchList({ search, page, limit: PAGE_SIZE })
+    isFirstRender.current = false
+  }, [page])
 
   const showToast = (msg, ok) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 4000) }
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  const filtered = list.filter((p) => {
-    const q = search.toLowerCase()
-    const matchSearch = !q || p.sku?.toLowerCase().includes(q) || p.name?.toLowerCase().includes(q)
-    const matchType = !typeF || classifyProduct(p) === typeF
-    return matchSearch && matchType
-  })
+  const filtered = typeF ? list.filter((p) => classifyProduct(p) === typeF) : list
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
+  const rangeEnd = Math.min(page * PAGE_SIZE, total)
 
   const handleExpand = async (id) => {
     if (Number(expanded) === Number(id)) {
@@ -128,7 +152,14 @@ export default function ProductosPage() {
 
   return (
     <div>
-      <h1 className="text-lg md:text-xl font-semibold text-foreground mb-4 md:mb-6">Productos</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4 md:mb-6">
+        <h1 className="text-lg md:text-xl font-semibold text-foreground">Productos</h1>
+        <span className="text-sm text-muted">
+          {typeF
+            ? <>{filtered.length} de {list.length} en esta pagina ({total} en total)</>
+            : <>{total} producto{total !== 1 ? 's' : ''} en total</>}
+        </span>
+      </div>
 
       <div className="flex gap-1 mb-4 md:mb-6 border-b border-border overflow-x-auto pb-px scrollbar-none">
         {TABS.filter((_, i) => i !== 2 || isAdmin).map((t, i) => (
@@ -321,11 +352,30 @@ export default function ProductosPage() {
             </div>
           )}
 
-          {filtered.length > 0 && (
-            <p className="mt-3 text-xs text-muted">
-              {filtered.length} producto{filtered.length !== 1 ? 's' : ''} mostrado{filtered.length !== 1 ? 's' : ''}
-              {(search || typeF) ? ` (filtrado de ${list.length})` : ''}
-            </p>
+          {total > 0 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted">
+                Mostrando {rangeStart}-{rangeEnd} de {total}
+                {typeF ? ` (filtro de tipo aplicado sobre esta pagina)` : ''}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loading}
+                  className="px-3 py-1.5 text-xs border border-border rounded-md text-muted hover:text-foreground hover:border-primary/50 disabled:opacity-40 disabled:hover:border-border transition-colors"
+                >
+                  ← Anterior
+                </button>
+                <span className="text-xs text-muted">Página {page} de {totalPages}</span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                  className="px-3 py-1.5 text-xs border border-border rounded-md text-muted hover:text-foreground hover:border-primary/50 disabled:opacity-40 disabled:hover:border-border transition-colors"
+                >
+                  Siguiente →
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
