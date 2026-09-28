@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
 import { useAuthStore } from '../store/authStore'
 import AlertSettingsPage from './AlertSettingsPage'
@@ -209,146 +209,167 @@ export default function ProductosPage() {
           )}
 
           {!loading && filtered.length > 0 && (
-            <div className="space-y-2">
-              {filtered.map((p) => {
-                const showDetail = Number(expanded) === Number(p.id) && Number(detail?.id) === Number(p.id)
-                const lotes = showDetail ? (detail?.lotes || []) : []
-                return (
-                  <div key={p.id} className={`bg-surface border rounded-lg overflow-hidden transition-colors ${
-                    p.active ? 'border-border' : 'border-border/40 opacity-60'
-                  }`}>
-                    <div className="flex items-center gap-3 px-4 py-3">
-                      <button
-                        onClick={() => handleExpand(p.id)}
-                        className="text-muted hover:text-foreground transition-colors text-xs w-4"
-                      >
-                        {Number(expanded) === Number(p.id) ? '▲' : '▼'}
-                      </button>
-
-                      <span className={`hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        TYPE_COLOR[classifyProduct(p)] || 'text-muted bg-white/5'
-                      }`}>
-                        {typeLabel(classifyProduct(p))}
-                      </span>
-
-                      <div className="flex-1 min-w-0">
-                        <span className="font-mono text-sm text-primary font-semibold">{p.sku}</span>
-                        <span className="text-foreground text-sm ml-2 truncate">{p.name}</span>
-                      </div>
-
-                      <div className="hidden xl:grid grid-cols-4 gap-4 text-xs text-muted tabular-nums min-w-[420px]">
-                        <span>Disp <strong className="text-foreground">{p.disponible ?? 0}</strong></span>
-                        <span>Cuar <strong className="text-foreground">{p.cuarentena ?? 0}</strong></span>
-                        <span>Res <strong className="text-foreground">{p.reservado ?? 0}</strong></span>
-                        <span>Total <strong className="text-foreground">{p.total_fisico ?? 0}</strong></span>
-                      </div>
-
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                        SEMAFORO_STYLE[p.semaforo] || 'text-muted bg-white/5 border-border'
-                      }`}>
-                        {p.semaforo || 'OK'}
-                      </span>
-
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                        p.active ? 'text-green-400 bg-green-400/10' : 'text-muted bg-white/5'
-                      }`}>
-                        {p.active ? 'Activo' : 'Inactivo'}
-                      </span>
-
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => startEdit(p)}
-                          className="text-xs px-2 py-1 border border-border rounded hover:border-primary/50 text-muted hover:text-foreground transition-colors"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => handleToggle(p)}
-                          className={`text-xs px-2 py-1 border rounded transition-colors ${
-                            p.active
-                              ? 'border-danger/30 text-danger hover:bg-danger/10'
-                              : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
-                          }`}
-                        >
-                          {p.active ? 'Inactivar' : 'Activar'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {Number(expanded) === Number(p.id) && (
-                      <div className="border-t border-border/50 px-4 py-3 space-y-4 text-xs">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <Detail label="Disponible" value={p.disponible ?? 0} />
-                          <Detail label="Cuarentena" value={p.cuarentena ?? 0} />
-                          <Detail label="Reservado" value={p.reservado ?? 0} />
-                          <Detail label="Total físico" value={p.total_fisico ?? 0} />
-                          <Detail label="Lotes activos" value={p.lotes_activos ?? 0} />
-                          <Detail label="Próx. vencimiento" value={p.proximo_vencimiento || '—'} />
-                          <Detail label="Últ. movimiento" value={p.ultimo_movimiento || '—'} />
-                          <Detail label="Semáforo" value={p.semaforo || 'OK'} />
-                        </div>
-
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          <Detail label="ID" value={p.id} mono />
-                          <Detail label="Descripción" value={p.description || '—'} />
-                          <Detail label="SIIGO ID" value={p.siigo_id || '—'} />
-                          <Detail label="SIIGO Code" value={p.siigo_code || '—'} />
-                          <Detail label="SIIGO Activo" value={p.siigo_active ? 'Sí' : 'No'} />
-                          <Detail label="Últ. sync" value={p.siigo_sync_at?.slice(0,10) || '—'} />
-                          <Detail label="Creado" value={p.createdAt?.slice(0,10) || p.created_at?.slice(0,10) || '—'} />
-                          <Detail label="Unidad" value={p.unit || 'und'} />
-                          <Detail label="Stock mínimo" value={p.min_stock ?? 0} />
-                          <Detail label="Stock máximo" value={p.max_stock ?? 0} />
-                        </div>
-
-                        <div>
-                          <p className="text-sm font-semibold text-foreground mb-2">Detalle por lote</p>
-                          {!showDetail ? (
-                            <p className="text-muted">Cargando detalle…</p>
-                          ) : lotes.length === 0 ? (
-                            <p className="text-muted">Sin lotes registrados para este producto.</p>
-                          ) : (
-                            <div className="overflow-x-auto rounded-lg border border-border/60">
-                              <table className="min-w-full text-xs">
-                                <thead className="bg-white/5 text-muted">
-                                  <tr>
-                                    <th className="text-left px-3 py-2">Lote</th>
-                                    <th className="text-right px-3 py-2">Cantidad</th>
-                                    <th className="text-right px-3 py-2">Reservado</th>
-                                    <th className="text-right px-3 py-2">Disponible</th>
-                                    <th className="text-left px-3 py-2">Estado</th>
-                                    <th className="text-left px-3 py-2">Origen</th>
-                                    <th className="text-left px-3 py-2">Vence</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {lotes.map((l) => (
-                                    <tr key={l.stock_id || l.lote} className="border-t border-border/40">
-                                      <td className="px-3 py-2 font-mono text-foreground break-all">{l.lote || '—'}</td>
-                                      <td className="px-3 py-2 text-right text-foreground">{l.cantidad}</td>
-                                      <td className="px-3 py-2 text-right text-foreground">{l.reservada}</td>
-                                      <td className="px-3 py-2 text-right text-foreground">{l.disponible_lote}</td>
-                                      <td className="px-3 py-2">
-                                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
-                                          LOTE_STATUS_STYLE[l.estado_lote] || 'text-muted bg-white/5 border-border'
-                                        }`}>
-                                          {l.estado_lote}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-2 text-foreground">{l.origen_lote}</td>
-                                      <td className="px-3 py-2 text-foreground">{l.vence || '—'}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="min-w-full text-sm">
+                <thead className="bg-white/5 text-muted text-xs sticky top-0 z-10">
+                  <tr>
+                    <th className="w-8 px-3 py-2"></th>
+                    <th className="hidden sm:table-cell text-left px-3 py-2 whitespace-nowrap">Tipo</th>
+                    <th className="text-left px-3 py-2 min-w-[240px]">Producto</th>
+                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Disp</th>
+                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Cuar</th>
+                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Res</th>
+                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Total</th>
+                    <th className="text-left px-3 py-2 whitespace-nowrap">Estado stock</th>
+                    <th className="text-left px-3 py-2 whitespace-nowrap">Activo</th>
+                    <th className="text-right px-3 py-2 whitespace-nowrap">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((p) => {
+                    const showDetail = Number(expanded) === Number(p.id) && Number(detail?.id) === Number(p.id)
+                    const lotes = showDetail ? (detail?.lotes || []) : []
+                    const isOpen = Number(expanded) === Number(p.id)
+                    return (
+                      <Fragment key={p.id}>
+                        <tr className={`border-t border-border/60 ${p.active ? '' : 'opacity-60'}`}>
+                          <td className="px-3 py-2.5 align-top">
+                            <button
+                              onClick={() => handleExpand(p.id)}
+                              className="text-muted hover:text-foreground transition-colors text-xs"
+                            >
+                              {isOpen ? '▲' : '▼'}
+                            </button>
+                          </td>
+                          <td className="hidden sm:table-cell px-3 py-2.5 align-top whitespace-nowrap">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                              TYPE_COLOR[classifyProduct(p)] || 'text-muted bg-white/5'
+                            }`}>
+                              {typeLabel(classifyProduct(p))}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 align-top">
+                            <div className="font-mono text-sm text-primary font-semibold">{p.sku}</div>
+                            <div className="text-foreground text-sm">{p.name}</div>
+                          </td>
+                          <td className="hidden xl:table-cell px-3 py-2.5 align-top text-right tabular-nums text-foreground">{p.disponible ?? 0}</td>
+                          <td className="hidden xl:table-cell px-3 py-2.5 align-top text-right tabular-nums text-foreground">{p.cuarentena ?? 0}</td>
+                          <td className="hidden xl:table-cell px-3 py-2.5 align-top text-right tabular-nums text-foreground">{p.reservado ?? 0}</td>
+                          <td className="hidden xl:table-cell px-3 py-2.5 align-top text-right tabular-nums text-foreground">{p.total_fisico ?? 0}</td>
+                          <td className="px-3 py-2.5 align-top whitespace-nowrap">
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
+                              SEMAFORO_STYLE[p.semaforo] || 'text-muted bg-white/5 border-border'
+                            }`}>
+                              {p.semaforo || 'OK'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 align-top whitespace-nowrap">
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                              p.active ? 'text-green-400 bg-green-400/10' : 'text-muted bg-white/5'
+                            }`}>
+                              {p.active ? 'Activo' : 'Inactivo'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 align-top">
+                            <div className="flex justify-end gap-1">
+                              <button
+                                onClick={() => startEdit(p)}
+                                className="text-xs px-2 py-1 border border-border rounded hover:border-primary/50 text-muted hover:text-foreground transition-colors whitespace-nowrap"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                onClick={() => handleToggle(p)}
+                                className={`text-xs px-2 py-1 border rounded transition-colors whitespace-nowrap ${
+                                  p.active
+                                    ? 'border-danger/30 text-danger hover:bg-danger/10'
+                                    : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
+                                }`}
+                              >
+                                {p.active ? 'Inactivar' : 'Activar'}
+                              </button>
                             </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+                          </td>
+                        </tr>
+
+                        {isOpen && (
+                          <tr className="border-t border-border/40 bg-surface/60">
+                            <td colSpan={10} className="px-4 py-4 space-y-4 text-xs">
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <Detail label="Disponible" value={p.disponible ?? 0} />
+                                <Detail label="Cuarentena" value={p.cuarentena ?? 0} />
+                                <Detail label="Reservado" value={p.reservado ?? 0} />
+                                <Detail label="Total físico" value={p.total_fisico ?? 0} />
+                                <Detail label="Lotes activos" value={p.lotes_activos ?? 0} />
+                                <Detail label="Próx. vencimiento" value={p.proximo_vencimiento || '—'} />
+                                <Detail label="Últ. movimiento" value={p.ultimo_movimiento || '—'} />
+                                <Detail label="Semáforo" value={p.semaforo || 'OK'} />
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                <Detail label="ID" value={p.id} mono />
+                                <Detail label="Descripción" value={p.description || '—'} />
+                                <Detail label="SIIGO ID" value={p.siigo_id || '—'} />
+                                <Detail label="SIIGO Code" value={p.siigo_code || '—'} />
+                                <Detail label="SIIGO Activo" value={p.siigo_active ? 'Sí' : 'No'} />
+                                <Detail label="Últ. sync" value={p.siigo_sync_at?.slice(0,10) || '—'} />
+                                <Detail label="Creado" value={p.createdAt?.slice(0,10) || p.created_at?.slice(0,10) || '—'} />
+                                <Detail label="Unidad" value={p.unit || 'und'} />
+                                <Detail label="Stock mínimo" value={p.min_stock ?? 0} />
+                                <Detail label="Stock máximo" value={p.max_stock ?? 0} />
+                              </div>
+
+                              <div>
+                                <p className="text-sm font-semibold text-foreground mb-2">Detalle por lote</p>
+                                {!showDetail ? (
+                                  <p className="text-muted">Cargando detalle…</p>
+                                ) : lotes.length === 0 ? (
+                                  <p className="text-muted">Sin lotes registrados para este producto.</p>
+                                ) : (
+                                  <div className="overflow-x-auto rounded-lg border border-border/60">
+                                    <table className="min-w-full text-xs">
+                                      <thead className="bg-white/5 text-muted">
+                                        <tr>
+                                          <th className="text-left px-3 py-2">Lote</th>
+                                          <th className="text-right px-3 py-2">Cantidad</th>
+                                          <th className="text-right px-3 py-2">Reservado</th>
+                                          <th className="text-right px-3 py-2">Disponible</th>
+                                          <th className="text-left px-3 py-2">Estado</th>
+                                          <th className="text-left px-3 py-2">Origen</th>
+                                          <th className="text-left px-3 py-2">Vence</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {lotes.map((l) => (
+                                          <tr key={l.stock_id || l.lote} className="border-t border-border/40">
+                                            <td className="px-3 py-2 font-mono text-foreground break-all">{l.lote || '—'}</td>
+                                            <td className="px-3 py-2 text-right text-foreground">{l.cantidad}</td>
+                                            <td className="px-3 py-2 text-right text-foreground">{l.reservada}</td>
+                                            <td className="px-3 py-2 text-right text-foreground">{l.disponible_lote}</td>
+                                            <td className="px-3 py-2">
+                                              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                                                LOTE_STATUS_STYLE[l.estado_lote] || 'text-muted bg-white/5 border-border'
+                                              }`}>
+                                                {l.estado_lote}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-foreground">{l.origen_lote}</td>
+                                            <td className="px-3 py-2 text-foreground">{l.vence || '—'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 
