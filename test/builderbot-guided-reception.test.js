@@ -28,7 +28,7 @@ function guidedDb({ singleSku = null, batchProducts = false } = {}) {
     { id: 6, siigo_code: '00006-TRP', nombre: 'TARRO', alias: 'tarros' },
   );
   if (batchProducts) products[1].nombre = 'GOMAS ASHWAGANDHA -MAGNESIO Y VITAMINA C';
-  const state = { draft: null, recentLog: [], inventoryWrites: 0, transactions: 0 };
+  const state = { draft: null, extraDrafts: [], recentLog: [], inventoryWrites: 0, transactions: 0 };
   const db = {
     async beginTransaction() { state.transactions += 1; },
     async commit() { state.transactions -= 1; },
@@ -83,7 +83,9 @@ function guidedDb({ singleSku = null, batchProducts = false } = {}) {
       ]];
       if (/SELECT id FROM recepciones WHERE id = \? FOR UPDATE/u.test(sql)) return [[{ id: 101 }]];
       if (/FROM recepcion_confirmacion_borradores d/u.test(sql)) {
-        return [state.draft ? [{ ...state.draft, recepcion_id: 101, orden_compra_id: 37 }] : []];
+        return [[...state.extraDrafts, ...(state.draft ? [{ ...state.draft, recepcion_id: 101,
+          orden_compra_id: 37, reception_number: 'REC-OC-37-001' }] : [])]
+          .filter(row => Number(row.usuario_id) === Number(values[0]))];
       }
       if (/FROM recepcion_confirmacion_borradores\s+WHERE recepcion_id/u.test(sql)) {
         return [state.draft ? [{ ...state.draft }] : []];
@@ -359,6 +361,145 @@ test('guided OC reception refuses to infer a new order from model memory alone',
     error => error.status === 409 && /OC ID N/u.test(error.message)
   );
   assert.equal(state.draft, null);
+});
+
+async function twoDraftReviews() {
+  const fixture = guidedDb();
+  const { db, state } = fixture;
+  const review = await advanceGuidedReception({ db, user: { id: 5 }, rawText: 'OC ID 37',
+    params: { avance: { producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  const otherPayload = { ...JSON.parse(state.draft.payload_json), orderId: 44, receptionId: 132 };
+  state.extraDrafts = [{ usuario_id: 5, recepcion_id: 132, orden_compra_id: 44,
+    reception_number: 'REC-OC-44-001', payload_json: JSON.stringify(otherPayload),
+    payload_hash: createHash('sha256').update(canonicalJson(otherPayload)).digest('hex') }];
+  // The unrelated draft appears first: timestamps must not choose the order.
+  state.recentLog = [{ action: 'AVANZAR_RECEPCION_GUIADA_OC', response: JSON.stringify({
+    message: review.message, context: { reception: review },
+  }) }];
+  return { ...fixture, review };
+}
+
+test('yes uses the last chat SKU review with two active receipts, not a model ID', async () => {
+  const { db, state } = await twoDraftReviews();
+  const other = JSON.stringify(state.extraDrafts);
+  assert.equal(await hasPendingSkuReview(db, 5, '573150000059'), true);
+  const result = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'sí', params: { orden_compra_id: 44, avance: {} } });
+  assert.equal(result.reception_id, 101);
+  assert.equal(result.purchase_order_id, 37);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
+  assert.equal(JSON.stringify(state.extraDrafts), other);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a review already shown before structured context can be resumed with yes', async () => {
+  const { db, state, review } = await twoDraftReviews();
+  state.recentLog[0].response = JSON.stringify({ mensaje: review.message,
+    context: { reception: { guided: true, sku_review: true, inventory_changed: false } } });
+  const result = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'sí', params: { avance: {} } });
+  assert.match(result.message, /00001-TPBI quedó revisado/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('corrections stay in the last displayed receipt with another draft open', async () => {
+  const { db, state } = await twoDraftReviews();
+  const result = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'Corrección ubicación A11', params: { avance: {} } });
+  assert.equal(result.purchase_order_id, 37);
+  assert.equal(result.review_sku, '00001-TPBI');
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].ubicacion, 'A11');
+  assert.equal(JSON.parse(state.extraDrafts[0].payload_json).entries['00001-TPBI'].ubicacion, 'A8');
+});
+
+test('multiple drafts remain ambiguous without a valid last reply for this chat', async () => {
+  for (const variant of ['no-phone', 'expired-context', 'unrelated', 'missing-draft',
+    'different-order', 'completed', 'inventory-change', 'changed-sku', 'invalid-json', 'legacy-wrong-number', 'legacy-wrong-sku']) {
+    const { db, state, review } = await twoDraftReviews();
+    const context = { ...review };
+    if (variant === 'expired-context') state.recentLog = [];
+    if (variant === 'unrelated') state.recentLog.unshift({ action: 'CONSULTAR_STOCK', response: '{}' });
+    if (variant === 'missing-draft') context.reception_id = 999;
+    if (variant === 'different-order') context.purchase_order_id = 44;
+    if (variant === 'completed') context.already_completed = true;
+    if (variant === 'inventory-change') context.inventory_changed = true;
+    if (variant === 'changed-sku') context.review_sku = '00051-MPASH';
+    if (!['expired-context', 'unrelated'].includes(variant)) {
+      state.recentLog[0].response = JSON.stringify({ message: review.message,
+        context: { reception: context } });
+    }
+    if (variant === 'invalid-json') state.recentLog[0].response = 'not JSON';
+    if (variant.startsWith('legacy-')) state.recentLog[0].response = JSON.stringify({
+      message: variant === 'legacy-wrong-number' ? review.message.replace('REC-OC-37-001', 'REC-OC-37-002')
+        : review.message.replace('Producto: 00001-TPBI', 'Producto: 00051-MPASH'),
+      context: { reception: { sku_review: true, inventory_changed: false } },
+    });
+    const before = state.draft.payload_json;
+    await assert.rejects(advanceGuidedReception({ db, user: { id: 5 },
+      from: variant === 'no-phone' ? undefined : '573150000059', rawText: 'sí', params: { avance: {} } }),
+    /Hay varias recepciones guiadas abiertas/u, variant);
+    assert.equal(state.draft.payload_json, before, variant);
+    assert.equal(state.inventoryWrites, 0, variant);
+  }
+});
+
+test('recent chat context cannot claim another operator receipt draft', async () => {
+  const { db, state, review } = await twoDraftReviews();
+  const otherPayload = { ...JSON.parse(state.extraDrafts[0].payload_json), orderId: 45, receptionId: 133 };
+  state.extraDrafts.push({ usuario_id: 6, recepcion_id: 133, orden_compra_id: 45,
+    payload_json: JSON.stringify(otherPayload),
+    payload_hash: createHash('sha256').update(canonicalJson(otherPayload)).digest('hex') });
+  state.recentLog[0].response = JSON.stringify({ context: { reception: {
+    ...review, reception_id: 133, purchase_order_id: 45,
+  } } });
+  await assert.rejects(hasPendingSkuReview(db, 5, '573150000059'), /Hay varias/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('transport duplicates do not hide the last SKU review', async () => {
+  const { db, state } = await twoDraftReviews();
+  state.recentLog.unshift({ action: 'AVANZAR_RECEPCION_GUIADA_OC',
+    response: JSON.stringify({ duplicate: true }) });
+  assert.equal(await hasPendingSkuReview(db, 5, '573150000059'), true);
+});
+
+test('a final summary correction resolves its receipt, never confirms inventory with yes', async () => {
+  const { db, state } = await twoDraftReviews();
+  const user = { id: 5 };
+  const from = '573150000059';
+  const send = async (rawText, params) => {
+    const result = await advanceGuidedReception({ db, user, from, rawText, params });
+    state.recentLog = [{ action: 'AVANZAR_RECEPCION_GUIADA_OC',
+      response: JSON.stringify({ message: result.message, context: { reception: result } }) }];
+    return result;
+  };
+  await send('sí', { avance: {} });
+  await send('gomas, cien disponibles en B16', {
+    avance: { producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16' },
+  });
+  const preview = await send('sí', { avance: {} });
+  assert.equal(preview.requires_confirmation, true);
+  assert.equal(preview.review_sku, null);
+  assert.equal(await hasPendingSkuReview(db, 5, from), false);
+  const repeated = await send('sí', { avance: {} });
+  assert.equal(repeated.requires_confirmation, true);
+  assert.equal(repeated.reception_id, 101);
+  const corrected = await send('Corrección ubicación de tapas A11', { avance: {} });
+  assert.equal(corrected.reception_id, 101);
+  assert.equal(corrected.review_sku, '00001-TPBI');
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].ubicacion, 'A11');
+  const updatedPreview = await send('sí', { avance: {} });
+  assert.equal(updatedPreview.requires_confirmation, true);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('explicit current-message order overrides the last chat review', async () => {
+  const { db, state, review } = await twoDraftReviews();
+  state.recentLog[0].response = JSON.stringify({ context: { reception: { ...review,
+    reception_id: 132, purchase_order_id: 44 } } });
+  const result = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
+    rawText: 'OC ID 37: sí', params: { avance: {} } });
+  assert.equal(result.reception_id, 101);
 });
 
 test('first product follows the last prepared reception without repeating OC ID', async () => {

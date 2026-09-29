@@ -165,9 +165,10 @@ function typedOrderId(text) {
   return reference?.id || null;
 }
 
-async function activeUserSession(db, userId, { allowPreview = false } = {}) {
+async function activeUserSession(db, userId, { allowPreview = false, from } = {}) {
   const [rows] = await db.execute(
-    `SELECT d.recepcion_id, d.orden_compra_id, d.usuario_id, d.payload_json, d.payload_hash
+    `SELECT d.recepcion_id, d.orden_compra_id, d.usuario_id, d.payload_json, d.payload_hash,
+            r.numero AS reception_number
        FROM recepcion_confirmacion_borradores d
        JOIN recepciones r ON r.id = d.recepcion_id
       WHERE d.usuario_id = ? AND d.estado = 'PENDIENTE' AND d.expira_en > NOW()
@@ -179,14 +180,17 @@ async function activeUserSession(db, userId, { allowPreview = false } = {}) {
     const payload = parseDraft(row, row.orden_compra_id, row.recepcion_id, userId);
     return payload.version === 2 || allowPreview && payload.version === 1;
   });
-  if (sessions.length > 1) {
+  if (rows.length > 1) {
+    const contextual = await recentlyPreparedSession(db, from, { sessions: rows });
+    if (contextual) return sessions.includes(contextual) ? contextual : null;
+    if (!sessions.length) return null;
     throw inputError('Hay varias recepciones guiadas abiertas. Indica OC ID N o IO ID N', 409);
   }
   return sessions[0] || null;
 }
 
-async function hasPendingSkuReview(db, userId) {
-  const session = await activeUserSession(db, userId);
+async function hasPendingSkuReview(db, userId, from) {
+  const session = await activeUserSession(db, userId, { from });
   if (!session) return false;
   const payload = parseDraft(session, session.orden_compra_id, session.recepcion_id, userId);
   return payload.version === 2 && (Boolean(payload.reviewSku)
@@ -194,18 +198,18 @@ async function hasPendingSkuReview(db, userId) {
       && entry.cantidad && entry.condicion && entry.ubicacion));
 }
 
-async function hasSelectedGuidedSku(db, userId) {
-  const session = await activeUserSession(db, userId);
+async function hasSelectedGuidedSku(db, userId, from) {
+  const session = await activeUserSession(db, userId, { from });
   if (!session) return false;
   const payload = parseDraft(session, session.orden_compra_id, session.recepcion_id, userId);
   return payload.version === 2 && Boolean(payload.reviewSku || payload.selectedSku);
 }
 
-async function hasActiveReceptionSession(db, userId) {
-  return Boolean(await activeUserSession(db, userId, { allowPreview: true }));
+async function hasActiveReceptionSession(db, userId, from) {
+  return Boolean(await activeUserSession(db, userId, { allowPreview: true, from }));
 }
 
-async function recentlyPreparedSession(db, from) {
+async function recentlyPreparedSession(db, from, { sessions } = {}) {
   if (!from) return null;
   const [rows] = await db.execute(
     `SELECT action, response
@@ -223,13 +227,44 @@ async function recentlyPreparedSession(db, from) {
       return null;
     }
     if (response?.duplicate === true) continue;
-    if (row.action !== 'PREPARAR_RECEPCION_OC') return null;
+    if (sessions) {
+      if (!['PREPARAR_RECEPCION_OC', 'AVANZAR_RECEPCION_GUIADA_OC'].includes(row.action)) return null;
+    } else if (row.action !== 'PREPARAR_RECEPCION_OC') return null;
     const context = response?.context?.reception;
-    const receptionId = Number(context?.reception_id);
-    const orderId = Number(context?.purchase_order_id);
+    let receptionId = Number(context?.reception_id);
+    let orderId = Number(context?.purchase_order_id);
+    // Compatibility with reviews already shown before structured IDs were added.
+    // Read only the WMS-generated header, never user text or model memory.
+    if (sessions && row.action === 'AVANZAR_RECEPCION_GUIADA_OC'
+      && context?.reception_id == null && context?.purchase_order_id == null) {
+      const message = String(response?.message || response?.mensaje || '');
+      const headers = [...message.matchAll(/^(?:(?:📋|🧾) Revisa|🧾 Recepción guiada|🧾 Corrección del resumen) (?:OC|IO) ID (\d+) \| (REC-[A-Z0-9-]+)\s*$/gmu)];
+      if (headers.length !== 1) return null;
+      orderId = Number(headers[0][1]);
+      const matches = sessions.filter(session => Number(session.orden_compra_id) === orderId
+        && session.reception_number === headers[0][2]);
+      if (matches.length !== 1) return null;
+      receptionId = Number(matches[0].recepcion_id);
+    }
     if (!Number.isSafeInteger(receptionId) || receptionId <= 0
       || !Number.isSafeInteger(orderId) || orderId <= 0
       || context?.already_completed || context?.inventory_changed !== false) return null;
+    if (sessions) {
+      const session = sessions.find(candidate => Number(candidate.recepcion_id) === receptionId
+        && Number(candidate.orden_compra_id) === orderId);
+      if (!session) return null;
+      const payload = parseDraft(session, orderId, receptionId, session.usuario_id);
+      if (context && Object.hasOwn(context, 'review_sku')
+        && context.review_sku !== (payload.reviewSku || null)) return null;
+      if (context && Object.hasOwn(context, 'selected_sku')
+        && context.selected_sku !== (payload.selectedSku || null)) return null;
+      if (context?.sku_review === true && context?.review_sku == null) {
+        const product = String(response?.message || response?.mensaje || '')
+          .match(/^Producto: ([A-Z0-9-]+) - /mu);
+        if (!product || product[1] !== payload.reviewSku) return null;
+      }
+      return session;
+    }
     const [active] = await db.execute(
       `SELECT id AS recepcion_id, orden_compra_id
          FROM recepciones
@@ -639,13 +674,13 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     order = await findPurchaseOrder(db, { numero_oc: params.numero_oc });
     assertPurchaseOrderTextReference(rawText, order);
   } else {
-    // An explicit correction belongs to the operator's active draft, even if
-    // another OC was prepared recently in the same chat.
+    // Resolve multiple drafts from the last WMS reply to this chat, not from
+    // model-supplied IDs or the draft's last-update timestamp.
     const session = correctionRequested
-      ? await activeUserSession(db, user.id, { allowPreview: true })
+      ? await activeUserSession(db, user.id, { allowPreview: true, from })
         || await recentlyPreparedSession(db, from)
       : await recentlyPreparedSession(db, from)
-        || await activeUserSession(db, user.id);
+        || await activeUserSession(db, user.id, { allowPreview: true, from });
     if (!session) {
       throw inputError('Para empezar, indica OC ID N o IO ID N de la recepción preparada', 409);
     }
@@ -660,6 +695,12 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   }
   const reception = prepared.reception;
   const preparedItems = reception.items;
+  let currentPayload;
+  const respond = result => ({ ...result,
+    reception_id: Number(reception.id), purchase_order_id: Number(order.id),
+    reception_number: reception.numero, review_sku: currentPayload?.reviewSku || null,
+    selected_sku: currentPayload?.selectedSku || null,
+  });
   await db.beginTransaction();
   try {
     await db.execute('SELECT id FROM recepciones WHERE id = ? FOR UPDATE', [reception.id]);
@@ -673,18 +714,19 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     const existing = parseDraft(rows[0], order.id, reception.id, user.id);
     if (existing?.version === 1 && !correctionRequested) {
       await db.commit();
-      return { message: buildReceptionReview(order, reception, existing.items),
-        inventory_changed: false, requires_confirmation: true };
+      return respond({ message: buildReceptionReview(order, reception, existing.items),
+        inventory_changed: false, requires_confirmation: true });
     }
     const payload = existing?.version === 1
       ? fromCompletedPreview(existing)
       : existing || { version: 2, orderId: Number(order.id), receptionId: Number(reception.id),
         selectedSku: null, entries: {} };
+    currentPayload = payload;
     if (existing?.version === 1 && correctionRequested) payload.editingSummary = true;
     if (batch) {
       const result = await captureBatch({ db, advances: batch, payload, preparedItems, order, reception, user });
       await db.commit();
-      return result;
+      return respond(result);
     }
     if (payload.editingSummary && preparedItems.length === 1
       && !payload.selectedSku && !payload.reviewSku) {
@@ -694,13 +736,13 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       && !String(advance.producto || advance.sku || '').trim()) {
       await saveGuidedDraft(db, order, reception, user.id, payload);
       await db.commit();
-      return { message: [
+      return respond({ message: [
         `🧾 Corrección del resumen ${purchaseOrderReceptionIdentifier(order)} | ${reception.numero}`,
         'Indica qué SKU o producto quieres corregir y el dato nuevo (cantidad, condición, ubicación, lote o vencimiento).',
         'Productos de esta recepción:',
         ...preparedItems.map(item => `- ${item.sku} - ${item.producto}`),
         'El inventario no se modifica hasta que revises de nuevo el resumen y confirmes la recepción.',
-      ].join('\n'), inventory_changed: false };
+      ].join('\n'), inventory_changed: false });
     }
     const selectedPending = preparedItems.find(item => item.sku === payload.selectedSku
       && payload.entries[item.sku] && missingFields(payload.entries[item.sku], item).length);
@@ -715,8 +757,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
         payload.selectedSku = unreviewed.sku;
         await saveGuidedDraft(db, order, reception, user.id, payload);
         await db.commit();
-        return { message: skuReviewMessage(order, reception, unreviewed,
-          payload.entries[unreviewed.sku]), inventory_changed: false, sku_review: true };
+        return respond({ message: skuReviewMessage(order, reception, unreviewed,
+          payload.entries[unreviewed.sku]), inventory_changed: false, sku_review: true });
       }
     }
 
@@ -746,15 +788,15 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
         });
         if (requested.siigo_code !== reviewSku) {
           await db.commit();
-          return { message: `Antes de pasar a otro producto, revisa ${reviewSku}.\n${skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku])}`,
-            inventory_changed: false, sku_review: true };
+          return respond({ message: `Antes de pasar a otro producto, revisa ${reviewSku}.\n${skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku])}`,
+            inventory_changed: false, sku_review: true });
         }
       }
       await db.commit();
-      return { message: reviewReply === 'NO'
+      return respond({ message: reviewReply === 'NO'
         ? `Indica qué dato de ${reviewSku} debo corregir; puedes dictar los datos corregidos juntos o por separado.\n${skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku])}`
         : skuReviewMessage(order, reception, reviewItem, payload.entries[reviewSku]),
-      inventory_changed: false, sku_review: true };
+      inventory_changed: false, sku_review: true });
     }
 
     if (!confirmedSku && reference) {
@@ -825,8 +867,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
         payload.reviewSku = selected.sku;
         await saveGuidedDraft(db, order, reception, user.id, payload);
         await db.commit();
-        return { message: skuReviewMessage(order, reception, selected, entry),
-          inventory_changed: false, sku_review: true };
+        return respond({ message: skuReviewMessage(order, reception, selected, entry),
+          inventory_changed: false, sku_review: true });
       }
       payload.selectedSku = null;
     }
@@ -841,8 +883,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       payload.reviewSku = nextReview.sku;
       await saveGuidedDraft(db, order, reception, user.id, payload);
       await db.commit();
-      return { message: skuReviewMessage(order, reception, nextReview, payload.entries[nextReview.sku]),
-        inventory_changed: false, sku_review: true };
+      return respond({ message: skuReviewMessage(order, reception, nextReview, payload.entries[nextReview.sku]),
+        inventory_changed: false, sku_review: true });
     }
     if (!pending.length) {
       const items = await buildConfirmationItems(db, preparedItems, {
@@ -862,14 +904,15 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       }
       await saveReceptionDraft(db, { order, reception, items, userId: user.id });
       await db.commit();
-      return { message: buildReceptionReview(order, reception, items),
-        inventory_changed: false, requires_confirmation: true, item_count: items.length };
+      currentPayload = null;
+      return respond({ message: buildReceptionReview(order, reception, items),
+        inventory_changed: false, requires_confirmation: true, item_count: items.length });
     }
     await saveGuidedDraft(db, order, reception, user.id, payload);
     await db.commit();
     const identifier = purchaseOrderReceptionIdentifier(order);
     if (selected && missing.length) {
-      return { message: [
+      return respond({ message: [
         `🧾 Recepción guiada ${identifier} | ${reception.numero}`,
         `Producto: ${selected.sku} - ${selected.producto}`,
         entry.referencia_interpretada
@@ -900,9 +943,9 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
           ? 'Puedes completar o corregir una partida por vez diciendo «partida 2, ubicación Q1» y los datos faltantes. Los datos del PDF deben cotejarse con la etiqueta física.'
           : 'Puedes responder todo junto o dato por dato. Los datos del PDF deben cotejarse con la etiqueta física.',
         'Aún no se modificó inventario.',
-      ].filter(Boolean).join('\n'), inventory_changed: false };
+      ].filter(Boolean).join('\n'), inventory_changed: false });
     }
-    return { message: [
+    return respond({ message: [
       `🧾 Recepción guiada ${identifier} | ${reception.numero}`,
       confirmedSku ? `${confirmedSku} quedó revisado en el borrador. No se modificó inventario.`
         : selected ? `${selected.sku} quedó registrado en el borrador. No se modificó inventario.`
@@ -910,7 +953,7 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       'Productos pendientes:',
       ...availableChoices(preparedItems, payload.entries),
       'Puedes decir el SKU o un nombre inequívoco, o registrar varios productos en un mensaje con sus cantidades, estados y ubicaciones. Si un nombre puede referirse a varios productos, te pediré precisarlo.',
-    ].join('\n'), inventory_changed: false };
+    ].join('\n'), inventory_changed: false });
   } catch (error) {
     await db.rollback().catch(() => {});
     throw error;

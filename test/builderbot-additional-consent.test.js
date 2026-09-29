@@ -57,6 +57,8 @@ function harness({ operationError, role = 'admin' } = {}) {
       advanceGuidedReception: async input => {
         calls.push(input);
         return { message: 'Ingreso conjunto guardado solo en borrador.', inventory_changed: false,
+          reception_id: 101, purchase_order_id: 37, reception_number: 'REC-OC-37-001',
+          review_sku: '00001-TPBI', selected_sku: '00001-TPBI',
           batch_captured: input.params.avances?.length || 0 };
       },
     },
@@ -259,7 +261,12 @@ test('guided batch traverses the real webhook with all SKU advances and receptio
     if (h.calls.length) {
       assert.deepEqual(h.calls[0].params.avances, params.avances);
       assert.equal(result.context.reception.inventory_changed, false);
-      assert.equal(result.context.reception.requires_confirmation, false);
+        assert.equal(result.context.reception.requires_confirmation, false);
+        assert.equal(result.context.reception.reception_id, 101);
+        assert.equal(result.context.reception.purchase_order_id, 37);
+        assert.equal(result.context.reception.reception_number, 'REC-OC-37-001');
+        assert.equal(result.context.reception.review_sku, '00001-TPBI');
+        assert.equal(result.context.reception.selected_sku, '00001-TPBI');
     }
   }
 });

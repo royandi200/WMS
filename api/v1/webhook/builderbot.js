@@ -1610,13 +1610,13 @@ module.exports = async (req, res) => {
     }
     if (!selectedPreparationReference && skuReviewReply(rawText)
       && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
-      && await hasPendingSkuReview(db, user.id)) {
+      && await hasPendingSkuReview(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
     }
     if (!selectedPreparationReference && isReceptionCorrectionRequest(rawText)
       && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
-      && await hasActiveReceptionSession(db, user.id)) {
+      && await hasActiveReceptionSession(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
     }
@@ -1635,7 +1635,7 @@ module.exports = async (req, res) => {
     const mismatch = documentMismatch(rawText);
     if (!selectedPreparationReference && (mismatch.lote || mismatch.fecha_vencimiento)
       && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
-      && await hasSelectedGuidedSku(db, user.id)) {
+      && await hasSelectedGuidedSku(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
     }
@@ -1984,6 +1984,11 @@ module.exports = async (req, res) => {
         mensaje = result.message;
         responseContext.reception = {
           guided: true,
+          reception_id: result.reception_id,
+          purchase_order_id: result.purchase_order_id,
+          reception_number: result.reception_number,
+          review_sku: result.review_sku,
+          selected_sku: result.selected_sku,
           sku_review: Boolean(result.sku_review),
           inventory_changed: false,
           requires_confirmation: Boolean(result.requires_confirmation),
