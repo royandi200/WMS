@@ -287,6 +287,87 @@ function cleanAdvance(params = {}) {
   return advance;
 }
 
+function cleanBatchAdvances(params) {
+  if (!Object.hasOwn(params, 'avances')) return null;
+  if (Object.hasOwn(params, 'avance')) {
+    throw inputError('Envía avance para un SKU o avances para varios, no ambos');
+  }
+  if (!Array.isArray(params.avances) || !params.avances.length || params.avances.length > 100) {
+    throw inputError('Indica entre 1 y 100 productos en avances');
+  }
+  return params.avances.map(value => {
+    const advance = cleanAdvance({ avance: value });
+    if (!String(advance.producto || advance.sku || '').trim()) {
+      throw inputError('Cada producto del ingreso conjunto debe indicar producto o SKU');
+    }
+    return advance;
+  });
+}
+
+async function captureBatch({ db, advances, payload, preparedItems, order, reception, user }) {
+  const captured = [];
+  const seen = new Set();
+  for (const advance of advances) {
+    const reference = String(advance.producto || advance.sku).trim();
+    const product = await resolveProductReference(db, reference, {
+      productIds: preparedItems.map(item => item.producto_id),
+      allowContextualPartial: true,
+      allowScopedApproximate: true,
+    });
+    const prepared = preparedItems.find(item => item.sku === product.siigo_code);
+    if (!prepared) throw inputError(`El producto ${reference} no pertenece a esta recepción`, 409);
+    if (seen.has(prepared.sku)) {
+      throw inputError(`Agrupa las cantidades y estados de ${prepared.sku} en sus partidas, sin repetir el SKU`, 409);
+    }
+    seen.add(prepared.sku);
+    const entry = payload.entries[prepared.sku] || { sku: prepared.sku };
+    applyMixedFields(entry, advance, prepared);
+    if (!entry.partidas && entry.cantidad
+      && Math.abs(Number(entry.cantidad) - Number(prepared.cantidad_pendiente)) < 0.0001) {
+      entry.motivo_diferencia = null;
+    }
+    if (!entry.partidas && entry.condicion === 'DISPONIBLE') entry.motivo = null;
+    entry.verified = false;
+    if (product.matched_by === 'scoped_approximate'
+      || product.matched_by === 'contextual_alias' && reference.toUpperCase() !== prepared.sku) {
+      entry.referencia_interpretada = reference;
+    }
+    payload.entries[prepared.sku] = entry;
+    const missing = missingFields(entry, prepared);
+    if (!missing.length) {
+      await buildConfirmationItems(db, [prepared], { items: [itemFromEntry(entry, prepared)] },
+        { warehouseId: reception.bodega_id });
+    }
+    captured.push({ prepared, entry, missing });
+  }
+  // Capture the whole message first, including incomplete SKUs. Never treat
+  // the batch as a yes, or discard later products while reviewing the first.
+  const incomplete = captured.find(item => item.missing.length);
+  const review = !incomplete && (preparedItems.find(item => item.sku === payload.reviewSku)
+    || captured[0].prepared);
+  payload.selectedSku = incomplete ? incomplete.prepared.sku : review.sku;
+  payload.reviewSku = incomplete ? null : review.sku;
+  await saveGuidedDraft(db, order, reception, user.id, payload);
+  const message = [
+    `🧾 Recepción guiada ${purchaseOrderReceptionIdentifier(order)} | ${reception.numero}`,
+    'Guardé los productos de este mensaje en el borrador:',
+    ...captured.flatMap(({ prepared, entry, missing }) => [
+      `- ${prepared.sku} - ${prepared.producto}: ${entry.cantidad || 'cantidad pendiente'} ${prepared.unidad || 'und'}.`,
+      ...(entry.partidas || [entry]).map((part, index) =>
+        `  ${entry.partidas ? `Partida ${index + 1}: ` : ''}${part.cantidad || 'cantidad pendiente'} ${prepared.unidad || 'und'} · ${part.condicion || 'condición pendiente'} · ubicación ${part.ubicacion || 'pendiente'}${part.motivo ? ` · motivo: ${part.motivo}` : ''}.`),
+      entry.referencia_interpretada
+        ? `  Interpreté «${entry.referencia_interpretada}» como ${prepared.sku}; verifica que sea correcto.` : null,
+      missing.length ? `  Falta: ${missing.join(', ')}.` : '  Datos completos, pendientes de revisión.',
+    ]),
+    'Los demás productos y datos ya registrados se conservan. No se modificó inventario.',
+    incomplete
+      ? `Siguiente paso: completa ${incomplete.prepared.sku} - ${incomplete.prepared.producto}. Falta: ${incomplete.missing.join(', ')}. Puedes dar los datos faltantes juntos o por partes; si corresponden a una partida, indica su número.`
+      : skuReviewMessage(order, reception, review, payload.entries[review.sku]),
+  ].filter(Boolean).join('\n');
+  return { message, inventory_changed: false, batch_captured: captured.length,
+    sku_review: !incomplete };
+}
+
 function applyMixedFields(entry, advance, prepared) {
   if (Object.hasOwn(advance, 'partidas')) {
     const old = entry.partidas?.length ? entry.partidas : [entry];
@@ -546,7 +627,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     throw inputError('Los avances no confirman inventario; revisa primero el resumen');
   }
   const correctionRequested = params.correccion === true || isReceptionCorrectionRequest(rawText);
-  const advance = { ...cleanAdvance(params), ...mixedPartsFromText(rawText),
+  const batch = cleanBatchAdvances(params);
+  const advance = batch ? {} : { ...cleanAdvance(params), ...mixedPartsFromText(rawText),
     ...indexedPartFieldsFromText(rawText), ...correctionFieldsFromText(rawText) };
   const explicitId = typedOrderId(rawText);
   let order;
@@ -599,6 +681,11 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       : existing || { version: 2, orderId: Number(order.id), receptionId: Number(reception.id),
         selectedSku: null, entries: {} };
     if (existing?.version === 1 && correctionRequested) payload.editingSummary = true;
+    if (batch) {
+      const result = await captureBatch({ db, advances: batch, payload, preparedItems, order, reception, user });
+      await db.commit();
+      return result;
+    }
     if (payload.editingSummary && preparedItems.length === 1
       && !payload.selectedSku && !payload.reviewSku) {
       payload.selectedSku = preparedItems[0].sku;
@@ -615,7 +702,9 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
         'El inventario no se modifica hasta que revises de nuevo el resumen y confirmes la recepción.',
       ].join('\n'), inventory_changed: false };
     }
-    if (!payload.reviewSku) {
+    const selectedPending = preparedItems.find(item => item.sku === payload.selectedSku
+      && payload.entries[item.sku] && missingFields(payload.entries[item.sku], item).length);
+    if (!payload.reviewSku && !selectedPending) {
       // Borradores creados antes de esta revisión pueden tener un SKU completo
       // sin validar. Muéstralo antes de aceptar cualquier siguiente producto.
       const unreviewed = preparedItems.find(item => payload.entries[item.sku]
@@ -745,6 +834,16 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
       const saved = payload.entries[item.sku];
       return !saved || !saved.verified || missingFields(saved, item).length;
     });
+    const nextReview = !selected && pending.find(item => payload.entries[item.sku]
+      && !missingFields(payload.entries[item.sku], item).length);
+    if (nextReview) {
+      payload.selectedSku = nextReview.sku;
+      payload.reviewSku = nextReview.sku;
+      await saveGuidedDraft(db, order, reception, user.id, payload);
+      await db.commit();
+      return { message: skuReviewMessage(order, reception, nextReview, payload.entries[nextReview.sku]),
+        inventory_changed: false, sku_review: true };
+    }
     if (!pending.length) {
       const items = await buildConfirmationItems(db, preparedItems, {
         items: preparedItems.map(item => itemFromEntry(payload.entries[item.sku], item)),
@@ -810,7 +909,7 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
           : 'Elige el primer SKU para registrar.',
       'Productos pendientes:',
       ...availableChoices(preparedItems, payload.entries),
-      'Puedes decir el SKU o un nombre inequívoco. Si un nombre puede referirse a varios productos, te pediré precisarlo.',
+      'Puedes decir el SKU o un nombre inequívoco, o registrar varios productos en un mensaje con sus cantidades, estados y ubicaciones. Si un nombre puede referirse a varios productos, te pediré precisarlo.',
     ].join('\n'), inventory_changed: false };
   } catch (error) {
     await db.rollback().catch(() => {});

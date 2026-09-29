@@ -4,12 +4,30 @@ const { createHash } = require('node:crypto');
 const { advanceGuidedReception, hasPendingSkuReview, skuReviewReply } = require('../api/_lib/builderbot-guided-reception');
 const { canonicalJson } = require('../api/_lib/builderbot-reception');
 
-function guidedDb({ singleSku = null } = {}) {
+const batchTranscription = 'Voy a ingresar tapa de tarro cuadrado blanco, las 30 unidades en la ubicación A8 y están en buen estado. También voy a ingresar las etiquetas achaguanda por 60, las 30 unidades, están en buen estado en A11. Voy a ingresar el liner tarro por 60, 30 unidades, hay 20 en buen estado y 10 en mal estado que van para cuarentena. y las 20 las voy a guardar en B10 y las gomas achaguanda de magnesio y vitamina C están los 5400 gramos en buen estado y los voy a guardar en A10';
+const batchAdvances = () => [
+  { producto: 'tapa de tarro cuadrado blanco', cantidad: 30, condicion: 'DISPONIBLE', ubicacion: 'A8' },
+  { producto: 'etiquetas achaguanda por 60', cantidad: 30, condicion: 'DISPONIBLE', ubicacion: 'A11' },
+  { producto: 'liner tarro por 60', cantidad_total: 30, partidas: [
+    { cantidad: 20, condicion: 'DISPONIBLE', ubicacion: 'B10' },
+    { cantidad: 10, condicion: 'CUARENTENA' },
+  ] },
+  { producto: 'gomas achaguanda de magnesio y vitamina C', cantidad: 5400,
+    condicion: 'DISPONIBLE', ubicacion: 'A10' },
+];
+
+function guidedDb({ singleSku = null, batchProducts = false } = {}) {
   const products = [
     { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO (60 UNID)', alias: 'tapa' },
     { id: 60, siigo_code: '00051-MPASH', nombre: 'GOMAS ASHWAGANDHA', alias: 'gomas ashwa' },
     { id: 276, siigo_code: '00276-PTZNASHWA', nombre: 'PRODUCTO TERMINADO ZENOVA ASHWAGANDHA', alias: 'Zenova Ashwagandha' },
   ];
+  if (batchProducts) products.push(
+    { id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA x 60', alias: 'etiquetas' },
+    { id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60', alias: 'liner' },
+    { id: 6, siigo_code: '00006-TRP', nombre: 'TARRO', alias: 'tarros' },
+  );
+  if (batchProducts) products[1].nombre = 'GOMAS ASHWAGANDHA -MAGNESIO Y VITAMINA C';
   const state = { draft: null, recentLog: [], inventoryWrites: 0, transactions: 0 };
   const db = {
     async beginTransaction() { state.transactions += 1; },
@@ -48,6 +66,13 @@ function guidedDb({ singleSku = null } = {}) {
             cantidad_pendiente: 1, unidad: 'und', lote_documento: 'Z-1',
             fecha_vencimiento_documento: '2027-12-31' },
         ];
+        if (batchProducts) return [[
+          ...items.slice(0, 2).map(item => ({ ...item,
+            cantidad_pendiente: item.sku === '00051-MPASH' ? 5400 : 30 })),
+          ...products.slice(3).map(product => ({ item_id: product.id, producto_id: product.id,
+            sku: product.siigo_code, producto: product.nombre, cantidad_pendiente: 30,
+            unidad: 'und', lote_documento: `L-${product.id}`, fecha_vencimiento_documento: '2027-12-31' })),
+        ]];
         return [singleSku ? items.filter(item => item.sku === singleSku) : items.slice(0, 2)];
       }
       if (/FROM producto_ubicaciones pu/u.test(sql)) return [[
@@ -83,6 +108,147 @@ function guidedDb({ singleSku = null } = {}) {
   };
   return { db, state };
 }
+
+test('batch captures the complete transcription without mixing SKUs or discarding incomplete partitions', async () => {
+  const { db, state } = guidedDb({ batchProducts: true });
+  const user = { id: 5 };
+  const send = (rawText, params) => advanceGuidedReception({ db, user, rawText, params });
+  await send('OC ID 37: tarros 30 disponibles en A11', {
+    avance: { producto: 'tarros', cantidad: 30, condicion: 'DISPONIBLE', ubicacion: 'A11' },
+  });
+  await send('sí', { avance: {} });
+  const result = await send(batchTranscription, { avances: batchAdvances() });
+  assert.equal(result.batch_captured, 4);
+  assert.match(result.message, /ubicación de partida 2/u);
+  assert.match(result.message, /motivo de partida 2 \(CUARENTENA\)/u);
+  const draft = JSON.parse(state.draft.payload_json);
+  assert.equal(draft.selectedSku, '00035-LNTP60');
+  assert.equal(draft.entries['00006-TRP'].verified, true);
+  assert.equal(draft.entries['00001-TPBI'].ubicacion, 'A8');
+  assert.equal(draft.entries['00017-ETASH60'].ubicacion, 'A11');
+  assert.equal(draft.entries['00051-MPASH'].ubicacion, 'A10');
+  assert.equal(draft.entries['00051-MPASH'].cantidad, 5400);
+  assert.equal(draft.entries['00035-LNTP60'].cantidad, 30);
+  assert.deepEqual(draft.entries['00035-LNTP60'].partidas.map(part => [part.cantidad,
+    part.condicion, part.ubicacion, part.motivo || null]), [
+    [20, 'DISPONIBLE', 'B10', null], [10, 'CUARENTENA', null, null],
+  ]);
+  for (const sku of ['00001-TPBI', '00017-ETASH60', '00035-LNTP60', '00051-MPASH']) {
+    assert.equal(draft.entries[sku].verified, false);
+  }
+  // Completing the missing partition must not be intercepted by another
+  // complete SKU awaiting review; all other batch data remain persisted.
+  const liner = await send('partida 2 en Q1 por empaque roto', {
+    avance: { partida: 2, ubicacion: 'Q1', motivo: 'empaque roto' },
+  });
+  assert.equal(liner.sku_review, true);
+  assert.match(liner.message, /Partida 2: 10 und · CUARENTENA · ubicación Q1/u);
+  assert.match(liner.message, /Motivo: empaque roto/u);
+  let review = await send('sí', { avance: {} });
+  assert.match(review.message, /Producto: 00001-TPBI/u);
+  review = await send('sí', { avance: {} });
+  assert.match(review.message, /Producto: 00051-MPASH/u);
+  review = await send('sí', { avance: {} });
+  assert.match(review.message, /Producto: 00017-ETASH60/u);
+  const preview = await send('sí', { avance: {} });
+  assert.equal(preview.requires_confirmation, true);
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  assert.match(preview.message, /Confirmo la recepción OC ID 37/u);
+  assert.match(preview.message, /CUARENTENA/u);
+  assert.equal(state.inventoryWrites, 0);
+  assert.equal(state.transactions, 0);
+});
+
+test('batch can capture other products while a SKU awaits review, without verifying that SKU', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: tapas dos en A8 buenas',
+    params: { avance: { producto: 'tapas', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  const result = await advanceGuidedReception({ db, user, rawText: 'gomas 100 g en B16 buenas',
+    params: { avances: [{ producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16' }] } });
+  assert.match(result.message, /Producto: 00001-TPBI/u);
+  const draft = JSON.parse(state.draft.payload_json);
+  assert.equal(draft.entries['00001-TPBI'].verified, false);
+  assert.equal(draft.entries['00051-MPASH'].cantidad, 100);
+  assert.equal(draft.entries['00051-MPASH'].verified, false);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('batch rejects foreign and duplicate products atomically, and keeps user draft ownership', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (avances, actor = user) => advanceGuidedReception({ db, user: actor,
+    rawText: 'OC ID 37: ingreso conjunto', params: { avances } });
+  const tapa = { producto: 'tapas', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' };
+  await assert.rejects(send([tapa, { producto: 'otro producto' }]), /no encontrado/u);
+  assert.equal(state.draft, null);
+  await assert.rejects(send([tapa, { ...tapa, producto: '00001-TPBI' }]), /sin repetir el SKU/u);
+  assert.equal(state.draft, null);
+  await assert.rejects(send([tapa, { producto: 'gomas', cantidad: -10 }]), /cantidad positiva/u);
+  assert.equal(state.draft, null);
+  await send([tapa]);
+  const before = state.draft.payload_json;
+  await assert.rejects(send([tapa], { id: 8 }), /otro usuario/u);
+  assert.equal(state.draft.payload_json, before);
+  assert.equal(state.inventoryWrites, 0);
+  assert.equal(state.transactions, 0);
+});
+
+test('batch rejects invalid structure, mixed contracts, excessive length and final confirmation', async () => {
+  const { db, state } = guidedDb();
+  for (const params of [
+    { avances: [] }, { avances: {} }, { avances: Array(101).fill({ producto: 'tapas' }) },
+    { avances: [{ producto: 'tapas' }], avance: {} }, { avances: [{}] },
+    { avances: [{ producto: 'tapas', verified: true }] },
+    { avances: [{ producto: 'tapas' }], confirmacion_final: true },
+  ]) {
+    await assert.rejects(advanceGuidedReception({ db, user: { id: 5 },
+      rawText: 'OC ID 37', params }));
+  }
+  assert.equal(state.draft, null);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('final preview supports batch corrections without losing untouched fields', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, params) => advanceGuidedReception({ db, user, rawText, params });
+  await send('OC ID 37: dos tapas en A8 y 100 g de gomas en B16 disponibles', {
+    avances: [
+      { producto: 'tapas', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' },
+      { producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16' },
+    ],
+  });
+  await send('sí', { avance: {} });
+  await send('sí', { avance: {} });
+  assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  await send('Corrección: tapas en A1 y gomas en A10', {
+    correccion: true, avances: [{ producto: 'tapas', ubicacion: 'A1' }, { producto: 'gomas', ubicacion: 'A10' }],
+  });
+  const draft = JSON.parse(state.draft.payload_json);
+  assert.equal(draft.version, 2);
+  assert.equal(draft.entries['00001-TPBI'].cantidad, 2);
+  assert.equal(draft.entries['00001-TPBI'].ubicacion, 'A1');
+  assert.equal(draft.entries['00001-TPBI'].lote, 'T-1');
+  assert.equal(draft.entries['00051-MPASH'].cantidad, 100);
+  assert.equal(draft.entries['00051-MPASH'].ubicacion, 'A10');
+  assert.equal(draft.entries['00051-MPASH'].lote, 'G-1');
+  assert.equal(draft.entries['00051-MPASH'].verified, false);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('prompt batch example uses the same contract and leaves quarantine location and cause missing', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const prompt = fs.readFileSync(path.join(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
+  const example = prompt.match(/Ejemplo batch del mensaje actual:[^\n]*-> `params: (\{[^\n]+\})`/u);
+  assert.ok(example);
+  const { avances } = JSON.parse(example[1]);
+  assert.deepEqual(avances, batchAdvances());
+  assert.match(prompt, /solamente lo dicho en el mensaje actual/u);
+  assert.match(prompt, /mal estado` NO es una causa concreta/u);
+  assert.match(prompt, /no cambies a `CONFIRMAR_RECEPCION_OC` porque falten datos/u);
+});
 
 test('guided OC reception accumulates audio-sized pieces and only creates a review draft', async () => {
   const { db, state } = guidedDb();

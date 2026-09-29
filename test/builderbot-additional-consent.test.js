@@ -52,6 +52,14 @@ function harness({ operationError, role = 'admin' } = {}) {
     },
   };
   const mocks = {
+    '../../_lib/builderbot-guided-reception': {
+      ...nativeRequire('../../_lib/builderbot-guided-reception'),
+      advanceGuidedReception: async input => {
+        calls.push(input);
+        return { message: 'Ingreso conjunto guardado solo en borrador.', inventory_changed: false,
+          batch_captured: input.params.avances?.length || 0 };
+      },
+    },
     '../../_lib/dispatch-workflow': {
       confirmImportedDispatch: async input => {
         calls.push(input);
@@ -230,6 +238,29 @@ test('flat reception traverses real webhook with permissions, totals and preview
     const h = harness();
     assert.equal((await h.send('CONFIRMAR_RECEPCION_OC', 'Confirmo la recepcion OC ID 21', bad)).ok, false);
     assert.equal(h.calls.length, 0);
+  }
+});
+
+test('guided batch traverses the real webhook with all SKU advances and reception role checks', async () => {
+  const params = { avances: [
+    { producto: 'tapas', cantidad: 30, condicion: 'DISPONIBLE', ubicacion: 'A8' },
+    { producto: 'liner', cantidad_total: 30, partidas: [
+      { cantidad: 20, condicion: 'DISPONIBLE', ubicacion: 'B10' },
+      { cantidad: 10, condicion: 'CUARENTENA' },
+    ] },
+    { producto: 'gomas', cantidad: 5400, condicion: 'DISPONIBLE', ubicacion: 'A10' },
+  ] };
+  for (const role of ['admin', 'recepcion_cierre', 'alistador']) {
+    const h = harness({ role });
+    const result = await h.send('AVANZAR_RECEPCION_GUIADA_OC',
+      'Voy a ingresar tapas, liners y gomas en la recepción preparada', params);
+    assert.equal(result.ok, role !== 'alistador', result.mensaje);
+    assert.equal(h.calls.length, role !== 'alistador' ? 1 : 0);
+    if (h.calls.length) {
+      assert.deepEqual(h.calls[0].params.avances, params.avances);
+      assert.equal(result.context.reception.inventory_changed, false);
+      assert.equal(result.context.reception.requires_confirmation, false);
+    }
   }
 });
 
