@@ -21,6 +21,15 @@ module.exports = async (req, res) => {
 
     const startedAt = Date.now();
 
+    if (req.query?.warehouses === 'true') {
+      const warehouses = await siigoGet('/v1/warehouses', { entidad: 'health-check' });
+      const list = Array.isArray(warehouses) ? warehouses : (warehouses?.results || []);
+      return res.status(200).json({
+        ok: true,
+        data: list.map(w => ({ id: w.id, name: w.name, active: w.active, has_movements: w.has_movements })),
+      });
+    }
+
     // 1. Verificar / obtener token
     const token = await getValidToken();
 
