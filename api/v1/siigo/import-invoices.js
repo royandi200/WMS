@@ -202,6 +202,10 @@ async function reconcilePending(user, excludedIds = new Set()) {
           dispatch.siigo_invoice_id,
           `Factura ${dispatch.siigo_invoice_name} eliminada en SIIGO; reserva liberada`
         ));
+      } else if (status === 400) {
+        // IDs from a previous SIIGO account (e.g. the sandbox) are rejected with
+        // 400 and must not freeze the import cursor.
+        results.push({ status: 'skipped', id: dispatch.id, siigo_invoice_id: dispatch.siigo_invoice_id, reason: 'factura_no_existe_en_cuenta' });
       } else {
         results.push({
           status: 'error',
@@ -320,6 +324,8 @@ async function reconcileCompleted(user, invoiceIds = [], cachedInvoices = new Ma
           user.id
         );
         results.push({ status: created ? 'alert_created' : 'alert_exists', id: dispatch.id, type: 'FACTURA_ELIMINADA' });
+      } else if (status === 400) {
+        results.push({ status: 'skipped', id: dispatch.id, reason: 'factura_no_existe_en_cuenta' });
       } else {
         results.push({ status: 'error', id: dispatch.id, error: err.message });
       }

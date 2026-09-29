@@ -181,6 +181,9 @@ async function reconcilePending(user, excludedPurchaseIds = new Set()) {
           id: reception.id,
           siigo_purchase_id: reception.siigo_purchase_id,
         });
+      } else if (status === 400) {
+        // IDs from a previous SIIGO account must not freeze the import cursor.
+        results.push({ status: 'skipped', id: reception.id, siigo_purchase_id: reception.siigo_purchase_id, reason: 'factura_no_existe_en_cuenta' });
       } else {
         results.push({
           status: 'error',
@@ -294,6 +297,8 @@ async function reconcileCompleted(user) {
           user.id
         );
         results.push({ status: created ? 'alert_created' : 'alert_exists', id: reception.id, type: 'FACTURA_ELIMINADA' });
+      } else if (status === 400) {
+        results.push({ status: 'skipped', id: reception.id, reason: 'factura_no_existe_en_cuenta' });
       } else {
         results.push({ status: 'error', id: reception.id, error: err.message });
       }
