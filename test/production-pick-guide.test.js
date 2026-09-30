@@ -73,7 +73,7 @@ function fakeDb({ a10Quantity = 12, extraA10Lot = false, extraA11Lot = false,
             ? (stock.lote.toUpperCase() === String(params[2]).toUpperCase()
               && (!params[3] || stock.ubicacion === params[3])
               && (!params[5] || stock.id === Number(params[5])))
-            : stock.ubicacion === params[2]))];
+            : (!params[2] || stock.ubicacion === params[2])))];
       }
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
       if (sql.includes('FROM producto_aliases pa')) return [[]];
@@ -229,6 +229,66 @@ test('permite escoger otro lote en la ubicación actual sin dictar el código', 
   assert.equal(db.allocations[0].stock_id, 15);
   assert.equal(db.stocks.get(11).reservada, 0);
   assert.equal(db.stocks.get(15).reservada, 7);
+});
+
+test('una corrección flexible de lote ofrece opciones sin exigir una frase fija', async () => {
+  const db = fakeDb({ extraA11Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const offered = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección en la partida 1 quiero cambiar el lote' });
+  assert.match(offered.message, /1\. Lote R8-260928-TRP/u);
+  assert.doesNotMatch(offered.message, /Materiales reservados|TAPA TARRO CUADRADO BLANCO/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+});
+
+test('otra formulación inequívoca permite cambiar de lote sin dictarlo', async () => {
+  const db = fakeDb({ extraA11Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const offered = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección de la partida 1, el lote no es el correcto' });
+  assert.match(offered.message, /1\. Lote R8-260928-TRP/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  const alternative = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección en la partida 1, quiero cambiar de lote' });
+  assert.match(alternative.message, /1\. Lote R8-260928-TRP/u);
+});
+
+test('cambiar ubicación sin saber el código ofrece destinos y aplica el único lote apto', async () => {
+  const db = fakeDb();
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const offered = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección de partida 1 la ubicación no es esta' });
+  assert.match(offered.message, /1\. Ubicación A9/u);
+  assert.match(offered.message, /2\. Ubicación A10/u);
+  assert.doesNotMatch(offered.message, /Ubicación A11|TAPA TARRO CUADRADO BLANCO|Materiales reservados/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  const blocked = await advanceProductionPick({ db, userId: 7,
+    rawText: 'Confirmo materiales OP ID 110' });
+  assert.equal(blocked.confirm, undefined);
+  assert.match(blocked.message, /Falta elegir la ubicación/u);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
+  assert.match(chosen.message, /Materiales reservados/u);
+  assert.match(chosen.message, /Lote: R5-260923-TRP \| ubicación: A10/u);
+  assert.equal(db.allocations[0].stock_id, 12);
+  assert.equal(db.review.choice, null);
+});
+
+test('al elegir ubicación con varios lotes pide el lote antes de cambiar la reserva', async () => {
+  const db = fakeDb({ extraA10Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const locations = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección partida 1 quiero cambiar ubicación' });
+  assert.match(locations.message, /2\. Ubicación A10 \| 2 lotes aptos/u);
+  const lots = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
+  assert.match(lots.message, /Para la ubicación A10, elige el lote/u);
+  assert.match(lots.message, /1\. Lote R5-260923-TRP/u);
+  assert.match(lots.message, /2\. Lote R7-260927-TRP/u);
+  assert.doesNotMatch(lots.message, /Materiales reservados|TAPA TARRO CUADRADO BLANCO/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
+  assert.match(chosen.message, /Lote: R7-260927-TRP \| ubicación: A10/u);
+  assert.match(chosen.message, /Materiales reservados/u);
+  assert.equal(db.allocations[0].stock_id, 14);
 });
 
 test('«los tarros» identifica el producto del resumen sin exigir su SKU', async () => {
