@@ -6,6 +6,7 @@ const dbPath = path.resolve(__dirname, '../api/_lib/db.js');
 const writes = [];
 let closeDraft = null;
 let latestStartedNotice = null;
+let latestReleasedNotice = null;
 let lastWorkflowAction = null;
 let pickReview = null;
 let pickAllocations = null;
@@ -29,7 +30,7 @@ require.cache[dbPath] = {
         if (/SELECT action FROM webhook_logs/u.test(sql)) return [lastWorkflowAction
           ? [{ action: lastWorkflowAction }] : []];
         if (pickAllocations && /FROM ordenes_produccion op JOIN productos p/u.test(sql)
-          && /op\.fase/u.test(sql)) return [[{ id: 110, codigo_orden: 'OP-20260930-000110',
+          && /op\.fase/u.test(sql)) return [[{ id: params[0], codigo_orden: `OP-20260930-${String(params[0]).padStart(6, '0')}`,
             estado: 'APROBADA', fase: 'F0', producto_sku: '00102-PTASH60',
             producto_nombre: 'ASHWAGANDHA X 60' }]];
         if (pickAllocations && /FROM produccion_material_lotes pml/u.test(sql)) return [pickAllocations.map(row => ({ ...row }))];
@@ -43,8 +44,9 @@ require.cache[dbPath] = {
         if (/FROM stock s JOIN ubicaciones u/u.test(sql)) return [[{
           id: 1, ubicacion_id: 8, cantidad: 100, reservada: 0, ubicacion: 'A8',
         }]];
-        if (/FROM notificaciones_salida/u.test(sql)) return [latestStartedNotice
-          ? [{ evento: `production_started:${latestStartedNotice}` }] : []];
+        if (/FROM notificaciones_salida/u.test(sql)) return [/production_released/u.test(sql)
+          ? (latestReleasedNotice ? [{ evento: `production_released:${latestReleasedNotice}` }] : [])
+          : (latestStartedNotice ? [{ evento: `production_started:${latestStartedNotice}` }] : [])];
         if (/FROM ordenes_produccion op JOIN productos p/u.test(sql)) return [[{
           id: params[0], codigo_orden: `OP-20260924-${String(params[0]).padStart(6, '0')}`,
           estado: 'EN_PROCESO',
@@ -169,6 +171,40 @@ test('el webhook mantiene OP y partida entre el resumen y la corrección de alis
     pickReview = null;
     pickAllocations = null;
     lastWorkflowAction = null;
+  }
+});
+
+test('alistador con audio parcial de ubicación permanece en OP 111, no entra al cierre', async () => {
+  writes.length = 0;
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  lastWorkflowAction = 'CERRAR_ORDEN_PRODUCCION';
+  latestReleasedNotice = 111;
+  pickReview = null;
+  pickAllocations = [
+    { id: 501, produccion_material_id: 10, stock_id: 11,
+      lote: 'R10-260925-LINER', ubicacion_id: 14, cantidad_reservada: 1,
+      producto_id: 35, unidad: 'und', bodega_id: 1, sku: '00035-LNTP60',
+      producto: 'LINER TARRO x 60', ubicacion: 'A14' },
+    { id: 502, produccion_material_id: 10, stock_id: 12,
+      lote: 'AA-260929-01-LINER', ubicacion_id: 14, cantidad_reservada: 4,
+      producto_id: 35, unidad: 'und', bodega_id: 1, sku: '00035-LNTP60',
+      producto: 'LINER TARRO x 60', ubicacion: 'A14' },
+  ];
+  try {
+    const res = await invoke('CERRAR_ORDEN_PRODUCCION', 'a10 y no de la a14');
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.mensaje, /En A14 hay varias partidas \(1 y 2\)/u);
+    assert.match(res.body.mensaje, /OP ID 111/u);
+    assert.doesNotMatch(res.body.mensaje, /No tienes permiso|cierre en borrador/u);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE lots|UPDATE ordenes_produccion|INSERT INTO movimientos/u.test(entry.sql)));
+  } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    lastWorkflowAction = null;
+    latestReleasedNotice = null;
+    pickReview = null;
+    pickAllocations = null;
   }
 });
 

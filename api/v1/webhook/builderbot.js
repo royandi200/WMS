@@ -1610,9 +1610,21 @@ module.exports = async (req, res) => {
       && !isPickReviewIntent(rawText));
     const lastWorkflowAction = contextualPickCorrection
       ? await lastProcessedWorkflowAction(db, from) : null;
+    const pickOnlyOperator = hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_PICK)
+      && !hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_CLOSE);
+    // Un alistador no puede cerrar una OP. Si una transcripción parcial expresa
+    // una corrección de materiales, no se debe enviar al cierre ni a su RBAC.
+    // La guía de alistamiento pedirá OP/partida si el contexto no es inequívoco.
+    if (pickOnlyOperator && contextualPickCorrection
+      && ['CERRAR_ORDEN_PRODUCCION', 'SOLICITAR_CIERRE_PRODUCCION',
+        'UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action)) {
+      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+      params = {};
+    }
     // La clasificación del modelo no prevalece sobre el último resumen real:
     // una corrección breve tras recepción o cierre no pertenece al alistamiento.
     if (action === 'CONFIRMAR_MATERIALES_PRODUCCION' && contextualPickCorrection
+      && !pickOnlyOperator
       && lastWorkflowAction && lastWorkflowAction !== 'CONFIRMAR_MATERIALES_PRODUCCION') {
       action = 'MODO_CHARLA';
       params = {};

@@ -228,5 +228,7 @@ test('confirmar otra OP o decir sí no ejecuta el inicio', async () => {
   assert.equal(explicitPickConfirmation('sí'), false);
   assert.equal(explicitPickConfirmation('Confirmo materiales OPIV 110'), true);
   assert.equal(isPickCorrection('los tarros no estaban en A11, estaban en A10'), true);
+  assert.equal(isPickCorrection('a10 y no de la a14'), true);
   assert.deepEqual(pickLocations('ubicación a 11, ubicación a 10'), ['A11', 'A10']);
+  assert.deepEqual(pickLocations('a10 y no de la a14'), ['A14', 'A10']);
 });

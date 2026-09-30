@@ -20,7 +20,9 @@ function explicitPickConfirmation(text) {
 }
 
 function isPickCorrection(text) {
-  return /\b(?:correccion|corrijo|corrige|cambia|cambio|ajusta|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(normalize(text));
+  const raw = normalize(text);
+  return /\b(?:correccion|corrijo|corrige|cambia|cambio|ajusta|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(raw)
+    || /\b[a-z]{1,5}\s*\d{1,3}\s+y\s+no\s+(?:de\s+)?(?:la\s+)?[a-z]{1,5}\s*\d{1,3}\b/u.test(raw);
 }
 
 function isPickReviewIntent(text) {
@@ -103,6 +105,10 @@ function mentionedOrderId(text) {
 
 function pickLocations(text) {
   const raw = normalize(text).replace(/\b([a-z]{1,5})\s+(\d{1,3})\b/gu, '$1$2');
+  // Una transcripción puede conservar solo «A10 y no de la A14».
+  // La segunda ubicación es la anterior; la primera es la corrección.
+  const reversed = /\b([a-z]{1,5}\d{1,3})\s+y\s+no\s+(?:de\s+)?(?:la\s+)?([a-z]{1,5}\d{1,3})\b/u.exec(raw);
+  if (reversed) return [reversed[2].toUpperCase(), reversed[1].toUpperCase()];
   const direct = [...raw.matchAll(/\b(?:ubicacion\s*(?:(?:correcta|nueva|es)\s*)?[:\-]?\s*|(?:en|para|a)\s+(?:la\s+ubicacion\s*)?)([a-z][a-z0-9-]*\d[a-z0-9-]*)\b/gu)]
     .map(match => match[1].toUpperCase());
   if (direct.length) return direct;
@@ -164,6 +170,10 @@ async function selectedAllocation(db, rows, text) {
   if (locations.length > 1) {
     const matching = rows.filter(row => row.ubicacion?.toUpperCase() === locations[0]);
     if (matching.length === 1) return matching[0];
+    if (matching.length > 1) {
+      const numbers = matching.map(row => rows.indexOf(row) + 1).join(' y ');
+      throw pickError(`En ${locations[0]} hay varias partidas (${numbers}). Di cuál quieres corregir, por ejemplo «corrección: partida ${rows.indexOf(matching[0]) + 1}, ubicación ${locations.at(-1)}». No cambié las reservas.`);
+    }
   }
   if (rows.length === 1) return rows[0];
   throw pickError('No identifiqué una sola partida. Di «corrección: partida N, ubicación A10» usando el número del resumen. No cambié las reservas.');
@@ -255,8 +265,11 @@ async function correctAllocation(db, rows, text) {
 async function advanceProductionPick({ db, userId, from, rawText }) {
   const explicitId = mentionedOrderId(rawText);
   const active = await pendingPickReview(db, userId);
-  const notifiedId = !explicitId && !active && (isPickCorrection(rawText) || isPickReviewIntent(rawText))
+  const notifiedId = !explicitId && (isPickCorrection(rawText) || isPickReviewIntent(rawText))
     ? await recentPickNotificationReference(db, from) : null;
+  if (!explicitId && active && notifiedId && Number(active.order_id) !== notifiedId) {
+    return { message: `Hay un alistamiento revisado de OP ID ${active.order_id} y un aviso de OP ID ${notifiedId}. Indica cuál vas a corregir, por ejemplo «Revisa materiales OP ID ${notifiedId}». No se cambiaron reservas ni se inició producción.` };
+  }
   const orderId = explicitId || Number(active?.order_id) || notifiedId || null;
   if (!orderId) return { message: 'Indica la OP que vas a alistar, por ejemplo «Revisa materiales OP ID 110». No se inició producción.' };
   const confirmationRequested = explicitPickConfirmation(rawText);
