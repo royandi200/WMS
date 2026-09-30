@@ -42,6 +42,19 @@ test('absence of a test legend is not a warning and incomplete automatic cotejo 
   ]), 'PENDIENTE_REVISION');
   assert.equal(documentDraftStatus([...warnings, 'SKU no encontrado o inactivo: X-1']), 'REQUIERE_CORRECCION');
 });
+
+test('a customer-order document legend is not a correction request', () => {
+  const warnings = documentWarningsForReview([
+    'Documento con leyenda de pedido de cliente / producción propia.',
+    'Documento con leyenda de pedido de cliente / produccion propia',
+  ]);
+  assert.deepEqual(warnings, []);
+  assert.equal(documentDraftStatus(warnings), 'PENDIENTE_REVISION');
+  assert.equal(documentDraftStatus([
+    'Documento con leyenda de pedido de cliente / producción propia.',
+    'SKU no encontrado o inactivo: 00102-PTASH60',
+  ]), 'REQUIERE_CORRECCION');
+});
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
 const { buildWarehouseExitPdf } = require('../scripts/qa/demo-pdf');
 

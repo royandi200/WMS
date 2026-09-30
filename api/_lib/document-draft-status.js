@@ -1,5 +1,6 @@
 const NON_WARNINGS = [
   /^Leyenda de prueba o sin validez comercial no observada\.?$/iu,
+  /^Documento con leyenda de pedido de cliente\s*\/\s*producci[oó]n propia\.?$/iu,
 ];
 
 const REVIEW_ONLY_WARNINGS = [

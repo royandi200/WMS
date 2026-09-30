@@ -45,6 +45,18 @@ test('customer purchase order cannot be normalized as supplier reception', () =>
   assert.equal(customer.items[0].unit, 'und');
 });
 
+test('customer-order intake drops a positive document legend from model warnings', () => {
+  const order = normalizeWarehouseDocumentInput({
+    tipo_documento: 'ORDEN_COMPRA_CLIENTE',
+    referencia_documento: 'Pedido 1',
+    fecha_documento: '2026-09-23',
+    nombre_cliente: 'Farmacia Central Demo',
+    items: [['00102-PTASH60', 'PRODUCTO TERMINADO ASHWAGANDHA X 60', 3, 'und']],
+    advertencias: ['Documento con leyenda de pedido de cliente / producción propia.'],
+  }, { evidenceText: customerPdfText });
+  assert.deepEqual(order.warnings, []);
+});
+
 test('document and pending-order actions stay in different workflows', () => {
   assert.equal(capabilityForAction('REGISTRAR_BORRADOR_OC_CLIENTE_DOCUMENTO'), CAPABILITIES.RECEPTION_CREATE);
   assert.equal(capabilityForAction('CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'), CAPABILITIES.PRODUCTION_RELEASE);
@@ -136,6 +148,18 @@ test('approval links a reviewed customer PDF without creating a supplier OC or i
   assert.ok(writes.some(({ sql }) => sql.includes('INSERT INTO pedido_cliente_items')));
   assert.ok(writes.some(({ sql }) => sql.includes('INSERT INTO system_logs')));
   assert.ok(writes.every(({ sql }) => !/ordenes_compra_proveedor|\bstock\b|\bkardex\b/iu.test(sql)));
+});
+
+test('an older draft with only the positive customer legend needs no correction reason', async () => {
+  const { conn, writes } = approvalConnection({
+    status: 'REQUIERE_CORRECCION',
+    warnings: JSON.stringify(['Documento con leyenda de pedido de cliente / producción propia.']),
+  });
+  const result = await approveCustomerOrderDraft(conn, {
+    draftId: 42, userId: 2, review: reviewedOrder(),
+  });
+  assert.equal(result.identificador, 'PED ID 7');
+  assert.ok(writes.some(({ sql }) => sql.includes('INSERT INTO system_logs')));
 });
 
 test('customer order corrections require a reason and preserve original evidence in the audit', async () => {

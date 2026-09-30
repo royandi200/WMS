@@ -2,7 +2,7 @@ const { createHash } = require('crypto');
 const { downloadBuilderBotPdf } = require('./purchase-order-document-intake');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
 const { enrichItemsFromLineEvidence, normalizedUnit } = require('./document-evidence-items');
-const { documentDraftStatus } = require('./document-draft-status');
+const { documentDraftStatus, documentWarningsForReview } = require('./document-draft-status');
 const { nativePdfEvidence, pdfReviewWarning } = require('./document-pdf-evidence');
 
 const MAX_DOCUMENT_ITEMS = 100;
@@ -24,7 +24,7 @@ function normalizeWarehouseDocumentInput(body = {}, { evidenceText = '', recover
   if (!items.length) throw inputError('El documento debe incluir al menos un item');
   if (items.length > MAX_DOCUMENT_ITEMS) throw inputError(`El documento supera ${MAX_DOCUMENT_ITEMS} items`);
 
-  const warnings = normalizeWarnings(source.advertencias || source.warnings)
+  const warnings = documentWarningsForReview(normalizeWarnings(source.advertencias || source.warnings))
     .filter((warning) => !isModelDerivedTotalWarning(warning));
   const evidence = cleanEvidenceText(evidenceText);
   assertDocumentTypeMarker(documentType, evidence);
@@ -180,10 +180,13 @@ async function registerWarehouseDocumentDraft({
         if (!files.length) await storeDraftFile(db, existing[0].id, document);
       }
       await db.commit();
+      const warnings = documentWarningsForReview(parseStoredWarnings(existing[0].advertencias));
       return {
         ...existing[0],
+        estado: ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(existing[0].estado)
+          ? documentDraftStatus(warnings) : existing[0].estado,
         duplicate: true,
-        warnings: parseStoredWarnings(existing[0].advertencias),
+        warnings,
         itemCount: input.items.length,
         skuCount: new Set(input.items.map(item => item.sku)).size,
         totalUnits: Number(existing[0].total_unidades || 0),
