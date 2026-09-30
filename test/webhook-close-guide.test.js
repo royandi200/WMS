@@ -6,6 +6,9 @@ const dbPath = path.resolve(__dirname, '../api/_lib/db.js');
 const writes = [];
 let closeDraft = null;
 let latestStartedNotice = null;
+let lastWorkflowAction = null;
+let pickReview = null;
+let pickAllocations = null;
 const user = { id: 7, nombre: 'Operario QA', telefono: '573150000059', activo: 1,
   rol_nombre: 'admin', email: 'qa@wms.co' };
 
@@ -21,6 +24,19 @@ require.cache[dbPath] = {
         if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
         if (/FROM produccion_cierre_borradores/u.test(sql)) return [closeDraft
           ? [{ payload_json: closeDraft }] : []];
+        if (/FROM produccion_alistamiento_revisiones/u.test(sql)) return [pickReview
+          ? [{ order_id: pickReview.orderId, huella: pickReview.hash }] : []];
+        if (/SELECT action FROM webhook_logs/u.test(sql)) return [lastWorkflowAction
+          ? [{ action: lastWorkflowAction }] : []];
+        if (pickAllocations && /FROM ordenes_produccion op JOIN productos p/u.test(sql)
+          && /op\.fase/u.test(sql)) return [[{ id: 110, codigo_orden: 'OP-20260930-000110',
+            estado: 'APROBADA', fase: 'F0', producto_sku: '00102-PTASH60',
+            producto_nombre: 'ASHWAGANDHA X 60' }]];
+        if (pickAllocations && /FROM produccion_material_lotes pml/u.test(sql)) return [pickAllocations.map(row => ({ ...row }))];
+        if (pickAllocations && /FROM stock s/u.test(sql) && /JOIN lots l/u.test(sql)) return [[{
+          id: 12, lote: 'R5-260923-TRP', ubicacion_id: 2, ubicacion: 'A10',
+          cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: null,
+        }]];
         if (/FROM lots/u.test(sql) && /UPPER\(lpn\)/u.test(sql)) return [params[0] === '123456'
           ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
             status: 'DISPONIBLE', bodega_id: 1 }]];
@@ -43,6 +59,18 @@ require.cache[dbPath] = {
           id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
           unit_label: 'und', alias: 'tapa',
         }]];
+        if (pickAllocations && /UPDATE produccion_material_lotes/u.test(sql)) {
+          pickAllocations[0].stock_id = params[0];
+          pickAllocations[0].lote = params[1];
+          pickAllocations[0].ubicacion_id = params[2];
+          pickAllocations[0].cantidad_reservada = params[3];
+          pickAllocations[0].ubicacion = 'A10';
+          return [{ affectedRows: 1 }];
+        }
+        if (/INSERT INTO produccion_alistamiento_revisiones/u.test(sql)) {
+          pickReview = { orderId: params[1], hash: params[2] };
+          return [{ affectedRows: 1 }];
+        }
         if (/INSERT INTO produccion_cierre_borradores/u.test(sql)) closeDraft = params[2];
         if (/^\s*INSERT/u.test(sql)) return [{ insertId: 101, affectedRows: 1 }];
         if (/^\s*UPDATE/u.test(sql)) return [{ affectedRows: 1 }];
@@ -86,6 +114,62 @@ test('un cierre incompleto devuelve la pregunta y finaliza la bandeja antes de c
   const waste = await invoke('REPORTE_MERMA', '0 merma', { motivo: 'merma' });
   assert.match(waste.body.mensaje, /ubicación quedará/iu);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
+});
+
+test('una ubicación negada mal clasificada como confirmación de alistamiento no inicia la OP', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  const res = await invoke('CONFIRMAR_MATERIALES_PRODUCCION',
+    'los dos no estaban en la ubicación a 11 estaban en la ubicación a 10',
+    { id_orden: 110 });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body.mensaje, /Indica la OP que vas a alistar/u);
+  assert.ok(!writes.some(entry => /UPDATE stock|UPDATE lots|UPDATE ordenes_produccion|INSERT INTO movimientos/u.test(entry.sql)));
+});
+
+test('una corrección después del resumen de cierre conserva ese contexto aunque BBC diga alistamiento', async () => {
+  writes.length = 0;
+  lastWorkflowAction = 'CERRAR_ORDEN_PRODUCCION';
+  closeDraft = JSON.stringify({ orderId: 101, conforming: 3, waste: 0,
+    wasteClassified: true, reason: null, location: 'C2', materials: [],
+    materialsAnswered: false, materialPending: null, reviewShown: false,
+    candidateOrderId: null });
+  try {
+    const res = await invoke('CONFIRMAR_MATERIALES_PRODUCCION',
+      'corrección, la ubicación del terminado es C2', { id_orden: 101 });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.mensaje, /OP ID 101 — cierre en borrador/u);
+    assert.doesNotMatch(res.body.mensaje, /Revisa el alistamiento/u);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE lots|UPDATE ordenes_produccion/u.test(entry.sql)));
+  } finally {
+    lastWorkflowAction = null;
+    closeDraft = null;
+  }
+});
+
+test('el webhook mantiene OP y partida entre el resumen y la corrección de alistamiento', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  pickReview = null;
+  pickAllocations = [{ id: 501, produccion_material_id: 10, stock_id: 11,
+    lote: 'R5-260923-TRP', ubicacion_id: 1, cantidad_reservada: 7,
+    producto_id: 6, unidad: 'und', bodega_id: 1, sku: '00006-TRP',
+    producto: 'TARRO CUADRADO x 60', ubicacion: 'A11' }];
+  try {
+    const preview = await invoke('MODO_CHARLA', 'Revisa materiales OP ID 110');
+    assert.match(preview.body.mensaje, /Revisa el alistamiento de OP ID 110/u);
+    assert.equal(pickReview.orderId, 110);
+    lastWorkflowAction = 'CONFIRMAR_MATERIALES_PRODUCCION';
+    const correction = await invoke('MODO_CHARLA', 'corrección: partida 1, ubicación A10');
+    assert.match(correction.body.mensaje, /Corrección aplicada a la partida 1/u);
+    assert.match(correction.body.mensaje, /ubicación: A10/u);
+    assert.equal(pickAllocations[0].stock_id, 12);
+    assert.ok(!writes.some(entry => /UPDATE stock\s+SET cantidad = cantidad -|UPDATE ordenes_produccion\s+SET fase/u.test(entry.sql)));
+  } finally {
+    pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
 });
 
 test('un número de OP aclarado en conversación queda pendiente y sí continúa el cierre', async () => {

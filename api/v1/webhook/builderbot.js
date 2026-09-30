@@ -103,6 +103,8 @@ const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow
 const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
   parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
+const { advanceProductionPick, isPickCorrection, isPickReviewIntent,
+  pendingPickReview, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
   resolveProductionOrigin,
@@ -563,6 +565,21 @@ async function saveLog(db, { from, action, priority, payload, response, status }
     [from || null, action, priority || 'baja',
      JSON.stringify(safePayload), JSON.stringify(response || {}), status]
   ).catch(() => {});
+}
+
+async function lastProcessedWorkflowAction(db, from) {
+  if (!from) return null;
+  const [rows] = await db.execute(
+    `SELECT action FROM webhook_logs
+      WHERE from_phone = ? AND status = 'PROCESSED'
+        AND action IN ('CONFIRMAR_MATERIALES_PRODUCCION',
+          'PREPARAR_RECEPCION_OC', 'AVANZAR_RECEPCION_GUIADA_OC',
+          'CONFIRMAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA',
+          'CONFIRMAR_RECEPCION_MAQUILA', 'CERRAR_ORDEN_PRODUCCION')
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+      ORDER BY id DESC LIMIT 1`, [from]
+  );
+  return rows[0]?.action || null;
 }
 
 function sanitizeWebhookLogPayload(payload, action) {
@@ -1589,6 +1606,18 @@ module.exports = async (req, res) => {
       }
     }
 
+    const contextualPickCorrection = Boolean(rawText && isPickCorrection(rawText)
+      && !isPickReviewIntent(rawText));
+    const lastWorkflowAction = contextualPickCorrection
+      ? await lastProcessedWorkflowAction(db, from) : null;
+    // La clasificación del modelo no prevalece sobre el último resumen real:
+    // una corrección breve tras recepción o cierre no pertenece al alistamiento.
+    if (action === 'CONFIRMAR_MATERIALES_PRODUCCION' && contextualPickCorrection
+      && lastWorkflowAction && lastWorkflowAction !== 'CONFIRMAR_MATERIALES_PRODUCCION') {
+      action = 'MODO_CHARLA';
+      params = {};
+    }
+
     let confirmedReceptionReference = null;
     let selectedPreparationReference = null;
     if (['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA',
@@ -1644,6 +1673,30 @@ module.exports = async (req, res) => {
       && await hasSelectedGuidedSku(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
+    }
+
+    // El texto del alistador es la fuente de verdad. Una corrección (incluida
+    // una negación mal transcrita) nunca puede activar el consumo de materiales,
+    // aunque el modelo la haya clasificado como confirmación.
+    if (rawText && ['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION',
+      'EXCEPCION_PICKING', 'AJUSTAR_MATERIALES_PRODUCCION', 'CERRAR_ORDEN_PRODUCCION'].includes(action)) {
+      const pickReviewIntent = isPickReviewIntent(rawText);
+      const pickCorrection = isPickCorrection(rawText);
+      if (action === 'CONFIRMAR_MATERIALES_PRODUCCION' || pickReviewIntent || pickCorrection) {
+        const activePick = pickCorrection && !pickReviewIntent
+          ? await pendingPickReview(db, user.id) : null;
+        const notifiedPick = pickCorrection && !activePick
+          && !/RECEPCION/u.test(lastWorkflowAction || '')
+          && lastWorkflowAction !== 'CERRAR_ORDEN_PRODUCCION'
+          ? await recentPickNotificationReference(db, from) : null;
+        if (action === 'CONFIRMAR_MATERIALES_PRODUCCION'
+          || pickReviewIntent || (pickCorrection && activePick
+            && lastWorkflowAction === 'CONFIRMAR_MATERIALES_PRODUCCION')
+          || (pickCorrection && notifiedPick)) {
+          action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+          params = {};
+        }
+      }
     }
 
     if (['UNKNOWN', 'MODO_CHARLA'].includes(action) && rawText
@@ -4175,7 +4228,13 @@ module.exports = async (req, res) => {
 
       // ── CONFIRMAR_MATERIALES_PRODUCCION ──────────────────────
       case 'CONFIRMAR_MATERIALES_PRODUCCION': {
-        const confirmation = await confirmProductionMaterials({ orderId: params.id_orden, userId: user.id });
+        const guided = await advanceProductionPick({ db, userId: user.id, from, rawText });
+        if (guided.message) {
+          mensaje = guided.message;
+          break;
+        }
+        const confirmation = await confirmProductionMaterials({ orderId: guided.orderId,
+          userId: user.id, requireReviewedPick: true });
         mensaje = confirmation.already_confirmed
           ? [
               `Los materiales de OP ID ${confirmation.order_id} | ${confirmation.order_code} ya estaban confirmados. No se modifico inventario.`,

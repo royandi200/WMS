@@ -7,6 +7,7 @@ const { resolveProductReference } = require('./product-references');
 const { beginAdditionalConfirmation, completeAdditionalConfirmation } = require('./additional-confirmation');
 const { planProductionMaterials, roundQty } = require('./production-material-availability');
 const { assignedFinishedLot } = require('./production-lot');
+const { allocationFingerprint } = require('./production-pick-guide');
 
 function httpError(status, message, data) {
   const error = new Error(message);
@@ -263,7 +264,7 @@ async function releaseProductionOrder({
           '',
         ]),
         '*Siguiente paso*',
-        `Confirma materiales e inicio de producción para OP ID ${created.insertId}.`,
+        `Revisa materiales OP ID ${created.insertId}. Después de corregir cualquier partida, confirma desde el resumen completo.`,
       ].join('\n'),
     }).catch(error => [{ status: 'error', error: error.message }]);
     return result;
@@ -278,7 +279,7 @@ async function releaseProductionOrder({
   }
 }
 
-async function confirmProductionMaterials({ orderId, userId }) {
+async function confirmProductionMaterials({ orderId, userId, requireReviewedPick = false }) {
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
@@ -313,6 +314,34 @@ async function confirmProductionMaterials({ orderId, userId }) {
       [order.id]
     );
     if (!allocations.length) throw httpError(409, 'La orden no tiene materiales reservados');
+
+    if (requireReviewedPick) {
+      const [reviews] = await conn.execute(
+        `SELECT huella FROM produccion_alistamiento_revisiones
+          WHERE usuario_id = ? AND orden_produccion_id = ? AND expira_en > NOW()
+          LIMIT 1 FOR UPDATE`, [userId, order.id]
+      );
+      if (!reviews.length || reviews[0].huella !== allocationFingerprint(allocations)) {
+        throw httpError(409, `El resumen de materiales de OP ID ${order.id} cambió o no fue revisado. Pide «Revisa materiales OP ID ${order.id}» antes de confirmar. No se inició producción.`);
+      }
+      for (const allocation of allocations) {
+        const [validStock] = await conn.execute(
+          `SELECT s.id FROM stock s
+             JOIN lots l ON l.lpn = s.lote AND l.product_id = s.producto_id
+             JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.activa = 1
+             JOIN bodegas b ON b.id = s.bodega_id AND b.activa = 1
+            WHERE s.id = ? AND s.lote = ? AND s.ubicacion_id = ?
+              AND s.producto_id = ? AND l.status = 'DISPONIBLE'
+              AND (COALESCE(l.expiry_date, s.fecha_venc) IS NULL
+                   OR COALESCE(l.expiry_date, s.fecha_venc) >= CURDATE())
+            LIMIT 1 FOR UPDATE`,
+          [allocation.stock_id, allocation.lote, allocation.ubicacion_id,
+            allocation.producto_id]
+        );
+        if (!validStock.length) throw httpError(409,
+          `El lote ${allocation.lote} ya no está disponible en la ubicación revisada. Vuelve a revisar OP ID ${order.id}; no se inició producción.`);
+      }
+    }
 
     const consumed = [];
     for (const allocation of allocations) {
@@ -391,6 +420,12 @@ async function confirmProductionMaterials({ orderId, userId }) {
        WHERE id = ? AND estado = 'APROBADA' AND fase = 'F0'`,
       [order.id]
     );
+    if (requireReviewedPick) {
+      await conn.execute(
+        `UPDATE produccion_alistamiento_revisiones SET expira_en = NOW()
+          WHERE usuario_id = ? AND orden_produccion_id = ?`, [userId, order.id]
+      );
+    }
     const [actors] = await conn.execute(`SELECT nombre FROM usuarios WHERE id = ? LIMIT 1`, [userId]);
     await conn.commit();
     const result = { order_id: order.id, order_code: order.codigo_orden, phase: 'F1',

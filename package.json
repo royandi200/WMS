@@ -42,6 +42,8 @@
     "data:product-locations:apply": "node scripts/apply-product-locations-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:production-replenishments:dry-run": "node scripts/apply-production-replenishments-migration.js",
     "data:production-replenishments:apply": "node scripts/apply-production-replenishments-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
+    "data:production-pick-reviews:dry-run": "node scripts/apply-production-pick-reviews-migration.js",
+    "data:production-pick-reviews:apply": "node scripts/apply-production-pick-reviews-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:purchase-order-hints:dry-run": "node scripts/apply-purchase-order-document-hints-migration.js",
     "data:purchase-order-hints:apply": "node scripts/apply-purchase-order-document-hints-migration.js --apply --yes-i-understand-this-changes-the-qa-schema",
     "data:outsourcing-before-oc:dry-run": "node scripts/apply-outsourcing-before-purchase-order-migration.js",
