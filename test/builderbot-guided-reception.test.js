@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const { advanceGuidedReception, hasPendingSkuReview, skuReviewReply } = require('../api/_lib/builderbot-guided-reception');
+const { advanceGuidedReception, hasPendingSkuReview, hasRecentReceptionContext,
+  guidedReceptionResume, isReceptionCorrectionRequest, skuReviewReply } = require('../api/_lib/builderbot-guided-reception');
 const { canonicalJson } = require('../api/_lib/builderbot-reception');
 
 const batchTranscription = 'Voy a ingresar tapa de tarro cuadrado blanco, las 30 unidades en la ubicación A8 y están en buen estado. También voy a ingresar las etiquetas achaguanda por 60, las 30 unidades, están en buen estado en A11. Voy a ingresar el liner tarro por 60, 30 unidades, hay 20 en buen estado y 10 en mal estado que van para cuarentena. y las 20 las voy a guardar en B10 y las gomas achaguanda de magnesio y vitamina C están los 5400 gramos en buen estado y los voy a guardar en A10';
@@ -819,6 +820,73 @@ test('guided reception keeps available and quarantine partitions of one SKU', as
   assert.match(correction.message, /Partida 2: 1 und · CUARENTENA · ubicación Q2/u);
   assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].partidas[0].ubicacion, 'A8');
   assert.equal(state.inventoryWrites, 0);
+});
+
+test('returning to an advanced receipt reports reviewed SKUs and the next missing step', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: dos tapas disponibles en A8', {
+    producto: 'tapas', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8',
+  });
+  await send('sí');
+  await send('gomas: llegaron 100 gramos', { producto: 'gomas', cantidad: 100 });
+  const prepared = { id: 101, numero: 'REC-OC-37-001', items: [
+    { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO (60 UNID)',
+      cantidad_pendiente: 2, unidad: 'und', lote_documento: 'T-1',
+      fecha_vencimiento_documento: '2027-12-31' },
+    { sku: '00051-MPASH', producto: 'GOMAS ASHWAGANDHA', cantidad_pendiente: 100,
+      unidad: 'g', lote_documento: 'G-1', fecha_vencimiento_documento: '2027-12-31' },
+  ] };
+  const order = { id: 37, numero: 'OC-37', tipo_recepcion: 'INSUMOS_MP' };
+  const resume = await guidedReceptionResume(db, order, prepared, user.id);
+  assert.match(resume, /ya tenía avance guardado; no se reinició/u);
+  assert.match(resume, /SKU ya revisados: 00001-TPBI/u);
+  assert.match(resume, /00051-MPASH.*faltan condición, ubicación/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('returning to a final reception preview shows the saved summary instead of restarting', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',
+    params: { avance: { producto: 'tapas', cantidad: 2,
+      condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  await advanceGuidedReception({ db, user, rawText: 'sí', params: { avance: {} } });
+  const resume = await guidedReceptionResume(db,
+    { id: 37, numero: 'OC-37', tipo_recepcion: 'INSUMOS_MP' },
+    { id: 101, numero: 'REC-OC-37-001', items: [{
+      sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO (60 UNID)',
+      cantidad_pendiente: 2, unidad: 'und', lote_documento: 'T-1',
+      fecha_vencimiento_documento: '2027-12-31',
+    }] }, user.id);
+  assert.match(resume, /ya tenía un borrador completo; no se reinició/u);
+  assert.match(resume, /Falta revisar el resumen final y confirmar/u);
+  assert.match(resume, /Confirmo la recepción OC ID 37/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a reception correction keeps context only while the latest processed reply is that receipt', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',
+    params: { avance: { producto: 'tapas', cantidad: 2,
+      condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  const latestReceipt = { action: 'AVANZAR_RECEPCION_GUIADA_OC', response: { context: {
+    reception: { reception_id: 101, purchase_order_id: 37, inventory_changed: false,
+      review_sku: '00001-TPBI' },
+  } } };
+  state.recentLog = [latestReceipt];
+  assert.equal(await hasRecentReceptionContext(db, user.id, '573150000059'), true);
+  state.recentLog = [{ action: 'CERRAR_ORDEN_PRODUCCION', response: { message: 'OP ID 109' } },
+    latestReceipt];
+  assert.equal(await hasRecentReceptionContext(db, user.id, '573150000059'), false);
+});
+
+test('an explicit OP correction cannot be mistaken for a reception correction', () => {
+  assert.equal(isReceptionCorrectionRequest('Corrige ubicación de la OP 109 a C2'), false);
+  assert.equal(isReceptionCorrectionRequest('Corrección, ubicación de la partida 2 de las gomas es A2'), true);
 });
 
 test('a final-preview correction without a partition number cannot alter a split SKU', async () => {

@@ -54,7 +54,7 @@ function isReceptionCorrectionRequest(rawText) {
   const text = currentMessageText(rawText).normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toLowerCase();
   return /^(?:correccion|corrige|corrijo|cambia|modifica|quiero corregir|quiero cambiar|quisiera cambiar|necesito corregir)\b/u.test(text)
-    && !/\b(?:op\s*id|orden de produccion|despacho)\b/u.test(text);
+    && !/\b(?:op\s*(?:id\s*)?\d+|op-\d{8}-\d+|op\s*id|orden de produccion|despacho)\b/u.test(text);
 }
 
 function correctionFieldsFromText(rawText) {
@@ -207,6 +207,12 @@ async function hasSelectedGuidedSku(db, userId, from) {
 
 async function hasActiveReceptionSession(db, userId, from) {
   return Boolean(await activeUserSession(db, userId, { allowPreview: true, from }));
+}
+
+async function hasRecentReceptionContext(db, userId, from) {
+  if (!from) return false;
+  const session = await activeUserSession(db, userId, { allowPreview: true, from });
+  return Boolean(session && await recentlyPreparedSession(db, from, { sessions: [session] }));
 }
 
 async function recentlyPreparedSession(db, from, { sessions } = {}) {
@@ -643,6 +649,48 @@ function skuReviewMessage(order, reception, prepared, entry) {
   ].filter(Boolean).join('\n');
 }
 
+async function guidedReceptionResume(db, order, reception, userId) {
+  const [rows] = await db.execute(
+    `SELECT usuario_id, payload_json, payload_hash
+       FROM recepcion_confirmacion_borradores
+      WHERE recepcion_id = ? AND estado = 'PENDIENTE' AND expira_en > NOW()
+      LIMIT 1`,
+    [reception.id]
+  );
+  const payload = parseDraft(rows[0], order.id, reception.id, userId);
+  if (!payload) return null;
+  const identifier = purchaseOrderReceptionIdentifier(order);
+  if (payload.version === 1) {
+    return [
+      `🧾 Retomamos ${identifier} | ${reception.numero}. Esta recepción ya tenía un borrador completo; no se reinició.`,
+      'Falta revisar el resumen final y confirmar. Puedes corregir una partida antes de confirmar.',
+      buildReceptionReview(order, reception, payload.items),
+    ].join('\n');
+  }
+  const preparedItems = reception.items || [];
+  const recorded = preparedItems.filter(item => payload.entries[item.sku]);
+  if (!recorded.length) return null;
+  const reviewed = recorded.filter(item => payload.entries[item.sku].verified
+    && !missingFields(payload.entries[item.sku], item).length);
+  const inProgress = recorded.filter(item => !reviewed.includes(item));
+  const pending = preparedItems.filter(item => !payload.entries[item.sku]);
+  const next = preparedItems.find(item => item.sku === payload.reviewSku)
+    || preparedItems.find(item => item.sku === payload.selectedSku)
+    || inProgress[0] || pending[0];
+  return [
+    `🧾 Retomamos ${identifier} | ${reception.numero}. Esta recepción ya tenía avance guardado; no se reinició.`,
+    reviewed.length ? `SKU ya revisados: ${reviewed.map(item => `${item.sku} - ${item.producto}`).join('; ')}.` : null,
+    ...inProgress.map(item => {
+      const entry = payload.entries[item.sku];
+      const missing = missingFields(entry, item);
+      return `${item.sku} - ${item.producto}: ${entry.cantidad || 'cantidad pendiente'} ${item.unidad || 'und'} registrados${entry.partidas?.length ? ` en ${entry.partidas.length} partidas` : ''}; ${missing.length ? `faltan ${missing.join(', ')}` : 'falta revisar este SKU y responder «sí» si está correcto'}.`;
+    }),
+    pending.length ? `SKU sin registrar: ${pending.map(item => `${item.sku} - ${item.producto}`).join('; ')}.` : null,
+    next ? `Siguiente paso: continúa con ${next.sku} - ${next.producto}${payload.reviewSku === next.sku ? ' y responde «sí» si su revisión está correcta' : ''}.` : null,
+    'Aún no se modificó inventario.',
+  ].filter(Boolean).join('\n');
+}
+
 async function saveGuidedDraft(db, order, reception, userId, payload) {
   const payloadJson = canonicalJson(payload);
   await db.execute(
@@ -963,6 +1011,6 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
 }
 
 module.exports = { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
-  hasActiveReceptionSession, isReceptionCorrectionRequest,
-  skuReviewReply, documentMismatch,
+  hasActiveReceptionSession, hasRecentReceptionContext, isReceptionCorrectionRequest,
+  skuReviewReply, documentMismatch, guidedReceptionResume,
   parseDraft, missingFields, itemFromEntry };

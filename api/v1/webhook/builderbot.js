@@ -162,8 +162,8 @@ const {
   validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
 const { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
-  hasActiveReceptionSession, isReceptionCorrectionRequest,
-  skuReviewReply, documentMismatch } = require('../../_lib/builderbot-guided-reception');
+  hasRecentReceptionContext, isReceptionCorrectionRequest,
+  skuReviewReply, documentMismatch, guidedReceptionResume } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
@@ -1615,8 +1615,9 @@ module.exports = async (req, res) => {
       params = { avance: {} };
     }
     if (!selectedPreparationReference && isReceptionCorrectionRequest(rawText)
-      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
-      && await hasActiveReceptionSession(db, user.id, from)) {
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC',
+        'CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA'].includes(action)
+      && await hasRecentReceptionContext(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
     }
@@ -1912,6 +1913,18 @@ module.exports = async (req, res) => {
             reception_id: prepared.reception.id,
             purchase_order_id: prepared.order.id,
             already_completed: true,
+          };
+          break;
+        }
+        const resume = prepared.reception.duplicate
+          ? await guidedReceptionResume(db, prepared.order, prepared.reception, user.id) : null;
+        if (resume) {
+          mensaje = resume;
+          responseContext.reception = {
+            reception_id: prepared.reception.id,
+            reception_number: prepared.reception.numero,
+            purchase_order_id: prepared.order.id,
+            inventory_changed: false,
           };
           break;
         }
