@@ -8,6 +8,7 @@ const {
   explicitConfirmation,
   contextualReceptionConfirmation,
   activeFinalReceptionPreview,
+  recentlyDisplayedFinalReceptionPreview,
   explicitPurchaseOrderConfirmation,
   purchaseOrderTextReference,
   purchaseOrderReceptionIdentifier,
@@ -35,19 +36,43 @@ const { formatWhatsAppMessage } = require('../api/_lib/whatsapp-message');
 test('final reception confirmation accepts one active OC preview, not a different ID or flow', () => {
   const order = { id: 40, numero: 'OC-PROV-40', tipo_recepcion: 'INSUMOS_MP' };
   for (const text of [
-    'confirmó la recepción',
     'confirmó la recepción o ib 40',
     'confirmó recepción oce y de 40',
     'confirmo la recepción OC ID 40',
   ]) assert.equal(contextualReceptionConfirmation(text, order), true, text);
   for (const text of [
-    'sí', 'recibí 40', 'confirmo la recepción 41',
+    'sí', 'recibí 40', 'confirmo la recepción', 'confirmó la recepción',
+    'confirmo la recepción 41',
     'confirmo la recepción IO ID 40', 'confirmo la recepción MQ ID 40',
     'confirmo la recepción OC ID 40 o IO ID 40',
     'confirmo la recepción 40 pero corrige el lote',
   ]) assert.equal(contextualReceptionConfirmation(text, order), false, text);
   assert.equal(contextualReceptionConfirmation('confirmo la recepción IO ID 40',
     { id: 40, tipo_recepcion: 'IN_OUT' }), true);
+});
+
+test('a vague confirmation uses only the last final preview shown to this operator', async () => {
+  const payload = { version: 1, orderId: 60, receptionId: 160,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 25 }] }] };
+  const row = { usuario_id: 20, payload_json: JSON.stringify(payload),
+    payload_hash: createHash('sha256').update(canonicalJson(payload)).digest('hex') };
+  const context = { reception: { reception_id: 160, purchase_order_id: 60,
+    requires_confirmation: true, inventory_changed: false } };
+  const logs = [{ action: 'AVANZAR_RECEPCION_GUIADA_OC',
+    response: JSON.stringify({ context }) }];
+  const db = { execute: async (sql, values) => {
+    if (sql.includes('FROM webhook_logs')) {
+      assert.deepEqual(values, ['573150000059']);
+      return [logs];
+    }
+    assert.match(sql, /FROM recepcion_confirmacion_borradores/u);
+    return [[row]];
+  } };
+  assert.deepEqual(await recentlyDisplayedFinalReceptionPreview(db, 20, '573150000059'),
+    { orden_compra_id: 60, recepcion_id: 160 });
+  await assert.rejects(recentlyDisplayedFinalReceptionPreview(db, 21, '573150000059'), /otro usuario/u);
+  logs[0] = { action: 'CONSULTAR_STOCK_MATERIA_PRIMA', response: '{}' };
+  assert.equal(await recentlyDisplayedFinalReceptionPreview(db, 20, '573150000059'), null);
 });
 
 test('contextual reception confirmation requires one valid final preview owned by the operator', async () => {

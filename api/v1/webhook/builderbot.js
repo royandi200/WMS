@@ -157,7 +157,7 @@ const {
   prepareReceptionFromPurchaseOrder,
   confirmReceptionFromWhatsApp,
   activeFinalReceptionPreview,
-  contextualReceptionConfirmation,
+  recentlyDisplayedFinalReceptionPreview,
   findPurchaseOrder,
   prepareReceptionFromOutsourcing,
   confirmOutsourcingReceptionFromWhatsApp,
@@ -1676,17 +1676,10 @@ module.exports = async (req, res) => {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
     }
-    if (['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_RECEPCION_OC'].includes(action)
-      && /^\s*(?:s[ií][,.:]?\s+)?confirm[oó]\s+(?:la\s+)?recepci[oó]n\b/iu.test(rawText)
-      && typedReceptionReferences(rawText).length === 0) {
-      const preview = await activeFinalReceptionPreview(db, user.id);
-      if (preview) {
-        const activeOrder = await findPurchaseOrder(db, { orden_compra_id: preview.orden_compra_id });
-        if (contextualReceptionConfirmation(rawText, activeOrder)) {
-          action = 'CONFIRMAR_RECEPCION_OC';
-          params = { orden_compra_id: activeOrder.id, confirmacion_final: true };
-        }
-      }
+    const vagueReceptionConfirmation = /^\s*(?:s[ií][,.:]?\s+)?confirm(?:o|a|ar)\s+(?:la\s+)?recepci[oó]n[.!?]*\s*$/iu.test(rawText);
+    if (vagueReceptionConfirmation) {
+      action = 'CONFIRMAR_RECEPCION_OC';
+      params = {};
     }
     const mismatch = documentMismatch(rawText);
     if (!selectedPreparationReference && (mismatch.lote || mismatch.fecha_vencimiento)
@@ -1804,6 +1797,32 @@ module.exports = async (req, res) => {
       const msg = `🚫 No tienes permiso para ejecutar *${action}*.\nTus roles: ${roles.join(', ') || 'sin rol'}`;
       await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
       return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw, roles });
+    }
+
+    if (vagueReceptionConfirmation) {
+      let preview = await recentlyDisplayedFinalReceptionPreview(db, user.id, from);
+      if (!preview) {
+        try {
+          preview = await activeFinalReceptionPreview(db, user.id);
+        } catch (error) {
+          if (error.status !== 409) throw error;
+        }
+      }
+      const order = preview
+        ? await findPurchaseOrder(db, { orden_compra_id: preview.orden_compra_id }) : null;
+      const identifier = order ? purchaseOrderReceptionIdentifier(order).replace(/\*/gu, '') : null;
+      const msg = identifier
+        ? `🧾 Si quieres cerrar esta recepción ${identifier}, revisa primero el resumen completo y escribe el mensaje completo: «Confirmo la recepción ${identifier}». «Confirma la recepción» por sí solo no confirma nada. No se modificó inventario.`
+        : '🧾 Para cerrar una recepción, revisa primero su resumen completo y escribe el mensaje completo: «Confirmo la recepción OC ID [número]» (o «IO ID [número]», según la orden). La frase sin ID no confirma ninguna recepción. No se modificó inventario.';
+      if (preview) responseContext.reception = {
+        reception_id: preview.recepcion_id,
+        purchase_order_id: preview.orden_compra_id,
+        requires_confirmation: true,
+        inventory_changed: false,
+      };
+      const body = { ok: true, message: msg, mensaje: msg, context: responseContext };
+      await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
+      return await finalizeHandledResponse(body);
     }
 
     let mensaje = '';

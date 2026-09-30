@@ -593,7 +593,7 @@ function contextualReceptionConfirmation(rawText, order) {
   const match = text.match(/^(?:SI[,.:]?\s+)?CONFIRMO\s+(?:LA\s+)?RECEPCION(?:\s+(.+))?$/u);
   if (!match) return false;
   const rest = String(match[1] || '').replace(/[.!?]+$/gu, '').trim();
-  if (!rest) return true;
+  if (!rest) return false;
   if (/\b(?:NO|PERO|EXCEPTO|SALVO|CAMBIA|CAMBIAR|CORRIGE|CORREGIR|PENDIENTE)\b/u.test(rest)) {
     return false;
   }
@@ -1059,6 +1059,36 @@ async function activeFinalReceptionPreview(db, userId) {
   return row;
 }
 
+async function recentlyDisplayedFinalReceptionPreview(db, userId, from) {
+  if (!from) return null;
+  const [logs] = await db.execute(
+    `SELECT action, response FROM webhook_logs
+      WHERE from_phone = ? AND status = 'PROCESSED'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+      ORDER BY id DESC LIMIT 5`,
+    [from]
+  );
+  for (const log of logs) {
+    let response;
+    try {
+      response = typeof log.response === 'string' ? JSON.parse(log.response) : log.response;
+    } catch {
+      return null;
+    }
+    if (response?.duplicate === true) continue;
+    if (!['AVANZAR_RECEPCION_GUIADA_OC', 'CONFIRMAR_RECEPCION_OC'].includes(log.action)) return null;
+    const context = response?.context?.reception;
+    if (context?.requires_confirmation !== true || context?.inventory_changed !== false) return null;
+    const orderId = Number(context.purchase_order_id);
+    const receptionId = Number(context.reception_id);
+    if (!Number.isSafeInteger(orderId) || orderId <= 0
+      || !Number.isSafeInteger(receptionId) || receptionId <= 0) return null;
+    const draft = await loadReceptionDraft(db, { orderId, receptionId, userId });
+    return draft ? { orden_compra_id: orderId, recepcion_id: receptionId } : null;
+  }
+  return null;
+}
+
 async function consumeReceptionDraft(db, receptionId, userId) {
   await db.execute(
     `UPDATE recepcion_confirmacion_borradores
@@ -1363,6 +1393,7 @@ module.exports = {
   saveReceptionDraft,
   loadReceptionDraft,
   activeFinalReceptionPreview,
+  recentlyDisplayedFinalReceptionPreview,
   confirmReceptionFromWhatsApp,
   confirmOutsourcingReceptionFromWhatsApp,
 };
