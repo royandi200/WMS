@@ -86,6 +86,12 @@ test('contextual reception confirmation requires one valid final preview owned b
     return [rows];
   } });
   assert.equal((await activeFinalReceptionPreview(db([row]), 20)).orden_compra_id, 40);
+  const scopedDb = { execute: async (sql, values) => {
+    assert.match(sql, /AND d\.orden_compra_id = \?/u);
+    assert.deepEqual(values, [20, 40]);
+    return [[row]];
+  } };
+  assert.equal((await activeFinalReceptionPreview(scopedDb, 20, 40)).orden_compra_id, 40);
   assert.equal(await activeFinalReceptionPreview(db([]), 20), null);
   await assert.rejects(activeFinalReceptionPreview(db([row, row]), 20), /varias recepciones/u);
   await assert.rejects(activeFinalReceptionPreview(db([{ ...row, payload_hash: 'wrong' }]), 20),

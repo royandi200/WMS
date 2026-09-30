@@ -1676,8 +1676,14 @@ module.exports = async (req, res) => {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
     }
-    const vagueReceptionConfirmation = /^\s*(?:s[ií][,.:]?\s+)?confirm(?:o|a|ar)\s+(?:la\s+)?recepci[oó]n[.!?]*\s*$/iu.test(rawText);
-    if (vagueReceptionConfirmation) {
+    const incompleteReceptionConfirmation = /^\s*(?:s[ií][,.:]?\s+)?confirm(?:o|a|ar)\s*(?:(?:la\s+)?recepci[oó]n|(?:OC|IO)\s*(?:ID\s*)?\d+)?[.!?]*\s*$/iu.test(rawText);
+    const receiptNamedInAttempt = /\brecepci[oó]n\b|\b(?:OC|IO)\s*(?:ID\s*)?\d+\b/iu.test(rawText);
+    const incompleteReceptionPreview = incompleteReceptionConfirmation && !receiptNamedInAttempt
+      ? await recentlyDisplayedFinalReceptionPreview(db, user.id, from) : null;
+    const guideIncompleteReception = incompleteReceptionConfirmation
+      && (receiptNamedInAttempt || action === 'CONFIRMAR_RECEPCION_OC'
+        || Boolean(incompleteReceptionPreview));
+    if (guideIncompleteReception) {
       action = 'CONFIRMAR_RECEPCION_OC';
       params = {};
     }
@@ -1799,11 +1805,19 @@ module.exports = async (req, res) => {
       return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED', rol: rolRaw, roles });
     }
 
-    if (vagueReceptionConfirmation) {
-      let preview = await recentlyDisplayedFinalReceptionPreview(db, user.id, from);
+    if (guideIncompleteReception) {
+      const references = typedReceptionReferences(rawText);
+      const requestedReference = references.length === 1
+        && ['OC', 'IO'].includes(references[0].kind) ? references[0] : null;
+      let preview = incompleteReceptionPreview
+        || await recentlyDisplayedFinalReceptionPreview(db, user.id, from);
+      if (requestedReference && Number(preview?.orden_compra_id) !== requestedReference.id) {
+        preview = null;
+      }
       if (!preview) {
         try {
-          preview = await activeFinalReceptionPreview(db, user.id);
+          preview = await activeFinalReceptionPreview(db, user.id,
+            requestedReference?.id || null);
         } catch (error) {
           if (error.status !== 409) throw error;
         }
@@ -1811,9 +1825,12 @@ module.exports = async (req, res) => {
       const order = preview
         ? await findPurchaseOrder(db, { orden_compra_id: preview.orden_compra_id }) : null;
       const identifier = order ? purchaseOrderReceptionIdentifier(order).replace(/\*/gu, '') : null;
-      const msg = identifier
-        ? `🧾 Si quieres cerrar esta recepción ${identifier}, revisa primero el resumen completo y escribe el mensaje completo: «Confirmo la recepción ${identifier}». «Confirma la recepción» por sí solo no confirma nada. No se modificó inventario.`
-        : '🧾 Para cerrar una recepción, revisa primero su resumen completo y escribe el mensaje completo: «Confirmo la recepción OC ID [número]» (o «IO ID [número]», según la orden). La frase sin ID no confirma ninguna recepción. No se modificó inventario.';
+      const referenceMatches = !requestedReference || identifier?.startsWith(requestedReference.kind);
+      const msg = identifier && referenceMatches
+        ? `🧾 Vas bien, pero ese mensaje está incompleto y no confirmó la recepción ${identifier}. Revisa el resumen y envía esta frase completa en un solo mensaje: «Confirmo la recepción ${identifier}». No se modificó inventario.`
+        : requestedReference
+          ? `🧾 No encuentro una recepción ${requestedReference.kind} ID ${requestedReference.id} lista para confirmar en tu usuario. Solicita o revisa su resumen antes de continuar; solo entonces envía «Confirmo la recepción ${requestedReference.kind} ID ${requestedReference.id}» en un solo mensaje. No se modificó inventario.`
+          : '🧾 Ese mensaje no confirmó ninguna recepción. Revisa el resumen de la recepción que quieres cerrar y envía en un solo mensaje «Confirmo la recepción OC ID [número]» (o «IO ID [número]», según la orden). No se modificó inventario.';
       if (preview) responseContext.reception = {
         reception_id: preview.recepcion_id,
         purchase_order_id: preview.orden_compra_id,

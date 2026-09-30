@@ -11,6 +11,7 @@ const reception = require(receptionPath);
 let routed = null;
 let recentReception = true;
 let recentFinalPreview = null;
+let activeFinalPreview = null;
 
 require.cache[dbPath] = {
   id: dbPath, filename: dbPath, loaded: true,
@@ -48,6 +49,9 @@ require.cache[receptionPath] = {
   exports: {
     ...reception,
     recentlyDisplayedFinalReceptionPreview: async () => recentFinalPreview,
+    activeFinalReceptionPreview: async (_db, _userId, orderId) =>
+      !orderId || Number(activeFinalPreview?.orden_compra_id) === Number(orderId)
+        ? activeFinalPreview : null,
     findPurchaseOrder: async (_db, params) => ({ id: Number(params.orden_compra_id),
       numero: 'OC-PROV-20260930-014', tipo_recepcion: 'INSUMOS_MP' }),
   },
@@ -116,6 +120,8 @@ test('a vague reception confirmation guides to the full OC ID without changing i
   for (const [text, action] of [
     ['Confirma la recepción', 'MODO_CHARLA'],
     ['Confirmo la recepción', 'CONFIRMAR_RECEPCION_OC'],
+    ['confirmo', 'MODO_CHARLA'],
+    ['confirmo OC 60', 'CONFIRMAR_RECEPCION_OC'],
   ]) {
     executed.length = 0;
     const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
@@ -126,9 +132,30 @@ test('a vague reception confirmation guides to the full OC ID without changing i
       json(body) { this.body = body; return this; }, end() { return this; } };
     await handler(req, res);
     assert.equal(res.statusCode, 200);
-    assert.match(res.body.mensaje, /escribe el mensaje completo: «Confirmo la recepción \*?OC ID 60\*?»/u);
+    assert.match(res.body.mensaje, /envía esta frase completa en un solo mensaje: «Confirmo la recepción \*?OC ID 60\*?»/u);
     assert.equal(res.body.context.reception.inventory_changed, false);
     assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)|UPDATE recepciones\s+SET estado/u);
   }
   recentFinalPreview = null;
+});
+
+test('an incomplete OC confirmation still guides after a prior reminder lost its context', async () => {
+  recentFinalPreview = null;
+  activeFinalPreview = { orden_compra_id: 51, recepcion_id: 151 };
+  executed.length = 0;
+  const text = 'confirmo OC 51';
+  const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+    body: { from: '573150000059', body: text,
+      info: { '@ction': 'CONFIRMAR_RECEPCION_OC', body: text,
+        params: { orden_compra_id: 51, confirmacion_final: true } } } };
+  const res = { statusCode: 200, body: null, setHeader() {},
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; }, end() { return this; } };
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body.mensaje, /Confirmo la recepción \*?OC ID 51\*?/u);
+  assert.doesNotMatch(res.body.mensaje, /Incluye todos los ítems/u);
+  assert.equal(res.body.context.reception.inventory_changed, false);
+  assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)|UPDATE recepciones\s+SET estado/u);
+  activeFinalPreview = null;
 });

@@ -1032,15 +1032,18 @@ async function loadReceptionDraft(db, { orderId, receptionId, userId }) {
   return parseReceptionDraft(rows[0], { orderId, receptionId, userId });
 }
 
-async function activeFinalReceptionPreview(db, userId) {
+async function activeFinalReceptionPreview(db, userId, orderId = null) {
+  const scopedOrderId = Number(orderId);
+  const hasOrderScope = Number.isSafeInteger(scopedOrderId) && scopedOrderId > 0;
   const [rows] = await db.execute(
     `SELECT d.recepcion_id, d.orden_compra_id, d.usuario_id, d.payload_json, d.payload_hash
        FROM recepcion_confirmacion_borradores d
        JOIN recepciones r ON r.id = d.recepcion_id
       WHERE d.usuario_id = ? AND d.estado = 'PENDIENTE' AND d.expira_en > NOW()
+        ${hasOrderScope ? 'AND d.orden_compra_id = ?' : ''}
         AND r.estado IN ('borrador', 'en_proceso')
       ORDER BY d.actualizado_en DESC LIMIT 2`,
-    [userId]
+    hasOrderScope ? [userId, scopedOrderId] : [userId]
   );
   if (rows.length > 1) {
     throw inputError('Hay varias recepciones listas para confirmar. Indica OC ID N o IO ID N', 409);
