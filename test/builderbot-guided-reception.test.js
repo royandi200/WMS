@@ -398,7 +398,7 @@ test('a review already shown before structured context can be resumed with yes',
     context: { reception: { guided: true, sku_review: true, inventory_changed: false } } });
   const result = await advanceGuidedReception({ db, user: { id: 5 }, from: '573150000059',
     rawText: 'sí', params: { avance: {} } });
-  assert.match(result.message, /00001-TPBI quedó revisado/u);
+  assert.match(result.message, /00001-TPBI - TAPA TARRO CUADRADO BLANCO \(60 UNID\) quedó revisado/u);
   assert.equal(state.inventoryWrites, 0);
 });
 
@@ -718,10 +718,14 @@ test('an incorrect SKU is corrected and reviewed again before the next one', asy
 test('a bare yes is scoped to a stored SKU review, not final inventory confirmation', async () => {
   const { db, state } = guidedDb();
   assert.equal(skuReviewReply('Sí.'), 'YES');
+  assert.equal(skuReviewReply('sim'), 'YES');
+  assert.equal(skuReviewReply('sim.'), 'YES');
   assert.equal(skuReviewReply('Sí, todo está bien'), 'YES');
   assert.equal(skuReviewReply('No'), 'NO');
   assert.equal(skuReviewReply('No está bien'), 'NO');
   assert.equal(skuReviewReply('Sí, pero cambia la cantidad'), null);
+  assert.equal(skuReviewReply('similar'), null);
+  assert.equal(skuReviewReply('sim, cambia la cantidad'), null);
   assert.equal(skuReviewReply('Confirmo la recepción OC ID 37'), null);
   const echoedYes = 'Sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:16:03]: Sí';
   assert.equal(skuReviewReply(echoedYes), 'YES');
@@ -746,7 +750,7 @@ test('BuilderBot history echo does not block a reviewed SKU yes', async () => {
   const accepted = await advanceGuidedReception({ db, user,
     rawText: 'sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:05:47]:  sí',
     params: { avance: {} } });
-  assert.match(accepted.message, /00001-TPBI quedó revisado en el borrador/u);
+  assert.match(accepted.message, /00001-TPBI - TAPA TARRO CUADRADO BLANCO \(60 UNID\) quedó revisado en el borrador/u);
   assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
   assert.equal(state.inventoryWrites, 0);
 });
@@ -760,8 +764,23 @@ test('BuilderBot tagged-only written yes advances only the reviewed SKU', async 
   const accepted = await advanceGuidedReception({ db, user,
     rawText: '{name}="Juan Esteban"\n[Friday, September 25, 2026 12:19:21]: Si',
     params: { avance: {} } });
-  assert.match(accepted.message, /00001-TPBI quedó revisado en el borrador/u);
+  assert.match(accepted.message, /00001-TPBI - TAPA TARRO CUADRADO BLANCO \(60 UNID\) quedó revisado en el borrador/u);
   assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('audio transcription sim reviews only the pending SKU and shows its product name', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',
+    params: { avance: { producto: 'tapa', cantidad: 2,
+      condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  const accepted = await advanceGuidedReception({ db, user, rawText: 'sim',
+    params: { avance: {} } });
+  assert.match(accepted.message,
+    /00001-TPBI - TAPA TARRO CUADRADO BLANCO \(60 UNID\) quedó revisado en el borrador/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].verified, true);
+  assert.equal(accepted.requires_confirmation, undefined);
   assert.equal(state.inventoryWrites, 0);
 });
 

@@ -34,7 +34,7 @@ function skuReviewReply(rawText) {
   const text = currentMessageText(rawText).trim().normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toUpperCase()
     .replace(/[.!?]+$/u, '').replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  if (/^(?:SI(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO)$/u.test(text)) return 'YES';
+  if (/^(?:SIM|SI(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO)$/u.test(text)) return 'YES';
   if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO ES CORRECTO|ESTA MAL)$/u.test(text)) return 'NO';
   return null;
 }
@@ -947,8 +947,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     }
     return respond({ message: [
       `🧾 Recepción guiada ${identifier} | ${reception.numero}`,
-      confirmedSku ? `${confirmedSku} quedó revisado en el borrador. No se modificó inventario.`
-        : selected ? `${selected.sku} quedó registrado en el borrador. No se modificó inventario.`
+      confirmedSku ? `${confirmedSku} - ${reviewItem.producto} quedó revisado en el borrador. No se modificó inventario.`
+        : selected ? `${selected.sku} - ${selected.producto} quedó registrado en el borrador. No se modificó inventario.`
           : 'Elige el primer SKU para registrar.',
       'Productos pendientes:',
       ...availableChoices(preparedItems, payload.entries),
