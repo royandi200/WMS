@@ -84,6 +84,45 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   assert.equal(db.writes.length, 5);
 });
 
+test('confirma con OP ID explícito solo si coincide con el borrador completo y revisado', async () => {
+  for (const phrase of ['confirmo cierre OP ID 109',
+    'Confirmo el cierre de la OP ID 109',
+    'confirmo el cierre de producción de la OP 109']) {
+    const db = fakeDb({ orderId: 109, planned: 1 });
+    const base = { db, userId: 7 };
+    const preview = await advanceCloseGuide({ ...base,
+      rawText: 'Cerramos OP ID 109: 1 conforme, 0 no conformes, ubicación C2, no repuse material' });
+    assert.match(preview.message, /confirmo cierre OP ID 109/u);
+    assert.equal(preview.params, undefined);
+    const confirmedClose = await advanceCloseGuide({ ...base, rawText: phrase });
+    assert.deepEqual(confirmedClose.params, { id_orden: 109, cantidad_real: 1, merma: 0,
+      motivo_merma: null, ubicacion: 'C2', materiales_repuestos: [] });
+    assert.equal(db.writes.length, 1);
+    assert.equal(isCloseFollowup(phrase, preview.draft), true);
+  }
+});
+
+test('un OP ID distinto o una revisión incompleta no cierran la producción', async () => {
+  const db = fakeDb({ orderId: 109, planned: 1 });
+  const base = { db, userId: 7 };
+  const incomplete = await advanceCloseGuide({ ...base, rawText: 'Cerramos OP ID 109' });
+  const premature = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.equal(premature.params, undefined);
+  assert.equal(premature.draft.reviewShown, false);
+  assert.match(premature.message, /Falta:/u);
+  assert.equal(db.writes.length, 2);
+  assert.equal(incomplete.params, undefined);
+
+  await advanceCloseGuide({ ...base,
+    rawText: '1 conforme, 0 no conformes, ubicación C2, no repuse material' });
+  const writesBeforeMismatch = db.writes.length;
+  await assert.rejects(
+    advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 110' }),
+    /cierre pendiente para OP ID 109/u
+  );
+  assert.equal(db.writes.length, writesBeforeMismatch);
+});
+
 test('transcripciones reales de OP 103 registran conformes y cero no conformes sin repetir la pregunta', async () => {
   const db = fakeDb({ orderId: 103, planned: 10 });
   const base = { db, userId: 23 };

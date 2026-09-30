@@ -598,8 +598,9 @@ async function applyMaterialReport(db, draft, order, text, params) {
 }
 
 function confirmed(text) {
-  return /^(?:si|confirmo|confirmar|correcto|todo bien|adelante)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?)?[.!]?$/u
-    .test(normalize(text));
+  const raw = normalize(text);
+  return /^(?:si|confirmo|confirmar|correcto|todo bien|adelante)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?)?[.!]?$/u.test(raw)
+    || /^confirmo\s+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?\s+op\s*(?:id\s*)?#?\s*[1-9]\d*[.!]?$/u.test(raw);
 }
 
 function rejected(text) {
@@ -710,7 +711,7 @@ function guideSummary(order, draft, locationHint) {
       : ['• Ninguno']);
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
-    lines.push('', 'Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre*.');
+    lines.push('', `Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}* o *confirmo cierre*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
     return lines.join('\n');
   }
