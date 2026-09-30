@@ -591,6 +591,42 @@ test('guided OC reception can correct its own preview without confirming invento
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('guided overage explains blocked units and an indexed correction recalculates the total', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const reviewed = await advanceGuidedReception({ db, user,
+    rawText: 'OC ID 37: llegaron tres tapas en dos partidas',
+    params: { avance: { producto: 'tapa', cantidad_total: 3,
+      motivo_diferencia: 'error del proveedor', partidas: [
+        { cantidad: 1, condicion: 'DISPONIBLE', ubicacion: 'A8' },
+        { cantidad: 2, condicion: 'CUARENTENA', ubicacion: 'A4', motivo: 'mal estado' },
+      ] } },
+  });
+  assert.match(reviewed.message, /Sobrante frente a la OC: 1 und/u);
+  assert.match(reviewed.message, /1 und quedarían disponibles y 2 und quedarían bloqueados/u);
+  assert.match(reviewed.message, /cantidad de la partida 2 es 4/u);
+  const corrected = await advanceGuidedReception({ db, user,
+    rawText: 'Corrección, cantidad de la partida 2 es 1',
+    params: { avance: { partida: 2, cantidad: 1, correccion: true } },
+  });
+  assert.match(corrected.message, /Total recibido: 2 und/u);
+  assert.doesNotMatch(corrected.message, /Sobrante frente a la OC/u);
+  const entry = JSON.parse(state.draft.payload_json).entries['00001-TPBI'];
+  assert.equal(entry.cantidad, 2);
+  assert.equal(entry.partidas[1].cantidad, 1);
+  assert.equal(entry.motivo_diferencia, null);
+  const revised = await advanceGuidedReception({ db, user,
+    rawText: 'Corrección, el total recibido fue tres, partida uno una y partida dos dos',
+    params: { avance: { correccion: true, cantidad_total: 3,
+      motivo_diferencia: 'error del proveedor', partidas: [
+        { partida: 1, cantidad: 1 }, { partida: 2, cantidad: 2 },
+      ] } },
+  });
+  assert.match(revised.message, /Sobrante frente a la OC: 1 und/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].partidas[1].ubicacion, 'A4');
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('final summary accepts a spoken location correction without repeating OC ID or model correction flag', async () => {
   const { db, state } = guidedDb();
   const user = { id: 5 };

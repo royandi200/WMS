@@ -324,15 +324,19 @@ function cleanAdvance(params = {}) {
   }
   const allowed = new Set(['producto', 'sku', 'cantidad', 'condicion', 'ubicacion',
     'lote', 'fecha_vencimiento', 'motivo', 'motivo_diferencia',
-    'partidas', 'partida', 'cantidad_total']);
+    'partidas', 'partida', 'cantidad_total', 'correccion']);
   if (Object.keys(advance).some(key => !allowed.has(key))) {
     throw inputError('El avance de recepción contiene campos no válidos');
+  }
+  if (Object.hasOwn(advance, 'correccion') && typeof advance.correccion !== 'boolean') {
+    throw inputError('El indicador de corrección no es válido');
   }
   if (Object.hasOwn(advance, 'partidas') && (!Array.isArray(advance.partidas)
     || !advance.partidas.length || advance.partidas.length > 20)) {
     throw inputError('Indica entre 1 y 20 partidas para el SKU');
   }
-  return advance;
+  const { correccion, ...fields } = advance;
+  return fields;
 }
 
 function cleanBatchAdvances(params) {
@@ -418,31 +422,54 @@ async function captureBatch({ db, advances, payload, preparedItems, order, recep
 
 function applyMixedFields(entry, advance, prepared) {
   if (Object.hasOwn(advance, 'partidas')) {
-    const old = entry.partidas?.length ? entry.partidas : [entry];
-    const parts = advance.partidas.map((part, index) => {
-      if (!part || typeof part !== 'object' || Array.isArray(part)
-        || Object.keys(part).some(key => !['cantidad', 'condicion', 'ubicacion',
-          'lote', 'fecha_vencimiento', 'motivo'].includes(key))) {
-        throw inputError(`La partida ${index + 1} contiene datos no válidos`);
+    if (advance.partidas.some(part => part && Object.hasOwn(part, 'partida'))) {
+      if (!advance.partidas.every(part => part && Object.hasOwn(part, 'partida'))
+        || !entry.partidas?.length) {
+        throw inputError('Para corregir partidas, indica el número de cada una ya registrada', 409);
       }
-      const same = old[index] && old[index].condicion === String(part.condicion || '').toUpperCase()
-        ? old[index] : null;
-      const available = String(part.condicion || '').toUpperCase() === 'DISPONIBLE'
-        ? old.find(row => row.condicion === 'DISPONIBLE') : null;
-      const row = {
-        lote: same?.lote || available?.lote || entry.lote || null,
-        fecha_vencimiento: same?.fecha_vencimiento || available?.fecha_vencimiento
-          || entry.fecha_vencimiento || null,
-        ubicacion: same?.ubicacion || available?.ubicacion || null,
-      };
-      applyFields(row, part);
-      return row;
-    });
-    entry.partidas = parts;
-    const sum = parts.reduce((total, row) => total + Number(row.cantidad || 0), 0);
-    const explicitTotal = advance.cantidad_total ?? advance.cantidad;
-    if (explicitTotal != null) applyFields(entry, { cantidad: explicitTotal });
-    else entry.cantidad = sum;
+      const seen = new Set();
+      for (const part of advance.partidas) {
+        const index = Number(part.partida) - 1;
+        if (!Number.isSafeInteger(index) || index < 0 || index >= entry.partidas.length
+          || seen.has(index) || Object.keys(part).some(key => !['partida', 'cantidad',
+            'condicion', 'ubicacion', 'lote', 'fecha_vencimiento', 'motivo'].includes(key))) {
+          throw inputError('La corrección de partidas contiene datos no válidos', 400);
+        }
+        seen.add(index);
+        const { partida, ...fields } = part;
+        applyFields(entry.partidas[index], fields);
+      }
+      const sum = entry.partidas.reduce((total, row) => total + Number(row.cantidad || 0), 0);
+      const explicitTotal = advance.cantidad_total ?? advance.cantidad;
+      if (explicitTotal != null) applyFields(entry, { cantidad: explicitTotal });
+      else if (entry.cantidad) entry.cantidad = Number(sum.toFixed(4));
+    } else {
+      const old = entry.partidas?.length ? entry.partidas : [entry];
+      const parts = advance.partidas.map((part, index) => {
+        if (!part || typeof part !== 'object' || Array.isArray(part)
+          || Object.keys(part).some(key => !['cantidad', 'condicion', 'ubicacion',
+            'lote', 'fecha_vencimiento', 'motivo'].includes(key))) {
+          throw inputError(`La partida ${index + 1} contiene datos no válidos`);
+        }
+        const same = old[index] && old[index].condicion === String(part.condicion || '').toUpperCase()
+          ? old[index] : null;
+        const available = String(part.condicion || '').toUpperCase() === 'DISPONIBLE'
+          ? old.find(row => row.condicion === 'DISPONIBLE') : null;
+        const row = {
+          lote: same?.lote || available?.lote || entry.lote || null,
+          fecha_vencimiento: same?.fecha_vencimiento || available?.fecha_vencimiento
+            || entry.fecha_vencimiento || null,
+          ubicacion: same?.ubicacion || available?.ubicacion || null,
+        };
+        applyFields(row, part);
+        return row;
+      });
+      entry.partidas = parts;
+      const sum = parts.reduce((total, row) => total + Number(row.cantidad || 0), 0);
+      const explicitTotal = advance.cantidad_total ?? advance.cantidad;
+      if (explicitTotal != null) applyFields(entry, { cantidad: explicitTotal });
+      else entry.cantidad = sum;
+    }
   } else if (Object.hasOwn(advance, 'partida')) {
     const index = Number(advance.partida) - 1;
     if (!Number.isSafeInteger(index) || index < 0 || index >= 20) {
@@ -458,12 +485,17 @@ function applyMixedFields(entry, advance, prepared) {
     if (index > entry.partidas.length) {
       throw inputError(`Registra primero la partida ${entry.partidas.length + 1}`);
     }
+    const existingQuantity = entry.partidas[index]?.cantidad;
     const row = entry.partidas[index] || {};
     const fields = { ...advance };
     for (const key of ['producto', 'sku', 'partida', 'cantidad_total', 'motivo_diferencia']) delete fields[key];
     applyFields(row, fields);
     if (!entry.partidas[index]) entry.partidas.push(row);
     if (advance.cantidad_total != null) applyFields(entry, { cantidad: advance.cantidad_total });
+    else if (entry.cantidad && existingQuantity && Object.hasOwn(advance, 'cantidad')) {
+      entry.cantidad = Number(entry.partidas.reduce((total, part) =>
+        total + Number(part.cantidad || 0), 0).toFixed(4));
+    }
   } else if (entry.partidas) {
     const partFields = ['cantidad', 'condicion', 'ubicacion', 'lote', 'fecha_vencimiento', 'motivo'];
     if (partFields.some(key => Object.hasOwn(advance, key))) {
@@ -617,11 +649,21 @@ function receivedQuantityPrompt(unit) {
 }
 
 function skuReviewMessage(order, reception, prepared, entry) {
+  const expected = Number(prepared.cantidad_pendiente);
+  const overage = Number((Number(entry.cantidad) - expected).toFixed(4));
+  const available = entry.partidas?.length
+    ? entry.partidas.reduce((sum, part) => sum + (part.condicion === 'DISPONIBLE'
+      ? Number(part.cantidad || 0) : 0), 0)
+    : entry.condicion === 'DISPONIBLE' ? Number(entry.cantidad) : 0;
+  const surplusNotice = Number.isFinite(expected) && overage > 0.0001
+    ? `⚠️ Sobrante frente a la OC: ${overage} ${prepared.unidad || 'und'}. ${available} ${prepared.unidad || 'und'} quedarían disponibles y ${Number((Number(entry.cantidad) - available).toFixed(4))} ${prepared.unidad || 'und'} quedarían bloqueados según las condiciones registradas. El sobrante se registraría como novedad; no puede ingresar como disponible.`
+    : null;
   if (entry.partidas?.length) {
     return [
       `🧾 Revisa ${purchaseOrderReceptionIdentifier(order)} | ${reception.numero}`,
       `Producto: ${prepared.sku} - ${prepared.producto}`,
       `Total recibido: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)} ${prepared.unidad || 'und'}).`,
+      surplusNotice,
       ...entry.partidas.flatMap((part, index) => [
         `Partida ${index + 1}: ${part.cantidad} ${prepared.unidad || 'und'} · ${part.condicion} · ubicación ${part.ubicacion}.`,
         `${prepared.lote_interno_sugerido ? 'Lote interno de origen' : 'Lote del proveedor'}: ${part.lote || prepared.lote_interno_sugerido || prepared.lote_documento}${!part.lote && prepared.lote_interno_sugerido ? ' (generado; el proveedor no informa lote)' : !part.lote && prepared.lote_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
@@ -631,7 +673,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),
       entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-      '¿Están correctas las partidas de este SKU? Responde «sí», «correcto» o «perfecto» para continuar. Para corregir, di el número de partida y el dato nuevo.',
+      '¿Están correctas las partidas de este SKU? Responde «sí», «correcto» o «perfecto» para continuar. Si hay un error, di por ejemplo «corrección, cantidad de la partida 2 es 4»; el total se recalculará. Verifica también el motivo de cada partida bloqueada y el de la diferencia frente a la OC.',
       'Este paso no confirma la recepción ni modifica inventario.',
     ].filter(Boolean).join('\n');
   }
@@ -643,6 +685,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
     entry.referencia_interpretada
       ? `Interpreté «${entry.referencia_interpretada}» como ${prepared.sku}; verifica que sea correcto.` : null,
     `Cantidad recibida: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)} ${prepared.unidad || 'und'}).`,
+    surplusNotice,
     `Condición: ${entry.condicion}.`,
     `Ubicación registrada: ${entry.ubicacion}.`,
     prepared.ubicacion_sugerida

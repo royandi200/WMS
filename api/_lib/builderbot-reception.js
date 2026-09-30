@@ -813,6 +813,8 @@ async function buildConfirmationItems(db, preparedItems, params = {}, options = 
 
 function buildReceptionReview(order, reception, items) {
   const identifier = purchaseOrderReceptionIdentifier(order);
+  const expectedByProduct = new Map((reception.items || []).map(item =>
+    [Number(item.producto_id), Number(item.cantidad_pendiente ?? item.cantidad_esp)]));
   const lines = items.flatMap(item => {
     const total = item.distributions.reduce(
       (sum, entry) => sum + Number(entry.cantidad || 0),
@@ -848,7 +850,15 @@ function buildReceptionReview(order, reception, items) {
         : null,
       entry.motivo ? `  Motivo de condición: ${entry.motivo}.` : null,
     ].filter(Boolean));
+    const expected = expectedByProduct.get(Number(item.product_id));
+    const overage = Number((total - expected).toFixed(4));
+    const available = Number(item.distributions.reduce((sum, entry) =>
+      sum + (String(entry.condicion).toUpperCase() === 'DISPONIBLE' ? Number(entry.cantidad) : 0), 0).toFixed(4));
     return [header, `  Recibido: ${Number(total.toFixed(4))} ${item.unidad}.`,
+      Number.isFinite(expected) && overage > 0.0001
+        ? `  Sobrante frente a la OC: ${overage} ${item.unidad} (${total} recibidos; ${expected} pendientes).` : null,
+      Number.isFinite(expected) && overage > 0.0001
+        ? `  Disponible que se aplicaría a la OC: ${available} ${item.unidad}. El sobrante no puede ingresar como disponible; verifica las partidas antes de confirmar.` : null,
       interpretation, ...details,
       item.motivo ? `  Motivo de diferencia: ${item.motivo}.` : null].filter(Boolean);
   });

@@ -444,6 +444,21 @@ test('reception surplus cannot inflate available inventory', () => {
   );
 });
 
+test('final review makes an OC overage and the available quantity explicit', () => {
+  const message = buildReceptionReview(
+    { id: 51, numero: 'OC-PROV-20260930-005' },
+    { numero: 'REC-OC-51-001', items: [{ producto_id: 19, cantidad_pendiente: 16 }] },
+    [{ product_id: 19, sku: '00001-TPBI', producto: 'TAPAS', unidad: 'und',
+      motivo: 'error del proveedor', distributions: [
+        { cantidad: 12, condicion: 'DISPONIBLE', ubicacion: 'A8', lote: 'T-1', fecha_venc: '2028-06-30' },
+        { cantidad: 8, condicion: 'CUARENTENA', ubicacion: 'A4', lote: 'T-1', fecha_venc: '2028-06-30', motivo: 'mal estado' },
+      ] }]
+  );
+  assert.match(message, /Sobrante frente a la OC: 4 und \(20 recibidos; 16 pendientes\)/u);
+  assert.match(message, /Disponible que se aplicaría a la OC: 12 und/u);
+  assert.match(message, /Motivo de diferencia: error del proveedor/u);
+});
+
 test('receipt distributions use a transactional engine with foreign keys', () => {
   const baseSchema = fs.readFileSync(path.join(__dirname, '../database/08_warehouse_workflows.sql'), 'utf8');
   const migration = fs.readFileSync(path.join(__dirname, '../database/24_reception_distributions_atomicity.sql'), 'utf8');
