@@ -837,7 +837,7 @@ function buildReceptionReview(order, reception, items) {
             : `  Lote del proveedor: ${entry.lote}.`
         : '  Lote del proveedor: faltante.',
       String(entry.condicion || '').toUpperCase() !== 'DISPONIBLE'
-        ? `  Partida interna ${String(entry.condicion).toLowerCase()}: se asignará al confirmar para separar estados; conserva el mismo origen.` : null,
+        ? `  Lote interno de ${String(entry.condicion).toLowerCase()}: se generará al confirmar. ${entry.lote_fuente === 'INTERNO' ? 'El lote interno de origen' : 'El lote del proveedor'} indicado arriba no cambia.` : null,
       entry.fecha_venc
         ? entry.fecha_venc_fuente === 'DOCUMENTO'
           ? `  Vencimiento: ${entry.fecha_venc} (propuesto por PDF).`

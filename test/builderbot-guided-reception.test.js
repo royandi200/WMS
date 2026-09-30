@@ -798,7 +798,7 @@ test('guided reception keeps available and quarantine partitions of one SKU', as
   assert.match(review.message, /Partida 1: 1 und · DISPONIBLE · ubicación A8/u);
   assert.match(review.message, /Partida 2: 1 und · CUARENTENA · ubicación CUAR-C-1-01/u);
   assert.equal((review.message.match(/Lote del proveedor: T-1/gu) || []).length, 2);
-  assert.match(review.message, /Partida interna cuarentena: se asignará al confirmar/u);
+  assert.match(review.message, /Lote interno de cuarentena: se generará al confirmar\. El lote del proveedor indicado arriba no cambia\./u);
   assert.match(review.message, /Motivo: empaque roto/u);
   const entry = JSON.parse(state.draft.payload_json).entries['00001-TPBI'];
   assert.equal(entry.partidas.length, 2);
@@ -813,7 +813,7 @@ test('guided reception keeps available and quarantine partitions of one SKU', as
   assert.match(preview.message, /Partida 1: 1 und/u);
   assert.match(preview.message, /Partida 2: 1 und/u);
   assert.match(preview.message, /CUARENTENA/u);
-  assert.match(preview.message, /Partida interna cuarentena: se asignará al confirmar/u);
+  assert.match(preview.message, /Lote interno de cuarentena: se generará al confirmar\. El lote del proveedor indicado arriba no cambia\./u);
   assert.equal(state.inventoryWrites, 0);
   const correction = await send('Corrección: ubicación de la partida 2 de tapas a Q2');
   assert.equal(correction.sku_review, true);

@@ -249,7 +249,7 @@ test('reception preview separates quarantine, physical lot and each distribution
   assert.match(review, /Recibido: 4 und\.\n  Partida 1: 3 und\n  Condición: DISPONIBLE/u);
   assert.match(review, /Partida 2: 1 und\n  Condición: CUARENTENA/u);
   assert.match(review, /Lote físico del proveedor: L-2 \(PDF: L-1\)/u);
-  assert.match(review, /Partida interna cuarentena: se asignará al confirmar/u);
+  assert.match(review, /Lote interno de cuarentena: se generará al confirmar\. El lote del proveedor indicado arriba no cambia\./u);
   assert.match(review, /Motivo de condición: Etiqueta ilegible/u);
   assert.match(review, /Motivo de diferencia: Una unidad menos que la OC/u);
 });

@@ -1984,7 +1984,7 @@ module.exports = async (req, res) => {
           const lines = (confirmation.items || []).flatMap(item => [
             `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`,
             ...(item.distribuciones || []).filter(part => part.internalLot).map(part =>
-              `  ${part.condition}: ${Number(part.quantity)} ${part.internalSource ? '· lote interno de origen' : '· lote del proveedor'} ${part.supplierLot} · partida interna separada ${part.lot}`
+              `  ${part.condition}: ${Number(part.quantity)} ${part.internalSource ? '· lote interno de origen' : '· lote del proveedor'} ${part.supplierLot} · lote interno de ${part.condition.toLowerCase()} ${part.lot}`
             ),
           ]);
           mensaje = [

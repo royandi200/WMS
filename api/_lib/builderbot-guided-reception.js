@@ -626,7 +626,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
         `Partida ${index + 1}: ${part.cantidad} ${prepared.unidad || 'und'} · ${part.condicion} · ubicación ${part.ubicacion}.`,
         `${prepared.lote_interno_sugerido ? 'Lote interno de origen' : 'Lote del proveedor'}: ${part.lote || prepared.lote_interno_sugerido || prepared.lote_documento}${!part.lote && prepared.lote_interno_sugerido ? ' (generado; el proveedor no informa lote)' : !part.lote && prepared.lote_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
         part.condicion !== 'DISPONIBLE'
-          ? `Partida interna ${part.condicion.toLowerCase()}: se asignará al confirmar para separar estados; conserva el mismo origen.` : null,
+          ? `Lote interno de ${part.condicion.toLowerCase()}: se generará al confirmar. ${prepared.lote_interno_sugerido ? 'El lote interno de origen' : 'El lote del proveedor'} indicado arriba no cambia.` : null,
         `Vencimiento: ${part.fecha_vencimiento || prepared.fecha_vencimiento_documento}${!part.fecha_vencimiento && prepared.fecha_vencimiento_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),
