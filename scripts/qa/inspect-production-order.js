@@ -3,7 +3,8 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 
 function loadEnv() {
-  const candidates = [path.resolve(__dirname, '../../../.env'), path.resolve(__dirname, '../../.env')];
+  const candidates = [path.resolve(__dirname, '../../.env'),
+    path.resolve(__dirname, '../../../../.env'), path.resolve(__dirname, '../../../.env')];
   const envPath = candidates.find(candidate => fs.existsSync(candidate));
   if (!envPath) throw new Error('No se encontro el archivo de entorno');
   for (const rawLine of fs.readFileSync(envPath, 'utf8').split(/\r?\n/u)) {
@@ -76,6 +77,33 @@ async function main() {
          FROM kardex WHERE reference LIKE ? ORDER BY created_at, id`,
       [`%${order.codigo_orden}%`]
     );
+    let stockOptions;
+    let locationAssignments;
+    if (process.argv.includes('--show-options')) {
+      [stockOptions] = await conn.execute(
+        `SELECT p.siigo_code, s.id AS stock_id, s.lote, u.codigo AS ubicacion,
+                s.cantidad, s.reservada, (s.cantidad - s.reservada) AS disponible,
+                l.status AS estado_lote, COALESCE(l.expiry_date, s.fecha_venc) AS vencimiento
+           FROM produccion_materiales pm
+           JOIN productos p ON p.id = pm.producto_id
+           JOIN stock s ON s.producto_id = pm.producto_id
+           JOIN lots l ON l.lpn = s.lote AND l.product_id = s.producto_id
+           JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.activa = 1
+           JOIN bodegas b ON b.id = s.bodega_id AND b.activa = 1
+          WHERE pm.orden_produccion_id = ? AND s.cantidad > 0
+          ORDER BY p.siigo_code, u.codigo, l.expiry_date, s.lote`, [order.id]
+      );
+      [locationAssignments] = await conn.execute(
+        `SELECT p.siigo_code, u.codigo AS ubicacion, pu.prioridad,
+                pu.tipo_asignacion, pu.activa
+           FROM produccion_materiales pm
+           JOIN productos p ON p.id = pm.producto_id
+           JOIN producto_ubicaciones pu ON pu.producto_id = p.id
+           JOIN ubicaciones u ON u.id = pu.ubicacion_id
+          WHERE pm.orden_produccion_id = ?
+          ORDER BY p.siigo_code, pu.prioridad, u.codigo`, [order.id]
+      );
+    }
     const materialGroups = new Map();
     for (const item of materials) {
       if (!materialGroups.has(item.siigo_code)) {
@@ -90,6 +118,7 @@ async function main() {
       ok: true,
       order,
       materials,
+      ...(stockOptions ? { stockOptions, locationAssignments } : {}),
       kardex: movements,
       invariants: {
         has_materials: materials.length > 0,

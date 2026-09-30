@@ -5,7 +5,7 @@ const {
   isPickCorrection, pickLocations,
 } = require('../api/_lib/production-pick-guide');
 
-function fakeDb({ a10Quantity = 12, extraA10Lot = false,
+function fakeDb({ a10Quantity = 12, extraA10Lot = false, extraA11Lot = false,
   extraTarroPart = false, notices = [] } = {}) {
   let snapshot = null;
   let review = null;
@@ -30,6 +30,9 @@ function fakeDb({ a10Quantity = 12, extraA10Lot = false,
     ...(extraA10Lot ? [[14, { id: 14, lote: 'R7-260927-TRP', ubicacion_id: 2,
       ubicacion: 'A10', cantidad: 10, reservada: 0, productId: 6,
       status: 'DISPONIBLE', vence: '2027-12-31' }]] : []),
+    ...(extraA11Lot ? [[15, { id: 15, lote: 'R8-260928-TRP', ubicacion_id: 1,
+      ubicacion: 'A11', cantidad: 9, reservada: 0, productId: 6,
+      status: 'DISPONIBLE', vence: '2028-06-30' }]] : []),
     [21, { id: 21, lote: 'R5-260923-TPBI', ubicacion_id: 3, ubicacion: 'A8',
       cantidad: 10, reservada: 7, productId: 1, status: 'DISPONIBLE' }],
   ]);
@@ -204,6 +207,22 @@ test('una opción inexistente no altera la reserva y repite la lista', async () 
   assert.match(reply.message, /La opción 3 no existe/u);
   assert.equal(db.allocations[0].stock_id, 11);
   assert.equal(db.stocks.get(11).reservada, 7);
+});
+
+test('permite escoger otro lote en la ubicación actual sin dictar el código', async () => {
+  const db = fakeDb({ extraA11Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const offered = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección: partida 1, quiero elegir otro lote' });
+  assert.match(offered.message, /en A11, elige el lote/u);
+  assert.match(offered.message, /1\. Lote R8-260928-TRP/u);
+  assert.doesNotMatch(offered.message, /1\. Lote R5-260923-TRP/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
+  assert.match(chosen.message, /Lote: R8-260928-TRP \| ubicación: A11/u);
+  assert.equal(db.allocations[0].stock_id, 15);
+  assert.equal(db.stocks.get(11).reservada, 0);
+  assert.equal(db.stocks.get(15).reservada, 7);
 });
 
 test('«los tarros» identifica el producto del resumen sin exigir su SKU', async () => {

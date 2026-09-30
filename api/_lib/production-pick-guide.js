@@ -122,6 +122,7 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
     ]),
     '', note || 'Verifica físicamente cada partida antes de iniciar la producción.',
     '', 'Para corregir, di «corrección: partida 1, ubicación A10». Si hay varias partidas del mismo producto, usa su número; no necesitas repetir el SKU ni el lote anterior.',
+    'Para escoger otro lote sin cambiar de ubicación, di «corrección: partida 1, quiero elegir otro lote».',
     'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
     choicePending
       ? 'Primero elige una de las opciones de lote mostradas arriba; todavía no confirmes los materiales.'
@@ -269,18 +270,23 @@ async function correctAllocation(db, rows, text) {
   const segments = parseSplit(text, selected.cantidad_reservada);
   const desired = segments || [{ quantity: roundQty(selected.cantidad_reservada),
     location: pickLocations(text).at(-1) || null, lot: pickLots(text).at(-1) || null }];
-  if (!segments && !desired[0].location && !desired[0].lot) {
+  const wantsAnotherLot = /\b(?:otro|diferente|distinto)\s+lote\b|\b(?:elegir|escoger|cambiar)\s+(?:un\s+|el\s+)?(?:otro\s+)?lote\b|\blotes\s+disponibles\b/u.test(normalize(text));
+  if (!segments && !desired[0].location && !desired[0].lot && !wantsAnotherLot) {
     throw pickError('Indica el dato nuevo de la partida: ubicación o lote. No cambié las reservas.');
   }
-  if (!segments && desired[0].location && !desired[0].lot
-    && desired[0].location !== selected.ubicacion?.toUpperCase()) {
-    const found = await locationLotChoices(db, selected, desired[0].location);
-    const options = found.eligible;
+  if (!segments && !desired[0].lot && (wantsAnotherLot
+    || (desired[0].location && desired[0].location !== selected.ubicacion?.toUpperCase()))) {
+    const targetLocation = desired[0].location || selected.ubicacion?.toUpperCase();
+    if (!targetLocation) throw pickError('La partida no tiene ubicación registrada. Indica la nueva ubicación; no cambié las reservas.');
+    const found = await locationLotChoices(db, selected, targetLocation);
+    const options = wantsAnotherLot
+      ? found.eligible.filter(option => option.stockId !== Number(selected.stock_id))
+      : found.eligible;
     if (!options.length) {
       const highest = Math.max(0, ...found.partial.map(option => option.available));
-      throw pickError(`No hay un lote disponible de ${selected.producto} en ${desired[0].location} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
+      throw pickError(`No hay ${wantsAnotherLot ? 'otro ' : 'un '}lote disponible de ${selected.producto} en ${targetLocation} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
     }
-    return { selected, choice: { allocationId: selected.id, location: desired[0].location,
+    return { selected, choice: { allocationId: selected.id, location: targetLocation,
       options, expiresAt: Date.now() + 15 * 60 * 1000 } };
   }
   return applyAllocation(db, selected, desired);
