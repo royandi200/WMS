@@ -16,6 +16,17 @@ const MAX_INCREMENTAL_PAGES = 10;
 const MAX_SANDBOX_PAGES = 3;
 const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
 const COMPLETED_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Real operation starts on this date; earlier invoices never become dispatches.
+const IMPORT_START_DATE = String(process.env.SIIGO_IMPORT_START_DATE || '2026-10-05').trim();
+
+function importStartIso() {
+  return new Date(`${IMPORT_START_DATE}T00:00:00${process.env.SIIGO_TIMEZONE_OFFSET || '-05:00'}`).toISOString();
+}
+
+function isBeforeImportStart(invoice) {
+  const date = String(invoice?.date || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) && date < IMPORT_START_DATE;
+}
 
 function isSharedSandbox() {
   return String(process.env.SIIGO_USERNAME || '').toLowerCase() === SHARED_SANDBOX_USERNAME;
@@ -97,6 +108,7 @@ async function fetchIncremental(since) {
         continue;
       }
       if (summary?.annulled === true || !summary?.id) continue;
+      if (isBeforeImportStart(summary)) continue;
       if (isSharedSandbox()) {
         const codes = (summary.items || []).map(item => String(item.code || '').toUpperCase());
         if (!codes.some(code => code.startsWith(testPrefix()))) continue;
@@ -353,7 +365,9 @@ module.exports = async (req, res) => {
       : await requireCapability(req, CAPABILITIES.SIIGO_POLL);
     const ids = requestedIds(req);
     const startedAt = new Date();
-    const since = String(req.body?.updated_start || req.query?.updated_start || await getCursor());
+    const requestedSince = String(req.body?.updated_start || req.query?.updated_start || await getCursor());
+    const startIso = importStartIso();
+    const since = Date.parse(requestedSince) < Date.parse(startIso) ? startIso : requestedSince;
     const invoices = ids.length ? await fetchByIds(ids) : await fetchIncremental(since);
     const results = [];
 

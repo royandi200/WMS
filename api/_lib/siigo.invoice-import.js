@@ -61,6 +61,11 @@ async function resolveWarehouse(conn, remoteWarehouseId) {
       `SELECT id, siigo_id FROM bodegas WHERE activa = 1 AND codigo = ? LIMIT 1`,
       [warehouseCode]
     );
+    // Every SIIGO warehouse the client invoices from ships physically from the
+    // single WMS warehouse.
+    const accepted = String(process.env.SIIGO_WAREHOUSE_IDS || '1,32')
+      .split(',').map(value => Number(value.trim())).filter(Number.isFinite);
+    if (active.length && accepted.includes(Number(remoteWarehouseId))) return active[0].id;
     const sharedSandbox = String(process.env.SIIGO_USERNAME || '').toLowerCase() === 'sandbox@siigoapi.com';
     if (active.length && (active[0].siigo_id == null || sharedSandbox)) {
       await conn.execute(
