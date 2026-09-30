@@ -50,7 +50,7 @@ async function nativePdfEvidence(db, document, body) {
 
 function pdfReviewWarning(evidence) {
   return ['NO_TEXT_LAYER', 'MODEL_FALLBACK'].includes(evidence.diagnostics.status)
-    ? 'No se pudo verificar la tabla completa con el texto nativo del PDF; coteja todas las filas con el original'
+    ? 'No fue posible cotejar automaticamente todas las filas del PDF. Revisa SKU, cantidad, lote y vencimiento con el documento original.'
     : null;
 }
 

@@ -2150,11 +2150,9 @@ module.exports = async (req, res) => {
             : `Orden ${draft.referencia_documento} leida y guardada como borrador.`,
           `Items: ${draft.itemCount}\nTotales: ${await draftQuantitySummary(db, draft.id)}`,
           `Estado: ${draft.estado}`,
-          warningLines.length ? 'Revisiones necesarias:' : null,
-          ...warningLines,
           draft.ordenCompraId
             ? `Ya fue convertida en la OC operativa #${draft.ordenCompraId}.`
-            : `Revisala en el dashboard o escribe: revisa la orden ${draft.referencia_documento}. No se modifico inventario.`,
+            : 'Revisa los datos y las observaciones en Recepciones > Ordenes de compra del dashboard. No se modifico inventario.',
         ].filter(Boolean).join('\n');
         responseContext.document_draft_id = draft.id;
         responseContext.purchase_order_id = customerDocument ? null : draft.ordenCompraId || null;

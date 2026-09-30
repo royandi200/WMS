@@ -8,7 +8,7 @@ const {
   operationalDocumentIdentity,
   registerWarehouseDocumentDraft,
 } = require('../api/_lib/warehouse-document-intake');
-const { documentDraftStatus } = require('../api/_lib/document-draft-status');
+const { documentDraftStatus, documentWarningsForReview } = require('../api/_lib/document-draft-status');
 
 test('supplier matching warnings require review but not document correction', () => {
   assert.equal(documentDraftStatus([
@@ -27,6 +27,20 @@ test('demo legends are informative and do not block document preparation', () =>
     documentDraftStatus(['Documento de prueba/sin validez comercial.']),
     'PENDIENTE_REVISION'
   );
+});
+
+test('absence of a test legend is not a warning and incomplete automatic cotejo only requires review', () => {
+  const warnings = documentWarningsForReview([
+    'Leyenda de prueba o sin validez comercial no observada.',
+    'No se pudo verificar la tabla completa con el texto nativo del PDF; coteja todas las filas con el original',
+    'Proveedor no encontrado de forma inequivoca en el catalogo sincronizado',
+  ]);
+  assert.equal(warnings.length, 2);
+  assert.equal(documentDraftStatus(warnings), 'PENDIENTE_REVISION');
+  assert.equal(documentDraftStatus([
+    'No fue posible cotejar automaticamente todas las filas del PDF. Revisa SKU, cantidad, lote y vencimiento con el documento original.',
+  ]), 'PENDIENTE_REVISION');
+  assert.equal(documentDraftStatus([...warnings, 'SKU no encontrado o inactivo: X-1']), 'REQUIERE_CORRECCION');
 });
 const { CAPABILITIES, capabilityForAction } = require('../api/_lib/capabilities');
 const { buildWarehouseExitPdf } = require('../scripts/qa/demo-pdf');

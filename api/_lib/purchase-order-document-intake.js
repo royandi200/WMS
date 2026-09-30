@@ -2,7 +2,7 @@ const { createHash } = require('crypto');
 const { MAX_PDF_BYTES } = require('./purchase-order-documents');
 const { assertDocumentTypeMarker } = require('./document-type-markers');
 const { enrichItemsFromLineEvidence } = require('./document-evidence-items');
-const { documentDraftStatus } = require('./document-draft-status');
+const { documentDraftStatus, documentWarningsForReview } = require('./document-draft-status');
 const { nativePdfEvidence, pdfReviewWarning } = require('./document-pdf-evidence');
 
 const MAX_DOCUMENT_ITEMS = 100;
@@ -32,7 +32,7 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '', rec
   if (evidence && !evidenceIncludes(evidence, reference)) {
     throw inputError('El numero de la orden no aparece literalmente en el documento');
   }
-  const sourceWarnings = normalizeWarnings(source.advertencias || source.warnings);
+  const sourceWarnings = documentWarningsForReview(normalizeWarnings(source.advertencias || source.warnings));
   const modelReportedMissingFields = sourceWarnings.some(isModelMissingItemWarning);
   const warnings = sourceWarnings
     .filter((warning) => !isModelDerivedValidationWarning(warning));
@@ -320,12 +320,14 @@ async function storeDraftFile(db, documentId, document) {
 }
 
 function draftResult(row, input, duplicate) {
+  const warnings = documentWarningsForReview(parseWarnings(row.advertencias));
   return {
     id: row.id,
     referencia_documento: row.referencia_documento,
-    estado: row.estado,
+    estado: ['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(row.estado)
+      ? documentDraftStatus(warnings) : row.estado,
     duplicate,
-    warnings: parseWarnings(row.advertencias),
+    warnings,
     itemCount: input.items.length,
     totalUnits: Number(row.total_unidades || 0),
     pdfStored: Number(row.file_count || 0) > 0,

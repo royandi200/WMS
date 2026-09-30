@@ -12,7 +12,7 @@ const {
   normalizeWarehouseDraftReview,
   reviewWarehouseDocumentDraft,
 } = require('../_lib/warehouse-document-draft-review');
-const { documentDraftStatus } = require('../_lib/document-draft-status');
+const { documentDraftStatus, documentWarningsForReview } = require('../_lib/document-draft-status');
 const { normalizePurchaseOrderPdf } = require('../_lib/purchase-order-documents');
 const { nativePdfEvidence } = require('../_lib/document-pdf-evidence');
 const { detectDocumentTypeMarkers } = require('../_lib/document-type-markers');
@@ -118,7 +118,7 @@ async function handleGet(req, res) {
   }
   for (const row of rows) {
     row.items = byDocument.get(row.id) || [];
-    row.advertencias = parseJsonArray(row.advertencias);
+    row.advertencias = documentWarningsForReview(parseJsonArray(row.advertencias));
     if (['PENDIENTE_REVISION', 'REQUIERE_CORRECCION'].includes(row.estado)) {
       row.estado = documentDraftStatus(row.advertencias);
     }

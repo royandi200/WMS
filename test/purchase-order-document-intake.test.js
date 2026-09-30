@@ -36,6 +36,13 @@ test('purchase order PDF extraction is deterministic and grounded in literal evi
   assert.deepEqual(first.warnings, []);
 });
 
+test('supplier intake discards a model warning when a test legend is simply absent', () => {
+  const normalized = normalizePurchaseOrderDocumentInput(validInput({
+    advertencias: ['Leyenda de prueba o sin validez comercial no observada.'],
+  }));
+  assert.deepEqual(normalized.warnings, []);
+});
+
 test('purchase order evidence requires an explicit document marker', () => {
   assert.throws(
     () => normalizePurchaseOrderDocumentInput(validInput(), {
