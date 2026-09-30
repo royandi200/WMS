@@ -611,7 +611,9 @@ function skuReviewMessage(order, reception, prepared, entry) {
       `Total recibido: ${entry.cantidad} ${prepared.unidad || 'und'} (pendiente según OC: ${Number(prepared.cantidad_pendiente)} ${prepared.unidad || 'und'}).`,
       ...entry.partidas.flatMap((part, index) => [
         `Partida ${index + 1}: ${part.cantidad} ${prepared.unidad || 'und'} · ${part.condicion} · ubicación ${part.ubicacion}.`,
-        `Lote: ${part.lote || prepared.lote_interno_sugerido || prepared.lote_documento}${!part.lote && prepared.lote_interno_sugerido ? ' (interno generado; el proveedor no lo informa)' : !part.lote && prepared.lote_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
+        `${prepared.lote_interno_sugerido ? 'Lote interno de origen' : 'Lote del proveedor'}: ${part.lote || prepared.lote_interno_sugerido || prepared.lote_documento}${!part.lote && prepared.lote_interno_sugerido ? ' (generado; el proveedor no informa lote)' : !part.lote && prepared.lote_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
+        part.condicion !== 'DISPONIBLE'
+          ? `Partida interna ${part.condicion.toLowerCase()}: se asignará al confirmar para separar estados; conserva el mismo origen.` : null,
         `Vencimiento: ${part.fecha_vencimiento || prepared.fecha_vencimiento_documento}${!part.fecha_vencimiento && prepared.fecha_vencimiento_documento ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),

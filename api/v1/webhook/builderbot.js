@@ -1964,9 +1964,12 @@ module.exports = async (req, res) => {
           mensaje = `${purchaseOrderReceptionIdentifier({ id: confirmation.orden_compra_id, tipo_recepcion: confirmation.tipo_recepcion })} | ${confirmation.orden_compra_numero} ya fue recibida en ${confirmation.numero}. No se modifico inventario.`;
           responseContext.reception = confirmation;
         } else {
-          const lines = (confirmation.items || []).map(item =>
-            `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`
-          );
+          const lines = (confirmation.items || []).flatMap(item => [
+            `- ${item.sku}: recibido ${Number(item.recibido || 0)}, disponible ${Number(item.disponible || item.aceptado || 0)}, cuarentena ${Number(item.cuarentena || 0)}, rechazado ${Number(item.rechazado || item.danado || 0)}`,
+            ...(item.distribuciones || []).filter(part => part.internalLot).map(part =>
+              `  ${part.condition}: ${Number(part.quantity)} ${part.internalSource ? '· lote interno de origen' : '· lote del proveedor'} ${part.supplierLot} · partida interna separada ${part.lot}`
+            ),
+          ]);
           mensaje = [
             `Recepcion ${confirmation.numero} confirmada contra ${purchaseOrderReceptionIdentifier({ id: confirmation.orden_compra_id, tipo_recepcion: confirmation.tipo_recepcion })} | ${confirmation.orden_compra_numero}.`,
             ...lines,

@@ -829,13 +829,15 @@ function buildReceptionReview(order, reception, items) {
       `  Ubicación: ${entry.ubicacion || 'sin ubicación'}.`,
       entry.lote
         ? entry.lote_fuente === 'INTERNO'
-          ? `  Lote interno a generar: ${entry.lote} (proveedor sin lote).`
+          ? `  Lote interno de origen: ${entry.lote} (proveedor sin lote).`
           : entry.lote_fuente === 'DOCUMENTO'
-          ? `  Lote: ${entry.lote} (propuesto por PDF; verifica la etiqueta física).`
+          ? `  Lote del proveedor: ${entry.lote} (propuesto por PDF; verifica la etiqueta física).`
           : entry.lote_documento && entry.lote !== entry.lote_documento
-            ? `  Lote físico: ${entry.lote} (PDF: ${entry.lote_documento}).`
-            : `  Lote: ${entry.lote}.`
+            ? `  Lote físico del proveedor: ${entry.lote} (PDF: ${entry.lote_documento}).`
+            : `  Lote del proveedor: ${entry.lote}.`
         : '  Lote del proveedor: faltante.',
+      String(entry.condicion || '').toUpperCase() !== 'DISPONIBLE'
+        ? `  Partida interna ${String(entry.condicion).toLowerCase()}: se asignará al confirmar para separar estados; conserva el mismo origen.` : null,
       entry.fecha_venc
         ? entry.fecha_venc_fuente === 'DOCUMENTO'
           ? `  Vencimiento: ${entry.fecha_venc} (propuesto por PDF).`

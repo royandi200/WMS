@@ -227,7 +227,7 @@ test('WhatsApp renders a canonical receipt review before inventory confirmation'
     }]
   );
   assert.match(review, /Resumen de recepción para OC ID 5 \| OC-DEMO-5/u);
-  assert.match(review, /- 00051-MPASH - Gomas Ashwa\n  Recibido: 2000 gr\.\n  Condición: DISPONIBLE\.\n  Ubicación: PPAL-A-1-01\.\n  Lote: DEMO-GOMAS-001\.\n  Vencimiento: 2027-12-31\./u);
+  assert.match(review, /- 00051-MPASH - Gomas Ashwa\n  Recibido: 2000 gr\.\n  Condición: DISPONIBLE\.\n  Ubicación: PPAL-A-1-01\.\n  Lote del proveedor: DEMO-GOMAS-001\.\n  Vencimiento: 2027-12-31\./u);
   assert.match(review, /Todavía no se modificó inventario/u);
   assert.match(review, /Confirmo la recepción OC ID 5/u);
   const formatted = formatWhatsAppMessage(review);
@@ -248,7 +248,8 @@ test('reception preview separates quarantine, physical lot and each distribution
   );
   assert.match(review, /Recibido: 4 und\.\n  Partida 1: 3 und\n  Condición: DISPONIBLE/u);
   assert.match(review, /Partida 2: 1 und\n  Condición: CUARENTENA/u);
-  assert.match(review, /Lote físico: L-2 \(PDF: L-1\)/u);
+  assert.match(review, /Lote físico del proveedor: L-2 \(PDF: L-1\)/u);
+  assert.match(review, /Partida interna cuarentena: se asignará al confirmar/u);
   assert.match(review, /Motivo de condición: Etiqueta ilegible/u);
   assert.match(review, /Motivo de diferencia: Una unidad menos que la OC/u);
 });
@@ -353,7 +354,7 @@ test('WhatsApp requires physical lot, expiry and location instead of trusting PD
     { id: 61, numero: 'REC-OC-6-001' },
     items
   );
-  assert.match(review, /Lote físico: FISICO-001 \(PDF: DEMO-IO-ZENOVA-001\)/u);
+  assert.match(review, /Lote físico del proveedor: FISICO-001 \(PDF: DEMO-IO-ZENOVA-001\)/u);
   assert.match(review, /Vencimiento físico: 2027-12-15 \(PDF: 2027-11-30\)/u);
   assert.match(review, /PDF es una referencia/u);
 });
