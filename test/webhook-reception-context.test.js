@@ -159,3 +159,46 @@ test('an incomplete OC confirmation still guides after a prior reminder lost its
   assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)|UPDATE recepciones\s+SET estado/u);
   activeFinalPreview = null;
 });
+
+test('repeated incomplete confirmations with BuilderBot history echoes keep the exact guidance', async () => {
+  activeFinalPreview = { orden_compra_id: 51, recepcion_id: 151 };
+  for (const [spoken, recentPreview, stampedOnly] of [
+    ['confirmo', { orden_compra_id: 51, recepcion_id: 151 }, false],
+    ['confirmo OC 51', null, false],
+    ['confirmo OC 51', null, true],
+  ]) {
+    recentFinalPreview = recentPreview;
+    executed.length = 0;
+    const echoed = `${spoken}\n{name}="Juan Esteban"\n[Wednesday, September 30, 2026 17:11:00]: ${spoken}`;
+    const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+      body: { from: '573150000059',
+        ...(stampedOnly ? {} : { body: spoken }),
+        info: { '@ction': 'CONFIRMAR_RECEPCION_OC',
+          body: stampedOnly ? `[Wednesday, September 30, 2026 17:11:00]: ${spoken}` : echoed,
+          params: { orden_compra_id: 51, confirmacion_final: true } } } };
+    const res = { statusCode: 200, body: null, setHeader() {},
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; }, end() { return this; } };
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.mensaje, /envía esta frase completa en un solo mensaje: «Confirmo la recepción \*?OC ID 51\*?»/u);
+    assert.equal(res.body.context.reception.inventory_changed, false);
+    assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)|UPDATE recepciones\s+SET estado/u);
+  }
+  activeFinalPreview = null;
+  recentFinalPreview = null;
+});
+
+test('a current complete phrase is not replaced by a stale abbreviated model echo', async () => {
+  recentFinalPreview = { orden_compra_id: 51, recepcion_id: 151 };
+  const current = 'Confirmo la recepción OC ID 51';
+  const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+    body: { from: '573150000059', body: current,
+      info: { '@ction': 'MODO_CHARLA', body: 'confirmo OC 51', params: {} } } };
+  const res = { statusCode: 200, body: null, setHeader() {},
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; }, end() { return this; } };
+  await handler(req, res);
+  assert.doesNotMatch(res.body.mensaje, /envía esta frase completa en un solo mensaje/u);
+  recentFinalPreview = null;
+});

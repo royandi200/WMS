@@ -166,7 +166,7 @@ const {
 const { buildPendingReceptionsMessage } = require('../../_lib/pending-receptions-message');
 const { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
   hasRecentReceptionContext, isReceptionCorrectionRequest,
-  skuReviewReply, documentMismatch, guidedReceptionResume } = require('../../_lib/builderbot-guided-reception');
+  currentMessageText, skuReviewReply, documentMismatch, guidedReceptionResume } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
 const { recoverReceptionPreview } = require('../../_lib/reception-json-envelope');
@@ -245,6 +245,27 @@ function getUserText(rawBody, info) {
 
 function getContractUserText(rawBody, info) {
   return currentUserText(rawBody, info, { allowParams: false });
+}
+
+const INCOMPLETE_RECEPTION_CONFIRMATION = /^\s*(?:s[ií][,.:]?\s+)?confirm(?:o|a|ar)\s*(?:(?:la\s+)?recepci[oó]n|(?:OC|IO)\s*(?:ID\s*)?\d+)?[.!?]*\s*$/iu;
+const BUILDERBOT_MESSAGE_TIMESTAMP = /^\[(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4} \d{2}:\d{2}:\d{2}\]:\s*/u;
+
+function incompleteReceptionAttempt(rawBody, info, rawText) {
+  // BBC puede repetir el mensaje actual con nombre y hora dentro de info.body.
+  // Solo este detector informativo usa las variantes del transporte; nunca
+  // sirven para autorizar el cierre ni para reconstruir los ítems recibidos.
+  const independent = [rawBody?.body, rawBody?.text, rawBody?.query]
+    .find(value => typeof value === 'string' && value.trim()
+      && !/^_event_document__[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/iu.test(value.trim()));
+  const candidates = independent ? [independent]
+    : [info?.body, info?.text, info?.query, rawText];
+  for (const value of candidates) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const utterance = currentMessageText(value)
+      .replace(BUILDERBOT_MESSAGE_TIMESTAMP, '').trim();
+    if (INCOMPLETE_RECEPTION_CONFIRMATION.test(utterance)) return utterance;
+  }
+  return null;
 }
 
 function isGreeting(text) {
@@ -1676,11 +1697,11 @@ module.exports = async (req, res) => {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
     }
-    const incompleteReceptionConfirmation = /^\s*(?:s[ií][,.:]?\s+)?confirm(?:o|a|ar)\s*(?:(?:la\s+)?recepci[oó]n|(?:OC|IO)\s*(?:ID\s*)?\d+)?[.!?]*\s*$/iu.test(rawText);
-    const receiptNamedInAttempt = /\brecepci[oó]n\b|\b(?:OC|IO)\s*(?:ID\s*)?\d+\b/iu.test(rawText);
-    const incompleteReceptionPreview = incompleteReceptionConfirmation && !receiptNamedInAttempt
+    const receptionAttempt = incompleteReceptionAttempt(rawBody, info, rawText);
+    const receiptNamedInAttempt = /\brecepci[oó]n\b|\b(?:OC|IO)\s*(?:ID\s*)?\d+\b/iu.test(receptionAttempt || '');
+    const incompleteReceptionPreview = receptionAttempt && !receiptNamedInAttempt
       ? await recentlyDisplayedFinalReceptionPreview(db, user.id, from) : null;
-    const guideIncompleteReception = incompleteReceptionConfirmation
+    const guideIncompleteReception = Boolean(receptionAttempt)
       && (receiptNamedInAttempt || action === 'CONFIRMAR_RECEPCION_OC'
         || Boolean(incompleteReceptionPreview));
     if (guideIncompleteReception) {
@@ -1806,7 +1827,7 @@ module.exports = async (req, res) => {
     }
 
     if (guideIncompleteReception) {
-      const references = typedReceptionReferences(rawText);
+      const references = typedReceptionReferences(receptionAttempt);
       const requestedReference = references.length === 1
         && ['OC', 'IO'].includes(references[0].kind) ? references[0] : null;
       let preview = incompleteReceptionPreview

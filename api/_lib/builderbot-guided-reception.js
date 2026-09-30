@@ -1062,5 +1062,5 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
 
 module.exports = { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
   hasActiveReceptionSession, hasRecentReceptionContext, isReceptionCorrectionRequest,
-  skuReviewReply, documentMismatch, guidedReceptionResume,
+  currentMessageText, skuReviewReply, documentMismatch, guidedReceptionResume,
   parseDraft, missingFields, itemFromEntry };

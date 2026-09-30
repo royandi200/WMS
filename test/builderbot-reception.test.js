@@ -9,6 +9,7 @@ const {
   contextualReceptionConfirmation,
   activeFinalReceptionPreview,
   recentlyDisplayedFinalReceptionPreview,
+  confirmReceptionFromWhatsApp,
   explicitPurchaseOrderConfirmation,
   purchaseOrderTextReference,
   purchaseOrderReceptionIdentifier,
@@ -73,6 +74,35 @@ test('a vague confirmation uses only the last final preview shown to this operat
   await assert.rejects(recentlyDisplayedFinalReceptionPreview(db, 21, '573150000059'), /otro usuario/u);
   logs[0] = { action: 'CONSULTAR_STOCK_MATERIA_PRIMA', response: '{}' };
   assert.equal(await recentlyDisplayedFinalReceptionPreview(db, 20, '573150000059'), null);
+});
+
+test('a second incomplete confirmation reaches the receipt handler but returns guidance, not an item error', async () => {
+  const payload = { version: 1, orderId: 51, receptionId: 151,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 12 }] }] };
+  const row = { usuario_id: 20, payload_json: JSON.stringify(payload),
+    payload_hash: createHash('sha256').update(canonicalJson(payload)).digest('hex') };
+  const queries = [];
+  const db = { execute: async (sql, values) => {
+    queries.push(sql);
+    if (sql.includes('FROM ordenes_compra_proveedor oc')) return [[{
+      id: 51, numero: 'OC-PROV-20260930-005', estado: 'CARGADA', tipo_recepcion: 'INSUMOS_MP',
+    }]];
+    if (sql.includes('FROM recepciones') && sql.includes('estado IN')) return [[{
+      id: 151, numero: 'REC-OC-51-001', estado: 'borrador',
+    }]];
+    if (sql.includes('FROM recepcion_confirmacion_borradores')) return [[row]];
+    throw new Error(`Unexpected query: ${sql}`);
+  } };
+  for (const text of ['confirmo OC 51',
+    '[Wednesday, September 30, 2026 17:11:00]: confirmo OC 51']) {
+    const response = await confirmReceptionFromWhatsApp({ db,
+      params: { orden_compra_id: 51, confirmacion_final: true }, rawText: text,
+      user: { id: 20 } });
+    assert.equal(response.requires_confirmation, true);
+    assert.equal(response.inventory_changed, false);
+    assert.match(response.message, /Confirmo la recepción OC ID 51/u);
+  }
+  assert.doesNotMatch(queries.join('\n'), /UPDATE|INSERT|DELETE/u);
 });
 
 test('contextual reception confirmation requires one valid final preview owned by the operator', async () => {

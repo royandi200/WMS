@@ -1130,6 +1130,30 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   if (!['borrador', 'en_proceso'].includes(requestedReception.estado)) {
     throw inputError(`La recepcion esta ${requestedReception.estado}`, 409);
   }
+  const suppliedRows = params.items || params.productos || params.lineas;
+  if (!isExplicitConfirmation && (!Array.isArray(suppliedRows) || !suppliedRows.length)
+    && /\bconfirm(?:o|a|ar)\b/iu.test(normalizeCommandText(rawText))) {
+    // Defensa adicional: si BBC envía un segundo intento abreviado directamente
+    // a esta acción, conservar el borrador del operador y volver a guiarlo.
+    // Nunca usar esta rama para confirmar ni para reconstruir los ítems.
+    const draft = await loadReceptionDraft(db, {
+      orderId: order.id, receptionId: requestedReception.id, userId: user.id,
+    });
+    if (draft) {
+      const identifier = purchaseOrderReceptionIdentifier(order);
+      return {
+        requires_confirmation: true,
+        inventory_changed: false,
+        recepcion_id: requestedReception.id,
+        numero: requestedReception.numero,
+        orden_compra_id: order.id,
+        orden_compra_numero: order.numero,
+        tipo_recepcion: purchaseOrderReceptionType(order),
+        item_count: draft.items.length,
+        message: `🧾 Ese mensaje no confirmó la recepción ${identifier}. Envía esta frase completa en un solo mensaje: «Confirmo la recepción ${identifier}». No se modificó inventario.`,
+      };
+    }
+  }
   const prepared = await prepareReceptionFromPurchaseOrder({
     db,
     params: { orden_compra_id: order.id },
