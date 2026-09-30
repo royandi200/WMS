@@ -722,11 +722,16 @@ test('a bare yes is scoped to a stored SKU review, not final inventory confirmat
   assert.equal(skuReviewReply('sim'), 'YES');
   assert.equal(skuReviewReply('sim.'), 'YES');
   assert.equal(skuReviewReply('Sí, todo está bien'), 'YES');
+  for (const reply of ['sii', 'síííí', 'correcto', 'todo está bien', 'perfecto',
+    'está perfecto', 'todo correcto', 'de acuerdo', 'ok']) {
+    assert.equal(skuReviewReply(reply), 'YES', reply);
+  }
   assert.equal(skuReviewReply('No'), 'NO');
   assert.equal(skuReviewReply('No está bien'), 'NO');
   assert.equal(skuReviewReply('Sí, pero cambia la cantidad'), null);
   assert.equal(skuReviewReply('similar'), null);
   assert.equal(skuReviewReply('sim, cambia la cantidad'), null);
+  assert.equal(skuReviewReply('perfecto, pero cambia la ubicación'), null);
   assert.equal(skuReviewReply('Confirmo la recepción OC ID 37'), null);
   const echoedYes = 'Sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:16:03]: Sí';
   assert.equal(skuReviewReply(echoedYes), 'YES');
@@ -740,6 +745,21 @@ test('a bare yes is scoped to a stored SKU review, not final inventory confirmat
   assert.equal(await hasPendingSkuReview(db, 5), true);
   assert.equal(JSON.parse(state.draft.payload_json).version, 2);
   assert.equal(state.inventoryWrites, 0);
+});
+
+test('positive SKU replies only advance the draft and never confirm inventory', async () => {
+  for (const reply of ['sim', 'siiii', 'correcto', 'todo está bien', 'perfecto']) {
+    const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+    const user = { id: 5 };
+    await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',
+      params: { avance: { producto: 'tapas', cantidad: 2,
+        condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+    const accepted = await advanceGuidedReception({ db, user, rawText: reply,
+      params: { avance: {} } });
+    assert.equal(accepted.requires_confirmation, true, reply);
+    assert.match(accepted.message, /Confirmo la recepción OC ID 37/u);
+    assert.equal(state.inventoryWrites, 0, reply);
+  }
 });
 
 test('BuilderBot history echo does not block a reviewed SKU yes', async () => {

@@ -30,6 +30,7 @@ require.cache[guidedPath] = {
   id: guidedPath, filename: guidedPath, loaded: true,
   exports: {
     ...guided,
+    hasPendingSkuReview: async () => true,
     hasRecentReceptionContext: async () => recentReception,
     advanceGuidedReception: async input => {
       routed = input;
@@ -80,4 +81,20 @@ test('an explicit OC correction recovers after the last reply was about producti
   assert.match(res.body.mensaje, /Corrección de recepción/u);
   assert.equal(routed.params.correccion, true);
   assert.equal(routed.params.id_orden, undefined);
+});
+
+test('perfecto resumes only the most recent SKU review', async () => {
+  for (const [recent, shouldResume] of [[true, true], [false, false]]) {
+    recentReception = recent;
+    routed = null;
+    const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+      body: { from: '573150000059', body: 'perfecto',
+        info: { '@ction': 'MODO_CHARLA', body: 'perfecto', params: {} } } };
+    const res = { statusCode: 200, body: null, setHeader() {},
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; }, end() { return this; } };
+    await handler(req, res);
+    assert.equal(Boolean(routed), shouldResume);
+    if (shouldResume) assert.equal(routed.params.confirmacion_final, undefined);
+  }
 });

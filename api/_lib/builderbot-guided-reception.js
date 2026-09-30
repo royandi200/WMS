@@ -34,7 +34,7 @@ function skuReviewReply(rawText) {
   const text = currentMessageText(rawText).trim().normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toUpperCase()
     .replace(/[.!?]+$/u, '').replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  if (/^(?:SIM|SI(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO)$/u.test(text)) return 'YES';
+  if (/^(?:SIM|SI+(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO|TODO CORRECTO|PERFECTO|ESTA PERFECTO|DE ACUERDO|OK|OKAY)$/u.test(text)) return 'YES';
   if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO ES CORRECTO|ESTA MAL)$/u.test(text)) return 'NO';
   return null;
 }
@@ -631,7 +631,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),
       entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-      '¿Están correctas las partidas de este SKU? Responde «sí» para continuar. Para corregir, di el número de partida y el dato nuevo.',
+      '¿Están correctas las partidas de este SKU? Responde «sí», «correcto» o «perfecto» para continuar. Para corregir, di el número de partida y el dato nuevo.',
       'Este paso no confirma la recepción ni modifica inventario.',
     ].filter(Boolean).join('\n');
   }
@@ -651,7 +651,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
     `Vencimiento: ${entry.fecha_vencimiento || prepared.fecha_vencimiento_documento}${expiryFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
     entry.motivo ? `Motivo de condición: ${entry.motivo}.` : null,
     entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-    '¿Está correcto este SKU? Responde «sí» para continuar o dime qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
+    '¿Está correcto este SKU? Responde «sí», «correcto» o «perfecto» para continuar, o dime qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
     'Este paso no confirma la recepción ni modifica inventario.',
   ].filter(Boolean).join('\n');
 }

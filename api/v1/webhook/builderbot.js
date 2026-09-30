@@ -1610,7 +1610,8 @@ module.exports = async (req, res) => {
     }
     if (!selectedPreparationReference && skuReviewReply(rawText)
       && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
-      && await hasPendingSkuReview(db, user.id, from)) {
+      && await hasPendingSkuReview(db, user.id, from)
+      && await hasRecentReceptionContext(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
     }
