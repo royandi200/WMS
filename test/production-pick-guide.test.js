@@ -183,15 +183,20 @@ test('cambiar ubicación ofrece los lotes del SKU y opción 2 aplica solo el ele
     rawText: 'corrección: partida 1, ubicación A10' });
   assert.match(offered.message, /1\. Lote R5-260923-TRP/u);
   assert.match(offered.message, /2\. Lote R7-260927-TRP/u);
+  assert.match(offered.message, /Partida 1: TARRO CUADRADO x 60/u);
+  assert.match(offered.message, /Actual: lote R5-260923-TRP \| ubicación A11/u);
+  assert.doesNotMatch(offered.message, /Materiales reservados|TAPA TARRO CUADRADO BLANCO/u);
   assert.equal(db.allocations[0].stock_id, 11);
   assert.ok(db.review.choice);
   const blocked = await advanceProductionPick({ db, userId: 7,
     rawText: 'Confirmo materiales OP ID 110' });
   assert.equal(blocked.confirm, undefined);
   assert.match(blocked.message, /Falta elegir el lote/u);
+  assert.doesNotMatch(blocked.message, /Materiales reservados|TAPA TARRO CUADRADO BLANCO/u);
   const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
   assert.match(chosen.message, /Corrección aplicada a la partida 1/u);
   assert.match(chosen.message, /Lote: R7-260927-TRP \| ubicación: A10/u);
+  assert.match(chosen.message, /Materiales reservados/u);
   assert.equal(db.allocations[0].stock_id, 14);
   assert.equal(db.review.choice, null);
   assert.equal(db.stocks.get(11).reservada, 0);
@@ -205,6 +210,7 @@ test('una opción inexistente no altera la reserva y repite la lista', async () 
     rawText: 'corrección: partida 1, ubicación A10' });
   const reply = await advanceProductionPick({ db, userId: 7, rawText: 'opción 3' });
   assert.match(reply.message, /La opción 3 no existe/u);
+  assert.doesNotMatch(reply.message, /Materiales reservados|TAPA TARRO CUADRADO BLANCO/u);
   assert.equal(db.allocations[0].stock_id, 11);
   assert.equal(db.stocks.get(11).reservada, 7);
 });
@@ -214,7 +220,7 @@ test('permite escoger otro lote en la ubicación actual sin dictar el código', 
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const offered = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección: partida 1, quiero elegir otro lote' });
-  assert.match(offered.message, /en A11, elige el lote/u);
+  assert.match(offered.message, /Para la ubicación A11, elige el lote/u);
   assert.match(offered.message, /1\. Lote R8-260928-TRP/u);
   assert.doesNotMatch(offered.message, /1\. Lote R5-260923-TRP/u);
   assert.equal(db.allocations[0].stock_id, 11);

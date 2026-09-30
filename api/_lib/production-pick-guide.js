@@ -58,7 +58,9 @@ function choicePrompt(choice, rows) {
   const selected = rows[index];
   if (!selected) return 'La partida cambió. Pide de nuevo el resumen de alistamiento; no se cambiaron reservas.';
   return [
-    `🔎 Para la partida ${index + 1} (${selected.producto}, ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}) en ${choice.location}, elige el lote que verificaste físicamente:`,
+    `🔎 Partida ${index + 1}: ${selected.producto} (${selected.sku}), ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}.`,
+    `Actual: lote ${selected.lote} | ubicación ${selected.ubicacion || 'sin ubicación'}.`,
+    `Para la ubicación ${choice.location}, elige el lote que verificaste físicamente:`,
     ...choice.options.map((option, number) => `${number + 1}. Lote ${option.lot} | disponible ${roundQty(option.available)} ${selected.unidad || 'und'} | vence ${displayExpiry(option.expiry)}`),
     '', 'Responde «opción 1», «opción 2», etc. No necesitas dictar el lote. Aún no cambié la reserva ni se inició producción.',
   ].join('\n');
@@ -449,8 +451,9 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
         pendingChoice ? JSON.stringify(pendingChoice) : null]
     );
     await db.commit();
-    return { message: pickSummary(order, current, note,
-      { choicePending: Boolean(pendingChoice) }), orderId: order.id };
+    return { message: pendingChoice
+      ? `🏭 OP ID ${order.id} | ${order.codigo_orden} - corrección de alistamiento\n\n${note}`
+      : pickSummary(order, current, note), orderId: order.id };
   } catch (error) {
     await db.rollback().catch(() => {});
     if (error.status === 409 && (isPickCorrection(rawText) || pickOptionNumber(rawText) !== null)
