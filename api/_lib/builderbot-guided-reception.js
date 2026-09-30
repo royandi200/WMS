@@ -57,6 +57,13 @@ function isReceptionCorrectionRequest(rawText) {
     && !/\b(?:op\s*(?:id\s*)?\d+|op-\d{8}-\d+|op\s*id|orden de produccion|despacho)\b/u.test(text);
 }
 
+function correctionProductName(value) {
+  return String(value || '').trim()
+    .replace(/^(?:las?|los?)\s+/iu, '')
+    .replace(/\s+(?:de\s+)?(?:OC|IO)\s*(?:ID|IB)?\s*\d+$/iu, '')
+    .trim();
+}
+
 function correctionFieldsFromText(rawText) {
   if (!isReceptionCorrectionRequest(rawText)) return {};
   const text = currentMessageText(rawText).normalize('NFD')
@@ -67,7 +74,7 @@ function correctionFieldsFromText(rawText) {
   if (indexed) {
     const field = indexed[1] === 'vencimiento' || indexed[1] === 'fecha de vencimiento'
       ? 'fecha_vencimiento' : indexed[1];
-    return { ...(indexed[3] ? { producto: indexed[3].trim().replace(/^(?:las?|los?)\s+/iu, '') } : {}),
+    return { ...(indexed[3] ? { producto: correctionProductName(indexed[3]) } : {}),
       partida: Number(indexed[2]), [field]: indexed[4].trim() };
   }
   const patterns = [
@@ -79,7 +86,7 @@ function correctionFieldsFromText(rawText) {
   ];
   for (const [field, pattern] of patterns) {
     const match = text.match(pattern);
-    if (match) return { producto: match[1].trim(), [field]: match[2].trim() };
+    if (match) return { producto: correctionProductName(match[1]), [field]: match[2].trim() };
   }
   const withoutProduct = [
     ['ubicacion', /^(?:la\s+)?ubicacion\s+(?:a|en|es|fue)?\s*([a-z][a-z0-9-]*\d[a-z0-9-]*)$/iu],

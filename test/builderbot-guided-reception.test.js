@@ -925,6 +925,20 @@ test('a completed single-condition preview can be corrected into two partitions'
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('an explicit OC ID correction updates a partition after a final preview', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const send = (rawText, avance = {}) => advanceGuidedReception({ db, user, rawText,
+    params: { avance } });
+  await send('OC ID 37: tapas', { producto: 'tapas' });
+  await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en CUAR-C-1-01 por golpe');
+  await send('sí');
+  const corrected = await send('Corrección, ubicación de la partida 2 de las tapas de OC ID 37 es A2');
+  assert.equal(corrected.sku_review, true);
+  assert.match(corrected.message, /Partida 2: 1 und · CUARENTENA · ubicación A2/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('an in-progress draft from before this change stops for its first SKU review', async () => {
   const { db, state } = guidedDb();
   const user = { id: 5 };

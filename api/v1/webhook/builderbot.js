@@ -1614,10 +1614,14 @@ module.exports = async (req, res) => {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: {} };
     }
+    const correctionReferences = isReceptionCorrectionRequest(rawText)
+      ? typedReceptionReferences(rawText) : [];
+    const explicitReceptionCorrection = correctionReferences.length === 1
+      && ['OC', 'IO'].includes(correctionReferences[0].kind);
     if (!selectedPreparationReference && isReceptionCorrectionRequest(rawText)
       && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC',
         'CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA'].includes(action)
-      && await hasRecentReceptionContext(db, user.id, from)) {
+      && (explicitReceptionCorrection || await hasRecentReceptionContext(db, user.id, from))) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
     }

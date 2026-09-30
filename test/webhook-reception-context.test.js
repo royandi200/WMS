@@ -7,6 +7,7 @@ const guidedPath = path.resolve(__dirname, '../api/_lib/builderbot-guided-recept
 const executed = [];
 const guided = require(guidedPath);
 let routed = null;
+let recentReception = true;
 
 require.cache[dbPath] = {
   id: dbPath, filename: dbPath, loaded: true,
@@ -29,7 +30,7 @@ require.cache[guidedPath] = {
   id: guidedPath, filename: guidedPath, loaded: true,
   exports: {
     ...guided,
-    hasRecentReceptionContext: async () => true,
+    hasRecentReceptionContext: async () => recentReception,
     advanceGuidedReception: async input => {
       routed = input;
       return { message: 'Corrección de recepción OC ID 45: partida 2 en A2',
@@ -44,6 +45,8 @@ process.env.DISABLE_OUTBOUND_NOTIFICATIONS = 'true';
 const handler = require('../api/v1/webhook/builderbot');
 
 test('a misclassified production correction follows the last reception preview', async () => {
+  recentReception = true;
+  routed = null;
   const text = 'Corrección, ubicación de la partida 2 de las gomas es A2';
   const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
     body: { from: '573150000059', body: text,
@@ -59,4 +62,22 @@ test('a misclassified production correction follows the last reception preview',
   assert.equal(routed.params.id_orden, undefined);
   assert.doesNotMatch(executed.join('\n'), /FROM produccion_cierre_borradores/u);
   assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)/u);
+});
+
+test('an explicit OC correction recovers after the last reply was about production', async () => {
+  recentReception = false;
+  routed = null;
+  const text = 'Corrección, ubicación de la partida 2 de las gomas de OC ID 45 es A2';
+  const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+    body: { from: '573150000059', body: text,
+      info: { '@ction': 'CERRAR_ORDEN_PRODUCCION', body: text,
+        params: { id_orden: 109, ubicacion: 'A2' } } } };
+  const res = { statusCode: 200, body: null, setHeader() {},
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; }, end() { return this; } };
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body.mensaje, /Corrección de recepción/u);
+  assert.equal(routed.params.correccion, true);
+  assert.equal(routed.params.id_orden, undefined);
 });
