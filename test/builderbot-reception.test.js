@@ -556,8 +556,7 @@ test('BuilderBot reception actions share domain handlers and disable free receip
   assert.match(prompt, /valor exacto reportado por el operario.*obligatorio para todos/u);
   assert.match(prompt, /prepara la recepcion OC ID 5/u);
   assert.match(prompt, /pueden coexistir `OC ID 11`, `IO ID 11` y `MQ ID 11`/u);
-  assert.match(webhook, /purchaseOrderReceptionIdentifier\(order\)/u);
-  assert.match(webhook, /MQ ID \$\{order\.id\}/u);
+  assert.match(webhook, /buildPendingReceptionsMessage\(\{ available, outsourcing, formatDateOnly \}\)/u);
   assert.doesNotMatch(
     webhook,
     /Produccion propia: el producto terminado ingresa al cerrar la orden de produccion/u

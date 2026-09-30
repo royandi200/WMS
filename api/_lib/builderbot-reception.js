@@ -50,7 +50,7 @@ async function listAvailablePurchaseOrderReceptions({ db, limit = 10 }) {
            WHERE blocked.orden_compra_id = oc.id
              AND blocked_product.modalidad_operativa IN ('PR', 'PT')
         )
-      ORDER BY COALESCE(oc.fecha_orden, DATE(oc.creado_en)), oc.id
+      ORDER BY COALESCE(oc.fecha_orden, DATE(oc.creado_en)) DESC, oc.id DESC
       LIMIT 50`
   );
   if (!orders.length) return [];

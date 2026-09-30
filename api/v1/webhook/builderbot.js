@@ -163,6 +163,7 @@ const {
   confirmOutsourcingReceptionFromWhatsApp,
   validateOutsourcingReceiptDocument,
 } = require('../../_lib/builderbot-reception');
+const { buildPendingReceptionsMessage } = require('../../_lib/pending-receptions-message');
 const { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
   hasRecentReceptionContext, isReceptionCorrectionRequest,
   skuReviewReply, documentMismatch, guidedReceptionResume } = require('../../_lib/builderbot-guided-reception');
@@ -1865,57 +1866,17 @@ module.exports = async (req, res) => {
     switch (action) {
 
       case 'CONSULTAR_RECEPCIONES_PENDIENTES': {
-        const [available, outsourcing] = await Promise.all([
+        let [available, outsourcing] = await Promise.all([
           listAvailablePurchaseOrderReceptions({ db, limit: 10 }),
           listAvailableOutsourcingReceptions({ db, limit: 10 }),
         ]);
         if (!available.length && !outsourcing.length) {
           mensaje = 'No hay recepciones pendientes disponibles.';
         } else {
-          const directGroups = [
-            ['Materia prima e insumos', available.filter(order => order.tipo_recepcion === 'INSUMOS_MP')],
-            ['Producto terminado In & Out', available.filter(order => order.tipo_recepcion === 'IN_OUT')],
-            ['Recepciones mixtas', available.filter(order => order.tipo_recepcion === 'MIXTA')],
-          ].filter(([, orders]) => orders.length);
-          const directLines = directGroups.flatMap(([label, orders]) => [
-            `*${label} (${orders.length})*`,
-            ...orders.flatMap(order => [
-              `${purchaseOrderReceptionIdentifier(order)} | ${order.numero}`,
-              `Proveedor: ${order.proveedor_nombre || 'N/A'}`,
-              `Fecha: ${formatDateOnly(order.fecha_orden)}`,
-              ...order.items.map(item =>
-                `- ${item.sku} - ${item.producto}\n  Pendiente: ${Number(item.cantidad_pendiente)} ${item.unidad}\n  Vencimiento requerido; lote del proveedor o interno según configuración del SKU`
-              ),
-              '',
-            ]),
-          ]);
-          const outsourcingLines = outsourcing.length ? [
-            `*Producto terminado desde maquila 3Q (${outsourcing.length})*`,
-            ...outsourcing.flatMap(order => [
-              `MQ ID ${order.id} | ${order.codigo}`,
-              `OC: ${order.orden_compra_numero}`,
-              `Proveedor: ${order.proveedor_nombre || '3Q'}`,
-              `- ${order.sku} - ${order.producto}`,
-              `  Pendiente: ${order.cantidad_pendiente} ${order.unidad}`,
-              '  Vencimiento requerido; lote de 3Q o interno según configuración del SKU',
-              '',
-            ]),
-            `Para recibir por WhatsApp responde, por ejemplo: prepara la recepcion MQ ID ${outsourcing[0].id} por ${outsourcing[0].cantidad_pendiente} ${outsourcing[0].unidad}.`,
-            'Tambien puedes usar Recepciones > Confirmar recepcion > Producto desde 3Q.',
-          ] : [];
-          mensaje = [
-            `*Recepciones pendientes (${available.length + outsourcing.length})*`,
-            '',
-            ...directLines,
-            ...outsourcingLines,
-            '',
-            ...(available.some(order => order.tipo_recepcion !== 'IN_OUT') ? [
-              `Para una compra de insumos responde, por ejemplo: prepara la recepcion ${purchaseOrderReceptionIdentifier(available.find(order => order.tipo_recepcion !== 'IN_OUT'))}.`,
-            ] : []),
-            ...(available.some(order => order.tipo_recepcion === 'IN_OUT') ? [
-              `Para producto terminado In & Out responde, por ejemplo: prepara la recepcion ${purchaseOrderReceptionIdentifier(available.find(order => order.tipo_recepcion === 'IN_OUT'))}.`,
-            ] : []),
-          ].join('\n');
+          const compact = buildPendingReceptionsMessage({ available, outsourcing, formatDateOnly });
+          mensaje = compact.message;
+          available = compact.shownAvailable;
+          outsourcing = compact.shownOutsourcing;
         }
         responseContext.available_receptions = available.map(order => ({
           purchase_order_id: Number(order.id),
