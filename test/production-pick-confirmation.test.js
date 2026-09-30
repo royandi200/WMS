@@ -4,6 +4,7 @@ const path = require('node:path');
 const dbPath = path.resolve(__dirname, '../api/_lib/db.js');
 const noticesPath = path.resolve(__dirname, '../api/_lib/builderbot-notifications.js');
 let reviewedHash = null;
+let pendingChoice = null;
 let stockUsable = true;
 const queries = [];
 const allocation = { id: 501, stock_id: 12, lote: 'R5-260923-TRP', ubicacion_id: 2,
@@ -21,8 +22,9 @@ require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true,
         cantidad_planeada: 1, origen_tipo: 'STOCK_SEGURIDAD',
       }]];
       if (sql.includes('FROM produccion_material_lotes pml')) return [[allocation]];
-      if (sql.includes('SELECT huella FROM produccion_alistamiento_revisiones')) {
-        return [reviewedHash ? [{ huella: reviewedHash }] : []];
+      if (sql.includes('SELECT huella, seleccion_pendiente FROM produccion_alistamiento_revisiones')) {
+        return [reviewedHash ? [{ huella: reviewedHash,
+          seleccion_pendiente: pendingChoice }] : []];
       }
       if (sql.includes('SELECT s.id FROM stock s')) return [stockUsable
         ? [{ id: allocation.stock_id }] : []];
@@ -55,6 +57,7 @@ test('WhatsApp no descuenta material sin una revisión vigente del mismo alistad
 
 test('la huella vigente permite consumir exactamente las partidas revisadas', async () => {
   reviewedHash = allocationFingerprint([allocation]);
+  pendingChoice = null;
   stockUsable = true;
   queries.length = 0;
   const result = await confirmProductionMaterials({ orderId: 110, userId: 7,
@@ -63,6 +66,17 @@ test('la huella vigente permite consumir exactamente las partidas revisadas', as
   assert.equal(result.consumed[0].location, 'A10');
   assert.ok(queries.some(({ sql }) => /UPDATE stock\s+SET cantidad = cantidad -/u.test(sql)));
   assert.ok(queries.some(({ sql }) => /UPDATE produccion_alistamiento_revisiones SET expira_en/u.test(sql)));
+});
+
+test('una selección de lote pendiente impide iniciar aunque la huella coincida', async () => {
+  reviewedHash = allocationFingerprint([allocation]);
+  pendingChoice = JSON.stringify({ allocationId: 501, location: 'A10' });
+  queries.length = 0;
+  try {
+    await assert.rejects(confirmProductionMaterials({ orderId: 110, userId: 7,
+      requireReviewedPick: true }), /Falta elegir el lote/u);
+    assert.ok(!queries.some(({ sql }) => /UPDATE stock|UPDATE lots|INSERT INTO movimientos/u.test(sql)));
+  } finally { pendingChoice = null; }
 });
 
 test('una partida bloqueada o vencida después del resumen impide iniciar la OP', async () => {

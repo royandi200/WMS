@@ -41,9 +41,20 @@ async function main() {
     );
     const present = Number(rows[0]?.present) === 1;
     if (apply && !present) await conn.query(source);
+    const [columns] = await conn.execute(
+      `SELECT COUNT(*) AS present FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'produccion_alistamiento_revisiones'
+          AND COLUMN_NAME = 'seleccion_pendiente'`
+    );
+    const choiceColumnPresent = Number(columns[0]?.present) === 1;
+    if (apply && present && !choiceColumnPresent) await conn.execute(
+      `ALTER TABLE produccion_alistamiento_revisiones
+         ADD COLUMN seleccion_pendiente JSON NULL AFTER huella`
+    );
     process.stdout.write(`${JSON.stringify({ mode: apply ? 'apply' : 'dry-run',
       table: 'produccion_alistamiento_revisiones', presentBefore: present,
-      created: apply && !present })}\n`);
+      created: apply && !present, choiceColumnPresentBefore: choiceColumnPresent,
+      choiceColumnAdded: apply && present && !choiceColumnPresent })}\n`);
   } finally { await conn.end(); }
 }
 

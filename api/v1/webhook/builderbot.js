@@ -103,7 +103,7 @@ const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow
 const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
   parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
-const { advanceProductionPick, isPickCorrection, isPickReviewIntent,
+const { advanceProductionPick, isPickCorrection, isPickReviewIntent, pickOptionNumber,
   pendingPickReview, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
@@ -1608,6 +1608,9 @@ module.exports = async (req, res) => {
 
     const contextualPickCorrection = Boolean(rawText && isPickCorrection(rawText)
       && !isPickReviewIntent(rawText));
+    const pendingPickOption = rawText && pickOptionNumber(rawText) !== null
+      && hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_PICK)
+      ? (await pendingPickReview(db, user.id))?.choice : null;
     const lastWorkflowAction = contextualPickCorrection
       ? await lastProcessedWorkflowAction(db, from) : null;
     const pickOnlyOperator = hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_PICK)
@@ -1618,6 +1621,11 @@ module.exports = async (req, res) => {
     if (pickOnlyOperator && contextualPickCorrection
       && ['CERRAR_ORDEN_PRODUCCION', 'SOLICITAR_CIERRE_PRODUCCION',
         'UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action)) {
+      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+      params = {};
+    }
+    if (pendingPickOption && ['UNKNOWN', 'MODO_CHARLA', 'CERRAR_ORDEN_PRODUCCION',
+      'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action)) {
       action = 'CONFIRMAR_MATERIALES_PRODUCCION';
       params = {};
     }

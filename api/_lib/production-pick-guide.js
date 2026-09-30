@@ -30,6 +30,40 @@ function isPickReviewIntent(text) {
     || /\b(?:alistamiento|materiales)\s+(?:de\s+la\s+)?op\s*(?:id\s*)?\d+/u.test(normalize(text));
 }
 
+function pickOptionNumber(text) {
+  const raw = normalize(text).replace(/[.!?]+$/u, '').trim();
+  const numbered = /^(?:la\s+)?(?:opcion|alternativa)\s*(?:numero\s*)?#?\s*(\d{1,2})$/u.exec(raw)
+    || /^(?:el\s+)?lote\s*(?:numero\s*)?#?\s*(\d{1,2})$/u.exec(raw);
+  if (numbered) return Number(numbered[1]);
+  const ordinals = { primera: 1, primero: 1, segunda: 2, segundo: 2,
+    tercera: 3, tercero: 3, cuarta: 4, cuarto: 4, quinta: 5, quinto: 5 };
+  const ordinal = /^(?:la|el)\s+(primera|primero|segunda|segundo|tercera|tercero|cuarta|cuarto|quinta|quinto)(?:\s+opcion|\s+lote)?$/u.exec(raw);
+  return ordinal ? ordinals[ordinal[1]] : null;
+}
+
+function parsePendingChoice(value) {
+  if (!value) return null;
+  try { return typeof value === 'string' ? JSON.parse(value) : value; }
+  catch { return null; }
+}
+
+function displayExpiry(value) {
+  if (!value) return 'sin vencimiento registrado';
+  const date = value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+  return date;
+}
+
+function choicePrompt(choice, rows) {
+  const index = rows.findIndex(row => Number(row.id) === Number(choice.allocationId));
+  const selected = rows[index];
+  if (!selected) return 'La partida cambió. Pide de nuevo el resumen de alistamiento; no se cambiaron reservas.';
+  return [
+    `🔎 Para la partida ${index + 1} (${selected.producto}, ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}) en ${choice.location}, elige el lote que verificaste físicamente:`,
+    ...choice.options.map((option, number) => `${number + 1}. Lote ${option.lot} | disponible ${roundQty(option.available)} ${selected.unidad || 'und'} | vence ${displayExpiry(option.expiry)}`),
+    '', 'Responde «opción 1», «opción 2», etc. No necesitas dictar el lote. Aún no cambié la reserva ni se inició producción.',
+  ].join('\n');
+}
+
 function allocationFingerprint(rows) {
   const canonical = [...rows].sort((a, b) => Number(a.id) - Number(b.id))
     .map(row => [Number(row.id), Number(row.stock_id),
@@ -39,11 +73,11 @@ function allocationFingerprint(rows) {
 
 async function pendingPickReview(db, userId) {
   const [rows] = await db.execute(
-    `SELECT orden_produccion_id AS order_id, huella
+    `SELECT orden_produccion_id AS order_id, huella, seleccion_pendiente AS choice_json
        FROM produccion_alistamiento_revisiones
       WHERE usuario_id = ? AND expira_en > NOW() LIMIT 1`, [userId]
   );
-  return rows[0] || null;
+  return rows[0] ? { ...rows[0], choice: parsePendingChoice(rows[0].choice_json) } : null;
 }
 
 async function recentPickNotificationReference(db, from) {
@@ -77,7 +111,7 @@ async function loadAllocations(db, orderId, lock = false) {
   return rows;
 }
 
-function pickSummary(order, rows, note = '') {
+function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
   const lines = [
     `🏭 *Revisa el alistamiento de OP ID ${order.id} | ${order.codigo_orden}*`,
     `Producto terminado: ${order.producto_nombre} (${order.producto_sku}).`,
@@ -89,7 +123,9 @@ function pickSummary(order, rows, note = '') {
     '', note || 'Verifica físicamente cada partida antes de iniciar la producción.',
     '', 'Para corregir, di «corrección: partida 1, ubicación A10». Si hay varias partidas del mismo producto, usa su número; no necesitas repetir el SKU ni el lote anterior.',
     'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
-    `Si *todo el resumen* está correcto, responde exactamente: *Confirmo materiales OP ID ${order.id}*.`,
+    choicePending
+      ? 'Primero elige una de las opciones de lote mostradas arriba; todavía no confirmes los materiales.'
+      : `Si *todo el resumen* está correcto, responde exactamente: *Confirmo materiales OP ID ${order.id}*.`,
     'Hasta esa confirmación no se consumen materiales ni se inicia la OP.',
   ];
   return lines.join('\n');
@@ -190,15 +226,42 @@ async function replacementStock(db, row, segment) {
        JOIN bodegas b ON b.id = s.bodega_id AND b.activa = 1
       WHERE s.producto_id = ? AND s.bodega_id = ? AND UPPER(s.lote) = UPPER(?)
         AND (? IS NULL OR UPPER(u.codigo) = UPPER(?))
+        AND (? IS NULL OR s.id = ?)
         AND (COALESCE(l.expiry_date, s.fecha_venc) IS NULL
              OR COALESCE(l.expiry_date, s.fecha_venc) >= CURDATE())
       ORDER BY s.id FOR UPDATE`,
-    [row.producto_id, row.bodega_id, lot, segment.location || null, segment.location || null]
+    [row.producto_id, row.bodega_id, lot, segment.location || null, segment.location || null,
+      segment.stockId || null, segment.stockId || null]
   );
   const usable = options.filter(option => option.status === 'DISPONIBLE');
   if (!usable.length) throw pickError(`No hay saldo registrado y disponible de ${row.producto} del lote ${lot}${segment.location ? ` en ${segment.location}` : ''}. No cambié las reservas. Si físicamente está allí, concilia su ubicación en inventario antes de iniciar la OP.`);
   if (usable.length > 1) throw pickError(`El lote ${lot} está en varias ubicaciones. Indica la ubicación de destino; no cambié las reservas.`);
   return usable[0];
+}
+
+async function locationLotChoices(db, row, location) {
+  const [options] = await db.execute(
+    `SELECT s.id, s.lote, s.ubicacion_id, s.cantidad, s.reservada,
+            u.codigo AS ubicacion, l.status, COALESCE(l.expiry_date, s.fecha_venc) AS vence
+       FROM stock s
+       JOIN lots l ON l.lpn = s.lote AND l.product_id = s.producto_id
+       JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.activa = 1
+       JOIN bodegas b ON b.id = s.bodega_id AND b.activa = 1
+      WHERE s.producto_id = ? AND s.bodega_id = ? AND UPPER(u.codigo) = UPPER(?)
+        AND (COALESCE(l.expiry_date, s.fecha_venc) IS NULL
+             OR COALESCE(l.expiry_date, s.fecha_venc) >= CURDATE())
+      ORDER BY COALESCE(l.expiry_date, s.fecha_venc), s.lote, s.id FOR UPDATE`,
+    [row.producto_id, row.bodega_id, location]
+  );
+  const available = options.filter(option => option.status === 'DISPONIBLE').map(option => ({
+    stockId: Number(option.id), lot: option.lote, location: option.ubicacion,
+    available: roundQty(Number(option.cantidad) - Number(option.reservada)
+      + (Number(option.id) === Number(row.stock_id) ? Number(row.cantidad_reservada) : 0)),
+    expiry: option.vence instanceof Date ? option.vence.toISOString().slice(0, 10)
+      : (option.vence ? String(option.vence).slice(0, 10) : null),
+  })).filter(option => option.available > 0);
+  return { eligible: available.filter(option => option.available + 0.0001
+    >= Number(row.cantidad_reservada)), partial: available };
 }
 
 async function correctAllocation(db, rows, text) {
@@ -209,6 +272,21 @@ async function correctAllocation(db, rows, text) {
   if (!segments && !desired[0].location && !desired[0].lot) {
     throw pickError('Indica el dato nuevo de la partida: ubicación o lote. No cambié las reservas.');
   }
+  if (!segments && desired[0].location && !desired[0].lot
+    && desired[0].location !== selected.ubicacion?.toUpperCase()) {
+    const found = await locationLotChoices(db, selected, desired[0].location);
+    const options = found.eligible;
+    if (!options.length) {
+      const highest = Math.max(0, ...found.partial.map(option => option.available));
+      throw pickError(`No hay un lote disponible de ${selected.producto} en ${desired[0].location} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
+    }
+    return { selected, choice: { allocationId: selected.id, location: desired[0].location,
+      options, expiresAt: Date.now() + 15 * 60 * 1000 } };
+  }
+  return applyAllocation(db, selected, desired);
+}
+
+async function applyAllocation(db, selected, desired) {
   const resolved = [];
   for (const segment of desired) resolved.push({ ...segment,
     stock: await replacementStock(db, selected, segment) });
@@ -294,9 +372,13 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
     const rows = await loadAllocations(db, order.id, true);
     if (!rows.length) throw pickError('La OP no tiene partidas reservadas; no se inició producción.');
     originalReview = { order, rows };
-    if (confirmationRequested && active) {
+    const reviewedFingerprint = allocationFingerprint(rows);
+    const activeChoice = active?.choice && Number(active.order_id) === Number(order.id)
+      && active.huella === reviewedFingerprint
+      && Number(active.choice.expiresAt) > Date.now() ? active.choice : null;
+    if (confirmationRequested && active && !active.choice) {
       if (Number(active.order_id) !== Number(order.id)
-        || active.huella !== allocationFingerprint(rows)) {
+        || active.huella !== reviewedFingerprint) {
         throw pickError('El resumen de materiales cambió o no fue revisado. Pide «Revisa materiales OP ID ' + order.id + '» antes de confirmar; no se inició producción.');
       }
       await db.commit();
@@ -304,8 +386,37 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
     }
     let note = confirmationRequested
       ? 'Antes de confirmar, revisa físicamente todas las partidas de este resumen. No se inició producción.' : '';
-    if (isPickCorrection(rawText)) {
-      const correction = await correctAllocation(db, rows, rawText);
+    let pendingChoice = null;
+    let correction = null;
+    const selectedOption = pickOptionNumber(rawText);
+    if (selectedOption !== null) {
+      if (!activeChoice) {
+        note = 'No hay una selección de lote vigente. Di «corrección: partida N, ubicación A2» para ver los lotes disponibles. No se cambiaron reservas.';
+      } else if (selectedOption < 1 || selectedOption > activeChoice.options.length) {
+        pendingChoice = activeChoice;
+        note = `La opción ${selectedOption} no existe.\n${choicePrompt(activeChoice, rows)}`;
+      } else {
+        const selected = rows.find(row => Number(row.id) === Number(activeChoice.allocationId));
+        if (!selected) throw pickError('La partida cambió. Pide de nuevo el resumen; no se cambiaron reservas.');
+        const option = activeChoice.options[selectedOption - 1];
+        correction = await applyAllocation(db, selected, [{ quantity: roundQty(selected.cantidad_reservada),
+          location: activeChoice.location, lot: option.lot, stockId: option.stockId }]);
+      }
+    } else if (isPickCorrection(rawText)) {
+      correction = await correctAllocation(db, rows, rawText);
+      if (correction.choice) {
+        pendingChoice = correction.choice;
+        note = choicePrompt(pendingChoice, rows);
+      }
+    } else if (activeChoice) {
+      pendingChoice = activeChoice;
+      note = `Falta elegir el lote antes de confirmar.\n${choicePrompt(activeChoice, rows)}`;
+    } else if (active?.choice) {
+      note = 'La elección de lote venció o cambió el resumen. Di de nuevo «corrección: partida N, ubicación A2»; no se inició producción.';
+    } else if (!isPickReviewIntent(rawText)) {
+      note = 'No interpreté tu mensaje como confirmación. No se consumieron materiales. Si querías corregir, empieza con «corrección» e indica la partida.';
+    }
+    if (correction?.resolved) {
       note = `Corrección aplicada a la partida ${rows.findIndex(row => row.id === correction.selected.id) + 1} en el borrador. Revisa de nuevo todo el resumen.`;
       await db.execute(
         `INSERT INTO system_logs (modulo, nivel, mensaje, usuario_id, payload, created_at)
@@ -319,23 +430,25 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
             lote: part.stock.lote, ubicacion: part.stock.ubicacion, cantidad: part.quantity })),
         })]
       );
-    } else if (!isPickReviewIntent(rawText)) {
-      note = 'No interpreté tu mensaje como confirmación. No se consumieron materiales. Si querías corregir, empieza con «corrección» e indica la partida.';
     }
     const current = await loadAllocations(db, order.id, true);
     await db.execute(
       `INSERT INTO produccion_alistamiento_revisiones
-         (usuario_id, orden_produccion_id, huella, expira_en)
-       VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))
+         (usuario_id, orden_produccion_id, huella, seleccion_pendiente, expira_en)
+       VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR))
        ON DUPLICATE KEY UPDATE orden_produccion_id = VALUES(orden_produccion_id),
-         huella = VALUES(huella), expira_en = VALUES(expira_en), actualizado_en = NOW()`,
-      [userId, order.id, allocationFingerprint(current)]
+         huella = VALUES(huella), seleccion_pendiente = VALUES(seleccion_pendiente),
+         expira_en = VALUES(expira_en), actualizado_en = NOW()`,
+      [userId, order.id, allocationFingerprint(current),
+        pendingChoice ? JSON.stringify(pendingChoice) : null]
     );
     await db.commit();
-    return { message: pickSummary(order, current, note), orderId: order.id };
+    return { message: pickSummary(order, current, note,
+      { choicePending: Boolean(pendingChoice) }), orderId: order.id };
   } catch (error) {
     await db.rollback().catch(() => {});
-    if (error.status === 409 && isPickCorrection(rawText) && originalReview) {
+    if (error.status === 409 && (isPickCorrection(rawText) || pickOptionNumber(rawText) !== null)
+      && originalReview) {
       return { message: `⚠️ ${error.message}\n\n${pickSummary(originalReview.order,
         originalReview.rows, 'No se cambiaron las reservas. Corrige la partida indicada y vuelve a revisar el resumen.')}` };
     }
@@ -344,5 +457,5 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
 }
 
 module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation,
-  isPickCorrection, isPickReviewIntent, loadAllocations, pendingPickReview,
+  isPickCorrection, isPickReviewIntent, pickOptionNumber, loadAllocations, pendingPickReview,
   pickLocations, pickLots, pickSummary, recentPickNotificationReference };

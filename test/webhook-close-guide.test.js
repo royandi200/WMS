@@ -26,7 +26,8 @@ require.cache[dbPath] = {
         if (/FROM produccion_cierre_borradores/u.test(sql)) return [closeDraft
           ? [{ payload_json: closeDraft }] : []];
         if (/FROM produccion_alistamiento_revisiones/u.test(sql)) return [pickReview
-          ? [{ order_id: pickReview.orderId, huella: pickReview.hash }] : []];
+          ? [{ order_id: pickReview.orderId, huella: pickReview.hash,
+            choice_json: pickReview.choice }] : []];
         if (/SELECT action FROM webhook_logs/u.test(sql)) return [lastWorkflowAction
           ? [{ action: lastWorkflowAction }] : []];
         if (pickAllocations && /FROM ordenes_produccion op JOIN productos p/u.test(sql)
@@ -34,10 +35,15 @@ require.cache[dbPath] = {
             estado: 'APROBADA', fase: 'F0', producto_sku: '00102-PTASH60',
             producto_nombre: 'ASHWAGANDHA X 60' }]];
         if (pickAllocations && /FROM produccion_material_lotes pml/u.test(sql)) return [pickAllocations.map(row => ({ ...row }))];
-        if (pickAllocations && /FROM stock s/u.test(sql) && /JOIN lots l/u.test(sql)) return [[{
-          id: 12, lote: 'R5-260923-TRP', ubicacion_id: 2, ubicacion: 'A10',
-          cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: null,
-        }]];
+        if (pickAllocations && /FROM stock s/u.test(sql) && /JOIN lots l/u.test(sql)) {
+          const stocks = [{ id: 12, lote: 'R5-260923-TRP', ubicacion_id: 2,
+            ubicacion: 'A10', cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: null },
+          { id: 13, lote: 'R7-260927-TRP', ubicacion_id: 2, ubicacion: 'A10',
+            cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: '2027-12-31' }];
+          return [/UPPER\(s\.lote\)/u.test(sql)
+            ? stocks.filter(stock => stock.lote === params[2]
+              && (!params[5] || stock.id === Number(params[5]))) : stocks];
+        }
         if (/FROM lots/u.test(sql) && /UPPER\(lpn\)/u.test(sql)) return [params[0] === '123456'
           ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
             status: 'DISPONIBLE', bodega_id: 1 }]];
@@ -70,7 +76,7 @@ require.cache[dbPath] = {
           return [{ affectedRows: 1 }];
         }
         if (/INSERT INTO produccion_alistamiento_revisiones/u.test(sql)) {
-          pickReview = { orderId: params[1], hash: params[2] };
+          pickReview = { orderId: params[1], hash: params[2], choice: params[3] };
           return [{ affectedRows: 1 }];
         }
         if (/INSERT INTO produccion_cierre_borradores/u.test(sql)) closeDraft = params[2];
@@ -163,9 +169,13 @@ test('el webhook mantiene OP y partida entre el resumen y la corrección de alis
     assert.equal(pickReview.orderId, 110);
     lastWorkflowAction = 'CONFIRMAR_MATERIALES_PRODUCCION';
     const correction = await invoke('MODO_CHARLA', 'corrección: partida 1, ubicación A10');
-    assert.match(correction.body.mensaje, /Corrección aplicada a la partida 1/u);
-    assert.match(correction.body.mensaje, /ubicación: A10/u);
-    assert.equal(pickAllocations[0].stock_id, 12);
+    assert.match(correction.body.mensaje, /elige el lote/u);
+    assert.equal(pickAllocations[0].stock_id, 11);
+    const choice = await invoke('MODO_CHARLA', 'opción 2');
+    assert.match(choice.body.mensaje, /Corrección aplicada a la partida 1/u);
+    assert.match(choice.body.mensaje, /ubicación: A10/u);
+    assert.match(choice.body.mensaje, /Lote: R7-260927-TRP/u);
+    assert.equal(pickAllocations[0].stock_id, 13);
     assert.ok(!writes.some(entry => /UPDATE stock\s+SET cantidad = cantidad -|UPDATE ordenes_produccion\s+SET fase/u.test(entry.sql)));
   } finally {
     pickReview = null;

@@ -5,7 +5,8 @@ const {
   isPickCorrection, pickLocations,
 } = require('../api/_lib/production-pick-guide');
 
-function fakeDb({ a10Quantity = 12, extraTarroPart = false, notices = [] } = {}) {
+function fakeDb({ a10Quantity = 12, extraA10Lot = false,
+  extraTarroPart = false, notices = [] } = {}) {
   let snapshot = null;
   let review = null;
   let nextId = 3;
@@ -26,6 +27,9 @@ function fakeDb({ a10Quantity = 12, extraTarroPart = false, notices = [] } = {})
       cantidad: a10Quantity, reservada: 0, productId: 6, status: 'DISPONIBLE' }],
     [13, { id: 13, lote: 'R6-260925-TRP', ubicacion_id: 4, ubicacion: 'A9',
       cantidad: 10, reservada: extraTarroPart ? 2 : 0, productId: 6, status: 'DISPONIBLE' }],
+    ...(extraA10Lot ? [[14, { id: 14, lote: 'R7-260927-TRP', ubicacion_id: 2,
+      ubicacion: 'A10', cantidad: 10, reservada: 0, productId: 6,
+      status: 'DISPONIBLE', vence: '2027-12-31' }]] : []),
     [21, { id: 21, lote: 'R5-260923-TPBI', ubicacion_id: 3, ubicacion: 'A8',
       cantidad: 10, reservada: 7, productId: 1, status: 'DISPONIBLE' }],
   ]);
@@ -48,7 +52,8 @@ function fakeDb({ a10Quantity = 12, extraTarroPart = false, notices = [] } = {})
     },
     async execute(sql, params = []) {
       if (sql.includes('FROM produccion_alistamiento_revisiones')) {
-        return [review ? [{ order_id: review.orderId, huella: review.hash }] : []];
+        return [review ? [{ order_id: review.orderId, huella: review.hash,
+          choice_json: review.choice }] : []];
       }
       if (sql.includes('FROM notificaciones_salida')) return [notices.map(id => ({
         evento: `production_released:${id}` }))];
@@ -61,8 +66,11 @@ function fakeDb({ a10Quantity = 12, extraTarroPart = false, notices = [] } = {})
         .map(row => ({ ...row })).sort((a, b) => a.id - b.id)];
       if (sql.includes('FROM stock s') && sql.includes('JOIN lots l')) {
         return [[...stocks.values()].filter(stock => stock.productId === Number(params[0])
-          && stock.lote.toUpperCase() === String(params[2]).toUpperCase()
-          && (!params[3] || stock.ubicacion === params[3]))];
+          && (sql.includes('UPPER(s.lote)')
+            ? (stock.lote.toUpperCase() === String(params[2]).toUpperCase()
+              && (!params[3] || stock.ubicacion === params[3])
+              && (!params[5] || stock.id === Number(params[5])))
+            : stock.ubicacion === params[2]))];
       }
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
       if (sql.includes('FROM producto_aliases pa')) return [[]];
@@ -97,7 +105,7 @@ function fakeDb({ a10Quantity = 12, extraTarroPart = false, notices = [] } = {})
         return [{ insertId: nextId, affectedRows: 1 }];
       }
       if (sql.includes('INSERT INTO produccion_alistamiento_revisiones')) {
-        review = { orderId: params[1], hash: params[2] };
+        review = { orderId: params[1], hash: params[2], choice: params[3] };
         return [{ affectedRows: 1 }];
       }
       if (sql.includes('INSERT INTO system_logs')) return [{ insertId: 1, affectedRows: 1 }];
@@ -125,9 +133,12 @@ test('una orden de confirmar primero muestra las partidas; solo una frase explí
 test('una negación transcrita como «los dos» corrige contexto o pide partida, nunca confirma', async () => {
   const db = fakeDb();
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
-  const corrected = await advanceProductionPick({ db, userId: 7,
+  const offered = await advanceProductionPick({ db, userId: 7,
     rawText: 'los dos no estaban en la ubicación a 11 estaban en la ubicación a 10' });
-  assert.equal(corrected.confirm, undefined);
+  assert.equal(offered.confirm, undefined);
+  assert.match(offered.message, /elige el lote/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  const corrected = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
   assert.match(corrected.message, /Corrección aplicada a la partida 1/u);
   assert.match(corrected.message, /ubicación: A10/u);
   assert.equal(db.allocations[0].stock_id, 12);
@@ -140,6 +151,8 @@ test('el único aviso de alistamiento permite corregir sin repetir OP ID, pero v
   const corrected = await advanceProductionPick({ db, userId: 7, from: '573000000000',
     rawText: 'los dos no estaban en la ubicación a 11 estaban en la ubicación a 10' });
   assert.equal(corrected.confirm, undefined);
+  assert.match(corrected.message, /elige el lote/u);
+  await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
   assert.equal(db.allocations[0].ubicacion, 'A10');
 
   const ambiguous = fakeDb({ notices: [110, 111] });
@@ -160,12 +173,47 @@ test('el operario corrige por número sin repetir SKU ni lote y puede cambiar a 
   assert.equal(db.stocks.get(13).reservada, 7);
 });
 
+test('cambiar ubicación ofrece los lotes del SKU y opción 2 aplica solo el elegido', async () => {
+  const db = fakeDb({ extraA10Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const offered = await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección: partida 1, ubicación A10' });
+  assert.match(offered.message, /1\. Lote R5-260923-TRP/u);
+  assert.match(offered.message, /2\. Lote R7-260927-TRP/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  assert.ok(db.review.choice);
+  const blocked = await advanceProductionPick({ db, userId: 7,
+    rawText: 'Confirmo materiales OP ID 110' });
+  assert.equal(blocked.confirm, undefined);
+  assert.match(blocked.message, /Falta elegir el lote/u);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
+  assert.match(chosen.message, /Corrección aplicada a la partida 1/u);
+  assert.match(chosen.message, /Lote: R7-260927-TRP \| ubicación: A10/u);
+  assert.equal(db.allocations[0].stock_id, 14);
+  assert.equal(db.review.choice, null);
+  assert.equal(db.stocks.get(11).reservada, 0);
+  assert.equal(db.stocks.get(14).reservada, 7);
+});
+
+test('una opción inexistente no altera la reserva y repite la lista', async () => {
+  const db = fakeDb({ extraA10Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  await advanceProductionPick({ db, userId: 7,
+    rawText: 'corrección: partida 1, ubicación A10' });
+  const reply = await advanceProductionPick({ db, userId: 7, rawText: 'opción 3' });
+  assert.match(reply.message, /La opción 3 no existe/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  assert.equal(db.stocks.get(11).reservada, 7);
+});
+
 test('«los tarros» identifica el producto del resumen sin exigir su SKU', async () => {
   const db = fakeDb();
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const result = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección: los tarros estaban en la ubicación A10' });
-  assert.match(result.message, /Corrección aplicada a la partida 1/u);
+  assert.match(result.message, /elige el lote/u);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
+  assert.match(chosen.message, /Corrección aplicada a la partida 1/u);
   assert.equal(db.allocations[0].stock_id, 12);
 });
 
@@ -174,7 +222,9 @@ test('una corrección natural de ubicación conserva el producto contextual', as
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const result = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección, la ubicación correcta de los tarros es A10' });
-  assert.match(result.message, /Corrección aplicada a la partida 1/u);
+  assert.match(result.message, /elige el lote/u);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
+  assert.match(chosen.message, /Corrección aplicada a la partida 1/u);
   assert.equal(db.allocations[0].stock_id, 12);
 });
 
@@ -208,7 +258,7 @@ test('una ubicación sin saldo suficiente revierte la corrección y el resumen p
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const reply = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección: partida 1, ubicación A10' });
-  assert.match(reply.message, /solo hay 3 disponibles/u);
+  assert.match(reply.message, /mayor saldo por lote es 3/u);
   assert.match(reply.message, /No se cambiaron las reservas/u);
   assert.equal(db.stocks.get(11).reservada, 7);
   assert.equal(db.stocks.get(12).reservada, 0);

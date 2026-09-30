@@ -317,13 +317,15 @@ async function confirmProductionMaterials({ orderId, userId, requireReviewedPick
 
     if (requireReviewedPick) {
       const [reviews] = await conn.execute(
-        `SELECT huella FROM produccion_alistamiento_revisiones
+        `SELECT huella, seleccion_pendiente FROM produccion_alistamiento_revisiones
           WHERE usuario_id = ? AND orden_produccion_id = ? AND expira_en > NOW()
           LIMIT 1 FOR UPDATE`, [userId, order.id]
       );
       if (!reviews.length || reviews[0].huella !== allocationFingerprint(allocations)) {
         throw httpError(409, `El resumen de materiales de OP ID ${order.id} cambió o no fue revisado. Pide «Revisa materiales OP ID ${order.id}» antes de confirmar. No se inició producción.`);
       }
+      if (reviews[0].seleccion_pendiente) throw httpError(409,
+        `Falta elegir el lote de la corrección pendiente para OP ID ${order.id}. No se inició producción.`);
       for (const allocation of allocations) {
         const [validStock] = await conn.execute(
           `SELECT s.id FROM stock s
