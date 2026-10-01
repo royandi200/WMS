@@ -627,7 +627,7 @@ test('un lote inexistente se rechaza al informarlo, antes de confirmar el cierre
   assert.equal(invalid.draft.reviewShown, false);
   const premature = await advanceCloseGuide({ db, userId: 102, rawText: 'confirmo cierre' });
   assert.equal(premature.params, undefined);
-  assert.match(premature.message, /lote válido del material repuesto/u);
+  assert.match(premature.message, /elige lote/u);
 });
 
 test('una corrección a lote inválido pausa el cierre hasta recibir uno válido', async () => {
@@ -712,8 +712,8 @@ test('material repuesto se reúne por partes, exige lote y causa y solo sale en 
   await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 97' });
   await advanceCloseGuide({ ...base, rawText: '2 conformes, 0 merma, ubicación C2' });
   const product = await advanceCloseGuide({ ...base, rawText: 'repuse una tapa' });
-  assert.match(product.message, /Lote: pendiente/u);
-  assert.match(product.message, /Causa: pendiente/u);
+  assert.match(product.message, /Lotes disponibles para TAPA/u);
+  assert.doesNotMatch(product.message, /Registrado hasta ahora|Resumen para confirmar|Causa: pendiente/u);
   const lot = await advanceCloseGuide({ ...base, rawText: 'lote ACC-260910-TPBI' });
   assert.match(lot.message, /Lote: ACC-260910-TPBI/u);
   const reason = await advanceCloseGuide({ ...base, rawText: 'por ruptura' });
@@ -859,6 +859,8 @@ test('OP 109 permite escoger el lote repuesto por número y revisar todo antes d
   assert.match(options.message, /Lotes disponibles para LINER/u);
   assert.match(options.message, /1\. Lote \*R5-260923-LINER\* \| ubicación \*A14\*/u);
   assert.match(options.message, /No necesitas escribir ni deletrear el lote/u);
+  assert.match(options.message, /OP ID 109 — elige lote/u);
+  assert.doesNotMatch(options.message, /Plan:|Registrado hasta ahora|Resumen para confirmar|Siguiente paso/u);
   assert.equal(options.params, undefined);
   assert.equal(isCloseFollowup('opción 1', options.draft), true);
 
@@ -954,8 +956,8 @@ test('varios SKU sin lote quedan en cola y se muestran lotes de cada uno antes d
   assert.equal(first.draft.materialPending.sku, '00035-LNTP60');
   assert.equal(first.draft.materialQueue.length, 1);
   assert.equal(first.draft.materialQueue[0].sku, '00001-TPBI');
-  assert.match(first.message, /Después: TAPA TARRO CUADRADO BLANCO/u);
   assert.match(first.message, /Lotes disponibles para LINER/u);
+  assert.doesNotMatch(first.message, /TAPA TARRO CUADRADO BLANCO|Registrado hasta ahora/u);
   const second = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
   assert.equal(second.draft.materials.length, 1);
   assert.equal(second.draft.materialPending.sku, '00001-TPBI');
@@ -1019,7 +1021,7 @@ test('si el saldo cambia después de escoger lote, la confirmación vuelve al bo
   const blocked = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
   assert.equal(blocked.params, undefined);
   assert.match(blocked.message, /Saldo insuficiente/u);
-  assert.match(blocked.message, /cierre en borrador/u);
+  assert.match(blocked.message, /elige lote/u);
 });
 
 test('el resumen permite volver a escoger el lote sin dictar el nuevo código', async () => {
@@ -1080,7 +1082,7 @@ test('una corrección sin lotes aptos bloquea el cierre hasta conservar expresam
   assert.match(blocked.message, /No hay lotes/u);
   const premature = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
   assert.equal(premature.params, undefined);
-  assert.match(premature.message, /elegir el lote/u);
+  assert.match(premature.message, /No hay lotes/u);
   const retained = await advanceCloseGuide({ ...base, rawText: 'conservar lote anterior' });
   assert.match(retained.message, /Resumen para confirmar/u);
   assert.equal(retained.params, undefined);

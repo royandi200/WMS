@@ -227,7 +227,7 @@ function lotChoicePrompt(choice) {
   const page = choice.options.slice(start, start + LOT_OPTIONS_PER_PAGE);
   const lines = [
     `🔎 *Lotes disponibles para ${choice.producto} (${choice.sku})*`,
-    `Cantidad a reponer: ${choice.cantidad} ${choice.unidad || 'und'}. Verifica físicamente el lote del que se tomó.`,
+    `Reposición: ${choice.cantidad} ${choice.unidad || 'und'}. Elige el lote que verificaste físicamente:`,
     ...page.map((option, index) => `${start + index + 1}. Lote *${option.lote}* | ubicación *${option.ubicacion}* | libre ${option.disponible} ${choice.unidad || 'und'} | vence ${option.vence || 'sin fecha registrada'}`),
     '', page.length === 1
       ? `Responde «opción ${start + 1}». No necesitas escribir ni deletrear el lote.`
@@ -235,7 +235,7 @@ function lotChoicePrompt(choice) {
   ];
   if (start + LOT_OPTIONS_PER_PAGE < choice.options.length) lines.push('Di «más opciones» para ver los siguientes lotes.');
   if (choice.page > 0) lines.push('Di «opciones anteriores» para volver.');
-  lines.push('Si el lote físico no aparece, no elijas otro: indica la ubicación correcta o pide conciliar inventario. Aún no se modificó inventario.');
+  lines.push('Si no aparece el lote físico, indica la ubicación correcta o pide conciliar inventario. El borrador no modifica inventario.');
   return lines.join('\n');
 }
 
@@ -268,7 +268,6 @@ async function startLotChoice(db, draft, order, target, index = null) {
     producto: line.producto, cantidad: line.cantidad, unidad: line.unidad,
     ubicacion: location, allowRetain: target === 'existing' && !!line.lote,
     options, page: 0 };
-  if (!options.length) draft.lotValidationMessage ||= `No hay un lote disponible de *${line.sku}* con ${line.cantidad} ${line.unidad || 'und'} libres${location ? ` en *${location}*` : ''}. Corrige la cantidad o la ubicación, o concilia inventario; no se modificó inventario.`;
 }
 
 async function applyLotChoice(db, draft, order, text) {
@@ -933,6 +932,13 @@ async function finishDraft(db, userId, draft) {
 }
 
 function guideSummary(order, draft, locationHint) {
+  // Igual que en alistamiento, una elección activa muestra solo sus opciones.
+  // El resumen completo se presenta después de elegir el lote y antes de cerrar.
+  if (draft.materialChoice) {
+    const warning = draft.lotValidationMessage
+      ? `⚠️ ${draft.lotValidationMessage}\n\n` : '';
+    return `🏭 *OP ID ${order.id} — elige lote*\n\n${warning}${lotChoicePrompt(draft.materialChoice)}`;
+  }
   const missing = [];
   if (draft.unclassifiedWaste) missing.push('identificar la merma mencionada');
   if (draft.conforming == null) missing.push('cantidad conforme');
@@ -986,9 +992,7 @@ function guideSummary(order, draft, locationHint) {
   lines.push('*Registrado hasta ahora*', ...(captured.length ? captured : ['• Aún no hay datos del cierre.']),
     '', ...(draft.lotValidationMessage ? [`⚠️ ${draft.lotValidationMessage}`, ''] : []),
     `*Falta:* ${missing.length ? missing.join(', ') : 'revisar las cantidades'}.`, '', '*Siguiente paso*');
-  if (draft.materialChoice) {
-    lines.push(lotChoicePrompt(draft.materialChoice));
-  } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
+  if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
     if (draft.materialPending.cantidad == null) {
       lines.push(`¿Cuántas ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} se dañaron?`);
     } else {
