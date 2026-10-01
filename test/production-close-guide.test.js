@@ -9,10 +9,12 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
   invalidLots = [], stockAvailable = 100 } = {}) {
   let stored = initialDraft;
   const writes = [];
+  const queries = [];
   const aliasTerms = [];
   return {
-    writes, aliasTerms,
+    writes, queries, aliasTerms,
     async execute(sql, params) {
+      queries.push(sql);
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
       if (sql.includes('FROM lots') && sql.includes('UPPER(lpn)')) return [invalidLots.includes(params[0])
         ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
@@ -138,6 +140,28 @@ test('sin OP ID o con uno equivocado, ayuda igual en intentos repetidos y no cie
   const confirmedClose = await advanceCloseGuide({ ...base,
     rawText: 'confirmo cierre OP ID 108' });
   assert.equal(confirmedClose.params.id_orden, 108);
+});
+
+test('el cierre pendiente conserva contexto para OP ID y cerrar durante la jornada', async () => {
+  const db = fakeDb({ orderId: 108, planned: 5, initialDraft: {
+    orderId: 108, conforming: 5, waste: 0, wasteClassified: true,
+    reason: null, location: 'C3', materials: [], materialsAnswered: true,
+    materialPending: null, reviewShown: true, candidateOrderId: null,
+  } });
+  const base = { db, userId: 5 };
+  const wrap = text => `{name}="Operario"\n[Wednesday, September 30, 2026 20:48:29]: ${text}`;
+  assert.equal(isCloseFollowup(wrap('op id 108'), { orderId: 108 }), true);
+  assert.equal(isCloseFollowup(wrap('cerrar'), { orderId: 108 }), true);
+  const reference = await advanceCloseGuide({ ...base, rawText: wrap('op id 108') });
+  assert.equal(reference.params, undefined);
+  assert.match(reference.message, /Ubicación del conforme: C3/u);
+  assert.match(reference.message, /confirmo cierre OP ID 108/u);
+  const close = await advanceCloseGuide({ ...base, rawText: wrap('cerrar') });
+  assert.equal(close.params, undefined);
+  assert.match(close.message, /confirmo cierre OP ID 108/u);
+  assert.doesNotMatch(close.message, /confirma cierre OP ID/u);
+  assert.ok(db.queries.some(sql => sql.includes('actualizado_en > DATE_SUB(NOW(), INTERVAL 8 HOUR)')));
+  assert.ok(db.writes.some(sql => sql.includes('DATE_ADD(NOW(), INTERVAL 8 HOUR)')));
 });
 
 test('una referencia inventada por IA no autoriza el cierre y vuelve a guiar', async () => {

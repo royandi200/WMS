@@ -616,7 +616,8 @@ function confirmed(text) {
 function confirmationAttempt(text) {
   const raw = normalize(closeUtterance(text));
   return /^(?:si|correcto|todo bien|adelante|confirmo|confirmar)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?(?:\s+op(?:\s+id)?\s+#?\s*[1-9]\d*)?)?[.!]?$/u.test(raw)
-    || /^confirmo\s+(?:la\s+)?op(?:\s+id)?\s+#?\s*[1-9]\d*[.!]?$/u.test(raw);
+    || /^confirmo\s+(?:la\s+)?op(?:\s+id)?\s+#?\s*[1-9]\d*[.!]?$/u.test(raw)
+    || /^(?:cerrar|cierre|cierro)(?:\s+(?:la\s+)?(?:orden|op))?[.!]?$/u.test(raw);
 }
 
 function confirmationHelp(orderId, prefix = '') {
@@ -635,7 +636,9 @@ function jsonObject(value) {
 async function pendingCloseDraft(db, userId) {
   const [rows] = await db.execute(
     `SELECT payload_json FROM produccion_cierre_borradores
-      WHERE usuario_id = ? AND estado = 'PENDIENTE' AND expira_en > NOW() LIMIT 1`, [userId]
+      WHERE usuario_id = ? AND estado = 'PENDIENTE'
+        AND (expira_en > NOW() OR actualizado_en > DATE_SUB(NOW(), INTERVAL 8 HOUR))
+      LIMIT 1`, [userId]
   );
   return rows.length ? jsonObject(rows[0].payload_json) : null;
 }
@@ -645,6 +648,7 @@ function isCloseFollowup(text, draft) {
   const raw = normalize(closeUtterance(text));
   if (materialLossCandidate(raw)) return true;
   if (confirmationAttempt(raw) || rejected(raw)) return true;
+  if (/^op\s*(?:id\s*)?#?\s*[1-9]\d*[.!]?$/u.test(raw)) return true;
   if (/^(?:corrige|cambia|modifica|quita|elimina|correccion|correcion|corrijo|perdon|perdona)\b/u.test(raw)) return true;
   if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por|repuse|repusimos|repuesto|lote|materiales?)\b/u.test(raw)) return true;
@@ -686,7 +690,7 @@ async function saveDraft(db, userId, draft) {
   await db.execute(
     `INSERT INTO produccion_cierre_borradores
        (usuario_id, orden_produccion_id, payload_json, estado, expira_en)
-     VALUES (?, ?, ?, 'PENDIENTE', DATE_ADD(NOW(), INTERVAL 45 MINUTE))
+     VALUES (?, ?, ?, 'PENDIENTE', DATE_ADD(NOW(), INTERVAL 8 HOUR))
      ON DUPLICATE KEY UPDATE orden_produccion_id = VALUES(orden_produccion_id),
        payload_json = VALUES(payload_json), estado = 'PENDIENTE',
        expira_en = VALUES(expira_en), actualizado_en = NOW()`,
