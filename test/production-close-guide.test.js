@@ -24,12 +24,15 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       if (sql.includes('FROM stock s JOIN lots l')) return [(replacementOptions || [
         { lote: 'ACC-260910-TPBI', ubicacion: 'A8', disponible: freeStock, vence: '2027-09-30' },
         { lote: 'R5-260923-LINER', ubicacion: 'A14', disponible: freeStock, vence: '2028-06-30' },
+        { lote: 'AA-260929-01-ETASH', ubicacion: 'A1', disponible: freeStock, vence: '2028-06-30' },
       ]).filter(row => Number(row.disponible) >= Number(params[1])
-        && (replacementOptions || (Number(params[0]) === 35 ? row.ubicacion === 'A14' : row.ubicacion === 'A8'))
+        && (replacementOptions || row.ubicacion === (Number(params[0]) === 35 ? 'A14'
+          : Number(params[0]) === 17 ? 'A1' : 'A8'))
         && (!params[3] || row.ubicacion === params[3]))];
       if (sql.includes('FROM stock s JOIN ubicaciones u')) return [[{
-        id: 1, ubicacion_id: Number(params[0]) === 35 ? 14 : 8,
-        cantidad: freeStock, reservada: 0, ubicacion: Number(params[0]) === 35 ? 'A14' : 'A8',
+        id: 1, ubicacion_id: Number(params[0]) === 35 ? 14 : Number(params[0]) === 17 ? 1 : 8,
+        cantidad: freeStock, reservada: 0,
+        ubicacion: Number(params[0]) === 35 ? 'A14' : Number(params[0]) === 17 ? 'A1' : 'A8',
       }]];
       if (sql.includes('FROM webhook_logs')) return [[]];
       if (sql.includes('FROM notificaciones_salida')) return [[{ evento: `production_started:${orderId}` }]];
@@ -48,7 +51,7 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[/^liners?$/u.test(params[0]) ? {
         id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60',
         unit_label: 'und', alias: 'liners',
-      } : params[0] === 'etiqueta' ? {
+      } : /^etiquetas?$/u.test(params[0]) ? {
         id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA',
         unit_label: 'und', alias: 'etiqueta',
       } : {
@@ -989,6 +992,88 @@ test('después del primer resumen se puede añadir otro SKU antes de confirmar',
   const finalReview = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
   assert.equal(finalReview.draft.materials.length, 2);
   assert.match(finalReview.message, /Resumen para confirmar/u);
+});
+
+test('OP 110 acepta una causa breve del insumo sin cambiar la merma del producto terminado', async () => {
+  const db = fakeDb({ orderId: 110, planned: 8 });
+  const base = { db, userId: 58 };
+  await advanceCloseGuide({ ...base, rawText: 'cerramos op id 110' });
+  const quantities = await advanceCloseGuide({ ...base,
+    rawText: '7 conformes, 1 no conforme, ubicación C2' });
+  assert.equal(quantities.draft.waste, 1);
+  const ptCause = await advanceCloseGuide({ ...base,
+    rawText: 'Motivo de la merma Tapa defectuosa' });
+  assert.equal(ptCause.draft.reason, 'tapa defectuosa');
+  const lid = await advanceCloseGuide({ ...base, rawText: 'Repuse una tapa' });
+  assert.match(lid.message, /elige lote/u);
+  const selected = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(selected.draft.materialPending?.sku, '00001-TPBI');
+  assert.ok(selected.draft.materialPending?.lote);
+  const direct = await advanceCloseGuide({ ...base, rawText: 'rupturaa' });
+  assert.equal(direct.draft.reason, 'tapa defectuosa');
+  assert.equal(direct.draft.materialPending, null, JSON.stringify(direct.draft));
+  assert.equal(direct.draft.materials[0].motivo, 'ruptura');
+  assert.match(direct.message, /Resumen para confirmar/u);
+  const label = await advanceCloseGuide({ ...base,
+    rawText: 'repuse 2 etiquetas y la causa fue mala impresión' });
+  assert.match(label.message, /elige lote/u);
+  assert.equal(label.draft.materialPending?.motivo, 'mala impresión', JSON.stringify(label.draft));
+  const review = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(review.draft.reason, 'tapa defectuosa');
+  assert.equal(review.draft.materials.length, 2, JSON.stringify(review.draft));
+  assert.equal(review.draft.materials[0].motivo, 'ruptura');
+  assert.equal(review.draft.materials[1].motivo, 'mala impresión');
+  assert.match(review.message, /Producto terminado no conforme: 1 und \| Causa: tapa defectuosa/u);
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 110' });
+  assert.equal(done.params.motivo_merma, 'tapa defectuosa');
+  assert.equal(done.params.materiales_repuestos.length, 2);
+  assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
+});
+
+test('la frase completa de causa de reposición se limpia y no sobrescribe la causa del PT', async () => {
+  const db = fakeDb({ orderId: 110, planned: 8, initialDraft: {
+    orderId: 110, conforming: 7, waste: 1, wasteClassified: true,
+    reason: 'tapa defectuosa', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 1, lote: 'ACC-260910-TPBI', motivo: null,
+      ubicacion: 'A8' }, reviewShown: false,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 59,
+    rawText: 'a causa de la reposición fue ruptura' });
+  assert.equal(result.draft.reason, 'tapa defectuosa');
+  assert.equal(result.draft.materials[0].motivo, 'ruptura');
+  assert.match(result.message, /Resumen para confirmar/u);
+});
+
+test('la causa de merma del PT se puede corregir sin alterar dos materiales ya revisados', async () => {
+  const db = fakeDb({ orderId: 110, planned: 8, initialDraft: {
+    orderId: 110, conforming: 7, waste: 1, wasteClassified: true,
+    reason: 'de la reposición fue ruptura', location: 'C2', materialsAnswered: true,
+    materials: [{ sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 1, lote: 'ACC-260910-TPBI', motivo: 'de la reposición fue ruptura', ubicacion: 'A8' },
+    { sku: '00017-ETASH60', producto: 'ETIQUETA ASHWAGANDHA',
+      unidad: 'und', cantidad: 2, lote: 'AA-260929-01-ETASH', motivo: 'fue mala impresión', ubicacion: 'A1' }],
+    materialPending: null, reviewShown: true,
+  } });
+  const base = { db, userId: 60 };
+  const correctedPt = await advanceCloseGuide({ ...base,
+    rawText: 'corrección: motivo de la merma es tapa defectuosa' });
+  assert.equal(correctedPt.draft.reason, 'tapa defectuosa');
+  assert.equal(correctedPt.draft.materials.length, 2);
+  assert.equal(correctedPt.draft.materials[0].motivo, 'de la reposición fue ruptura');
+  const correctedLid = await advanceCloseGuide({ ...base,
+    rawText: 'corrige causa de tapa a ruptura' });
+  assert.equal(correctedLid.draft.reason, 'tapa defectuosa');
+  assert.equal(correctedLid.draft.materials[0].motivo, 'ruptura');
+  assert.equal(correctedLid.draft.materials[1].motivo, 'fue mala impresión');
+  const corrected = await advanceCloseGuide({ ...base,
+    rawText: 'corrige causa de etiqueta a mala impresión' });
+  assert.equal(corrected.draft.reason, 'tapa defectuosa');
+  assert.equal(corrected.draft.materials.length, 2);
+  assert.equal(corrected.draft.materials[0].motivo, 'ruptura');
+  assert.equal(corrected.draft.materials[1].motivo, 'mala impresión');
+  assert.match(corrected.message, /Producto terminado no conforme: 1 und \| Causa: tapa defectuosa/u);
+  assert.equal(corrected.params, undefined);
 });
 
 test('un lote elegido se revalida y no permite confirmar si desapareció el saldo', async () => {
