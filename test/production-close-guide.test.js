@@ -6,21 +6,30 @@ const {
 const { hasProductionCloseIntent } = require('../api/_lib/production-close-input');
 
 function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
-  invalidLots = [], stockAvailable = 100 } = {}) {
+  invalidLots = [], stockAvailable = 100, replacementOptions = null } = {}) {
   let stored = initialDraft;
+  let freeStock = stockAvailable;
   const writes = [];
   const queries = [];
   const aliasTerms = [];
   return {
     writes, queries, aliasTerms,
+    setFreeStock(value) { freeStock = value; },
     async execute(sql, params) {
       queries.push(sql);
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
       if (sql.includes('FROM lots') && sql.includes('UPPER(lpn)')) return [invalidLots.includes(params[0])
         ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
           status: 'DISPONIBLE', bodega_id: 1 }]];
+      if (sql.includes('FROM stock s JOIN lots l')) return [(replacementOptions || [
+        { lote: 'ACC-260910-TPBI', ubicacion: 'A8', disponible: freeStock, vence: '2027-09-30' },
+        { lote: 'R5-260923-LINER', ubicacion: 'A14', disponible: freeStock, vence: '2028-06-30' },
+      ]).filter(row => Number(row.disponible) >= Number(params[1])
+        && (replacementOptions || (Number(params[0]) === 35 ? row.ubicacion === 'A14' : row.ubicacion === 'A8'))
+        && (!params[3] || row.ubicacion === params[3]))];
       if (sql.includes('FROM stock s JOIN ubicaciones u')) return [[{
-        id: 1, ubicacion_id: 8, cantidad: stockAvailable, reservada: 0, ubicacion: 'A8',
+        id: 1, ubicacion_id: Number(params[0]) === 35 ? 14 : 8,
+        cantidad: freeStock, reservada: 0, ubicacion: Number(params[0]) === 35 ? 'A14' : 'A8',
       }]];
       if (sql.includes('FROM webhook_logs')) return [[]];
       if (sql.includes('FROM notificaciones_salida')) return [[{ evento: `production_started:${orderId}` }]];
@@ -36,7 +45,7 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
       { producto_id: 35, unidad: 'und', sku: '00035-LNTP60', nombre: 'LINER TARRO x 60' }]];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
-      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[params[0] === 'liners' ? {
+      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[/^liners?$/u.test(params[0]) ? {
         id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60',
         unit_label: 'und', alias: 'liners',
       } : params[0] === 'etiqueta' ? {
@@ -347,7 +356,7 @@ test('la reposición narrada junto al daño separa el liner y valida su lote ant
   assert.equal(result.draft.materialPending.lote, null);
   assert.equal(result.draft.materialPending.loteIntentado, '1234');
   assert.match(result.message, /lote \*1234\* no está registrado/u);
-  assert.match(result.message, /¿De qué lote sacaste 2 und/u);
+  assert.match(result.message, /Lotes disponibles para LINER/u);
   assert.deepEqual(db.aliasTerms, ['liners']);
 });
 
@@ -515,7 +524,7 @@ test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cier
   assert.match(second.message, /¿Repusiste 2 und de TAPA/u);
   assert.equal(second.params, undefined);
   const affirmed = await advanceCloseGuide({ ...base, rawText: 'sí' });
-  assert.match(affirmed.message, /¿De qué lote sacaste 2 und/u);
+  assert.match(affirmed.message, /Lotes disponibles para TAPA/u);
   const lot = await advanceCloseGuide({ ...base, rawText: 'lote ACC-260910-TPBI' });
   assert.equal(lot.draft.materials[0].cantidad, 2);
   assert.equal(lot.draft.materials[0].lote, 'ACC-260910-TPBI');
@@ -837,4 +846,148 @@ test('parsea cantidades y causas expresas sin tomar el OP ID como unidades', () 
   assert.equal(confirmed('confirmo cierre OP ID 97'), true);
   assert.equal(isCloseFollowup('C2', { orderId: 97 }), true);
   assert.equal(isCloseFollowup('cuánto stock queda', { orderId: 97 }), false);
+});
+
+test('OP 109 permite escoger el lote repuesto por número y revisar todo antes de cerrar', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sellado defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const base = { db, userId: 7 };
+  const options = await advanceCloseGuide({ ...base, rawText: 'repuse 1 liner por ruptura' });
+  assert.match(options.message, /Lotes disponibles para LINER/u);
+  assert.match(options.message, /1\. Lote \*R5-260923-LINER\* \| ubicación \*A14\*/u);
+  assert.match(options.message, /No necesitas escribir ni deletrear el lote/u);
+  assert.equal(options.params, undefined);
+  assert.equal(isCloseFollowup('opción 1', options.draft), true);
+
+  const review = await advanceCloseGuide({ ...base, rawText: 'opción uno' });
+  assert.match(review.message, /Resumen para confirmar/u);
+  assert.match(review.message, /Producto terminado no conforme: 1 und \| Causa: sellado defectuoso/u);
+  assert.match(review.message, /Lote de reposición: R5-260923-LINER \| Causa: ruptura \| Ubicación: A14/u);
+  assert.match(review.message, /1 conforme\(s\) \+ 1 no conforme\(s\) = 2 und frente a 2 planeadas/u);
+  assert.equal(review.params, undefined);
+
+  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.deepEqual(confirmedClose.params.materiales_repuestos, [{
+    sku: '00035-LNTP60', cantidad: 1, lote: 'R5-260923-LINER',
+    motivo: 'ruptura', ubicacion: 'A14',
+  }]);
+  assert.equal(confirmedClose.params.merma, 1);
+  assert.equal(confirmedClose.params.motivo_merma, 'sellado defectuoso');
+  assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
+});
+
+test('un lote elegido se revalida y no permite confirmar si desapareció el saldo', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sellado defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const base = { db, userId: 7 };
+  await advanceCloseGuide({ ...base, rawText: 'repuse 1 liner por ruptura' });
+  db.setFreeStock(0);
+  const stale = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.match(stale.message, /opción ya no está disponible/u);
+  assert.equal(stale.params, undefined);
+  const attempted = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.equal(attempted.params, undefined);
+});
+
+test('si el saldo cambia después de escoger lote, la confirmación vuelve al borrador', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 2, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const base = { db, userId: 7 };
+  await advanceCloseGuide({ ...base, rawText: 'repuse 1 liner por ruptura' });
+  const reviewed = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.match(reviewed.message, /Resumen para confirmar/u);
+  db.setFreeStock(0);
+  const blocked = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.equal(blocked.params, undefined);
+  assert.match(blocked.message, /Saldo insuficiente/u);
+  assert.match(blocked.message, /cierre en borrador/u);
+});
+
+test('el resumen permite volver a escoger el lote sin dictar el nuevo código', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, replacementOptions: [
+    { lote: 'L-UNO', ubicacion: 'A14', disponible: 4, vence: '2027-09-30' },
+    { lote: 'L-DOS', ubicacion: 'A14', disponible: 5, vence: '2028-06-30' },
+  ], initialDraft: {
+    orderId: 109, conforming: 2, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [{ sku: '00035-LNTP60',
+      producto: 'LINER TARRO x 60', unidad: 'und', cantidad: 1,
+      lote: 'L-UNO', motivo: 'ruptura', ubicacion: 'A14' }],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  const base = { db, userId: 7 };
+  const options = await advanceCloseGuide({ ...base, rawText: 'quiero cambiar el lote' });
+  assert.match(options.message, /1\. Lote \*L-UNO\*/u);
+  assert.match(options.message, /2\. Lote \*L-DOS\*/u);
+  assert.equal(options.params, undefined);
+  const review = await advanceCloseGuide({ ...base, rawText: 'opción 2' });
+  assert.match(review.message, /Lote de reposición: L-DOS/u);
+  assert.equal(review.params, undefined);
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.equal(done.params.materiales_repuestos[0].lote, 'L-DOS');
+});
+
+test('las opciones de reposición se limitan a la ubicación declarada y permiten paginar', async () => {
+  const replacementOptions = Array.from({ length: 9 }, (_, index) => ({
+    lote: `L-${index + 1}`, ubicacion: 'A14', disponible: 5,
+    vence: `2028-01-${String(index + 1).padStart(2, '0')}`,
+  }));
+  replacementOptions.push({ lote: 'L-OTRA', ubicacion: 'B14', disponible: 5, vence: '2028-01-15' });
+  const db = fakeDb({ orderId: 109, planned: 2, replacementOptions,
+    initialDraft: { orderId: 109, conforming: 2, waste: 0, wasteClassified: true,
+      reason: null, location: 'C2', materials: [], materialsAnswered: false,
+      materialPending: null, reviewShown: false } });
+  const base = { db, userId: 7 };
+  const first = await advanceCloseGuide({ ...base,
+    rawText: 'repuse 1 liner ubicación A14 por ruptura' });
+  assert.match(first.message, /1\. Lote \*L-1\*/u);
+  assert.doesNotMatch(first.message, /L-OTRA/u);
+  assert.match(first.message, /más opciones/u);
+  const more = await advanceCloseGuide({ ...base, rawText: 'más opciones' });
+  assert.match(more.message, /9\. Lote \*L-9\*/u);
+  const review = await advanceCloseGuide({ ...base, rawText: 'opción 9' });
+  assert.match(review.message, /Lote de reposición: L-9/u);
+});
+
+test('una corrección sin lotes aptos bloquea el cierre hasta conservar expresamente el anterior', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, replacementOptions: [], initialDraft: {
+    orderId: 109, conforming: 2, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [{ sku: '00035-LNTP60',
+      producto: 'LINER TARRO x 60', unidad: 'und', cantidad: 1,
+      lote: 'R5-260923-LINER', motivo: 'ruptura', ubicacion: 'A14' }],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  const base = { db, userId: 7 };
+  const blocked = await advanceCloseGuide({ ...base, rawText: 'quiero cambiar el lote' });
+  assert.match(blocked.message, /No hay lotes/u);
+  const premature = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.equal(premature.params, undefined);
+  assert.match(premature.message, /elegir el lote/u);
+  const retained = await advanceCloseGuide({ ...base, rawText: 'conservar lote anterior' });
+  assert.match(retained.message, /Resumen para confirmar/u);
+  assert.equal(retained.params, undefined);
+});
+
+test('si ningún lote cubre la cantidad, el operario puede corregirla y volver a ver opciones', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, replacementOptions: [
+    { lote: 'L-DOS', ubicacion: 'A14', disponible: 2, vence: '2028-06-30' },
+  ], initialDraft: {
+    orderId: 109, conforming: 2, waste: 0, wasteClassified: true,
+    reason: null, location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const base = { db, userId: 7 };
+  const unavailable = await advanceCloseGuide({ ...base, rawText: 'repuse 3 liner por ruptura' });
+  assert.match(unavailable.message, /No hay lotes/u);
+  const corrected = await advanceCloseGuide({ ...base, rawText: 'corrige cantidad a 1' });
+  assert.match(corrected.message, /1\. Lote \*L-DOS\*/u);
+  assert.equal(corrected.draft.materialPending.cantidad, 1);
 });

@@ -169,13 +169,14 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
   return segments.map(segment => {
     const quantityMatch = segment.match(/^\s*(\d+(?:[.,]\d+)?|una|uno|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b\s*(?:und|unidades?|gramos?|g)?\s*(?:de\s+)?/iu);
     const lot = segment.match(/\blote\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
-    const cause = segment.match(/\b(?:por|causa|motivo|debido a)\s+(.+)$/iu)?.[1]?.trim() || null;
+    const cause = segment.match(/\b(?:por|causa|motivo|debido a)\s+(.+?)(?=\s+ubicaci[oó]n\b|$)/iu)?.[1]?.trim() || null;
+    const location = segment.match(/\bubicaci[oó]n\s*(?:es|:)?\s*([a-z]+\d+[a-z0-9-]*)\b/iu)?.[1] || null;
     const product = segment.slice(quantityMatch?.[0]?.length || 0)
-      .split(/\b(?:del?\s+)?lote\b|\b(?:por|causa|motivo|debido a)\b/iu)[0]
+      .split(/\b(?:del?\s+)?lote\b|\b(?:por|causa|motivo|debido a|ubicaci[oó]n)\b/iu)[0]
       .replace(/^(?:de|del|la|el)\s+/iu, '').trim();
     const productTerm = /^(?:material(?:es)?|insumo(?:s)?)$/iu.test(product) ? null : product;
     return { producto: productTerm || null, cantidad: quantityMatch ? quantity(quantityMatch[1]) : null,
-      lote: lot, motivo: cause };
+      lote: lot, motivo: cause, ubicacion: location?.toUpperCase() || null };
   }).filter(item => item.producto || item.cantidad != null || item.lote || item.motivo);
 }
 
@@ -185,7 +186,171 @@ function materialFollowup(text) {
   const cause = raw.match(/\b(?:causa|motivo)(?:\s+(?:fue|es))?\s*(?:[:\-]|por)?\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || raw.match(/\b(?:por|debido a)\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || (/^(?:ruptura|rotura|derrame|contaminacion|contaminación|defecto|caida|caída|daño|dano|despegue)$/iu.test(raw) ? raw : null);
-  return { lote: lot, motivo: cause };
+  const location = raw.match(/\b(?:ubicaci[oó]n\s*(?:es|:)?|en)\s*([a-z]+\d+[a-z0-9-]*)\b/iu)?.[1] || null;
+  return { lote: lot, motivo: cause, ubicacion: location?.toUpperCase() || null };
+}
+
+const LOT_OPTIONS_PER_PAGE = 8;
+
+function lotOptionNumber(text) {
+  const raw = normalize(text).replace(/[.!?]+$/u, '');
+  const match = /^(?:(?:la|el)\s+)?(?:(?:opcion|lote|numero)\s*(?:numero\s*)?#?\s*)?(\d{1,2})$/u.exec(raw);
+  if (match) return Number(match[1]);
+  const spoken = /^(?:(?:la|el)\s+)?(?:opcion|lote|numero)\s+(uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/u.exec(raw);
+  if (spoken) return NUMBER_WORDS[spoken[1]];
+  const ordinals = { primera: 1, primero: 1, segunda: 2, segundo: 2,
+    tercera: 3, tercero: 3, cuarta: 4, cuarto: 4, quinta: 5, quinto: 5 };
+  return ordinals[/^(?:(?:la|el)\s+)?(primera|primero|segunda|segundo|tercera|tercero|cuarta|cuarto|quinta|quinto)(?:\s+(?:opcion|lote))?$/u.exec(raw)?.[1]] || null;
+}
+
+function lotChoicePrompt(choice) {
+  if (!choice.options.length) return [
+    `No hay lotes de *${choice.producto} (${choice.sku})* con ${choice.cantidad} ${choice.unidad || 'und'} libres${choice.ubicacion ? ` en *${choice.ubicacion}*` : ''}.`,
+    choice.target === 'existing' && choice.allowRetain
+      ? 'Si conservarás el lote anterior, responde «conservar lote anterior». Si no, corrige la cantidad o ubicación, o concilia inventario antes de cerrar.'
+      : 'Corrige la cantidad o ubicación, o concilia inventario antes de cerrar. No elijas otro lote que no hayas verificado.',
+  ].join('\n');
+  const start = choice.page * LOT_OPTIONS_PER_PAGE;
+  const page = choice.options.slice(start, start + LOT_OPTIONS_PER_PAGE);
+  const lines = [
+    `🔎 *Lotes disponibles para ${choice.producto} (${choice.sku})*`,
+    `Cantidad a reponer: ${choice.cantidad} ${choice.unidad || 'und'}. Verifica físicamente el lote del que se tomó.`,
+    ...page.map((option, index) => `${start + index + 1}. Lote *${option.lote}* | ubicación *${option.ubicacion}* | libre ${option.disponible} ${choice.unidad || 'und'} | vence ${option.vence || 'sin fecha registrada'}`),
+    '', `Responde «opción ${start + 1}», «opción ${start + 2}», etc. No necesitas escribir ni deletrear el lote.`,
+  ];
+  if (start + LOT_OPTIONS_PER_PAGE < choice.options.length) lines.push('Di «más opciones» para ver los siguientes lotes.');
+  if (choice.page > 0) lines.push('Di «opciones anteriores» para volver.');
+  lines.push('Si el lote físico no aparece, no elijas otro: indica la ubicación correcta o pide conciliar inventario. Aún no se modificó inventario.');
+  return lines.join('\n');
+}
+
+async function availableReplacementLots(db, material, line, location = null) {
+  const [rows] = await db.execute(
+    `SELECT s.lote, u.codigo AS ubicacion, s.cantidad - s.reservada AS disponible,
+            DATE_FORMAT(COALESCE(l.expiry_date, s.fecha_venc), '%Y-%m-%d') AS vence
+       FROM stock s JOIN lots l ON BINARY l.lpn = BINARY s.lote AND l.product_id = s.producto_id
+       JOIN ubicaciones u ON u.id = s.ubicacion_id AND u.activa = 1
+       JOIN bodegas b ON b.id = s.bodega_id AND b.activa = 1
+      WHERE s.producto_id = ? AND l.status = 'DISPONIBLE'
+        AND s.cantidad - s.reservada >= ? AND l.qty_current >= ?
+        AND (? IS NULL OR UPPER(u.codigo) = UPPER(?))
+      ORDER BY COALESCE(l.expiry_date, s.fecha_venc), u.codigo, s.lote, s.id`,
+    [material.producto_id, line.cantidad, line.cantidad, location, location]
+  );
+  return rows.map(row => ({ lote: row.lote, ubicacion: row.ubicacion,
+    disponible: Number(row.disponible), vence: row.vence ? String(row.vence).slice(0, 10) : null }));
+}
+
+async function startLotChoice(db, draft, order, target, index = null) {
+  const line = target === 'pending' ? draft.materialPending : draft.materials[index];
+  if (!line?.sku || line.cantidad == null) return;
+  const materials = await orderMaterials(db, order.id);
+  const material = materials.find(item => item.sku === line.sku);
+  if (!material) throw guideError(`${line.sku} no pertenece a OP ID ${order.id}`);
+  const location = target === 'pending' ? line.ubicacion || null : null;
+  const options = await availableReplacementLots(db, material, line, location);
+  draft.materialChoice = { target, index, sku: line.sku,
+    producto: line.producto, cantidad: line.cantidad, unidad: line.unidad,
+    ubicacion: location, allowRetain: target === 'existing' && !!line.lote,
+    options, page: 0 };
+  if (!options.length) draft.lotValidationMessage ||= `No hay un lote disponible de *${line.sku}* con ${line.cantidad} ${line.unidad || 'und'} libres${location ? ` en *${location}*` : ''}. Corrige la cantidad o la ubicación, o concilia inventario; no se modificó inventario.`;
+}
+
+async function applyLotChoice(db, draft, order, text) {
+  const choice = draft.materialChoice;
+  if (!choice) return false;
+  const raw = normalize(text);
+  if (raw === 'conservar lote anterior' && choice.target === 'existing' && choice.allowRetain) {
+    draft.materialChoice = null;
+    draft.lotValidationMessage = null;
+    draft.reviewShown = false;
+    return true;
+  }
+  if (/^(?:mas opciones|siguientes opciones|siguiente pagina)$/u.test(raw)) {
+    if ((choice.page + 1) * LOT_OPTIONS_PER_PAGE < choice.options.length) choice.page += 1;
+    return true;
+  }
+  if (/^(?:opciones anteriores|pagina anterior)$/u.test(raw)) {
+    choice.page = Math.max(0, choice.page - 1);
+    return true;
+  }
+  const number = lotOptionNumber(text);
+  if (number == null) return false;
+  const option = choice.options[number - 1];
+  if (!option || Math.floor((number - 1) / LOT_OPTIONS_PER_PAGE) !== choice.page) {
+    draft.lotValidationMessage = `La opción ${number} no está en la página mostrada. Elige una de las opciones visibles; no se modificó inventario.`;
+    return true;
+  }
+  const line = choice.target === 'pending' ? draft.materialPending : draft.materials[choice.index];
+  if (!line || line.sku !== choice.sku || Number(line.cantidad) !== Number(choice.cantidad)) {
+    draft.materialChoice = null;
+    draft.lotValidationMessage = 'El material o la cantidad cambió. Pide de nuevo los lotes disponibles; no se modificó inventario.';
+    return true;
+  }
+  const materials = await orderMaterials(db, order.id);
+  const material = materials.find(item => item.sku === line.sku);
+  const candidate = { ...line, lote: option.lote, ubicacion: option.ubicacion };
+  const error = await validateReplacementLot(db, material, candidate);
+  if (error) {
+    await startLotChoice(db, draft, order, choice.target, choice.index);
+    draft.lotValidationMessage = `${error} La opción ya no está disponible. Pide de nuevo los lotes; no se modificó inventario.`;
+    return true;
+  }
+  if (choice.target === 'existing' && draft.materials.some((other, index) =>
+    index !== choice.index && other.sku === line.sku && other.lote === candidate.lote)) {
+    draft.lotValidationMessage = 'Ese material y lote ya figuran en otra partida; indica el total en una sola. No se modificó inventario.';
+    return true;
+  }
+  line.lote = candidate.lote;
+  line.ubicacion = candidate.ubicacion;
+  line.validatedLotKey = candidate.validatedLotKey;
+  if (choice.target === 'pending' && line.damageReport) finishPendingDamage(draft);
+  else if (choice.target === 'pending' && line.sku && line.cantidad != null && line.motivo) {
+    draft.materials.push(line);
+    draft.materialPending = null;
+    draft.materialsAnswered = true;
+  }
+  draft.materialChoice = null;
+  draft.lotValidationMessage = null;
+  draft.reviewShown = false;
+  return true;
+}
+
+function isLotChangeRequest(text) {
+  const raw = normalize(text);
+  return /\b(?:cambiar|cambia|cambio|escoger|elegir|seleccionar|ver|mostrar)\b.*\blote\b/u.test(raw)
+    && !/\blote\b.*\b(?:a|por)\s+[a-z0-9][a-z0-9_-]*[.!]?$/u.test(raw);
+}
+
+async function requestLotChange(db, draft, order, text) {
+  if (!isLotChangeRequest(text)) return false;
+  const raw = normalize(text);
+  if (draft.materialPending?.sku && draft.materialPending.cantidad != null) {
+    await startLotChoice(db, draft, order, 'pending');
+    return true;
+  }
+  const lines = draft.materials || [];
+  if (!lines.length) return false;
+  let index = 0;
+  if (lines.length > 1) {
+    const partition = /\bpartida\s*#?\s*(\d{1,2})\b/u.exec(raw);
+    if (partition && Number(partition[1]) >= 1 && Number(partition[1]) <= lines.length) {
+      index = Number(partition[1]) - 1;
+    } else {
+      const available = await orderMaterials(db, order.id);
+      const matches = [];
+      for (const material of available) {
+        if (raw.includes(normalize(material.sku)) || raw.includes(normalize(material.nombre))) matches.push(material.sku);
+      }
+      const selected = lines.map((line, lineIndex) => ({ line, lineIndex }))
+        .filter(item => matches.includes(item.line.sku));
+      if (selected.length !== 1) throw guideError('Hay varias partidas. Di «cambia lote de partida 1» o indica el SKU; no modifiqué el borrador.');
+      index = selected[0].lineIndex;
+    }
+  }
+  await startLotChoice(db, draft, order, 'existing', index);
+  draft.reviewShown = false;
+  return true;
 }
 
 function groundedLotHint(text, value) {
@@ -206,7 +371,6 @@ async function orderMaterials(db, orderId) {
 
 async function validateReplacementLot(db, material, line) {
   const key = [line.sku, line.cantidad, line.lote, line.ubicacion || ''].join('|');
-  if (line.validatedLotKey === key) return null;
   const [lots] = await db.execute(
     `SELECT id, lpn, qty_current, status, bodega_id FROM lots
       WHERE UPPER(lpn) = UPPER(?) AND product_id = ? LIMIT 2`,
@@ -239,7 +403,7 @@ async function validateReplacementLot(db, material, line) {
     || Number(lots[0].qty_current) + 0.000001 < Number(line.cantidad)) {
     return `Saldo insuficiente de *${line.sku}*, lote *${line.lote}*, ubicación *${candidates[0].ubicacion}*: pediste ${line.cantidad} ${line.unidad || ''} y hay ${Math.min(free, Number(lots[0].qty_current))} libres.`;
   }
-  line.validatedLotKey = [line.sku, line.cantidad, line.lote, line.ubicacion || ''].join('|');
+  line.validatedLotKey = key;
   return null;
 }
 
@@ -290,6 +454,21 @@ function naturalLotCorrection(text, params) {
 
 async function applyMaterialCorrection(db, draft, order, text, params) {
   const raw = normalize(text);
+  if (draft.materialPending?.sku
+    && /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica)\b.*\bcantidad\b/u.test(raw)) {
+    const amount = quantity(new RegExp(`\\b(?:cantidad\\s*(?:es|a|por|de)?\\s*)${NUMBER}\\b`, 'u').exec(raw)?.[1]);
+    const unit = String(draft.materialPending.unidad || '').toLowerCase();
+    if (amount == null || amount <= 0 || Math.abs(amount * 1000 - Math.round(amount * 1000)) > 0.000001
+      || (!['g', 'gr', 'gramo', 'gramos'].includes(unit) && !Number.isInteger(amount))) {
+      throw guideError('Indica la cantidad nueva del material en su unidad correspondiente; no cambié el borrador.');
+    }
+    draft.materialPending.cantidad = amount;
+    draft.materialPending.lote = null;
+    draft.materialChoice = null;
+    draft.materialsAnswered = false;
+    draft.reviewShown = false;
+    return true;
+  }
   const followup = materialFollowup(text);
   const causeCorrection = /^(?:correccion|correcion|corrijo|corrige|perdon|perdona)\b\s*[,;:-]?\s*(?:la\s+)?(?:causa|motivo)\b/u.test(raw);
   const lotReply = /^(?:(?:salieron|se\s+sacaron|las?\s+saque|los?\s+saque)\s+(?:de|del)\s+lote|(?:correccion|correcion|perdon|perdona)\b\s*[,;:-]?\s*(?:el\s+)?lote)\b/u.test(raw);
@@ -487,6 +666,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
     }
     const followup = materialFollowup(text);
     if (followup.lote || aiLot) pending.lote = followup.lote || aiLot;
+    if (followup.ubicacion) pending.ubicacion = followup.ubicacion;
     if (pending.cantidad == null) pending.cantidad = quantity(text);
     if (pending.motivo == null && followup.motivo) pending.motivo = followup.motivo;
     finishPendingDamage(draft);
@@ -593,6 +773,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
         || product.unit_label;
     }
     if (followup.lote) draft.materialPending.lote = followup.lote;
+    if (followup.ubicacion) draft.materialPending.ubicacion = followup.ubicacion;
     if (followup.motivo) {
       if (/^(?:merma|perdida|pérdida|reposicion|reposición|material)$/iu.test(followup.motivo)) {
         throw guideError('Indica la causa concreta del material repuesto, por ejemplo ruptura, derrame o defecto.');
@@ -646,6 +827,9 @@ async function pendingCloseDraft(db, userId) {
 function isCloseFollowup(text, draft) {
   if (!draft) return false;
   const raw = normalize(closeUtterance(text));
+  if (draft.materialChoice && (lotOptionNumber(raw) != null
+    || /^(?:mas opciones|siguientes opciones|siguiente pagina|opciones anteriores|pagina anterior)$/u.test(raw))) return true;
+  if (isLotChangeRequest(raw)) return true;
   if (materialLossCandidate(raw)) return true;
   if (confirmationAttempt(raw) || rejected(raw)) return true;
   if (/^op\s*(?:id\s*)?#?\s*[1-9]\d*[.!]?$/u.test(raw)) return true;
@@ -716,6 +900,7 @@ function guideSummary(order, draft, locationHint) {
   if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto terminado');
   if (!draft.materialsAnswered || draft.materialPending) missing.push('reposición de insumos');
   if ((draft.materials || []).some(item => !item.lote)) missing.push('lote válido del material repuesto');
+  if (draft.materialChoice) missing.push('elegir el lote del material repuesto');
   const readyForReview = !missing.length && draft.conforming + draft.waste > 0;
   const lines = ['🏭 *OP ID ' + order.id + ' — cierre en borrador*',
     `Producto: ${order.producto} (${order.sku})`,
@@ -734,6 +919,7 @@ function guideSummary(order, draft, locationHint) {
         `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote de reposición: ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`)
       : ['• Ninguno']);
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
+    lines.push('', `Conciliación de producto terminado: ${draft.conforming} conforme(s) + ${draft.waste} no conforme(s) = ${draft.conforming + draft.waste} und frente a ${Number(order.cantidad_planeada)} planeadas.`);
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
     lines.push('', `Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
@@ -755,7 +941,9 @@ function guideSummary(order, draft, locationHint) {
   lines.push('*Registrado hasta ahora*', ...(captured.length ? captured : ['• Aún no hay datos del cierre.']),
     '', ...(draft.lotValidationMessage ? [`⚠️ ${draft.lotValidationMessage}`, ''] : []),
     `*Falta:* ${missing.length ? missing.join(', ') : 'revisar las cantidades'}.`, '', '*Siguiente paso*');
-  if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
+  if (draft.materialChoice) {
+    lines.push(lotChoicePrompt(draft.materialChoice));
+  } else if (draft.materialPending?.damageReport && draft.materialPending.replacementDecision == null) {
     if (draft.materialPending.cantidad == null) {
       lines.push(`¿Cuántas ${draft.materialPending.unidad || 'und'} de ${draft.materialPending.producto} se dañaron?`);
     } else {
@@ -873,7 +1061,12 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     return { message: `No pude identificar el código nuevo de ubicación. El borrador conserva ${draft.location || 'la ubicación pendiente'}. Dime, por ejemplo, «la ubicación es C3». No se modificó inventario.`, draft };
   }
   const hadPendingMaterial = Boolean(draft.materialPending);
-  if ((!confirmationAttempt(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport) {
+  const choiceHandled = await applyLotChoice(db, draft, order, rawText);
+  const choiceWarning = choiceHandled ? draft.lotValidationMessage : null;
+  if (!choiceHandled && draft.materialChoice && !confirmationAttempt(rawText)) draft.materialChoice = null;
+  const wantsLotChange = !choiceHandled && isLotChangeRequest(rawText);
+  if (!choiceHandled && !wantsLotChange
+    && ((!confirmationAttempt(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport)) {
     await applyMaterialReport(db, draft, order, rawText, params);
   }
   if (draft.unclassifiedWaste && !damageMarker && !draft.materialPending) {
@@ -904,7 +1097,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (parsed.location && !hadPendingMaterial) draft.location = parsed.location;
   const singleQuantity = quantity(rawText);
   if (singleQuantity != null && parsed.conforming == null && parsed.waste == null
-    && !hadPendingMaterial && !draft.unclassifiedWaste) {
+    && !choiceHandled && !hadPendingMaterial && !draft.unclassifiedWaste) {
     if (draft.conforming == null) draft.conforming = singleQuantity;
     else if (draft.waste == null) {
       draft.unclassifiedWaste = { quantity: singleQuantity, cause: null };
@@ -939,10 +1132,20 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     draft.location = locations[0].codigo;
   }
   await validateDraftReplacementLots(db, draft, order);
+  if (wantsLotChange) await requestLotChange(db, draft, order, rawText);
+  else if (!draft.materialChoice && draft.materialPending?.sku
+    && draft.materialPending.cantidad != null && !draft.materialPending.lote
+    && (!draft.materialPending.damageReport || draft.materialPending.replacementDecision)) {
+    await startLotChoice(db, draft, order, 'pending');
+  } else if (!draft.materialChoice && !draft.materialPending
+    && (draft.materials || []).some(item => item.sku && item.cantidad != null && !item.lote)) {
+    await startLotChoice(db, draft, order, 'existing', draft.materials.findIndex(item => !item.lote));
+  }
+  if (choiceWarning) draft.lotValidationMessage = choiceWarning;
   const complete = draft.conforming != null && draft.waste != null
     && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
     && (draft.conforming === 0 || !!draft.location)
-    && draft.materialsAnswered && !draft.materialPending && !draft.unclassifiedWaste
+    && draft.materialsAnswered && !draft.materialPending && !draft.materialChoice && !draft.unclassifiedWaste
     && draft.materials.every(item => !!item.lote);
   if (confirmed(rawText) && complete && draft.reviewShown) {
     return { params: { id_orden: draft.orderId, cantidad_real: draft.conforming,
