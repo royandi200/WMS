@@ -110,6 +110,7 @@ test('BBC puede envolver el mensaje actual sin perder la confirmación explícit
   assert.doesNotMatch(preview.message, /o \*confirmo cierre\*/u);
   const wrap = text => `{name}="Operario"\n[Wednesday, September 30, 2026 19:49:05]: ${text}`;
   assert.equal(isCloseFollowup(wrap('confirmo cierre'), preview.draft), true);
+  assert.equal(isCloseFollowup(wrap('confirmo op 108'), preview.draft), true);
   assert.equal(isCloseFollowup(wrap('confirmo cierre OP ID 108'), preview.draft), true);
   const final = await advanceCloseGuide({ ...base, rawText: wrap('confirmo cierre OP ID 108'),
     params: { id_orden: 108 } });
@@ -125,6 +126,7 @@ test('sin OP ID o con uno equivocado, ayuda igual en intentos repetidos y no cie
     rawText: 'Cerrar OP ID 108: 5 conformes, 0 no conformes, ubicación C3, no repuse material' });
   assert.match(preview.message, /responde \*confirmo cierre OP ID 108\*\./u);
   for (const phrase of ['confirmo cierre', 'confirmo cierre',
+    'confirmo op 108', 'confirmo op 108',
     'confirmo cierre OP ID 109', 'confirmo cierre OP ID 109']) {
     const reply = await advanceCloseGuide({ ...base, rawText: phrase });
     assert.equal(reply.params, undefined);

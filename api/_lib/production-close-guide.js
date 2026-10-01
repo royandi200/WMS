@@ -615,7 +615,8 @@ function confirmed(text) {
 
 function confirmationAttempt(text) {
   const raw = normalize(closeUtterance(text));
-  return /^(?:si|correcto|todo bien|adelante|confirmo|confirmar)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?(?:\s+op(?:\s+id)?\s+#?\s*[1-9]\d*)?)?[.!]?$/u.test(raw);
+  return /^(?:si|correcto|todo bien|adelante|confirmo|confirmar)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?(?:\s+op(?:\s+id)?\s+#?\s*[1-9]\d*)?)?[.!]?$/u.test(raw)
+    || /^confirmo\s+(?:la\s+)?op(?:\s+id)?\s+#?\s*[1-9]\d*[.!]?$/u.test(raw);
 }
 
 function confirmationHelp(orderId, prefix = '') {
