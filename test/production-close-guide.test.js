@@ -879,6 +879,116 @@ test('OP 109 permite escoger el lote repuesto por número y revisar todo antes d
   assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
 });
 
+test('OP 109 conserva «un liner» aunque la interpretación omita la cantidad', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sello defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 52,
+    rawText: 'repuse un liner por ruptura',
+    params: { avance_materiales: { items: [{ producto: 'liner', cantidad: null, motivo: 'ruptura' }] } },
+  });
+  assert.equal(result.draft.materialPending.cantidad, 1);
+  assert.equal(result.draft.materialPending.motivo, 'ruptura');
+  assert.match(result.message, /Lotes disponibles para LINER/u);
+  assert.equal(result.params, undefined);
+});
+
+test('OP 109 acepta cifras o palabras al completar el mismo liner sin duplicarlo', async () => {
+  for (const reply of ['se repuso 1 unidad de liner', 'se repuso una unidad de liner']) {
+    const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+      orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+      reason: 'sello defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+      materialPending: { sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und',
+        cantidad: null, lote: null, motivo: 'ruptura', ubicacion: null }, reviewShown: false,
+    } });
+    const result = await advanceCloseGuide({ db, userId: 53, rawText: reply,
+      params: { avance_materiales: { items: [{ producto: 'liner', cantidad: null }] } },
+    });
+    assert.equal(result.draft.materialPending.cantidad, 1);
+    assert.equal(result.draft.materials.length, 0);
+    assert.match(result.message, /Lotes disponibles para LINER/u);
+    assert.equal(result.params, undefined);
+  }
+});
+
+test('el texto explícito del operario prevalece ante un SKU distinto interpretado por IA', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sello defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 55,
+    rawText: 'repuse 1 liner por ruptura',
+    params: { avance_materiales: { items: [{ producto: 'tapa', cantidad: 9, motivo: 'otro' }] } },
+  });
+  assert.equal(result.draft.materialPending.sku, '00035-LNTP60');
+  assert.equal(result.draft.materialPending.cantidad, 1);
+  assert.equal(result.draft.materialPending.motivo, 'ruptura');
+});
+
+test('no añade otro SKU mientras el anterior espera cantidad o lote', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sello defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: { sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und',
+      cantidad: null, lote: null, motivo: 'ruptura', ubicacion: null }, reviewShown: false,
+  } });
+  await assert.rejects(
+    advanceCloseGuide({ db, userId: 56, rawText: 'repuse 1 tapa por defecto' }),
+    /Primero completa LINER TARRO x 60/u
+  );
+  assert.equal(db.writes.length, 0);
+});
+
+test('varios SKU sin lote quedan en cola y se muestran lotes de cada uno antes del cierre', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sello defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const base = { db, userId: 54 };
+  const first = await advanceCloseGuide({ ...base,
+    rawText: 'repuse un liner por ruptura y una tapa por defecto' });
+  assert.equal(first.draft.materialPending.sku, '00035-LNTP60');
+  assert.equal(first.draft.materialQueue.length, 1);
+  assert.equal(first.draft.materialQueue[0].sku, '00001-TPBI');
+  assert.match(first.message, /Después: TAPA TARRO CUADRADO BLANCO/u);
+  assert.match(first.message, /Lotes disponibles para LINER/u);
+  const second = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(second.draft.materials.length, 1);
+  assert.equal(second.draft.materialPending.sku, '00001-TPBI');
+  assert.match(second.message, /Lotes disponibles para TAPA/u);
+  const review = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(review.draft.materials.length, 2);
+  assert.match(review.message, /Resumen para confirmar/u);
+  assert.match(review.message, /00035-LNTP60/u);
+  assert.match(review.message, /00001-TPBI/u);
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 109' });
+  assert.equal(done.params.materiales_repuestos.length, 2);
+  assert.equal(done.params.materiales_repuestos[0].motivo, 'ruptura');
+  assert.equal(done.params.materiales_repuestos[1].motivo, 'defecto');
+});
+
+test('después del primer resumen se puede añadir otro SKU antes de confirmar', async () => {
+  const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
+    orderId: 109, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'sello defectuoso', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: null, reviewShown: false,
+  } });
+  const base = { db, userId: 57 };
+  await advanceCloseGuide({ ...base, rawText: 'repuse un liner por ruptura' });
+  const firstReview = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.match(firstReview.message, /Si repusiste otro SKU/u);
+  const secondOptions = await advanceCloseGuide({ ...base, rawText: 'repuse una tapa por defecto' });
+  assert.match(secondOptions.message, /Lotes disponibles para TAPA/u);
+  assert.equal(secondOptions.draft.materials.length, 1);
+  const finalReview = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(finalReview.draft.materials.length, 2);
+  assert.match(finalReview.message, /Resumen para confirmar/u);
+});
+
 test('un lote elegido se revalida y no permite confirmar si desapareció el saldo', async () => {
   const db = fakeDb({ orderId: 109, planned: 2, initialDraft: {
     orderId: 109, conforming: 1, waste: 1, wasteClassified: true,

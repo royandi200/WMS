@@ -151,6 +151,19 @@ function noReplacements(text) {
   return /\b(?:no\s+(?:repuse|repusimos|reponi|repusemos)|sin\s+(?:reposicion|material(?:es)?\s+adicional(?:es)?)|ningun(?:a|o)?\s+material\s+repuesto)\b/u.test(normalize(text));
 }
 
+function promoteQueuedMaterial(draft) {
+  draft.materialQueue ||= [];
+  while (!draft.materialPending && draft.materialQueue.length) {
+    const next = draft.materialQueue.shift();
+    if (next.sku && next.cantidad != null && next.lote && next.motivo) {
+      draft.materials.push(next);
+    } else {
+      draft.materialPending = next;
+    }
+  }
+  if (draft.materialPending || draft.materialQueue.length) draft.materialsAnswered = false;
+}
+
 function replacementsFinished(text) {
   return /^(?:no hay mas|ninguno mas|eso es todo|sin mas materiales|listo con los materiales)[.!]?$/u.test(normalize(text));
 }
@@ -167,7 +180,7 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
   const source = marker ? raw.slice(marker.index + marker[0].length) : raw;
   const segments = source.split(/\s*;\s*|\s*,\s*(?=(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)|\s+y\s+(?=(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)/iu);
   return segments.map(segment => {
-    const quantityMatch = segment.match(/^\s*(\d+(?:[.,]\d+)?|una|uno|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b\s*(?:und|unidades?|gramos?|g)?\s*(?:de\s+)?/iu);
+    const quantityMatch = segment.match(/^\s*(\d+(?:[.,]\d+)?|una|uno|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b\s*(?:und|unidad(?:es)?|gramos?|g)?\s*(?:de\s+)?/iu);
     const lot = segment.match(/\blote\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
     const cause = segment.match(/\b(?:por|causa|motivo|debido a)\s+(.+?)(?=\s+ubicaci[oó]n\b|$)/iu)?.[1]?.trim() || null;
     const location = segment.match(/\bubicaci[oó]n\s*(?:es|:)?\s*([a-z]+\d+[a-z0-9-]*)\b/iu)?.[1] || null;
@@ -216,7 +229,9 @@ function lotChoicePrompt(choice) {
     `🔎 *Lotes disponibles para ${choice.producto} (${choice.sku})*`,
     `Cantidad a reponer: ${choice.cantidad} ${choice.unidad || 'und'}. Verifica físicamente el lote del que se tomó.`,
     ...page.map((option, index) => `${start + index + 1}. Lote *${option.lote}* | ubicación *${option.ubicacion}* | libre ${option.disponible} ${choice.unidad || 'und'} | vence ${option.vence || 'sin fecha registrada'}`),
-    '', `Responde «opción ${start + 1}», «opción ${start + 2}», etc. No necesitas escribir ni deletrear el lote.`,
+    '', page.length === 1
+      ? `Responde «opción ${start + 1}». No necesitas escribir ni deletrear el lote.`
+      : `Responde «opción ${start + 1}», «opción ${start + 2}», etc. No necesitas escribir ni deletrear el lote.`,
   ];
   if (start + LOT_OPTIONS_PER_PAGE < choice.options.length) lines.push('Di «más opciones» para ver los siguientes lotes.');
   if (choice.page > 0) lines.push('Di «opciones anteriores» para volver.');
@@ -301,6 +316,11 @@ async function applyLotChoice(db, draft, order, text) {
     draft.lotValidationMessage = 'Ese material y lote ya figuran en otra partida; indica el total en una sola. No se modificó inventario.';
     return true;
   }
+  if (choice.target === 'pending' && draft.materials.some(other =>
+    other.sku === line.sku && other.lote === candidate.lote)) {
+    draft.lotValidationMessage = 'Ese material y lote ya figuran en otra partida. Indica el total en una sola; no se modificó inventario.';
+    return true;
+  }
   line.lote = candidate.lote;
   line.ubicacion = candidate.ubicacion;
   line.validatedLotKey = candidate.validatedLotKey;
@@ -313,6 +333,7 @@ async function applyLotChoice(db, draft, order, text) {
   draft.materialChoice = null;
   draft.lotValidationMessage = null;
   draft.reviewShown = false;
+  promoteQueuedMaterial(draft);
   return true;
 }
 
@@ -675,13 +696,14 @@ async function applyMaterialReport(db, draft, order, text, params) {
   if (noReplacements(text)) {
     draft.materials = [];
     draft.materialPending = null;
+    draft.materialQueue = [];
     draft.materialsAnswered = true;
     return;
   }
   const advance = params.avance_materiales && typeof params.avance_materiales === 'object'
     ? params.avance_materiales : {};
   if (replacementsFinished(text) || advance.finalizar === true) {
-    if (draft.materialPending) throw guideError('Termina primero el material pendiente: faltan producto, cantidad, lote o causa.');
+    if (draft.materialPending || draft.materialQueue?.length) throw guideError('Termina primero los materiales pendientes: faltan cantidad, lote o causa.');
     if (!draft.materials.length) throw guideError('Confirma expresamente si no repusiste material durante esta OP.');
     draft.materialsAnswered = true;
     return;
@@ -696,10 +718,19 @@ async function applyMaterialReport(db, draft, order, text, params) {
     return;
   }
   const hasNewMaterial = spoken.length > 0;
-  const incoming = hasNewMaterial && Array.isArray(advance.items) && advance.items.length
-    ? advance.items : hasNewMaterial && Array.isArray(params.materiales_repuestos) && params.materiales_repuestos.length
-      ? params.materiales_repuestos : spoken;
+  const interpreted = Array.isArray(advance.items) && advance.items.length
+    ? advance.items : Array.isArray(params.materiales_repuestos) && params.materiales_repuestos.length
+      ? params.materiales_repuestos : [];
+  const incoming = hasNewMaterial && interpreted.length === spoken.length
+    ? spoken.map((said, index) => ({ ...interpreted[index],
+      producto: said.producto || interpreted[index].producto || interpreted[index].sku,
+      cantidad: said.cantidad ?? interpreted[index].cantidad,
+      lote: said.lote || groundedLotHint(text, interpreted[index].lote),
+      motivo: said.motivo || interpreted[index].motivo || interpreted[index].causa,
+      ubicacion: said.ubicacion || interpreted[index].ubicacion,
+    })) : spoken;
   const materials = incoming.length ? await orderMaterials(db, order.id) : [];
+  const pendingBeforeMessage = draft.materialPending;
   for (const item of incoming) {
     const productTerm = String(item.producto || item.sku || item.id_item || '').trim();
     const number = quantity(item.cantidad);
@@ -709,9 +740,6 @@ async function applyMaterialReport(db, draft, order, text, params) {
     if (reason && /^(?:merma|perdida|pérdida|reposicion|reposición|material)$/iu.test(reason)) {
       throw guideError('Indica la causa concreta del material repuesto, por ejemplo ruptura, derrame o defecto.');
     }
-    if (draft.materialPending && productTerm) {
-      throw guideError(`Termina primero ${draft.materialPending.sku || draft.materialPending.producto}: indica su lote y causa antes de añadir otro material.`);
-    }
     const product = productTerm ? await resolveProductReference(db, productTerm, {
       productIds: materials.map(row => row.producto_id),
       allowContextualPartial: true, allowScopedApproximate: true,
@@ -719,7 +747,15 @@ async function applyMaterialReport(db, draft, order, text, params) {
     if (productTerm && !materials.some(row => Number(row.producto_id) === Number(product.id))) {
       throw guideError(`El producto ${productTerm} no es un material de OP ID ${order.id}`);
     }
-    const pending = draft.materialPending || {};
+    const differentPending = draft.materialPending?.sku && product
+      && product.siigo_code !== draft.materialPending.sku;
+    if (differentPending && pendingBeforeMessage) {
+      throw guideError(`Primero completa ${draft.materialPending.producto} (${draft.materialPending.sku}). Puedes repetir su cantidad en palabras o cifras; después te mostraré sus lotes y podrás registrar otro SKU.`);
+    }
+    // Una segunda partida del mismo mensaje no debe sobrescribir la primera,
+    // incluso si corresponde al mismo SKU pero se tomó de otro lote.
+    const queued = Boolean(draft.materialPending && !pendingBeforeMessage);
+    const pending = queued ? {} : draft.materialPending || {};
     const next = {
       sku: product?.siigo_code || pending.sku || null,
       producto: product?.nombre || pending.producto || productTerm || null,
@@ -741,8 +777,12 @@ async function applyMaterialReport(db, draft, order, text, params) {
       const existing = draft.materials.findIndex(line => line.sku === next.sku && line.lote === next.lote);
       if (existing >= 0) draft.materials[existing] = next;
       else draft.materials.push(next);
-      draft.materialPending = null;
-      draft.materialsAnswered = true;
+      if (!queued) draft.materialPending = null;
+      draft.materialsAnswered = !draft.materialPending && !draft.materialQueue?.length;
+    } else if (queued) {
+      draft.materialQueue ||= [];
+      draft.materialQueue.push(next);
+      draft.materialsAnswered = false;
     } else {
       draft.materialPending = next;
       draft.materialsAnswered = false;
@@ -787,6 +827,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
       draft.materialsAnswered = true;
     }
   }
+  promoteQueuedMaterial(draft);
 }
 
 function confirmed(text) {
@@ -898,7 +939,7 @@ function guideSummary(order, draft, locationHint) {
   if (draft.waste == null && !draft.unclassifiedWaste) missing.push('cantidad no conforme de producto terminado');
   if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
   if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto terminado');
-  if (!draft.materialsAnswered || draft.materialPending) missing.push('reposición de insumos');
+  if (!draft.materialsAnswered || draft.materialPending || draft.materialQueue?.length) missing.push('reposición de insumos');
   if ((draft.materials || []).some(item => !item.lote)) missing.push('lote válido del material repuesto');
   if (draft.materialChoice) missing.push('elegir el lote del material repuesto');
   const readyForReview = !missing.length && draft.conforming + draft.waste > 0;
@@ -921,7 +962,8 @@ function guideSummary(order, draft, locationHint) {
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
     lines.push('', `Conciliación de producto terminado: ${draft.conforming} conforme(s) + ${draft.waste} no conforme(s) = ${draft.conforming + draft.waste} und frente a ${Number(order.cantidad_planeada)} planeadas.`);
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
-    lines.push('', `Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
+    lines.push('', 'Si repusiste otro SKU, repórtalo antes de confirmar; te mostraré sus lotes por separado.');
+    lines.push(`Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
     return lines.join('\n');
   }
@@ -937,6 +979,9 @@ function guideSummary(order, draft, locationHint) {
   if (draft.materialPending) {
     const item = draft.materialPending;
     captured.push(`• Insumo en curso: ${item.producto || 'sin identificar'}${item.sku ? ` (${item.sku})` : ''} | Cantidad: ${item.cantidad ?? 'pendiente'} | Lote: ${item.lote || `pendiente${item.loteIntentado ? ` (se rechazó ${item.loteIntentado})` : ''}`} | Causa: ${item.motivo || 'pendiente'}`);
+  }
+  if (draft.materialQueue?.length) {
+    captured.push(`• Después: ${draft.materialQueue.map(item => `${item.producto} (${item.sku})`).join(', ')}. Se revisarán sus lotes uno por uno.`);
   }
   lines.push('*Registrado hasta ahora*', ...(captured.length ? captured : ['• Aún no hay datos del cierre.']),
     '', ...(draft.lotValidationMessage ? [`⚠️ ${draft.lotValidationMessage}`, ''] : []),
@@ -1145,7 +1190,8 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const complete = draft.conforming != null && draft.waste != null
     && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
     && (draft.conforming === 0 || !!draft.location)
-    && draft.materialsAnswered && !draft.materialPending && !draft.materialChoice && !draft.unclassifiedWaste
+    && draft.materialsAnswered && !draft.materialPending && !draft.materialQueue?.length
+    && !draft.materialChoice && !draft.unclassifiedWaste
     && draft.materials.every(item => !!item.lote);
   if (confirmed(rawText) && complete && draft.reviewShown) {
     return { params: { id_orden: draft.orderId, cantidad_real: draft.conforming,
