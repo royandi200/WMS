@@ -28,7 +28,7 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
         sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
       }]];
       if (sql.includes('FROM producto_ubicaciones')) return [[{ codigo: 'C2' }]];
-      if (sql.includes('FROM ubicaciones u JOIN bodegas b')) return [[{ codigo: 'C2' }]];
+      if (sql.includes('FROM ubicaciones u JOIN bodegas b')) return [[{ codigo: String(params[0]).toUpperCase() }]];
       if (sql.includes('FROM produccion_materiales pm JOIN productos')) return [[{
         producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
       }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
@@ -183,6 +183,39 @@ test('el operario puede dar todos los datos del cierre en un mensaje y aun debe 
   const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
   assert.deepEqual(confirmedClose.params, { id_orden: 97, cantidad_real: 10, merma: 10,
     motivo_merma: 'ruptura', ubicacion: 'C2', materiales_repuestos: [] });
+});
+
+test('corrige la ubicación del PT con expresiones naturales sin cerrar la OP', async () => {
+  for (const phrase of [
+    'corrección la ubicación es C3',
+    'corrijo: la ubicación correcta es C3',
+    'la ubicación del producto terminado será C3',
+    'corrección ubicación de C2 a C3',
+    'corrección ubicación C2 a C3',
+    'corrección la ubicación no es C2, es C3',
+    'corrección la ubicación es C 3',
+  ]) {
+    const db = fakeDb({ orderId: 108, planned: 5 });
+    const base = { db, userId: 7 };
+    await advanceCloseGuide({ ...base,
+      rawText: 'OP ID 108: 5 unidades conformes, 0 no conformes, ubicación C2 y no repuse material' });
+    const corrected = await advanceCloseGuide({ ...base, rawText: phrase,
+      params: { avance_materiales: { correccion_lote: { ubicacion: 'C3' } } } });
+    assert.equal(corrected.draft.location, 'C3', phrase);
+    assert.match(corrected.message, /Ubicación del conforme: C3/u);
+    assert.equal(corrected.params, undefined);
+  }
+});
+
+test('una corrección de ubicación incomprensible informa que conservó la anterior', async () => {
+  const db = fakeDb({ orderId: 108, planned: 5 });
+  const base = { db, userId: 7 };
+  await advanceCloseGuide({ ...base,
+    rawText: 'OP ID 108: 5 unidades conformes, 0 no conformes, ubicación C2 y no repuse material' });
+  const reply = await advanceCloseGuide({ ...base, rawText: 'corrección la ubicación es allá' });
+  assert.match(reply.message, /El borrador conserva C2/u);
+  assert.equal(reply.draft.location, 'C2');
+  assert.equal(reply.params, undefined);
 });
 
 test('an operator can begin a close using the sole notified OP without repeating its ID', async () => {

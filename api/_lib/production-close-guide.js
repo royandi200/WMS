@@ -75,10 +75,13 @@ function closeFields(text) {
     waste = quantity(raw.match(new RegExp(`${NUMBER}\\s+(?:producto(?:s)?(?:\\s+terminad[oa]s?)?|unidades?(?:\\s+terminad[oa]s?)?|terminad[oa]s?)\\s+no\\s+conformes?\\b`, 'u'))?.[1]);
   }
   if (waste == null && /\b(?:sin|ninguna|no hubo)\s+(?:merma|mermas|rechazos?)\b/u.test(raw)) waste = 0;
-  const locationCandidate = [...raw.matchAll(/\b(?:ubicacion\s*[:\-]?|quedan?\s+en|dejar\s+en|ubicar\s+en|en)\s*([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b/gu)]
-    .map(match => match[1]).find(candidate => /\d/u.test(candidate));
-  const location = locationCandidate && /\d/u.test(locationCandidate)
-    ? locationCandidate.toUpperCase() : null;
+  const locationCode = '([a-z][a-z0-9-]*\\d[a-z0-9-]*|[a-z]\\s+\\d+)';
+  const negated = new RegExp(`\\bubicacion\\s+no\\s+(?:es|era|fue)\\s+${locationCode}\\s*(?:,|;|sino)?\\s*(?:es|sino(?:\\s+que\\s+es)?)\\s+${locationCode}\\b`, 'u').exec(raw);
+  const changedFrom = new RegExp(`\\bubicacion\\s+(?:(?:de|desde)\\s+)?${locationCode}\\s+(?:a|para|por)\\s+${locationCode}\\b`, 'u').exec(raw);
+  const direct = new RegExp(`\\bubicacion(?:\\s+(?:del?\\s+)?(?:(?:producto\\s+)?terminado(?:\\s+conforme)?|conforme|pt))?\\s*(?:(?:correcta|nueva|ahora)\\s+)?(?:(?:es|fue|sera|seria|queda|quedara|debe\\s+ser|va\\s+para|van\\s+para|a|en)\\s+)?[:=\\-]?\\s*${locationCode}\\b`, 'u').exec(raw);
+  const contextual = new RegExp(`\\b(?:quedan?\\s+en|dejar\\s+en|ubicar\\s+en|van?\\s+para|en)\\s*${locationCode}\\b`, 'u').exec(raw);
+  const location = (negated?.[2] || changedFrom?.[2] || direct?.[1] || contextual?.[1] || null)
+    ?.replace(/\s+/gu, '').toUpperCase() || null;
   const rawReason = raw.match(/\b(?:por|motivo|causa|debido a)\s+(.+?)(?=\s+(?:ubicacion|quedan en|dejar en)\b|$)/u)?.[1]
     ?.replace(/[,;\s]+$/u, '').trim() || null;
   const locationTail = location ? ` en ${location.toLowerCase()}` : '';
@@ -832,6 +835,10 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const closeText = materialMarker ? String(rawText).slice(0, materialMarker.index)
     : damageMarker ? String(rawText).slice(0, damageMarker.index) : rawText;
   const parsed = closeFields(closeText);
+  if (/^(?:correccion|correcion|corrijo|corrige|cambio|cambia|perdon|perdona)\b.*\bubicacion\b/u.test(normalize(rawText))
+    && !parsed.location && !draft.materials?.length && !draft.materialPending) {
+    return { message: `No pude identificar el código nuevo de ubicación. El borrador conserva ${draft.location || 'la ubicación pendiente'}. Dime, por ejemplo, «la ubicación es C3». No se modificó inventario.`, draft };
+  }
   const hadPendingMaterial = Boolean(draft.materialPending);
   if ((!confirmed(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport) {
     await applyMaterialReport(db, draft, order, rawText, params);
