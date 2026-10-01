@@ -78,7 +78,7 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
   const fifth = await advanceCloseGuide({ ...base, rawText: 'no repuse material' });
   assert.match(fifth.message, /confirmo cierre/u);
   assert.equal(fifth.params, undefined);
-  const sixth = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const sixth = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 97' });
   assert.deepEqual(sixth.params, { id_orden: 97, cantidad_real: 2, merma: 0,
     motivo_merma: null, ubicacion: 'C2', materiales_repuestos: [] });
   assert.equal(db.writes.length, 5);
@@ -87,7 +87,7 @@ test('cierre guiado conserva datos entre audios y solo entrega parámetros tras 
 test('confirma con OP ID explícito solo si coincide con el borrador completo y revisado', async () => {
   for (const phrase of ['confirmo cierre OP ID 109',
     'Confirmo el cierre de la OP ID 109',
-    'confirmo el cierre de producción de la OP 109']) {
+    'confirmo el cierre de producción de la OP ID 109']) {
     const db = fakeDb({ orderId: 109, planned: 1 });
     const base = { db, userId: 7 };
     const preview = await advanceCloseGuide({ ...base,
@@ -100,6 +100,55 @@ test('confirma con OP ID explícito solo si coincide con el borrador completo y 
     assert.equal(db.writes.length, 1);
     assert.equal(isCloseFollowup(phrase, preview.draft), true);
   }
+});
+
+test('BBC puede envolver el mensaje actual sin perder la confirmación explícita', async () => {
+  const db = fakeDb({ orderId: 108, planned: 5 });
+  const base = { db, userId: 18 };
+  const preview = await advanceCloseGuide({ ...base,
+    rawText: 'Cerrar OP ID 108: 5 conformes, 0 no conformes, ubicación C3, no repuse material' });
+  assert.doesNotMatch(preview.message, /o \*confirmo cierre\*/u);
+  const wrap = text => `{name}="Operario"\n[Wednesday, September 30, 2026 19:49:05]: ${text}`;
+  assert.equal(isCloseFollowup(wrap('confirmo cierre'), preview.draft), true);
+  assert.equal(isCloseFollowup(wrap('confirmo cierre OP ID 108'), preview.draft), true);
+  const final = await advanceCloseGuide({ ...base, rawText: wrap('confirmo cierre OP ID 108'),
+    params: { id_orden: 108 } });
+  assert.equal(final.params.id_orden, 108);
+  assert.equal(final.params.ubicacion, 'C3');
+  assert.equal(db.writes.length, 1);
+});
+
+test('sin OP ID o con uno equivocado, ayuda igual en intentos repetidos y no cierra', async () => {
+  const db = fakeDb({ orderId: 108, planned: 5 });
+  const base = { db, userId: 19 };
+  const preview = await advanceCloseGuide({ ...base,
+    rawText: 'Cerrar OP ID 108: 5 conformes, 0 no conformes, ubicación C3, no repuse material' });
+  assert.match(preview.message, /responde \*confirmo cierre OP ID 108\*\./u);
+  for (const phrase of ['confirmo cierre', 'confirmo cierre',
+    'confirmo cierre OP ID 109', 'confirmo cierre OP ID 109']) {
+    const reply = await advanceCloseGuide({ ...base, rawText: phrase });
+    assert.equal(reply.params, undefined);
+    assert.match(reply.message, /confirmo cierre OP ID 108/u);
+    assert.match(reply.message, /no se modificó inventario/u);
+    assert.equal(reply.draft.orderId, 108);
+  }
+  assert.equal(db.writes.length, 1);
+  const confirmedClose = await advanceCloseGuide({ ...base,
+    rawText: 'confirmo cierre OP ID 108' });
+  assert.equal(confirmedClose.params.id_orden, 108);
+});
+
+test('una referencia inventada por IA no autoriza el cierre y vuelve a guiar', async () => {
+  const db = fakeDb({ orderId: 108, planned: 5 });
+  const base = { db, userId: 20 };
+  await advanceCloseGuide({ ...base,
+    rawText: 'Cerrar OP ID 108: 5 conformes, 0 no conformes, ubicación C3, no repuse material' });
+  const mismatch = await advanceCloseGuide({ ...base,
+    rawText: 'confirmo cierre OP ID 108', params: { id_orden: 109 } });
+  assert.equal(mismatch.params, undefined);
+  assert.match(mismatch.message, /No pude verificar la referencia/u);
+  assert.match(mismatch.message, /confirmo cierre OP ID 108/u);
+  assert.equal(db.writes.length, 1);
 });
 
 test('un OP ID distinto o una revisión incompleta no cierran la producción', async () => {
@@ -116,10 +165,10 @@ test('un OP ID distinto o una revisión incompleta no cierran la producción', a
   await advanceCloseGuide({ ...base,
     rawText: '1 conforme, 0 no conformes, ubicación C2, no repuse material' });
   const writesBeforeMismatch = db.writes.length;
-  await assert.rejects(
-    advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 110' }),
-    /cierre pendiente para OP ID 109/u
-  );
+  const mismatch = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 110' });
+  assert.equal(mismatch.params, undefined);
+  assert.match(mismatch.message, /Escribiste OP ID 110, pero el borrador activo es OP ID 109/u);
+  assert.match(mismatch.message, /confirmo cierre OP ID 109/u);
   assert.equal(db.writes.length, writesBeforeMismatch);
 });
 
@@ -163,7 +212,7 @@ test('el operario puede declarar conformes y no conformes juntos y completar lo 
   const preview = await advanceCloseGuide({ ...base, rawText: 'no repuse material' });
   assert.match(preview.message, /Resumen para confirmar/u);
   assert.equal(preview.params, undefined);
-  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 97' });
   assert.deepEqual(confirmedClose.params, { id_orden: 97, cantidad_real: 10, merma: 10,
     motivo_merma: 'ruptura', ubicacion: 'C2', materiales_repuestos: [] });
 });
@@ -180,7 +229,7 @@ test('el operario puede dar todos los datos del cierre en un mensaje y aun debe 
   assert.equal(preview.draft.materialsAnswered, true);
   assert.match(preview.message, /Resumen para confirmar/u);
   assert.equal(preview.params, undefined);
-  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const confirmedClose = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 97' });
   assert.deepEqual(confirmedClose.params, { id_orden: 97, cantidad_real: 10, merma: 10,
     motivo_merma: 'ruptura', ubicacion: 'C2', materiales_repuestos: [] });
 });
@@ -452,7 +501,7 @@ test('audio ambiguo de OP 100 y merma posterior de tapas conservan el mismo cier
   assert.equal(classified.draft.reason, 'rotura');
   const review = await advanceCloseGuide({ ...base, rawText: 'ubicación C2' });
   assert.match(review.message, /confirmo cierre/u);
-  const confirmation = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const confirmation = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 100' });
   assert.equal(confirmation.params.cantidad_real, 4);
   assert.equal(confirmation.params.merma, 1);
   assert.deepEqual(confirmation.params.materiales_repuestos, [{
@@ -636,7 +685,7 @@ test('material repuesto se reúne por partes, exige lote y causa y solo sale en 
   assert.match(reason.message, /Causa: ruptura/u);
   assert.match(reason.message, /confirmo cierre/u);
   assert.equal(reason.params, undefined);
-  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 97' });
   assert.deepEqual(done.params.materiales_repuestos, [{
     sku: '00001-TPBI', cantidad: 1, lote: 'ACC-260910-TPBI',
     motivo: 'ruptura', ubicacion: undefined,
@@ -654,7 +703,7 @@ test('un solo audio puede cerrar el resultado y declarar dos materiales sin dupl
   assert.deepEqual(db.aliasTerms, ['tapa', 'etiqueta']);
   assert.match(review.message, /00001-TPBI/u);
   assert.match(review.message, /00017-ETASH60/u);
-  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 97' });
   assert.equal(done.params.materiales_repuestos.length, 2);
   assert.equal(done.params.materiales_repuestos[0].motivo, 'ruptura');
   assert.equal(done.params.materiales_repuestos[1].lote, 'L-ET');
@@ -685,7 +734,7 @@ test('corrige lote y cantidad dentro del borrador antes de confirmar', async () 
   assert.doesNotMatch(correctedLot.message, /L-VIEJO/u);
   const correctedQuantity = await advanceCloseGuide({ ...base, rawText: 'corrige cantidad de tapa a 2' });
   assert.match(correctedQuantity.message, /00001-TPBI\): 2 und/u);
-  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre' });
+  const done = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 97' });
   assert.equal(done.params.materiales_repuestos[0].lote, 'L-NUEVO');
   assert.equal(done.params.materiales_repuestos[0].cantidad, 2);
 });
@@ -706,7 +755,7 @@ test('corrige el lote con la frase natural y su transcripción imperfecta sin ce
     assert.doesNotMatch(corrected.message, /ACC-260910-TPBI/u);
     assert.equal(corrected.draft.materials[0].lote, 'R2-260920-TPBI');
     assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
-    const final = await advanceCloseGuide({ db, userId: 105, rawText: 'confirmo cierre' });
+    const final = await advanceCloseGuide({ db, userId: 105, rawText: 'confirmo cierre OP ID 100' });
     assert.equal(final.params.materiales_repuestos[0].lote, 'R2-260920-TPBI');
   }
 });
@@ -757,8 +806,9 @@ test('parsea cantidades y causas expresas sin tomar el OP ID como unidades', () 
   assert.deepEqual(closeFields('1 producto terminado conforme, 1 producto terminado no conforme por ruptura'), {
     conforming: 1, waste: 1, reason: 'ruptura', location: null,
   });
-  assert.equal(confirmed('sí'), true);
-  assert.equal(confirmed('confirmo cierre'), true);
+  assert.equal(confirmed('sí'), false);
+  assert.equal(confirmed('confirmo cierre'), false);
+  assert.equal(confirmed('confirmo cierre OP ID 97'), true);
   assert.equal(isCloseFollowup('C2', { orderId: 97 }), true);
   assert.equal(isCloseFollowup('cuánto stock queda', { orderId: 97 }), false);
 });

@@ -16,6 +16,14 @@ function normalize(value) {
     .toLowerCase().replace(/\s+/gu, ' ').trim();
 }
 
+function closeUtterance(value) {
+  const raw = String(value || '').trim();
+  // BBC envía a veces un solo mensaje actual con nombre y hora. No aceptar
+  // historiales, líneas adicionales ni prosa del modelo como confirmación.
+  const wrapped = raw.match(/^\{name\}="[^"\r\n]{1,120}"\r?\n\[(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4} \d{2}:\d{2}:\d{2}\]:[ \t]*([^\r\n]+)$/u);
+  return wrapped ? wrapped[1].trim() : raw;
+}
+
 function quantity(value) {
   if (value == null) return null;
   const text = normalize(value);
@@ -601,9 +609,17 @@ async function applyMaterialReport(db, draft, order, text, params) {
 }
 
 function confirmed(text) {
-  const raw = normalize(text);
-  return /^(?:si|confirmo|confirmar|correcto|todo bien|adelante)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?)?[.!]?$/u.test(raw)
-    || /^confirmo\s+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?\s+op\s*(?:id\s*)?#?\s*[1-9]\d*[.!]?$/u.test(raw);
+  return /^confirmo\s+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?\s+op\s+id\s+#?\s*[1-9]\d*[.!]?$/u
+    .test(normalize(closeUtterance(text)));
+}
+
+function confirmationAttempt(text) {
+  const raw = normalize(closeUtterance(text));
+  return /^(?:si|correcto|todo bien|adelante|confirmo|confirmar)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?(?:\s+op(?:\s+id)?\s+#?\s*[1-9]\d*)?)?[.!]?$/u.test(raw);
+}
+
+function confirmationHelp(orderId, prefix = '') {
+  return `${prefix}Para cerrar la OP, escribe exactamente: *confirmo cierre OP ID ${orderId}*. El borrador sigue abierto y no se modificó inventario.`;
 }
 
 function rejected(text) {
@@ -625,9 +641,9 @@ async function pendingCloseDraft(db, userId) {
 
 function isCloseFollowup(text, draft) {
   if (!draft) return false;
-  const raw = normalize(text);
+  const raw = normalize(closeUtterance(text));
   if (materialLossCandidate(raw)) return true;
-  if (confirmed(raw) || rejected(raw)) return true;
+  if (confirmationAttempt(raw) || rejected(raw)) return true;
   if (/^(?:corrige|cambia|modifica|quita|elimina|correccion|correcion|corrijo|perdon|perdona)\b/u.test(raw)) return true;
   if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por|repuse|repusimos|repuesto|lote|materiales?)\b/u.test(raw)) return true;
@@ -714,7 +730,7 @@ function guideSummary(order, draft, locationHint) {
       : ['• Ninguno']);
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
-    lines.push('', `Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}* o *confirmo cierre*.`);
+    lines.push('', `Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
     return lines.join('\n');
   }
@@ -778,9 +794,21 @@ function guideSummary(order, draft, locationHint) {
 }
 
 async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
+  rawText = closeUtterance(rawText);
   const prior = await pendingCloseDraft(db, userId);
-  const spokenOrderId = closeOrderReference(rawText, params);
+  let spokenOrderId;
+  try {
+    spokenOrderId = closeOrderReference(rawText, params);
+  } catch (error) {
+    if (!prior?.orderId || !confirmationAttempt(rawText)) throw error;
+    return { message: confirmationHelp(prior.orderId,
+      'No pude verificar la referencia de tu mensaje. No se cerró nada.\n'), draft: prior };
+  }
   if (spokenOrderId && prior?.orderId && spokenOrderId !== prior.orderId) {
+    if (confirmationAttempt(rawText)) {
+      return { message: confirmationHelp(prior.orderId,
+        `Escribiste OP ID ${spokenOrderId}, pero el borrador activo es OP ID ${prior.orderId}. No se cerró nada.\n`), draft: prior };
+    }
     throw guideError(`Tienes un cierre pendiente para OP ID ${prior.orderId}. Termínalo o cancélalo antes de cambiar de OP.`);
   }
   const draft = prior || { orderId: null, conforming: null, waste: null,
@@ -790,7 +818,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     draft.orderId = spokenOrderId;
     draft.candidateOrderId = null;
   }
-  if (!draft.orderId && confirmed(rawText) && draft.candidateOrderId) {
+  if (!draft.orderId && confirmationAttempt(rawText) && draft.candidateOrderId) {
     draft.orderId = draft.candidateOrderId;
     draft.candidateOrderId = null;
   }
@@ -840,7 +868,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     return { message: `No pude identificar el código nuevo de ubicación. El borrador conserva ${draft.location || 'la ubicación pendiente'}. Dime, por ejemplo, «la ubicación es C3». No se modificó inventario.`, draft };
   }
   const hadPendingMaterial = Boolean(draft.materialPending);
-  if ((!confirmed(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport) {
+  if ((!confirmationAttempt(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport) {
     await applyMaterialReport(db, draft, order, rawText, params);
   }
   if (draft.unclassifiedWaste && !damageMarker && !draft.materialPending) {
@@ -880,7 +908,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (draft.waste > 0 && !draft.reason && parsed.reason == null && !hadPendingMaterial
     && !damageMarker
     && !spokenOrderId && !parsed.location && parsed.conforming == null && parsed.waste == null
-    && !confirmed(rawText) && !rejected(rawText)) {
+    && !confirmationAttempt(rawText) && !rejected(rawText)) {
     const candidate = String(rawText || '').trim();
     if (candidate && candidate.length <= 100 && !/[?¿]/u.test(candidate)
       && !(/^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$/iu.test(candidate) && /\d/u.test(candidate))) draft.reason = candidate;
@@ -917,6 +945,9 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
       materiales_repuestos: draft.materials.map(item => ({ sku: item.sku,
         cantidad: item.cantidad, lote: item.lote, motivo: item.motivo,
         ubicacion: item.ubicacion || undefined })) }, draft };
+  }
+  if (confirmationAttempt(rawText) && complete && draft.reviewShown) {
+    return { message: confirmationHelp(order.id), draft };
   }
   if (rejected(rawText)) draft.reviewShown = false;
   else draft.reviewShown = complete;
