@@ -1702,7 +1702,8 @@ module.exports = async (req, res) => {
     if (spokenReceptionConfirmation && !selectedPreparationReference
       && ['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_RECEPCION_OC',
         'AVANZAR_RECEPCION_GUIADA_OC'].includes(action)) {
-      const preview = await recentlyDisplayedFinalReceptionPreview(db, user.id, from);
+      const preview = await recentlyDisplayedFinalReceptionPreview(db, user.id, from)
+        || await activeFinalReceptionPreview(db, user.id, spokenReceptionConfirmation.id);
       if (Number(preview?.orden_compra_id) === spokenReceptionConfirmation.id) {
         const order = await findPurchaseOrder(db, { orden_compra_id: preview.orden_compra_id });
         const identifier = purchaseOrderReceptionIdentifier(order);

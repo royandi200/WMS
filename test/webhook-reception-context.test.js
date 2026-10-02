@@ -241,3 +241,21 @@ test('OCIV speech reaches only the matching final reception preview', async () =
   interceptConfirmation = false;
   recentFinalPreview = null;
 });
+
+test('OCIV retry keeps the unexpired draft after an incomplete confirmation response', async () => {
+  interceptConfirmation = true;
+  recentFinalPreview = null;
+  activeFinalPreview = { orden_compra_id: 63, recepcion_id: 163 };
+  interceptedConfirmation = null;
+  const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+    body: { from: '573150000059', body: 'Confirmo OCIV63',
+      info: { '@ction': 'MODO_CHARLA', body: 'Confirmo OCIV63', params: {} } } };
+  const res = { statusCode: 200, body: null, setHeader() {},
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; }, end() { return this; } };
+  await handler(req, res);
+  assert.equal(interceptedConfirmation?.params.orden_compra_id, 63);
+  assert.equal(interceptedConfirmation?.params.confirmacion_final, true);
+  interceptConfirmation = false;
+  activeFinalPreview = null;
+});
