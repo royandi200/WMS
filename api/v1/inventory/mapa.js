@@ -36,7 +36,8 @@ module.exports = async (req, res) => {
       return res.json({ ok:true, data:{ ubicaciones:[], bodegas:[] } })
     }
 
-    // Stock por ubicación (agrupa todos los productos/lotes)
+    // Stock por ubicación. Las partidas bloqueadas se muestran aparte:
+    // nunca se suman al stock operativo ni al umbral de alerta de la celda.
     const stockRows = await query(`
       SELECT
         s.ubicacion_id,
@@ -50,8 +51,44 @@ module.exports = async (req, res) => {
         MIN(p.stock_minimo) AS min_stock_ref
       FROM stock s
       JOIN productos p ON p.id = s.producto_id
+      LEFT JOIN lots l ON l.product_id = s.producto_id AND BINARY l.lpn = BINARY s.lote
       WHERE s.ubicacion_id IS NOT NULL AND s.cantidad > 0
+        AND (l.id IS NULL OR l.status NOT IN ('CUARENTENA','RECHAZADO','PENDIENTE_DISPOSICION'))
       GROUP BY s.ubicacion_id
+    `)
+
+    // Una recepción bloqueada RECBLK conserva cantidad y ubicación en lots y
+    // recepcion_distribuciones, pero no crea fila en stock. Las devoluciones
+    // bloqueadas pueden conservar su ubicación en devoluciones. Si existe
+    // stock para un lote bloqueado, usar esa fila sin duplicar qty_current.
+    const blockedRows = await query(`
+      SELECT
+        u.id AS ubicacion_id,
+        p.siigo_code AS sku,
+        p.nombre,
+        p.unit_label AS unidad,
+        l.lpn AS lote_interno,
+        l.status AS estado,
+        COALESCE(rd.lote_proveedor, rd.lote_interno_origen, l.lpn) AS lote,
+        CASE WHEN s.id IS NULL THEN l.qty_current ELSE s.cantidad END AS cantidad
+      FROM lots l
+      JOIN productos p ON p.id = l.product_id
+      LEFT JOIN stock s ON s.producto_id = l.product_id AND BINARY s.lote = BINARY l.lpn
+      LEFT JOIN (
+        SELECT lote, MIN(ubicacion_id) AS ubicacion_id,
+               MIN(lote_proveedor) AS lote_proveedor,
+               MIN(lote_interno_origen) AS lote_interno_origen
+          FROM recepcion_distribuciones GROUP BY lote
+      ) rd ON BINARY rd.lote = BINARY l.lpn
+      LEFT JOIN (
+        SELECT lote, MIN(ubicacion_id) AS ubicacion_id
+          FROM devoluciones GROUP BY lote
+      ) dv ON BINARY dv.lote = BINARY l.lpn
+      JOIN ubicaciones u ON u.id = COALESCE(s.ubicacion_id, dv.ubicacion_id, rd.ubicacion_id)
+        AND u.bodega_id = COALESCE(s.bodega_id, l.bodega_id) AND u.activa = 1
+      JOIN bodegas b ON b.id = u.bodega_id AND b.activa = 1
+      WHERE l.status IN ('CUARENTENA','RECHAZADO','PENDIENTE_DISPOSICION')
+        AND (CASE WHEN s.id IS NULL THEN l.qty_current ELSE s.cantidad END) > 0
     `)
 
     const stockMap = {}
@@ -66,6 +103,20 @@ module.exports = async (req, res) => {
         min_stock_ref:  parseFloat(row.min_stock_ref)||0,
         items,
       }
+    }
+
+    const blockedMap = {}
+    for (const row of blockedRows) {
+      const location = blockedMap[row.ubicacion_id] || { cantidad: 0, cuarentena: 0, items: [] }
+      const cantidad = Number(row.cantidad) || 0
+      location.cantidad += cantidad
+      if (row.estado === 'CUARENTENA') location.cuarentena += cantidad
+      location.items.push({
+        sku: row.sku, nombre: row.nombre, lote: row.lote,
+        lote_interno: row.lote_interno, unidad: row.unidad,
+        cantidad, estado: row.estado,
+      })
+      blockedMap[row.ubicacion_id] = location
     }
 
     const documented = manifestAssignments(warehouseManifest)
@@ -100,8 +151,9 @@ module.exports = async (req, res) => {
     // Ensamblar respuesta
     const result = ubicaciones.map(u => {
       const stock  = stockMap[u.id]
+      const blocked = blockedMap[u.id]
       const estado = !stock
-        ? 'vacio'
+        ? blocked ? 'bloqueado' : 'vacio'
         : stock.cantidad_total <= stock.min_stock_ref
           ? 'bajo'
           : 'ok'
@@ -117,8 +169,11 @@ module.exports = async (req, res) => {
         bodega_nombre:  u.bodega_nombre,
         estado,
         cantidad_total: stock?.cantidad_total || 0,
+        cantidad_cuarentena: blocked?.cuarentena || 0,
+        cantidad_bloqueada: blocked?.cantidad || 0,
         num_productos:  stock?.num_productos  || 0,
         items:          stock?.items          || [],
+        items_bloqueados: blocked?.items || [],
         asignaciones:   u.bodega_codigo === warehouseManifest.warehouse_code
           ? assignmentMap.get(u.codigo) || []
           : [],

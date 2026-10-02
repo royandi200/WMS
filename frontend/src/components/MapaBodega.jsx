@@ -24,6 +24,7 @@ const zoneColor = (zona) => {
 const ESTADO = {
   ok:    { bg:'#3fb95020', border:'#3fb95060', dot:'#3fb950' },
   bajo:  { bg:'#f0883e20', border:'#f0883e60', dot:'#f0883e' },
+  bloqueado: { bg:'#e3b34120', border:'#e3b34180', dot:'#e3b341' },
   vacio: { bg:'#ffffff08', border:'#30363d',   dot:'#30363d' },
 }
 
@@ -194,6 +195,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
           const ok    = cells.filter(u=>u.estado==='ok').length
           const bajo  = cells.filter(u=>u.estado==='bajo').length
           const vacio = cells.filter(u=>u.estado==='vacio').length
+          const bloqueado = cells.filter(u=>Number(u.cantidad_bloqueada)>0).length
           const assigned = cells.filter(u=>(u.asignaciones?.length || u.uso_reservado)).length
 
           return (
@@ -233,6 +235,7 @@ function PlanoPajaro({ ubicaciones, warehouseCode, documentedMode, onZoneClick, 
                     <div className="flex flex-col gap-0.5">
                       {ok>0    && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-400"/><span className="text-[9px] text-muted">{ok} ok</span></div>}
                       {bajo>0  && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-orange-400"/><span className="text-[9px] text-muted">{bajo} bajo</span></div>}
+                      {bloqueado>0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400"/><span className="text-[9px] text-muted">{bloqueado} con material bloqueado</span></div>}
                       {vacio>0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-border"/><span className="text-[9px] text-muted">{vacio} vacía</span></div>}
                       {assigned>0 && <div className="flex items-center gap-1"><Package size={8} className="text-primary"/><span className="text-[9px] text-muted">{assigned} asignadas</span></div>}
                     </div>
@@ -477,9 +480,15 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
                       <div className="flex gap-1.5 flex-wrap flex-1">
                         {cells.map(u => {
                           const e = ESTADO[u.estado] || ESTADO.vacio
+                          const blockedQty = Number(u.cantidad_bloqueada || 0)
+                          const quarantineQty = Number(u.cantidad_cuarentena || 0)
+                          const stockQty = Number(u.cantidad_total || 0)
+                          const displayQty = stockQty > 0 ? stockQty : blockedQty
                           return (
                             <button key={u.id}
                               onClick={() => setSelected(sel=>sel?.id===u.id?null:u)}
+                              aria-label={`${u.codigo}: ${stockQty} en stock registrado, ${blockedQty} bloqueado (${quarantineQty} en cuarentena)`}
+                              title={`${u.codigo}: ${stockQty} en stock registrado; ${blockedQty} bloqueado (${quarantineQty} en cuarentena). El mapa no mide capacidad libre.`}
                               className="relative rounded-lg border-2 flex flex-col items-center justify-center transition-all duration-150 active:scale-95"
                               style={{
                                 width: documentedMode ? '68px' : '56px', height:'56px',
@@ -493,7 +502,12 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
                               </span>
                               {u.estado!=='vacio' && (
                                 <span className="text-[8px] tabular-nums" style={{color:e.dot}}>
-                                  {u.cantidad_total>=1000?(u.cantidad_total/1000).toFixed(1)+'k':Math.round(u.cantidad_total)}
+                                  {displayQty>=1000?(displayQty/1000).toFixed(1)+'k':Math.round(displayQty)}
+                                </span>
+                              )}
+                              {blockedQty>0 && (
+                                <span className="absolute left-1 bottom-0 text-[7px] font-semibold text-amber-400">
+                                  {blockedQty===quarantineQty ? 'CUAR.' : 'BLOQ.'}
                                 </span>
                               )}
                               {(u.asignaciones?.length > 0 || u.uso_reservado) && (
@@ -570,11 +584,11 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
 
             {/* Items de stock */}
             <div>
-              <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock físico</p>
+              <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-muted">Stock registrado no bloqueado</p>
               {selected.items.length === 0 ? (
                 <div className="flex flex-col items-center py-6 gap-1">
                   <Box size={18} className="text-muted opacity-30"/>
-                  <span className="text-xs text-muted">Vacía</span>
+                  <span className="text-xs text-muted">Sin stock en esta categoría</span>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2">
@@ -593,6 +607,30 @@ function VistaEstantes({ zona, ubicaciones, documentedMode, onBack, onRefresh })
                 </div>
               )}
             </div>
+
+            {Number(selected.cantidad_bloqueada)>0 && (
+              <div className="border-t border-amber-400/20">
+                <p className="px-4 pt-3 text-[10px] font-semibold uppercase text-amber-400">
+                  Material bloqueado · no disponible
+                </p>
+                <div className="grid grid-cols-1 xl:grid-cols-2">
+                  {(selected.items_bloqueados || []).map((item,i) => (
+                    <div key={`${item.lote_interno}-${i}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 px-4 py-3 border-b border-border/20">
+                      <div className="min-w-0">
+                        <p className="break-all font-mono text-xs text-amber-400">{item.sku}</p>
+                        <p className="text-[11px] leading-relaxed text-muted">{item.nombre}</p>
+                        <p className="mt-1 text-[10px] font-semibold text-amber-400">{item.estado.replaceAll('_',' ')}</p>
+                        <p className="break-all text-[10px] text-muted/70">Lote: {item.lote}</p>
+                        {item.lote_interno !== item.lote && <p className="break-all text-[10px] text-muted/70">Partida: {item.lote_interno}</p>}
+                      </div>
+                      <span className="shrink-0 text-sm font-bold tabular-nums text-amber-400">
+                        {Number(item.cantidad).toLocaleString('es-CO',{maximumFractionDigits:1})} {item.unidad || ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Acciones */}
             {!documentedMode && <div className="px-4 py-3 border-t border-border flex gap-2">
@@ -682,6 +720,10 @@ export default function MapaBodega() {
           </span>
         </div>
       )}
+      <p className="text-xs text-muted">
+        Verde/naranja: alerta de stock, no de espacio. Amarillo: material bloqueado (incluida cuarentena), no disponible.
+        Gris: sin existencias registradas en el mapa. El plano muestra ocupación registrada; no calcula capacidad libre.
+      </p>
       {view === 'plano' ? (
         <PlanoPajaro
           ubicaciones={visibleLocations}
