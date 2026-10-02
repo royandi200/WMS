@@ -40,6 +40,7 @@ test('final reception confirmation accepts one active OC preview, not a differen
     'confirmó la recepción o ib 40',
     'confirmó recepción oce y de 40',
     'confirmo la recepción OC ID 40',
+    'Confirmo OCIV40',
   ]) assert.equal(contextualReceptionConfirmation(text, order), true, text);
   for (const text of [
     'sí', 'recibí 40', 'confirmo la recepción', 'confirmó la recepción',
@@ -47,6 +48,8 @@ test('final reception confirmation accepts one active OC preview, not a differen
     'confirmo la recepción IO ID 40', 'confirmo la recepción MQ ID 40',
     'confirmo la recepción OC ID 40 o IO ID 40',
     'confirmo la recepción 40 pero corrige el lote',
+    'Confirmo OCIV41', 'Confirmo IOIV40',
+    'Confirmo OCIV40 pero cambia el lote',
   ]) assert.equal(contextualReceptionConfirmation(text, order), false, text);
   assert.equal(contextualReceptionConfirmation('confirmo la recepción IO ID 40',
     { id: 40, tipo_recepcion: 'IN_OUT' }), true);

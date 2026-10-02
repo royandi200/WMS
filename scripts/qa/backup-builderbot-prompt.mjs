@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const projectId = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
+const projectId = process.argv.find(arg => arg.startsWith('--project='))?.slice('--project='.length)
+  || '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
 const targets = [
   ['Entrada', 'fa49edb8-5ecb-414c-b4d6-aa005ed19343', 'b4e6d905-70c6-4a30-a519-e3eb7e0adcce'],
   ['Voz', '79ce1f41-00f7-45ba-a3f3-8f042aebe0a4', 'bca07485-2ad1-449c-aa38-3b851b57f79c'],
@@ -22,9 +23,14 @@ const response = await fetch(`https://app.builderbot.cloud/api/v1/manager/flows/
 });
 if (!response.ok) throw new Error(`BuilderBot Manager HTTP ${response.status}`);
 const flows = (await response.json()).flows || [];
-const prompts = targets.map(([name, flowId, answerId]) => {
-  const flow = flows.find(item => (item.id || item.uuid) === flowId && item.name === name);
-  const answer = flow?.answers?.find(item => (item.id || item.uuid) === answerId);
+const prompts = targets.map(([name, originalFlowId, originalAnswerId]) => {
+  const flow = flows.find(item => item.name === name && (projectId !== '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d'
+    || (item.id || item.uuid) === originalFlowId));
+  const answer = projectId === '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d'
+    ? flow?.answers?.find(item => (item.id || item.uuid) === originalAnswerId)
+    : flow?.answers?.find(item => typeof item.plugins?.openai?.assistantInstructions === 'string');
+  const flowId = flow?.id || flow?.uuid;
+  const answerId = answer?.id || answer?.uuid;
   const instructions = answer?.plugins?.openai?.assistantInstructions;
   if (typeof instructions !== 'string' || !instructions.length) {
     throw new Error(`Prompt not found for ${name}; no backup was written`);

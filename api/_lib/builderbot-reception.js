@@ -2,7 +2,8 @@ const { preparePurchaseOrderReception } = require('./purchase-order-reception');
 const { prepareOutsourcingReception } = require('./outsourcing-workflow');
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
-const { typedReceptionReferences, preparationIntentFromText } = require('./typed-reception-reference');
+const { typedReceptionReferences, preparationIntentFromText,
+  noisySpokenReceptionConfirmationReference } = require('./typed-reception-reference');
 const { normalizeReceptionDistributions, validateReceptionItem } = require('./reception-distributions');
 const { DOCUMENT_TYPES, assertDocumentTypeMarker, normalizeMarkerText } = require('./document-type-markers');
 
@@ -590,6 +591,11 @@ function explicitConfirmation(rawText, order, params = {}) {
 
 function contextualReceptionConfirmation(rawText, order) {
   const text = normalizeCommandText(rawText).toUpperCase().replace(/\s+/gu, ' ').trim();
+  const spokenReference = noisySpokenReceptionConfirmationReference(text);
+  if (spokenReference) {
+    const kind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
+    return spokenReference.kind === kind && spokenReference.id === Number(order.id);
+  }
   const match = text.match(/^(?:SI[,.:]?\s+)?CONFIRMO\s+(?:LA\s+)?RECEPCION(?:\s+(.+))?$/u);
   if (!match) return false;
   const rest = String(match[1] || '').replace(/[.!?]+$/gu, '').trim();

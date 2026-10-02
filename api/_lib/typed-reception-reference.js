@@ -87,6 +87,17 @@ function preparationIntentFromText(rawText, options = {}) {
   return distinct.length === 1 ? distinct[0] : null;
 }
 
+function noisySpokenReceptionConfirmationReference(rawText) {
+  const text = normalizedSpeech(rawText).replace(/\s+/gu, ' ').trim();
+  // Solo una orden OC/IO tipada, precedida por «confirmo». El error fonético
+  // afecta «ID», no el tipo ni el número. No aceptar datos o correcciones extra.
+  const match = text.match(/^(?:SI[,.:]?\s+)?CONFIRMO\s+(?:(?:LA\s+)?RECEPCION\s+)?(O\s*C|I\s*O)\s*(?:I|Y)\s*(?:D|B|P|V)\s*(\d+)[.!]?$/u);
+  const id = Number(match?.[2]);
+  return match && Number.isSafeInteger(id) && id > 0
+    ? { kind: match[1].replace(/\s/gu, ''), id }
+    : null;
+}
+
 function preparationClarificationCandidate(rawText) {
   const text = normalizedSpeech(rawText).replace(/[.,;:]+/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
@@ -127,6 +138,7 @@ module.exports = {
   singleTypedReceptionReference,
   purchaseOrderParamsFromText,
   preparationIntentFromText,
+  noisySpokenReceptionConfirmationReference,
   preparationClarificationCandidate,
   confirmedPreparationReference,
   clarifiedPreparationReference,

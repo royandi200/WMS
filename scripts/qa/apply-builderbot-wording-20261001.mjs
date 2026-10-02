@@ -2,19 +2,48 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const projectId = '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
+const projectId = process.argv.find(arg => arg.startsWith('--project='))?.slice('--project='.length)
+  || '5fe41915-a5e6-423c-9bd4-b4e63dbe0d3d';
 const apply = process.argv.includes('--apply');
 const reboot = process.argv.includes('--reboot');
 const restore = process.argv.includes('--restore');
 if (reboot && !apply) throw new Error('--reboot requires --apply');
 
-const checkpoint = JSON.parse(await readFile(resolve('.tmp', 'builderbot-pre-wording-20261001.json'), 'utf8'));
+const checkpointFile = process.argv.find(arg => arg.startsWith('--checkpoint='))?.slice('--checkpoint='.length)
+  || 'builderbot-pre-wording-20261001.json';
+if (!/^builderbot-[a-z0-9-]+\.json$/u.test(checkpointFile)) throw new Error('Invalid checkpoint filename');
+const checkpoint = JSON.parse(await readFile(resolve('.tmp', checkpointFile), 'utf8'));
 if (checkpoint.projectId !== projectId || checkpoint.prompts.length !== 2
   || checkpoint.prompts.map(prompt => prompt.name).join(',') !== 'Entrada,Voz') {
   throw new Error('BuilderBot checkpoint does not match Entrada and Voz');
 }
 const local = await readFile(new URL('../../docs/Prompt WMS.txt', import.meta.url), 'utf8');
-const substitutions = [
+const voiceFallback = process.argv.includes('--voice-fallback');
+const neverTranslateAiVoice = process.argv.includes('--never-translate-aivoice');
+const noisyReceptionConfirmation = process.argv.includes('--noisy-reception-confirmation');
+if ([voiceFallback, neverTranslateAiVoice, noisyReceptionConfirmation].filter(Boolean).length > 1) {
+  throw new Error('Choose one prompt patch at a time');
+}
+function promptLine(source, prefix) {
+  const matches = source.split(/\r?\n/u).filter(line => line.startsWith(prefix));
+  if (matches.length !== 1) throw new Error(`Expected one prompt line starting ${prefix}`);
+  return matches[0];
+}
+const spanishRule = '5A. Redacta en español todas las preguntas, aclaraciones y respuestas generadas; no respondas al usuario en inglés. Conserva literalmente, con su idioma original, el mensaje real, nombres propios, marcas, SKU, IDs, datos documentales, claves JSON y nombres de acciones técnicas.';
+const fallbackRule = local.split(/\r?\n/u).find(line => line.startsWith('5B. '));
+if (voiceFallback && !fallbackRule) throw new Error('Local voice fallback rule is unavailable');
+const neverTranslateRule = local.split(/\r?\n/u).find(line => line.startsWith('5C. '));
+if (neverTranslateAiVoice && (!fallbackRule || !neverTranslateRule)) {
+  throw new Error('Local AI Voice non-translation rule is unavailable');
+}
+const substitutions = noisyReceptionConfirmation ? [
+  [promptLine(checkpoint.prompts[0].instructions, '- Solo al PREPARAR una recepción,'),
+    promptLine(local, '- Al PREPARAR una recepción,')],
+  [promptLine(checkpoint.prompts[0].instructions, 'Acepta "Confirmo la recepcion OC ID N"'),
+    promptLine(local, 'Acepta "Confirmo la recepcion OC ID N"')],
+] : neverTranslateAiVoice
+  ? [[fallbackRule, `${fallbackRule}\n${neverTranslateRule}`]]
+  : voiceFallback ? [[spanishRule, `${spanishRule}\n${fallbackRule}`]] : [
   ['No resumas, traduzcas, corrijas ni reemplaces `MENSAJE_REAL` con texto del historial.',
     'No resumas, reformules, corrijas ni reemplaces `MENSAJE_REAL` con texto del historial.'],
   ['5A. Nunca traduzcas al inglés ni respondas al usuario en inglés. Redacta en español todas las preguntas, aclaraciones y respuestas generadas. Conserva sin traducir el mensaje real, nombres propios, marcas, SKU, IDs, datos documentales, claves JSON y nombres de acciones técnicas.',
@@ -59,7 +88,9 @@ function patchedPrompt(original) {
     if (updated.split(before).length !== 2) throw new Error(`Expected exactly one prompt occurrence: ${before}`);
     updated = updated.replace(before, after);
   }
-  if (/traduc/iu.test(updated)) throw new Error('A translation-related instruction remains in the prompt');
+  if (!neverTranslateAiVoice && !noisyReceptionConfirmation && /traduc/iu.test(updated)) {
+    throw new Error('A translation-related instruction remains in the prompt');
+  }
   return updated;
 }
 

@@ -174,6 +174,7 @@ const { receptionPartidas } = require('../../_lib/reception-partidas');
 const {
   preparationIntentFromText,
   typedReceptionReferences,
+  noisySpokenReceptionConfirmationReference,
   preparationClarificationCandidate,
   purchaseOrderParamsFromText,
   confirmedPreparationReference,
@@ -1696,6 +1697,20 @@ module.exports = async (req, res) => {
       && (explicitReceptionCorrection || await hasRecentReceptionContext(db, user.id, from))) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
+    }
+    const spokenReceptionConfirmation = noisySpokenReceptionConfirmationReference(rawText);
+    if (spokenReceptionConfirmation && !selectedPreparationReference
+      && ['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_RECEPCION_OC',
+        'AVANZAR_RECEPCION_GUIADA_OC'].includes(action)) {
+      const preview = await recentlyDisplayedFinalReceptionPreview(db, user.id, from);
+      if (Number(preview?.orden_compra_id) === spokenReceptionConfirmation.id) {
+        const order = await findPurchaseOrder(db, { orden_compra_id: preview.orden_compra_id });
+        const identifier = purchaseOrderReceptionIdentifier(order);
+        if (identifier === `${spokenReceptionConfirmation.kind} ID ${spokenReceptionConfirmation.id}`) {
+          action = 'CONFIRMAR_RECEPCION_OC';
+          params = { orden_compra_id: spokenReceptionConfirmation.id, confirmacion_final: true };
+        }
+      }
     }
     const receptionAttempt = incompleteReceptionAttempt(rawBody, info, rawText);
     const receiptNamedInAttempt = /\brecepci[oó]n\b|\b(?:OC|IO)\s*(?:ID\s*)?\d+\b/iu.test(receptionAttempt || '');

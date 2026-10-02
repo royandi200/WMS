@@ -12,6 +12,8 @@ let routed = null;
 let recentReception = true;
 let recentFinalPreview = null;
 let activeFinalPreview = null;
+let interceptConfirmation = false;
+let interceptedConfirmation = null;
 
 require.cache[dbPath] = {
   id: dbPath, filename: dbPath, loaded: true,
@@ -54,6 +56,13 @@ require.cache[receptionPath] = {
         ? activeFinalPreview : null,
     findPurchaseOrder: async (_db, params) => ({ id: Number(params.orden_compra_id),
       numero: 'OC-PROV-20260930-014', tipo_recepcion: 'INSUMOS_MP' }),
+    confirmReceptionFromWhatsApp: async input => {
+      if (!interceptConfirmation) return reception.confirmReceptionFromWhatsApp(input);
+      interceptedConfirmation = input;
+      return { requires_confirmation: true, inventory_changed: false,
+        recepcion_id: 163, numero: 'REC-OC-63-001', orden_compra_id: 63,
+        item_count: 1, message: 'Confirmación fonética recibida; borrador verificado.' };
+    },
   },
 };
 
@@ -200,5 +209,35 @@ test('a current complete phrase is not replaced by a stale abbreviated model ech
     json(body) { this.body = body; return this; }, end() { return this; } };
   await handler(req, res);
   assert.doesNotMatch(res.body.mensaje, /envía esta frase completa en un solo mensaje/u);
+  recentFinalPreview = null;
+});
+
+test('OCIV speech reaches only the matching final reception preview', async () => {
+  interceptConfirmation = true;
+  recentFinalPreview = { orden_compra_id: 63, recepcion_id: 163 };
+  for (const [spoken, expected] of [
+    ['Confirmo OCIV63', true],
+    ['Confirmo OCIV64', false],
+    ['Confirmo IOIV63', false],
+    ['Confirmo OCIV63 pero cambia el lote', false],
+  ]) {
+    interceptedConfirmation = null;
+    executed.length = 0;
+    const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+      body: { from: '573150000059', body: spoken,
+        info: { '@ction': 'MODO_CHARLA', body: spoken, params: {} } } };
+    const res = { statusCode: 200, body: null, setHeader() {},
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; }, end() { return this; } };
+    await handler(req, res);
+    assert.equal(Boolean(interceptedConfirmation), expected, spoken);
+    if (expected) {
+      assert.equal(interceptedConfirmation.params.orden_compra_id, 63);
+      assert.equal(interceptedConfirmation.params.confirmacion_final, true);
+      assert.equal(interceptedConfirmation.rawText, spoken);
+    }
+    assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)|UPDATE recepciones\s+SET estado/u);
+  }
+  interceptConfirmation = false;
   recentFinalPreview = null;
 });

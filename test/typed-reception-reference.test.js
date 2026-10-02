@@ -7,6 +7,7 @@ const {
   singleTypedReceptionReference,
   purchaseOrderParamsFromText,
   preparationIntentFromText,
+  noisySpokenReceptionConfirmationReference,
   preparationClarificationCandidate,
   confirmedPreparationReference,
   clarifiedPreparationReference,
@@ -160,6 +161,21 @@ test('preparation checks the selected order namespace without loosening final re
     /El ID 38 es ambiguo/u);
   assert.equal(purchaseOrderTextReference('Confirmo la recepción IOIV38',
     { id: 38, tipo_recepcion: 'IN_OUT' }), false);
+});
+
+test('noisy final confirmation requires confirmo and one typed OC or IO reference', () => {
+  for (const phrase of ['Confirmo OCIV63', 'confirmo O C I V 63',
+    'Confirmo la recepción OCIB63']) {
+    assert.deepEqual(noisySpokenReceptionConfirmationReference(phrase),
+      { kind: 'OC', id: 63 }, phrase);
+  }
+  assert.deepEqual(noisySpokenReceptionConfirmationReference('Confirmo IOIV63'),
+    { kind: 'IO', id: 63 });
+  for (const phrase of ['Confirmo', 'OCIV63', 'No confirmo OCIV63',
+    'Confirmo OCIV63 pero corrige el lote', 'Confirmo OCIV63 o IOIV63',
+    'Confirmo MQIB63', 'Confirmo OCIV64 y OCIV63']) {
+    assert.equal(noisySpokenReceptionConfirmationReference(phrase), null, phrase);
+  }
 });
 
 test('MQ audio preparation stays in its own namespace and does not relax final confirmation', async () => {
