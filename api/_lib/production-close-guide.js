@@ -93,7 +93,7 @@ function closeFields(text) {
   const negated = new RegExp(`\\bubicacion\\s+no\\s+(?:es|era|fue)\\s+${locationCode}\\s*(?:,|;|sino)?\\s*(?:es|sino(?:\\s+que\\s+es)?)\\s+${locationCode}\\b`, 'u').exec(raw);
   const changedFrom = new RegExp(`\\bubicacion\\s+(?:(?:de|desde)\\s+)?${locationCode}\\s+(?:a|para|por)\\s+${locationCode}\\b`, 'u').exec(raw);
   const direct = new RegExp(`\\bubicacion(?:\\s+(?:del?\\s+)?(?:(?:producto\\s+)?terminado(?:\\s+conforme)?|conforme|pt))?\\s*(?:(?:correcta|nueva|ahora)\\s+)?(?:(?:es|fue|sera|seria|queda|quedara|debe\\s+ser|va\\s+para|van\\s+para|a|en)\\s+)?[:=\\-]?\\s*${locationCode}\\b`, 'u').exec(raw);
-  const contextual = new RegExp(`\\b(?:quedan?\\s+en|dejar\\s+en|ubicar\\s+en|van?\\s+para|en)\\s*${locationCode}\\b`, 'u').exec(raw);
+  const contextual = new RegExp(`\\b(?:quedan?\\s+en|dejar\\s+en|ubicar\\s+en|van?\\s+para|en)\\s*(?:la\\s+)?(?:ubicacion\\s+)?${locationCode}\\b`, 'u').exec(raw);
   const location = (negated?.[2] || changedFrom?.[2] || direct?.[1] || contextual?.[1] || null)
     ?.replace(/\s+/gu, '').toUpperCase() || null;
   const rawReason = raw.match(/\b(?:por|motivo|causa|debido a)\s+(.+?)(?=\s+(?:ubicacion|quedan en|dejar en)\b|$)/u)?.[1]
@@ -205,13 +205,26 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
   }).filter(item => item.producto || item.cantidad != null || item.lote || item.motivo);
 }
 
+function changedMaterialCandidate(text) {
+  const raw = normalize(text).replace(/[.!?]+$/u, '');
+  const match = /^(?:se\s+)?(?:cambie|cambiamos|cambiaron|cambio|reemplace|reemplazamos|sustitui|sustituimos)\s+(?:de\s+)?(.+)$/u.exec(raw);
+  if (!match || /^(?:el\s+|la\s+)?(?:lote|ubicacion|cantidad|causa|motivo)\b/u.test(match[1])) return null;
+  const segment = match[1].trim();
+  const count = new RegExp(`^${NUMBER}\\s*(?:und|unidad(?:es)?|g|gramos?)?\\s*(?:de\\s+)?`, 'u').exec(segment);
+  const description = segment.slice(count?.[0].length || 0).trim();
+  const [product, cause] = description.split(/\s+(?:por|debido a|causa|motivo)\s+/u);
+  if (!product || /^(?:material(?:es)?|insumo(?:s)?)$/u.test(product)) return null;
+  return { producto: product, cantidad: count ? quantity(count[1]) : null,
+    lote: null, motivo: cleanMaterialCause(cause) };
+}
+
 function materialFollowup(text) {
   const raw = String(text || '').trim();
   const lot = raw.match(/\blote(?:\s+(?:es|fue|era|sería|seria))?(?:\s+el)?\s*[:#-]?\s*((?!(?:es|fue|era|el|de|del)\b)[A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
   const cause = cleanMaterialCause(raw.match(/\b(?:causa|motivo)(?:\s+(?:fue|es))?\s*(?:[:\-]|por)?\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || raw.match(/\b(?:por|debido a)\s+(.+?)(?=\s+y\s+(?:el\s+)?lote\b|[.;]|$)/iu)?.[1]?.trim()
     || (/^(?:ruptura+|rotura|derrame|contaminacion|contaminación|defecto|caida|caída|daño|dano|despegue)$/iu.test(raw) ? raw : null));
-  const location = raw.match(/\b(?:ubicaci[oó]n\s*(?:es|:)?|en)\s*([a-z]+\d+[a-z0-9-]*)\b/iu)?.[1] || null;
+  const location = raw.match(/\b(?:ubicaci[oó]n\s*(?:es|:)?|(?:va|van|queda|quedan)?\s*(?:para|en|a)\s+(?:la\s+)?(?:ubicaci[oó]n\s+)?)\s*([a-z]+\d+[a-z0-9-]*)\b/iu)?.[1] || null;
   return { lote: lot, motivo: cause, ubicacion: location?.toUpperCase() || null };
 }
 
@@ -276,13 +289,13 @@ async function availableReplacementLots(db, material, line, location = null) {
     disponible: Number(row.disponible), vence: row.vence ? String(row.vence).slice(0, 10) : null }));
 }
 
-async function startLotChoice(db, draft, order, target, index = null) {
+async function startLotChoice(db, draft, order, target, index = null, requestedLocation = undefined) {
   const line = target === 'pending' ? draft.materialPending : draft.materials[index];
   if (!line?.sku || line.cantidad == null) return;
   const materials = await orderMaterials(db, order.id);
   const material = materials.find(item => item.sku === line.sku);
   if (!material) throw guideError(`${line.sku} no pertenece a OP ID ${order.id}`);
-  const location = line.ubicacion || null;
+  const location = requestedLocation === undefined ? line.ubicacion || null : requestedLocation;
   const options = await availableReplacementLots(db, material, line, location);
   draft.materialChoice = { target, index, sku: line.sku,
     producto: line.producto, cantidad: line.cantidad, unidad: line.unidad,
@@ -397,7 +410,10 @@ async function requestLotChange(db, draft, order, text) {
       index = selected[0].lineIndex;
     }
   }
-  await startLotChoice(db, draft, order, 'existing', index);
+  // Cambiar lote no implica conservar la ubicación del lote anterior. Una
+  // ubicación dicha ahora sí limita la lista; sin ella se muestran todas.
+  await startLotChoice(db, draft, order, 'existing', index,
+    materialFollowup(text).ubicacion || null);
   draft.reviewShown = false;
   return true;
 }
@@ -511,16 +527,16 @@ function materialQuantityCorrection(text) {
   // como cantidad si el operario aún no dijo cuál es el valor nuevo.
   const remainder = prefix && indexed ? raw.slice(indexed.index + indexed[0].length)
     .trim().replace(/^[,;:.-]\s*/u, '') : '';
-  const bareIndexed = /^(?:(?:a|son|fueron|eran|es|era|quedaron|quedo)\s+)?(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(g|gramos?|und|unidades?)?\s*[.!]?$/u.exec(remainder);
+  const bareIndexed = /^(?:(?:a|son|fueron|eran|es|era|quedaron|quedo)\s+)?(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(g|gramos?|und|unidad(?:es)?)?\s*[.!]?$/u.exec(remainder);
   const amount = quantity(raw.match(/\b(?:cantidad|reposicion|repuesto|total)\b(?:\s+(?:fue|era|es|de|a|por|quedo|quedaron|fueron))*\s*(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/u)?.[1]
     || bareIndexed?.[1]
-    || raw.match(/\b(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:g|gramos?|und|unidades?)?\s*[.!]?\s*$/u)?.[1]);
+    || raw.match(/\b(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:g|gramos?|und|unidad(?:es)?)?\s*[.!]?\s*$/u)?.[1]);
   const natural = /^(?:la\s+)?reposicion\s+de\s+(.+?)\s+(?:fue|era|es|quedo)\s+(?:de\s+)?/u.exec(raw);
   const targeted = /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona)\s*[:,.-]?\s*(?:la\s+)?(?:cantidad|reposicion|total)\s+(?:de\s+)?(.+?)\s+(?:a|por|es|fue|era)\s+/u.exec(raw);
   if (!(quantityField || bareIndexed) || amount == null || !(prefix || natural || targeted)) return null;
   const product = natural?.[1] || targeted?.[1] || null;
   if (!indexed && !product) return null;
-  const spokenUnit = bareIndexed?.[2] || raw.match(/\b(?:\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(g|gramos?|und|unidades?)\s*[.!]?$/u)?.[1] || null;
+  const spokenUnit = bareIndexed?.[2] || raw.match(/\b(?:\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(g|gramos?|und|unidad(?:es)?)\s*[.!]?$/u)?.[1] || null;
   return { index: indexed ? Number(indexed[1]) - 1 : null, product, amount, spokenUnit };
 }
 
@@ -575,7 +591,9 @@ async function applyQuantityCorrection(db, draft, order, text) {
 
 function applyIndexedMaterialCorrection(draft, text) {
   const raw = normalize(text);
-  if (!/^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona|quita|elimina)\b/u.test(raw)) return false;
+  const explicitCorrection = /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona|quita|elimina)\b/u.test(raw);
+  const directedPart = /^(?:(?:la|el)\s+)?(?:partida|fila|renglon)\s*#?\s*\d+\s*[,;:]?\s*(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(raw);
+  if (!explicitCorrection && !directedPart) return false;
   const reference = /\b(?:partida|fila|renglon)\s*#?\s*(\d+)\b/u.exec(raw);
   if (!reference) return false;
   const index = Number(reference[1]) - 1;
@@ -584,7 +602,8 @@ function applyIndexedMaterialCorrection(draft, text) {
   if (/^(?:quita|elimina)\b/u.test(raw)) {
     draft.materials.splice(index, 1);
   } else {
-    const location = /\bubicacion\s*(?:(?:nueva|correcta)\s*)?(?:a|es|era|fue|en|:)?\s*([a-z]+\s*\d+[a-z0-9-]*)\b/u.exec(raw)?.[1];
+    const location = /\bubicacion\s*(?:(?:nueva|correcta)\s*)?(?:a|es|era|fue|en|:)?\s*([a-z]+\s*\d+[a-z0-9-]*)\b/u.exec(raw)?.[1]
+      || /\b(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?([a-z]+\s*\d+[a-z0-9-]*)\b/u.exec(raw)?.[1];
     const lot = /\blote\s+(?:a|es|era|fue|:)\s*([a-z0-9][a-z0-9_-]*)\b/u.exec(raw)?.[1];
     const reason = /\b(?:causa|motivo)\s*(?:a|es|era|fue|por|:)?\s*(.+)$/u.exec(raw)?.[1];
     if (!location && !lot && !reason) return false;
@@ -841,7 +860,9 @@ async function applyMaterialReport(db, draft, order, text, params) {
   }
   const readyForMaterials = draft.conforming != null && draft.waste != null
     && (draft.waste === 0 || draft.reason) && (draft.conforming === 0 || draft.location);
+  const changedMaterial = changedMaterialCandidate(text);
   const spoken = parseMaterialSegments(text, { allowImplicit: readyForMaterials && !draft.materialPending });
+  if (!spoken.length && changedMaterial) spoken.push(changedMaterial);
   if (MATERIAL_START.test(String(text || '')) && !spoken.length && !draft.materialPending) {
     draft.materialPending = { sku: null, producto: null, cantidad: null, lote: null,
       motivo: null, unidad: null, ubicacion: null };
@@ -852,7 +873,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
   const interpreted = Array.isArray(advance.items) && advance.items.length
     ? advance.items : Array.isArray(params.materiales_repuestos) && params.materiales_repuestos.length
       ? params.materiales_repuestos : [];
-  const incoming = hasNewMaterial && interpreted.length === spoken.length
+  const incoming = hasNewMaterial && !changedMaterial && interpreted.length === spoken.length
     ? spoken.map((said, index) => ({ ...interpreted[index],
       producto: said.producto || interpreted[index].producto || interpreted[index].sku,
       cantidad: said.cantidad ?? interpreted[index].cantidad,
@@ -877,6 +898,13 @@ async function applyMaterialReport(db, draft, order, text, params) {
     }) : null;
     if (productTerm && !materials.some(row => Number(row.producto_id) === Number(product.id))) {
       throw guideError(`El producto ${productTerm} no es un material de OP ID ${order.id}`);
+    }
+    const recordedParts = changedMaterial && number == null
+      ? draft.materials.map((line, index) => line.sku === product.siigo_code ? index + 1 : null)
+        .filter(Boolean) : [];
+    if (recordedParts.length) {
+      const listed = recordedParts.join(', ');
+      throw guideError(`Ya hay una reposición de ${product.nombre} en ${recordedParts.length === 1 ? 'la partida' : 'las partidas'} ${listed}. ¿Quieres corregirla o agregar otra reposición? Para corregir, di «cambia lote de partida ${recordedParts[0]}» o «partida ${recordedParts[0]}, cantidad nueva»; para agregar otra, indica cuántas unidades cambiaste. No cambié el borrador.`);
     }
     const differentPending = draft.materialPending?.sku && product
       && product.siigo_code !== draft.materialPending.sku;
@@ -1007,11 +1035,13 @@ function isCloseFollowup(text, draft) {
     || /^(?:mas opciones|siguientes opciones|siguiente pagina|opciones anteriores|pagina anterior)$/u.test(raw))) return true;
   if (isLotChangeRequest(raw)) return true;
   if (materialLossCandidate(raw)) return true;
+  if (changedMaterialCandidate(raw)) return true;
   if (confirmationAttempt(raw) || rejected(raw)) return true;
   if (/^op\s*(?:id\s*)?#?\s*[1-9]\d*[.!]?$/u.test(raw)) return true;
   if (/^(?:corrige|cambia|modifica|quita|elimina|correccion|correcion|corrijo|perdon|perdona)\b/u.test(raw)) return true;
   if (!draft.orderId && contextualOrderCandidate(raw, true)) return true;
   if (/\b(?:conformes?|mermas?|no conformes?|motivo|causa|ubicacion|dejar en|quedan en|por|repuse|repusimos|repuesto|lote|materiales?)\b/u.test(raw)) return true;
+  if (closeFields(raw).location && /\b(?:va|van|queda|quedan|dejo|pongo)\s+(?:para|en|a)\b/u.test(raw)) return true;
   if (noReplacements(raw) || replacementsFinished(raw)) return true;
   if (draft.materialPending && raw.length < 120 && !/[?¿]/u.test(raw)) return true;
   if (draft.unclassifiedWaste && raw.length < 120 && !/[?¿]/u.test(raw)) return true;
@@ -1240,9 +1270,16 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   }
   const materialMarker = MATERIAL_START.exec(String(rawText || ''));
   const damageMarker = materialLossCandidate(rawText);
+  const changedMaterialMarker = changedMaterialCandidate(rawText);
   const closeText = materialMarker ? String(rawText).slice(0, materialMarker.index)
-    : damageMarker ? String(rawText).slice(0, damageMarker.index) : rawText;
+    : damageMarker ? String(rawText).slice(0, damageMarker.index)
+      : changedMaterialMarker ? '' : rawText;
   const parsed = closeFields(closeText);
+  const partTargeted = /\b(?:partida|fila|renglon)\s*#?\s*\d+\b/u.test(normalize(rawText));
+  const naturalDestination = /^(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(normalize(rawText));
+  if (naturalDestination && draft.materials?.length && !draft.materialPending && draft.location) {
+    return { message: 'Hay producto terminado y materiales repuestos en este cierre. ¿Qué ubicación corriges? Di «el conforme va para la C3» o «partida N va para la A14». No cambié el borrador.', draft };
+  }
   const explicitPtReason = explicitFinishedWasteReason(rawText);
   const targetedPtReason = explicitPtReason
     && (!draft.materialPending || /\b(?:producto\s+terminado|no\s+conforme)\b/u.test(normalize(rawText)))
@@ -1287,7 +1324,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (targetedPtReason && draft.waste > 0) draft.reason = targetedPtReason;
   else if (parsed.reason && draft.waste > 0
     && (parsed.waste > 0 || (!draft.reason && !hadPendingMaterial))) draft.reason = parsed.reason;
-  if (parsed.location && !hadPendingMaterial) draft.location = parsed.location;
+  if (parsed.location && !hadPendingMaterial && !partTargeted && !wantsLotChange) draft.location = parsed.location;
   const singleQuantity = quantity(rawText);
   if (singleQuantity != null && parsed.conforming == null && parsed.waste == null
     && !choiceHandled && !hadPendingMaterial && !draft.unclassifiedWaste) {

@@ -22,7 +22,8 @@ function explicitPickConfirmation(text) {
 function isPickCorrection(text) {
   const raw = normalize(text);
   return /\b(?:correccion|corrijo|corrige|cambia|cambio|ajusta|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(raw)
-    || /\b[a-z]{1,5}\s*\d{1,3}\s+y\s+no\s+(?:de\s+)?(?:la\s+)?[a-z]{1,5}\s*\d{1,3}\b/u.test(raw);
+    || /\b[a-z]{1,5}\s*\d{1,3}\s+y\s+no\s+(?:de\s+)?(?:la\s+)?[a-z]{1,5}\s*\d{1,3}\b/u.test(raw)
+    || /^(?:(?:la\s+)?(?:partida|fila|renglon)\s*#?\s*\d+\s*[,;:]?\s*)?(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico)|las?\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(raw);
 }
 
 function isPickReviewIntent(text) {
@@ -128,7 +129,7 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
       `   Lote: ${row.lote} | ubicación: ${row.ubicacion || 'sin ubicación'}`,
     ]),
     '', note || 'Verifica físicamente cada partida antes de iniciar la producción.',
-    '', 'Para corregir, empieza con «corrección» e identifica la partida. Por ejemplo: «corrección en la partida 1, la ubicación es A10» o «corrección de partida 1, quiero cambiar ubicación». No necesitas repetir el SKU ni el lote anterior.',
+    '', 'Para corregir, identifica la partida. Por ejemplo: «partida 1 va para la A10» o «corrección de partida 1, quiero cambiar ubicación». No necesitas repetir el SKU ni el lote anterior.',
     'Para escoger otro lote, puedes decir «corrección: partida 1, quiero cambiar el lote».',
     'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
     choicePending
@@ -153,7 +154,7 @@ function pickLocations(text) {
   // La segunda ubicación es la anterior; la primera es la corrección.
   const reversed = /\b([a-z]{1,5}\d{1,3})\s+y\s+no\s+(?:de\s+)?(?:la\s+)?([a-z]{1,5}\d{1,3})\b/u.exec(raw);
   if (reversed) return [reversed[2].toUpperCase(), reversed[1].toUpperCase()];
-  const direct = [...raw.matchAll(/\b(?:ubicacion\s*(?:(?:correcta|nueva|es)\s*)?[:\-]?\s*|(?:en|para|a)\s+(?:la\s+ubicacion\s*)?)([a-z][a-z0-9-]*\d[a-z0-9-]*)\b/gu)]
+  const direct = [...raw.matchAll(/\b(?:ubicacion\s*(?:(?:correcta|nueva|es)\s*)?[:\-]?\s*|(?:en|para|a)\s+(?:la\s+)?(?:ubicacion\s*)?)([a-z][a-z0-9-]*\d[a-z0-9-]*)\b/gu)]
     .map(match => match[1].toUpperCase());
   if (direct.length) return direct;
   const natural = /\bubicacion(?: correcta)?\s+de\s+(?:los?|las?)\s+.+?\s+(?:es|fue|queda)\s+([a-z][a-z0-9-]*\d[a-z0-9-]*)\b/u.exec(raw);

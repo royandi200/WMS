@@ -995,6 +995,41 @@ test('an explicit OC ID correction updates a partition after a final preview', a
   assert.equal(state.inventoryWrites, 0);
 });
 
+test('una recepción acepta cantidad y destino evidentes sin exigir el nombre del campo', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const send = rawText => advanceGuidedReception({ db, user, rawText, params: { avance: {} } });
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',
+    params: { avance: { producto: 'tapas', cantidad: 2,
+      condicion: 'DISPONIBLE', ubicacion: 'A8' } } });
+  await send('sí');
+  await send('corrección, 1 unidad');
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].cantidad, 1);
+  const location = await send('va para la A11');
+  assert.match(location.message, /A11/u);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].ubicacion, 'A11');
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('una partida explícita corrige solo su destino y una partida ambigua no cambia nada', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const send = rawText => advanceGuidedReception({ db, user, rawText, params: { avance: {} } });
+  await send('OC ID 37: tapas');
+  await send('partidas de tapas: 1 disponible en A8; 1 en cuarentena en CUAR-C-1-01 por golpe');
+  await send('sí');
+  await send('sí');
+  await assert.rejects(send('va para la A11'), /Indica cuál corriges.*partida 1.*partida 2/u);
+  const unchanged = JSON.parse(state.draft.payload_json);
+  assert.equal(unchanged.version, 1);
+  assert.equal(unchanged.items[0].distributions[0].ubicacion, 'A8');
+  const corrected = await send('partida 1 va para la A11');
+  assert.equal(corrected.sku_review, true);
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].partidas[0].ubicacion, 'A11');
+  assert.equal(JSON.parse(state.draft.payload_json).entries['00001-TPBI'].partidas[1].ubicacion, 'CUAR-C-1-01');
+  assert.equal(state.inventoryWrites, 0);
+});
+
 test('an in-progress draft from before this change stops for its first SKU review', async () => {
   const { db, state } = guidedDb();
   const user = { id: 5 };

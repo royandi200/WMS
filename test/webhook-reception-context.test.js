@@ -90,6 +90,34 @@ test('a misclassified production correction follows the last reception preview',
   assert.doesNotMatch(executed.join('\n'), /INSERT INTO (?:stock|lots|kardex)/u);
 });
 
+test('una frase breve de cantidad o destino sigue la recepción solo con contexto reciente', async () => {
+  for (const text of ['va para la A11', 'partida 2 va para la A11', '100 gramos']) {
+    recentReception = true;
+    routed = null;
+    const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+      body: { from: '573150000059', body: text,
+        info: { '@ction': 'MODO_CHARLA', body: text, params: {} } } };
+    const res = { statusCode: 200, body: null, setHeader() {},
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; }, end() { return this; } };
+    await handler(req, res);
+    assert.equal(res.statusCode, 200, text);
+    assert.equal(routed?.rawText, text);
+    assert.equal(routed.params.confirmacion_final, undefined);
+  }
+  recentReception = false;
+  routed = null;
+  const text = 'va para la A11';
+  const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+    body: { from: '573150000059', body: text,
+      info: { '@ction': 'MODO_CHARLA', body: text, params: {} } } };
+  const res = { statusCode: 200, body: null, setHeader() {},
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; }, end() { return this; } };
+  await handler(req, res);
+  assert.equal(routed, null);
+});
+
 test('an explicit OC correction recovers after the last reply was about production', async () => {
   recentReception = false;
   routed = null;

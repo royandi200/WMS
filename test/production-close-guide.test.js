@@ -1000,6 +1000,51 @@ test('después del primer resumen se puede añadir otro SKU antes de confirmar',
   assert.match(finalReview.message, /Resumen para confirmar/u);
 });
 
+test('«cambio de etiquetas» identifica un insumo de la OP y pregunta lo que falta', async () => {
+  const db = fakeDb({ orderId: 110, planned: 8, initialDraft: {
+    orderId: 110, conforming: 7, waste: 1, wasteClassified: true,
+    reason: 'defecto', location: 'C2', materials: [], materialsAnswered: true,
+    materialPending: null, reviewShown: true,
+  } });
+  const started = await advanceCloseGuide({ db, userId: 7, rawText: 'cambio de etiquetas' });
+  assert.equal(started.draft.materialPending?.sku, '00017-ETASH60');
+  assert.equal(started.draft.materialPending?.cantidad, null);
+  assert.match(started.message, /¿Cuánto ETIQUETA ASHWAGANDHA repusiste\?/u);
+  assert.equal(isCloseFollowup('cambio de etiquetas', started.draft), true);
+  assert.equal(started.draft.reason, 'defecto');
+  assert.equal(started.draft.materialChoice == null, true);
+});
+
+test('«cambié dos etiquetas» toma la cantidad sin inventar lote ni alterar otra reposición', async () => {
+  const db = fakeDb({ orderId: 110, planned: 8, initialDraft: {
+    orderId: 110, conforming: 7, waste: 1, wasteClassified: true,
+    reason: 'defecto', location: 'C2', materials: [{ sku: '00001-TPBI',
+      producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und', cantidad: 1,
+      lote: 'ACC-260910-TPBI', motivo: 'ruptura', ubicacion: 'A8' }],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'cambié dos etiquetas por mala impresión' });
+  assert.equal(result.draft.materialPending?.sku, '00017-ETASH60');
+  assert.equal(result.draft.materialPending?.cantidad, 2);
+  assert.equal(result.draft.materialPending?.motivo, 'mala impresion');
+  assert.equal(result.draft.materials[0].cantidad, 1);
+  assert.match(result.message, /elige lote/u);
+});
+
+test('«cambio de etiquetas» no duplica una reposición ya registrada', async () => {
+  const db = fakeDb({ orderId: 110, planned: 8, initialDraft: {
+    orderId: 110, conforming: 7, waste: 1, wasteClassified: true,
+    reason: 'defecto', location: 'C2', materials: [{ sku: '00017-ETASH60',
+      producto: 'ETIQUETA ASHWAGANDHA', unidad: 'und', cantidad: 2,
+      lote: 'AA-260929-01-ETASH', motivo: 'impresión', ubicacion: 'A1' }],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  await assert.rejects(() => advanceCloseGuide({ db, userId: 7,
+    rawText: 'cambio de etiquetas' }), /¿Quieres corregirla o agregar otra reposición\?/u);
+  assert.equal(db.writes.length, 0);
+});
+
 test('OP 110 acepta una causa breve del insumo sin cambiar la merma del producto terminado', async () => {
   const db = fakeDb({ orderId: 110, planned: 8 });
   const base = { db, userId: 58 };
@@ -1138,6 +1183,34 @@ test('el resumen permite volver a escoger el lote sin dictar el nuevo código', 
   assert.equal(done.params.materiales_repuestos[0].lote, 'L-DOS');
 });
 
+test('cambiar lote ofrece otras ubicaciones cuando ambas cubren la reposición', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20,
+    stockAvailable: 60, stockLocations: { 'LOTE-B11': 'B11', 'LOTE-C5': 'C5' },
+    replacementOptions: [
+      { lote: 'LOTE-B11', ubicacion: 'B11', disponible: 60 },
+      { lote: 'LOTE-C5', ubicacion: 'C5', disponible: 20 },
+    ], initialDraft: { orderId: 113, conforming: 19, waste: 1,
+      wasteClassified: true, reason: 'defecto', location: 'C7',
+      materials: [{ sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+        unidad: 'und', cantidad: 2, lote: 'LOTE-B11', motivo: 'ruptura', ubicacion: 'B11' }],
+      materialsAnswered: true, materialPending: null, reviewShown: true } });
+  const base = { db, userId: 7 };
+  const options = await advanceCloseGuide({ ...base, rawText: 'cambia lote de partida 1' });
+  assert.match(options.message, /Lote \*LOTE-B11\* \| ubicación \*B11\*/u);
+  assert.match(options.message, /Lote \*LOTE-C5\* \| ubicación \*C5\*/u);
+  assert.equal(options.draft.location, 'C7');
+  const chosen = await advanceCloseGuide({ ...base, rawText: 'opción 2' });
+  assert.equal(chosen.draft.materials[0].lote, 'LOTE-C5');
+  assert.equal(chosen.draft.materials[0].ubicacion, 'C5');
+  assert.equal(chosen.draft.location, 'C7');
+
+  const filtered = await advanceCloseGuide({ ...base,
+    rawText: 'cambia lote de partida 1 en B11' });
+  assert.match(filtered.message, /Lote \*LOTE-B11\*/u);
+  assert.doesNotMatch(filtered.message, /Lote \*LOTE-C5\*/u);
+  assert.equal(filtered.draft.location, 'C7');
+});
+
 test('las opciones de reposición se limitan a la ubicación declarada y permiten paginar', async () => {
   const replacementOptions = Array.from({ length: 9 }, (_, index) => ({
     lote: `L-${index + 1}`, ubicacion: 'A14', disponible: 5,
@@ -1222,6 +1295,16 @@ test('OP 113 corrige 120 a 100 g en la partida existente sin pedir de nuevo el l
   }
 });
 
+test('una unidad singular también corrige cantidad de un insumo por partida', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20,
+    initialDraft: gomasDraft([{ sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 2, lote: 'ACC-260910-TPBI', motivo: 'ruptura', ubicacion: 'A8' }]) });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección partida 1, 1 unidad' });
+  assert.equal(result.draft.materials[0].cantidad, 1);
+  assert.equal(result.draft.materials[0].lote, 'ACC-260910-TPBI');
+});
+
 test('OP 113 acepta corrección directa de partida 3 y no inventa cantidad si falta', async () => {
   const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
     stockAvailable: 200, initialDraft: gomasDraft([
@@ -1292,6 +1375,37 @@ test('corrige causa y ubicación de una partida específica sin afectar la otra'
   assert.equal(location.draft.materials[1].ubicacion, 'A14');
   assert.equal(location.draft.materials[0].ubicacion, 'A8');
   assert.equal(location.draft.materials.length, 2);
+});
+
+test('una partida repuesta puede cambiar de ubicación con lenguaje natural sin mover el terminado', async () => {
+  for (const phrase of ['partida 1 va para la A14',
+    'corrección: partida 1 queda en la A14']) {
+    const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+      stockAvailable: 200, stockLocations: { 'LOTE-OLD': 'A8', 'LOTE-NEW': 'A14' },
+      replacementOptions: [
+        { lote: 'LOTE-OLD', ubicacion: 'A8', disponible: 200 },
+        { lote: 'LOTE-NEW', ubicacion: 'A14', disponible: 200 },
+      ], initialDraft: gomasDraft([gomasLine(120, 'LOTE-OLD', 'A8')]) });
+    const changed = await advanceCloseGuide({ db, userId: 7, rawText: phrase });
+    assert.equal(changed.draft.materials[0].ubicacion, 'A14', phrase);
+    assert.equal(changed.draft.location, 'C2', phrase);
+    assert.equal(changed.draft.materials[0].lote, null, phrase);
+    assert.deepEqual(changed.draft.materialChoice.options.map(row => row.lote), ['LOTE-NEW'], phrase);
+  }
+});
+
+test('un destino sin objeto claro pide distinguir terminado y material', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+    initialDraft: gomasDraft([gomasLine(100)]) });
+  const ambiguous = await advanceCloseGuide({ db, userId: 7, rawText: 'va para la C3' });
+  assert.match(ambiguous.message, /¿Qué ubicación corriges\?/u);
+  assert.equal(ambiguous.draft.location, 'C2');
+  assert.equal(ambiguous.draft.materials[0].ubicacion, 'A8');
+  const finished = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'el conforme va para la C3' });
+  assert.equal(finished.draft.location, 'C3');
+  assert.equal(finished.draft.materials[0].ubicacion, 'A8');
+  assert.equal(isCloseFollowup('va para la C3', finished.draft), true);
 });
 
 test('con varios lotes, cambiar lote de partida 2 abre opciones sin tratar «de» como lote', async () => {

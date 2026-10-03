@@ -313,6 +313,29 @@ test('una corrección natural de ubicación conserva el producto contextual', as
   assert.equal(db.allocations[0].stock_id, 12);
 });
 
+test('una partida con destino claro no necesita la palabra corrección ni ubicación', async () => {
+  for (const phrase of ['partida 1 va para la A10', 'fila 1 queda en A10',
+    'partida 1 lo dejo en la A10']) {
+    const db = fakeDb();
+    await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+    const offered = await advanceProductionPick({ db, userId: 7, rawText: phrase });
+    assert.match(offered.message, /elige el lote/u, phrase);
+    assert.equal(db.allocations[0].ubicacion, 'A11', phrase);
+    const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
+    assert.match(chosen.message, /Corrección aplicada a la partida 1/u, phrase);
+    assert.equal(db.allocations[0].ubicacion, 'A10', phrase);
+  }
+});
+
+test('un destino sin partida no adivina entre materiales distintos', async () => {
+  const db = fakeDb();
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const reply = await advanceProductionPick({ db, userId: 7, rawText: 'va para la A10' });
+  assert.match(reply.message, /No identifiqué una sola partida/u);
+  assert.equal(db.allocations[0].ubicacion, 'A11');
+  assert.equal(db.allocations[1].ubicacion, 'A8');
+});
+
 test('el reparto conserva el total, crea una segunda partida y exige revisar otra vez', async () => {
   const db = fakeDb();
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });

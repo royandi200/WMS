@@ -165,7 +165,7 @@ const {
 } = require('../../_lib/builderbot-reception');
 const { buildPendingReceptionsMessage } = require('../../_lib/pending-receptions-message');
 const { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
-  hasRecentReceptionContext, isReceptionCorrectionRequest,
+  hasRecentReceptionContext, isReceptionCorrectionRequest, isReceptionContextualField,
   currentMessageText, skuReviewReply, documentMismatch, guidedReceptionResume } = require('../../_lib/builderbot-guided-reception');
 
 // BB Cloud API token y Bot ID
@@ -1642,6 +1642,7 @@ module.exports = async (req, res) => {
     // una corrección de materiales, no se debe enviar al cierre ni a su RBAC.
     // La guía de alistamiento pedirá OP/partida si el contexto no es inequívoco.
     if (pickOnlyOperator && contextualPickCorrection
+      && !await hasRecentReceptionContext(db, user.id, from)
       && ['CERRAR_ORDEN_PRODUCCION', 'SOLICITAR_CIERRE_PRODUCCION',
         'UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action)) {
       action = 'CONFIRMAR_MATERIALES_PRODUCCION';
@@ -1697,6 +1698,13 @@ module.exports = async (req, res) => {
       && (explicitReceptionCorrection || await hasRecentReceptionContext(db, user.id, from))) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
       params = { avance: params.avance || {}, correccion: true };
+    }
+    if (!selectedPreparationReference && isReceptionContextualField(rawText)
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC',
+        'CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA'].includes(action)
+      && await hasRecentReceptionContext(db, user.id, from)) {
+      action = 'AVANZAR_RECEPCION_GUIADA_OC';
+      params = { avance: {} };
     }
     const spokenReceptionConfirmation = noisySpokenReceptionConfirmationReference(rawText);
     if (spokenReceptionConfirmation && !selectedPreparationReference

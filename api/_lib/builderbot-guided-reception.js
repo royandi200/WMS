@@ -102,6 +102,31 @@ function correctionFieldsFromText(rawText) {
   return {};
 }
 
+function contextualFieldsFromText(rawText) {
+  const raw = currentMessageText(rawText).normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '').toLowerCase().trim()
+    .replace(/[.!?]+$/u, '').trim();
+  const correction = /^(?:correccion|correcion|corrijo|corrige|cambia|modifica)\b\s*[,;:-]?\s*/u.exec(raw);
+  let remaining = correction ? raw.slice(correction[0].length) : raw;
+  const part = /^(?:(?:la|el)\s+)?(?:partida|fila|renglon)\s*#?\s*(\d+)\b\s*[,;:]?\s*/u.exec(remaining);
+  if (part) remaining = remaining.slice(part[0].length).trim();
+  const target = part ? { partida: Number(part[1]) } : {};
+  const location = /^(?:(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico)|las?\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)|(?:para|en|a))\s+(?:la\s+)?(?:ubicacion\s+)?([a-z][a-z0-9-]*\d[a-z0-9-]*)$/u.exec(remaining);
+  if (location) return { fields: { ...target, ubicacion: location[1].toUpperCase() }, unit: null };
+  const amount = /^(?:(?:son|fueron|eran|quedan|recibi|recibimos|llegaron)\s+)?(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(g|gramos?|und|unidad(?:es)?)?$/u.exec(remaining);
+  if (!amount || (!correction && !part && !amount[2] && !/^(?:recibi|recibimos|llegaron)\b/u.test(remaining))) {
+    return { fields: {}, unit: null };
+  }
+  const words = { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
+    seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
+  const quantity = words[amount[1]] ?? Number(amount[1].replace(',', '.'));
+  return { fields: { ...target, cantidad: quantity }, unit: amount[2] || null };
+}
+
+function isReceptionContextualField(rawText) {
+  return Object.keys(contextualFieldsFromText(rawText).fields).length > 0;
+}
+
 function mixedPartsFromText(rawText) {
   const text = currentMessageText(rawText).trim().normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '');
@@ -499,7 +524,13 @@ function applyMixedFields(entry, advance, prepared) {
   } else if (entry.partidas) {
     const partFields = ['cantidad', 'condicion', 'ubicacion', 'lote', 'fecha_vencimiento', 'motivo'];
     if (partFields.some(key => Object.hasOwn(advance, key))) {
-      throw inputError(`Este SKU tiene ${entry.partidas.length} partidas. Indica cuál corriges: «partida 1» o «partida 2». No se cambió el borrador.`, 409);
+      if (entry.partidas.length !== 1) {
+        throw inputError(`Este SKU tiene ${entry.partidas.length} partidas. Indica cuál corriges: «partida 1» o «partida 2». No se cambió el borrador.`, 409);
+      }
+      const fields = { ...advance };
+      for (const key of ['producto', 'sku', 'cantidad_total', 'motivo_diferencia']) delete fields[key];
+      applyFields(entry.partidas[0], fields);
+      entry.cantidad = Number(entry.partidas[0].cantidad);
     }
     if (advance.cantidad_total != null) applyFields(entry, { cantidad: advance.cantidad_total });
   } else {
@@ -761,9 +792,12 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   if (params.confirmacion_final === true || params.confirmacion_final === 'true') {
     throw inputError('Los avances no confirman inventario; revisa primero el resumen');
   }
-  const correctionRequested = params.correccion === true || isReceptionCorrectionRequest(rawText);
+  const contextual = contextualFieldsFromText(rawText);
+  const correctionRequested = params.correccion === true || isReceptionCorrectionRequest(rawText)
+    || Object.keys(contextual.fields).length > 0;
   const batch = cleanBatchAdvances(params);
-  const advance = batch ? {} : { ...cleanAdvance(params), ...mixedPartsFromText(rawText),
+  const advance = batch ? {} : { ...cleanAdvance(params), ...contextual.fields,
+    ...mixedPartsFromText(rawText),
     ...indexedPartFieldsFromText(rawText), ...correctionFieldsFromText(rawText) };
   const explicitId = typedOrderId(rawText);
   let order;
@@ -921,6 +955,13 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     }
     if (selected && hasFields) {
       const safeAdvance = { ...advance };
+      if (contextual.unit && Object.hasOwn(safeAdvance, 'cantidad')) {
+        const grams = ['g', 'gr', 'gramo', 'gramos'].includes(String(selected.unidad).toLowerCase());
+        const spokenGrams = /^(?:g|gramos?)$/u.test(contextual.unit);
+        if (grams !== spokenGrams) {
+          throw inputError(`Este producto se registra en ${selected.unidad || 'und'}, no en ${contextual.unit}. No cambié el borrador.`, 409);
+        }
+      }
       for (const key of ['lote', 'fecha_vencimiento']) {
         if (mismatches[key] && safeAdvance[key]
           && (/^(?:no coincide|no corresponde|diferente|distinto|incorrect[oa])$/iu
@@ -1062,5 +1103,6 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
 
 module.exports = { advanceGuidedReception, hasPendingSkuReview, hasSelectedGuidedSku,
   hasActiveReceptionSession, hasRecentReceptionContext, isReceptionCorrectionRequest,
+  isReceptionContextualField,
   currentMessageText, skuReviewReply, documentMismatch, guidedReceptionResume,
   parseDraft, missingFields, itemFromEntry };
