@@ -6,7 +6,8 @@ const {
 const { hasProductionCloseIntent } = require('../api/_lib/production-close-input');
 
 function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
-  invalidLots = [], stockAvailable = 100, replacementOptions = null } = {}) {
+  invalidLots = [], stockAvailable = 100, replacementOptions = null, withGomas = false,
+  stockLocations = {} } = {}) {
   let stored = initialDraft;
   let freeStock = stockAvailable;
   const writes = [];
@@ -19,7 +20,7 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       queries.push(sql);
       if (sql.includes('FROM produccion_cierre_borradores')) return [stored ? [{ payload_json: stored }] : []];
       if (sql.includes('FROM lots') && sql.includes('UPPER(lpn)')) return [invalidLots.includes(params[0])
-        ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
+        ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: Math.max(freeStock, 100),
           status: 'DISPONIBLE', bodega_id: 1 }]];
       if (sql.includes('FROM stock s JOIN lots l')) return [(replacementOptions || [
         { lote: 'ACC-260910-TPBI', ubicacion: 'A8', disponible: freeStock, vence: '2027-09-30' },
@@ -30,9 +31,10 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
           : Number(params[0]) === 17 ? 'A1' : 'A8'))
         && (!params[3] || row.ubicacion === params[3]))];
       if (sql.includes('FROM stock s JOIN ubicaciones u')) return [[{
-        id: 1, ubicacion_id: Number(params[0]) === 35 ? 14 : Number(params[0]) === 17 ? 1 : 8,
+        id: 1, ubicacion_id: stockLocations[params[1]] === 'A14' ? 14
+          : Number(params[0]) === 35 ? 14 : Number(params[0]) === 17 ? 1 : 8,
         cantidad: freeStock, reservada: 0,
-        ubicacion: Number(params[0]) === 35 ? 'A14' : Number(params[0]) === 17 ? 'A1' : 'A8',
+        ubicacion: stockLocations[params[1]] || (Number(params[0]) === 35 ? 'A14' : Number(params[0]) === 17 ? 'A1' : 'A8'),
       }]];
       if (sql.includes('FROM webhook_logs')) return [[]];
       if (sql.includes('FROM notificaciones_salida')) return [[{ evento: `production_started:${orderId}` }]];
@@ -46,9 +48,13 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       if (sql.includes('FROM produccion_materiales pm JOIN productos')) return [[{
         producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
       }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
-      { producto_id: 35, unidad: 'und', sku: '00035-LNTP60', nombre: 'LINER TARRO x 60' }]];
+      { producto_id: 35, unidad: 'und', sku: '00035-LNTP60', nombre: 'LINER TARRO x 60' },
+      ...(withGomas ? [{ producto_id: 50, unidad: 'g', sku: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' }] : [])]];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
-      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[/^liners?$/u.test(params[0]) ? {
+      if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[/gomas?/u.test(params[0]) && withGomas ? {
+        id: 50, siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS',
+        unit_label: 'g', alias: 'gomas',
+      } : /^liners?$/u.test(params[0]) ? {
         id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60',
         unit_label: 'und', alias: 'liners',
       } : /^etiquetas?$/u.test(params[0]) ? {
@@ -1187,4 +1193,118 @@ test('si ningún lote cubre la cantidad, el operario puede corregirla y volver a
   const corrected = await advanceCloseGuide({ ...base, rawText: 'corrige cantidad a 1' });
   assert.match(corrected.message, /1\. Lote \*L-DOS\*/u);
   assert.equal(corrected.draft.materialPending.cantidad, 1);
+});
+
+function gomasDraft(materials) {
+  return { orderId: 113, conforming: 19, waste: 1, wasteClassified: true,
+    reason: 'defecto', location: 'C2', materials, materialsAnswered: true,
+    materialPending: null, materialChoice: null, reviewShown: true };
+}
+
+function gomasLine(quantity, lot = 'GOMEZ-L24', location = 'A8') {
+  return { sku: '00050-MPRO', producto: 'GOMAS PROBIOTICOS', unidad: 'g',
+    cantidad: quantity, lote: lot, motivo: 'derrame', ubicacion: location };
+}
+
+test('OP 113 corrige 120 a 100 g en la partida existente sin pedir de nuevo el lote', async () => {
+  for (const phrase of ['Corrección partida 1, la reposición fue de 100 gramos.',
+    'la reposición de gomas fue de 100 gramos', 'corrige cantidad de gomas a 100 gramos']) {
+    const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+      initialDraft: gomasDraft([gomasLine(120)]) });
+    const result = await advanceCloseGuide({ db, userId: 7, rawText: phrase });
+    assert.equal(result.draft.materials[0].cantidad, 100, phrase);
+    assert.equal(result.draft.materials.length, 1, phrase);
+    assert.equal(result.draft.materialPending, null, phrase);
+    assert.equal(result.draft.materialChoice, null, phrase);
+    assert.match(result.message, /GOMAS PROBIOTICOS.*100 g/u);
+    assert.doesNotMatch(result.message, /elige lote/u);
+  }
+});
+
+test('una opción de lote duplicada sale del bucle y permite corregir el total', async () => {
+  const draft = gomasDraft([gomasLine(120)]);
+  draft.materialPending = { ...gomasLine(100), lote: null, motivo: null, ubicacion: null };
+  draft.materialsAnswered = false;
+  draft.materialChoice = { target: 'pending', index: null, sku: '00050-MPRO',
+    producto: 'GOMAS PROBIOTICOS', cantidad: 100, unidad: 'g', page: 0,
+    options: [{ lote: 'GOMEZ-L24', ubicacion: 'A8', disponible: 200 }] };
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true, stockAvailable: 200,
+    replacementOptions: draft.materialChoice.options, initialDraft: draft });
+  const choice = await advanceCloseGuide({ db, userId: 7, rawText: 'opción 1' });
+  assert.equal(choice.draft.materialPending, null);
+  assert.equal(choice.draft.materialChoice, null);
+  assert.equal(choice.draft.materials[0].cantidad, 120);
+  assert.match(choice.message, /No agregué una segunda reposición/u);
+  assert.doesNotMatch(choice.message, /elige lote/u);
+  const correction = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección: partida 1, cantidad 100 gramos' });
+  assert.equal(correction.draft.materials[0].cantidad, 100);
+  assert.equal(correction.draft.materials.length, 1);
+});
+
+test('con varias partidas del mismo SKU exige número y conserva lote y ubicación', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true, stockAvailable: 200,
+    stockLocations: { 'LOTE-2': 'A14' }, initialDraft: gomasDraft([
+      gomasLine(120), gomasLine(80, 'LOTE-2', 'A14'),
+    ]) });
+  await assert.rejects(() => advanceCloseGuide({ db, userId: 7,
+    rawText: 'la reposición de gomas fue de 100 gramos' }), /Hay 2 partidas/u);
+  const corrected = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección: partida 2, cantidad 100 gramos' });
+  assert.deepEqual(corrected.draft.materials.map(line => [line.cantidad, line.lote, line.ubicacion]),
+    [[120, 'GOMEZ-L24', 'A8'], [100, 'LOTE-2', 'A14']]);
+});
+
+test('corrige causa y ubicación de una partida específica sin afectar la otra', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+    stockAvailable: 200, stockLocations: { 'LOTE-2': 'A14' },
+    initialDraft: gomasDraft([gomasLine(120), gomasLine(80, 'LOTE-2', 'A14')]) });
+  const cause = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección: partida 2, causa contaminación' });
+  assert.equal(cause.draft.materials[1].motivo, 'contaminacion');
+  assert.equal(cause.draft.materials[0].motivo, 'derrame');
+  const location = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección: partida 2, ubicación es A14' });
+  assert.equal(location.draft.materials[1].ubicacion, 'A14');
+  assert.equal(location.draft.materials[0].ubicacion, 'A8');
+  assert.equal(location.draft.materials.length, 2);
+});
+
+test('con varios lotes, cambiar lote de partida 2 abre opciones sin tratar «de» como lote', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+    stockAvailable: 200, stockLocations: { 'LOTE-2': 'A14' },
+    replacementOptions: [{ lote: 'LOTE-3', ubicacion: 'A14', disponible: 200 }],
+    initialDraft: gomasDraft([gomasLine(120), gomasLine(80, 'LOTE-2', 'A14')]) });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'cambia lote de partida 2' });
+  assert.equal(result.draft.materialChoice.target, 'existing');
+  assert.equal(result.draft.materialChoice.index, 1);
+  assert.equal(result.draft.materials[1].lote, 'LOTE-2');
+  assert.match(result.message, /elige lote/u);
+});
+
+test('al corregir ubicación de un insumo solo ofrece lotes de la ubicación nueva', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+    stockAvailable: 200, stockLocations: { 'LOTE-OLD': 'A8', 'LOTE-NEW': 'A14' },
+    replacementOptions: [
+      { lote: 'LOTE-OLD', ubicacion: 'A8', disponible: 200 },
+      { lote: 'LOTE-NEW', ubicacion: 'A14', disponible: 200 },
+    ], initialDraft: gomasDraft([gomasLine(120, 'LOTE-OLD', 'A8')]) });
+  const changed = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección: partida 1, ubicación A14' });
+  assert.equal(changed.draft.materials[0].ubicacion, 'A14');
+  assert.equal(changed.draft.materials[0].lote, null);
+  assert.deepEqual(changed.draft.materialChoice.options.map(row => row.lote), ['LOTE-NEW']);
+});
+
+test('corrige conformes, no conformes y ubicación sin tocar las reposiciones', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+    initialDraft: gomasDraft([gomasLine(100)]) });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección: conformes a 18, no conformes a 2, ubicación del conforme a C3' });
+  assert.equal(result.draft.conforming, 18);
+  assert.equal(result.draft.waste, 2);
+  assert.equal(result.draft.location, 'C3');
+  assert.equal(result.draft.materials[0].cantidad, 100);
+  assert.equal(result.draft.reviewShown, true);
 });

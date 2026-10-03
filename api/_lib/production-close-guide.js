@@ -63,7 +63,7 @@ function contextualOrderCandidate(text, hasDraft) {
 
 function fieldMatch(text, before, after) {
   const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
-    || text.match(new RegExp(`${before}\\s*(?:de|son|fueron|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
+    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|son|fueron|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
   return quantity(value);
 }
 
@@ -282,7 +282,7 @@ async function startLotChoice(db, draft, order, target, index = null) {
   const materials = await orderMaterials(db, order.id);
   const material = materials.find(item => item.sku === line.sku);
   if (!material) throw guideError(`${line.sku} no pertenece a OP ID ${order.id}`);
-  const location = target === 'pending' ? line.ubicacion || null : null;
+  const location = line.ubicacion || null;
   const options = await availableReplacementLots(db, material, line, location);
   draft.materialChoice = { target, index, sku: line.sku,
     producto: line.producto, cantidad: line.cantidad, unidad: line.unidad,
@@ -331,13 +331,22 @@ async function applyLotChoice(db, draft, order, text) {
     return true;
   }
   if (choice.target === 'existing' && draft.materials.some((other, index) =>
-    index !== choice.index && other.sku === line.sku && other.lote === candidate.lote)) {
-    draft.lotValidationMessage = 'Ese material y lote ya figuran en otra partida; indica el total en una sola. No se modificó inventario.';
+    index !== choice.index && other.sku === line.sku && other.lote === candidate.lote
+      && other.ubicacion === candidate.ubicacion)) {
+    draft.materialChoice = null;
+    draft.reviewShown = false;
+    draft.lotValidationMessage = 'Ese material, lote y ubicación ya figuran en otra partida. Conservé ambas partidas sin cambios; corrige sus cantidades o elimina la partida duplicada antes de confirmar.';
     return true;
   }
-  if (choice.target === 'pending' && draft.materials.some(other =>
-    other.sku === line.sku && other.lote === candidate.lote)) {
-    draft.lotValidationMessage = 'Ese material y lote ya figuran en otra partida. Indica el total en una sola; no se modificó inventario.';
+  const duplicateIndex = choice.target === 'pending' ? draft.materials.findIndex(other =>
+    other.sku === line.sku && other.lote === candidate.lote
+      && other.ubicacion === candidate.ubicacion) : -1;
+  if (duplicateIndex >= 0) {
+    draft.materialPending = null;
+    draft.materialChoice = null;
+    draft.materialsAnswered = true;
+    draft.reviewShown = false;
+    draft.lotValidationMessage = `Ese material, lote y ubicación ya figuran en la partida ${duplicateIndex + 1}. No agregué una segunda reposición. Si querías corregir el total, di «corrección: partida ${duplicateIndex + 1}, cantidad 100 ${line.unidad || 'und'}».`;
     return true;
   }
   line.lote = candidate.lote;
@@ -492,8 +501,97 @@ function naturalLotCorrection(text, params) {
   return { product: String(ai.producto || '').trim(), amount, lot };
 }
 
+function materialQuantityCorrection(text) {
+  const raw = normalize(text);
+  const prefix = /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona)\b/u.test(raw);
+  const indexed = /\b(?:partida|fila|renglon)\s*#?\s*(\d+)\b/u.exec(raw);
+  const quantityField = /\b(?:cantidad|reposicion|repuesto|total)\b/u.test(raw);
+  const amount = quantity(raw.match(/\b(?:cantidad|reposicion|repuesto|total)\b(?:\s+(?:fue|era|es|de|a|por|quedo|quedaron|fueron))*\s*(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/u)?.[1]
+    || raw.match(/\b(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:g|gramos?|und|unidades?)?\s*[.!]?\s*$/u)?.[1]);
+  const natural = /^(?:la\s+)?reposicion\s+de\s+(.+?)\s+(?:fue|era|es|quedo)\s+(?:de\s+)?/u.exec(raw);
+  const targeted = /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona)\s*[:,.-]?\s*(?:la\s+)?(?:cantidad|reposicion|total)\s+(?:de\s+)?(.+?)\s+(?:a|por|es|fue|era)\s+/u.exec(raw);
+  if (!quantityField || amount == null || !(prefix || natural || targeted)) return null;
+  const product = natural?.[1] || targeted?.[1] || null;
+  if (!indexed && !product) return null;
+  return { index: indexed ? Number(indexed[1]) - 1 : null, product, amount };
+}
+
+async function applyQuantityCorrection(db, draft, order, text) {
+  const correction = materialQuantityCorrection(text);
+  if (!correction) return false;
+  const lines = draft.materials || [];
+  let index = correction.index;
+  if (index != null && (!Number.isSafeInteger(index) || index < 0 || index >= lines.length)) {
+    throw guideError(`No existe la partida ${index + 1} en este cierre. Revisa el resumen; no cambié el borrador.`);
+  }
+  if (correction.product) {
+    const available = await orderMaterials(db, order.id);
+    const product = await resolveProductReference(db, correction.product, {
+      productIds: available.map(row => row.producto_id),
+      allowContextualPartial: true, allowScopedApproximate: true,
+    });
+    const matches = lines.map((line, position) => ({ line, position }))
+      .filter(entry => entry.line.sku === product.siigo_code);
+    if (index != null && lines[index].sku !== product.siigo_code) {
+      throw guideError(`La partida ${index + 1} no corresponde a ${product.nombre}. No cambié el borrador.`);
+    }
+    if (index == null && matches.length !== 1) {
+      throw guideError(matches.length
+        ? `Hay ${matches.length} partidas de ${product.nombre}. Di «corrección: partida N, cantidad ${correction.amount} ${matches[0].line.unidad || 'und'}» usando el número del resumen; no cambié el borrador.`
+        : `No hay una reposición registrada de ${product.nombre}. No cambié el borrador.`);
+    }
+    if (index == null) index = matches[0].position;
+  }
+  const line = lines[index];
+  const amount = correction.amount;
+  if (amount <= 0 || Math.abs(amount * 1000 - Math.round(amount * 1000)) > 0.000001
+    || (!['g', 'gr', 'gramo', 'gramos'].includes(String(line.unidad).toLowerCase()) && !Number.isInteger(amount))) {
+    throw guideError(`La cantidad de la partida ${index + 1} debe ser positiva y corresponder a ${line.unidad || 'und'}. No cambié el borrador.`);
+  }
+  line.cantidad = amount;
+  line.validatedLotKey = null;
+  if (draft.materialPending?.sku === line.sku && !draft.materialPending.lote) {
+    draft.materialPending = null;
+    draft.materialChoice = null;
+  }
+  draft.materialsAnswered = !draft.materialPending && !draft.materialQueue?.length;
+  draft.reviewShown = false;
+  draft.lotValidationMessage = null;
+  return true;
+}
+
+function applyIndexedMaterialCorrection(draft, text) {
+  const raw = normalize(text);
+  if (!/^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona|quita|elimina)\b/u.test(raw)) return false;
+  const reference = /\b(?:partida|fila|renglon)\s*#?\s*(\d+)\b/u.exec(raw);
+  if (!reference) return false;
+  const index = Number(reference[1]) - 1;
+  const line = draft.materials?.[index];
+  if (!line) throw guideError(`No existe la partida ${reference[1]} en este cierre. No cambié el borrador.`);
+  if (/^(?:quita|elimina)\b/u.test(raw)) {
+    draft.materials.splice(index, 1);
+  } else {
+    const location = /\bubicacion\s*(?:(?:nueva|correcta)\s*)?(?:a|es|era|fue|en|:)?\s*([a-z]+\s*\d+[a-z0-9-]*)\b/u.exec(raw)?.[1];
+    const lot = /\blote\s+(?:a|es|era|fue|:)\s*([a-z0-9][a-z0-9_-]*)\b/u.exec(raw)?.[1];
+    const reason = /\b(?:causa|motivo)\s*(?:a|es|era|fue|por|:)?\s*(.+)$/u.exec(raw)?.[1];
+    if (!location && !lot && !reason) return false;
+    if (location) line.ubicacion = location.replace(/\s+/gu, '').toUpperCase();
+    if (lot) line.lote = lot;
+    if (reason) line.motivo = cleanMaterialCause(reason);
+    line.validatedLotKey = null;
+  }
+  // El número de otra partida puede desplazarse al eliminar una fila.
+  draft.materialChoice = null;
+  draft.materialsAnswered = draft.materials.length > 0
+    && !draft.materialPending && !draft.materialQueue?.length;
+  draft.reviewShown = false;
+  return true;
+}
+
 async function applyMaterialCorrection(db, draft, order, text, params) {
   const raw = normalize(text);
+  if (await applyQuantityCorrection(db, draft, order, text)) return true;
+  if (applyIndexedMaterialCorrection(draft, text)) return true;
   if (draft.materialPending?.sku
     && /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica)\b.*\bcantidad\b/u.test(raw)) {
     const amount = quantity(new RegExp(`\\b(?:cantidad\\s*(?:es|a|por|de)?\\s*)${NUMBER}\\b`, 'u').exec(raw)?.[1]);
@@ -794,7 +892,8 @@ async function applyMaterialReport(db, draft, order, text, params) {
       && !Number.isInteger(next.cantidad)) throw guideError(`${next.producto} debe informarse en unidades enteras.`);
     if (next.lote?.length > 80 || next.motivo?.length > 255) throw guideError('El lote o la causa exceden la longitud permitida.');
     if (next.sku && next.cantidad != null && next.lote && next.motivo) {
-      const existing = draft.materials.findIndex(line => line.sku === next.sku && line.lote === next.lote);
+      const existing = draft.materials.findIndex(line => line.sku === next.sku
+        && line.lote === next.lote && line.ubicacion === next.ubicacion);
       if (existing >= 0) draft.materials[existing] = next;
       else draft.materials.push(next);
       if (!queued) draft.materialPending = null;
@@ -980,6 +1079,7 @@ function guideSummary(order, draft, locationHint) {
       ? `Ubicación sugerida para el producto terminado conforme: *${locationHint}* (verifica físicamente).` : null,
     ''].filter(line => line != null);
   if (readyForReview) {
+    if (draft.lotValidationMessage) lines.push(`⚠️ ${draft.lotValidationMessage}`, '');
     lines.push('*Resumen para confirmar*',
       `• Producto terminado conforme: ${draft.conforming} und`,
       `• Producto terminado no conforme: ${draft.waste} und${draft.waste ? ` | Causa: ${draft.reason}` : ''}`,
@@ -992,8 +1092,9 @@ function guideSummary(order, draft, locationHint) {
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
     lines.push('', `Conciliación de producto terminado: ${draft.conforming} conforme(s) + ${draft.waste} no conforme(s) = ${draft.conforming + draft.waste} und frente a ${Number(order.cantidad_planeada)} planeadas.`);
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
-    lines.push('', 'Si repusiste otro SKU, repórtalo antes de confirmar; te mostraré sus lotes por separado.');
-    lines.push(`Revisa el resumen. Puedes corregir cualquier dato; si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
+    lines.push('', 'Si repusiste otro SKU, lote o ubicación, repórtalo antes de confirmar; te mostraré sus lotes por separado.');
+    lines.push('Correcciones: «conformes a 18», «no conformes a 2» o «ubicación del conforme a C7». Para un insumo, usa su número: «corrección: partida 3, cantidad 100 g» o «cambia lote de partida 3».');
+    lines.push(`Revisa el resumen. Si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
     return lines.join('\n');
   }
