@@ -1208,6 +1208,7 @@ function gomasLine(quantity, lot = 'GOMEZ-L24', location = 'A8') {
 
 test('OP 113 corrige 120 a 100 g en la partida existente sin pedir de nuevo el lote', async () => {
   for (const phrase of ['Corrección partida 1, la reposición fue de 100 gramos.',
+    'Corrección partida 1, 100 gramos', 'corrijo partida 1 a 100 g',
     'la reposición de gomas fue de 100 gramos', 'corrige cantidad de gomas a 100 gramos']) {
     const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
       initialDraft: gomasDraft([gomasLine(120)]) });
@@ -1219,6 +1220,29 @@ test('OP 113 corrige 120 a 100 g en la partida existente sin pedir de nuevo el l
     assert.match(result.message, /GOMAS PROBIOTICOS.*100 g/u);
     assert.doesNotMatch(result.message, /elige lote/u);
   }
+});
+
+test('OP 113 acepta corrección directa de partida 3 y no inventa cantidad si falta', async () => {
+  const db = fakeDb({ orderId: 113, planned: 20, withGomas: true,
+    stockAvailable: 200, initialDraft: gomasDraft([
+      { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und',
+        cantidad: 2, lote: 'ACC-260910-TPBI', motivo: 'ruptura', ubicacion: 'A8' },
+      { sku: '00017-ETASH60', producto: 'ETIQUETA ASHWAGANDHA', unidad: 'und',
+        cantidad: 3, lote: 'AA-260929-01-ETASH', motivo: 'defecto', ubicacion: 'A1' },
+      gomasLine(120),
+    ]) });
+  const incomplete = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección partida 3' });
+  assert.equal(incomplete.draft.materials[2].cantidad, 120);
+  await assert.rejects(() => advanceCloseGuide({ db, userId: 7,
+    rawText: 'corrección partida 3, 100 unidades' }), /se registra en g/u);
+  const changed = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'Corrección partida 3, 100 gramos' });
+  assert.equal(changed.draft.materials[2].cantidad, 100);
+  assert.equal(changed.draft.materials[2].lote, 'GOMEZ-L24');
+  assert.equal(changed.draft.materials.length, 3);
+  assert.equal(changed.draft.materialChoice, null);
+  assert.match(changed.message, /GOMAS PROBIOTICOS.*100 g/u);
 });
 
 test('una opción de lote duplicada sale del bucle y permite corregir el total', async () => {

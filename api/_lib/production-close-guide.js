@@ -506,14 +506,22 @@ function materialQuantityCorrection(text) {
   const prefix = /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona)\b/u.test(raw);
   const indexed = /\b(?:partida|fila|renglon)\s*#?\s*(\d+)\b/u.exec(raw);
   const quantityField = /\b(?:cantidad|reposicion|repuesto|total)\b/u.test(raw);
+  // «Corrección partida 3, 100 gramos» identifica una sola fila y un solo dato.
+  // Se analiza solo el texto posterior al número de partida para no tomar «3»
+  // como cantidad si el operario aún no dijo cuál es el valor nuevo.
+  const remainder = prefix && indexed ? raw.slice(indexed.index + indexed[0].length)
+    .trim().replace(/^[,;:.-]\s*/u, '') : '';
+  const bareIndexed = /^(?:(?:a|son|fueron|eran|es|era|quedaron|quedo)\s+)?(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(g|gramos?|und|unidades?)?\s*[.!]?$/u.exec(remainder);
   const amount = quantity(raw.match(/\b(?:cantidad|reposicion|repuesto|total)\b(?:\s+(?:fue|era|es|de|a|por|quedo|quedaron|fueron))*\s*(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/u)?.[1]
+    || bareIndexed?.[1]
     || raw.match(/\b(\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:g|gramos?|und|unidades?)?\s*[.!]?\s*$/u)?.[1]);
   const natural = /^(?:la\s+)?reposicion\s+de\s+(.+?)\s+(?:fue|era|es|quedo)\s+(?:de\s+)?/u.exec(raw);
   const targeted = /^(?:correccion|correcion|corrijo|corrige|cambia|cambio|modifica|ajusta|ajuste|perdon|perdona)\s*[:,.-]?\s*(?:la\s+)?(?:cantidad|reposicion|total)\s+(?:de\s+)?(.+?)\s+(?:a|por|es|fue|era)\s+/u.exec(raw);
-  if (!quantityField || amount == null || !(prefix || natural || targeted)) return null;
+  if (!(quantityField || bareIndexed) || amount == null || !(prefix || natural || targeted)) return null;
   const product = natural?.[1] || targeted?.[1] || null;
   if (!indexed && !product) return null;
-  return { index: indexed ? Number(indexed[1]) - 1 : null, product, amount };
+  const spokenUnit = bareIndexed?.[2] || raw.match(/\b(?:\d+(?:[.,]\d+)?|una?|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(g|gramos?|und|unidades?)\s*[.!]?$/u)?.[1] || null;
+  return { index: indexed ? Number(indexed[1]) - 1 : null, product, amount, spokenUnit };
 }
 
 async function applyQuantityCorrection(db, draft, order, text) {
@@ -544,8 +552,13 @@ async function applyQuantityCorrection(db, draft, order, text) {
   }
   const line = lines[index];
   const amount = correction.amount;
+  const grams = ['g', 'gr', 'gramo', 'gramos'].includes(String(line.unidad).toLowerCase());
+  const spokenGrams = correction.spokenUnit && /^(?:g|gramos?)$/u.test(correction.spokenUnit);
+  if (correction.spokenUnit && Boolean(spokenGrams) !== grams) {
+    throw guideError(`La partida ${index + 1} se registra en ${line.unidad || 'und'}, no en ${correction.spokenUnit}. No cambié el borrador.`);
+  }
   if (amount <= 0 || Math.abs(amount * 1000 - Math.round(amount * 1000)) > 0.000001
-    || (!['g', 'gr', 'gramo', 'gramos'].includes(String(line.unidad).toLowerCase()) && !Number.isInteger(amount))) {
+    || (!grams && !Number.isInteger(amount))) {
     throw guideError(`La cantidad de la partida ${index + 1} debe ser positiva y corresponder a ${line.unidad || 'und'}. No cambié el borrador.`);
   }
   line.cantidad = amount;
