@@ -197,7 +197,15 @@ async function reportWaste(input, userId, { allowGeneratedReference = false } = 
       productIds = [order.producto_id, ...materials.map(material => material.producto_id)];
     }
 
-    const product = await resolveProductReference(conn, data.sku, data.order ? {
+    // Merma de bodega: el lote ya fija el producto. «1 liner del lote X» se resuelve
+    // dentro de ese producto; si el nombre no corresponde, sigue sin resolverse.
+    if (!data.order && data.lot) {
+      const [lotProducts] = await conn.execute(
+        `SELECT DISTINCT product_id FROM lots WHERE lpn = ? LIMIT 2`, [data.lot]
+      );
+      productIds = lotProducts.map(row => row.product_id);
+    }
+    const product = await resolveProductReference(conn, data.sku, productIds.length ? {
       productIds,
       allowContextualPartial: true,
     } : {});
