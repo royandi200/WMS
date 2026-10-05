@@ -168,6 +168,7 @@ async function registerPurchaseOrderDocumentDraft({
   documentName = '',
   uploadedDocument,
   precomputedEvidence,
+  origin = 'BUILDERBOT',
 }) {
   const document = uploadedDocument === undefined
     ? await downloadBuilderBotPdf(documentUrl, documentName)
@@ -190,7 +191,7 @@ async function registerPurchaseOrderDocumentDraft({
               (SELECT COUNT(*) FROM documento_bodega_borrador_archivos a
                 WHERE a.documento_id = documentos_bodega_borrador.id) AS file_count
          FROM documentos_bodega_borrador
-        WHERE tipo_documento = ? AND origen = 'BUILDERBOT'
+        WHERE tipo_documento = ? AND origen IN ('BUILDERBOT', 'DASHBOARD')
           AND referencia_documento = ?
         LIMIT 1 FOR UPDATE`,
       [DOCUMENT_TYPE, input.reference]
@@ -256,8 +257,9 @@ async function registerPurchaseOrderDocumentDraft({
           destinatario_nombre, nit, proveedor_nit, tercero_id, moneda, total_unidades,
           total_calculado, nombre_archivo, referencia_origen, advertencias,
           sha256, estado, creado_por, creado_en, actualizado_en)
-       VALUES (?, 'BUILDERBOT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [DOCUMENT_TYPE, input.reference, input.documentDate, input.supplierName,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [DOCUMENT_TYPE, origin === 'DASHBOARD' ? 'DASHBOARD' : 'BUILDERBOT',
+       input.reference, input.documentDate, input.supplierName,
        input.supplierTaxId, input.supplierTaxId, supplier?.id || null, input.currency, input.totalUnits,
        input.calculatedTotal, document?.name || input.sourceFileName,
        input.sourceReference, input.warnings.length ? JSON.stringify(input.warnings) : null,

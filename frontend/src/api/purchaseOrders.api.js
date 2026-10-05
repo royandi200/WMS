@@ -6,6 +6,11 @@ export const cancelPurchaseOrder = (id, motivo) => client.patch('/purchase-order
 export const listPurchaseOrderDocumentDrafts = (params = {}) => client
   .get('/warehouse-documents', { params: { ...params, type: 'ORDEN_COMPRA' } })
   .then((r) => r.data)
+// Lee el PDF en el servidor (mismo lector que WhatsApp) y devuelve el borrador.
+// La lectura puede tardar más que el timeout general de 10 s.
+export const uploadPurchaseOrderPdf = (pdf) => client
+  .post('/warehouse-documents', { tipo_documento: 'ORDEN_COMPRA', documento_pdf: pdf }, { timeout: 60000 })
+  .then((r) => r.data)
 export const discardPurchaseOrderDocumentDraft = (id, motivo) => client
   .delete('/warehouse-documents', { data: { id, motivo } })
   .then((r) => r.data)

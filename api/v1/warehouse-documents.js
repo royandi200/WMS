@@ -16,6 +16,7 @@ const { documentDraftStatus, documentWarningsForReview } = require('../_lib/docu
 const { normalizePurchaseOrderPdf } = require('../_lib/purchase-order-documents');
 const { nativePdfEvidence } = require('../_lib/document-pdf-evidence');
 const { detectDocumentTypeMarkers } = require('../_lib/document-type-markers');
+const { registerPurchaseOrderDocumentDraft } = require('../_lib/purchase-order-document-intake');
 
 async function handleGet(req, res) {
   if (req.query?.inspect_pdf != null) {
@@ -131,11 +132,35 @@ async function handleGet(req, res) {
 
 async function handlePost(req, res) {
   const customerOrder = req.body?.tipo_documento === 'ORDEN_COMPRA_CLIENTE';
+  const purchaseOrder = req.body?.tipo_documento === 'ORDEN_COMPRA';
   const user = customerOrder
     ? await requireRole(req, ['admin', 'administrador', 'supervisor'])
-    : await requireCapability(req, CAPABILITIES.OUTSOURCING_MANAGE);
+    : purchaseOrder
+      ? await requireCapability(req, CAPABILITIES.RECEPTION_CREATE)
+      : await requireCapability(req, CAPABILITIES.OUTSOURCING_MANAGE);
   const conn = await createConnection();
   try {
+    if (purchaseOrder) {
+      // Mismo lector y mismo borrador que WhatsApp: no crea la OC ni toca inventario.
+      const uploadedDocument = normalizePurchaseOrderPdf(req.body || {});
+      const precomputedEvidence = await nativePdfEvidence(conn, uploadedDocument, req.body || {});
+      const markers = detectDocumentTypeMarkers(precomputedEvidence.text);
+      if (markers.customerPurchaseOrder || markers.outsourcingExit || markers.outsourcingReceipt) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Este PDF no es una orden de compra de proveedor. Las OC de cliente se cargan en Producción y las remisiones en Maquila 3Q.',
+        });
+      }
+      const data = await registerPurchaseOrderDocumentDraft({
+        db: conn,
+        body: precomputedEvidence.body,
+        userId: user.id,
+        uploadedDocument,
+        precomputedEvidence,
+        origin: 'DASHBOARD',
+      });
+      return res.status(data.duplicate ? 200 : 201).json({ ok: true, data });
+    }
     if (customerOrder) {
       const uploadedDocument = normalizePurchaseOrderPdf(req.body || {});
       const precomputedEvidence = await nativePdfEvidence(conn, uploadedDocument, req.body || {});

@@ -10,6 +10,7 @@ import {
   downloadPurchaseOrderDraftDocument,
   listPurchaseOrderDocumentDrafts,
   listPurchaseOrders,
+  uploadPurchaseOrderPdf,
 } from '../api/purchaseOrders.api'
 import { listSuppliers } from '../api/suppliers.api'
 import {
@@ -195,6 +196,27 @@ export default function RecepcionPage() {
               return { ok: true }
             } catch (error) {
               const message = error.response?.data?.error || 'Error al cargar la orden de compra'
+              showToast(message, false)
+              return { ok: false, message }
+            } finally {
+              setPurchaseLoading(false)
+            }
+          }}
+          onUploadPdf={async (file) => {
+            setPurchaseLoading(true)
+            try {
+              const base64 = await readFileAsDataUrl(file)
+              const payload = await uploadPurchaseOrderPdf({ name: file.name, type: 'application/pdf', base64 })
+              const refreshedDrafts = await listPurchaseOrderDocumentDrafts({ limit: 100 })
+              const rows = refreshedDrafts?.data?.rows || []
+              setPurchaseOrderDrafts(rows)
+              const data = payload?.data
+              showToast(data?.duplicate
+                ? `El PDF ya estaba cargado como borrador ID ${data.id}.`
+                : `PDF leído: borrador ID ${data?.id}. Revisa los datos antes de crear la OC.`, true)
+              return { ok: true, draft: rows.find((row) => Number(row.id) === Number(data?.id)) || null }
+            } catch (error) {
+              const message = error.response?.data?.error || error.message || 'No fue posible leer el PDF'
               showToast(message, false)
               return { ok: false, message }
             } finally {
@@ -496,7 +518,7 @@ const EMPTY_PO = {
   items: [{ sku: '', cantidad: '', unidad: 'und' }],
 }
 
-function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canDiscardDraft, onCreate, onCancel, onDiscardDraft }) {
+function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canDiscardDraft, onCreate, onCancel, onDiscardDraft, onUploadPdf }) {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(EMPTY_PO)
   const [formError, setFormError] = useState('')
@@ -597,9 +619,35 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
           <p className="text-sm font-medium text-foreground">Órdenes esperadas</p>
           <p className="text-xs text-muted">No generan stock hasta confirmar la recepción física.</p>
         </div>
-        <button type="button" onClick={() => creating ? closeForm() : setCreating(true)} className="btn-primary inline-flex items-center gap-2">
-          <Plus size={16} /> Nueva OC
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {onUploadPdf && (
+            <label className={`inline-flex cursor-pointer items-center gap-2 border border-primary/50 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 ${loading ? 'pointer-events-none opacity-50' : ''}`}
+              title="El sistema lee el PDF y deja el borrador listo para revisar">
+              <FileText size={16} /> {loading ? 'Leyendo PDF...' : 'Cargar PDF'}
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                className="sr-only"
+                disabled={loading}
+                onChange={async (event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  if (!file) return
+                  if (file.size > 2_500_000) {
+                    setFormError('El PDF supera 2.5 MB.')
+                    setCreating(true)
+                    return
+                  }
+                  const result = await onUploadPdf(file)
+                  if (result?.ok && result.draft) reviewDraft(result.draft)
+                }}
+              />
+            </label>
+          )}
+          <button type="button" onClick={() => creating ? closeForm() : setCreating(true)} className="btn-primary inline-flex items-center gap-2">
+            <Plus size={16} /> Nueva OC
+          </button>
+        </div>
       </div>
 
       {creating && (
