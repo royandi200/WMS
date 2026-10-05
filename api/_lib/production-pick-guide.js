@@ -33,9 +33,13 @@ function isPickReviewIntent(text) {
 
 function pickOptionNumber(text) {
   const raw = normalize(text).replace(/[.!?]+$/u, '').trim();
-  const numbered = /^(?:la\s+)?(?:opcion|alternativa)\s*(?:numero\s*)?#?\s*(\d{1,2})$/u.exec(raw)
-    || /^(?:el\s+)?lote\s*(?:numero\s*)?#?\s*(\d{1,2})$/u.exec(raw);
+  // Igual que el cierre de OP: «7» solo también elige la opción mostrada. El
+  // enrutamiento solo lo usa cuando hay una selección de lote pendiente.
+  const numbered = /^(?:(?:la|el)\s+)?(?:(?:opcion|alternativa|lote|numero)\s*(?:numero\s*)?#?\s*)?(\d{1,2})$/u.exec(raw);
   if (numbered) return Number(numbered[1]);
+  const words = { uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
+  const spoken = /^(?:(?:la|el)\s+)?(?:opcion|alternativa|lote|numero)\s+(uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/u.exec(raw);
+  if (spoken) return words[spoken[1]];
   const ordinals = { primera: 1, primero: 1, segunda: 2, segundo: 2,
     tercera: 3, tercero: 3, cuarta: 4, cuarto: 4, quinta: 5, quinto: 5 };
   const ordinal = /^(?:la|el)\s+(primera|primero|segunda|segundo|tercera|tercero|cuarta|cuarto|quinta|quinto)(?:\s+opcion|\s+lote)?$/u.exec(raw);
