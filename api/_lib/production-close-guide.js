@@ -198,7 +198,10 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
     const location = segment.match(/\bubicaci[oó]n\s*(?:es|:)?\s*([a-z]+\d+[a-z0-9-]*)\b/iu)?.[1] || null;
     const product = segment.slice(quantityMatch?.[0]?.length || 0)
       .split(/\b(?:del?\s+)?lote\b|\b(?:por|causa|motivo|debido a|ubicaci[oó]n)\b/iu)[0]
-      .replace(/^(?:de|del|la|el)\s+/iu, '').replace(/\s+y\s+(?:la|el)\s*$/iu, '').trim();
+      .replace(/^(?:de|del|la|el)\s+/iu, '').replace(/\s+y\s+(?:la|el)\s*$/iu, '')
+      // «2 tapas sacadas del lote X», «1 liner tomado de…»: el participio no es parte del producto.
+      .replace(/\s+(?:(?:que\s+)?(?:sacad|tomad|retirad|repuest|usad|cambiad|reemplazad)[oa]s?|que\s+(?:saqu[eé]|tom[eé]|us[eé]|retir[eé]|sali[oó]|salieron))(?:\s+(?:de|del))?\s*$/iu, '')
+      .trim();
     const productTerm = /^(?:material(?:es)?|insumo(?:s)?)$/iu.test(product) ? null : product;
     return { producto: productTerm || null, cantidad: quantityMatch ? quantity(quantityMatch[1]) : null,
       lote: lot, motivo: cause, ubicacion: location?.toUpperCase() || null };
@@ -895,6 +898,10 @@ async function applyMaterialReport(db, draft, order, text, params) {
     const product = productTerm ? await resolveProductReference(db, productTerm, {
       productIds: materials.map(row => row.producto_id),
       allowContextualPartial: true, allowScopedApproximate: true,
+    }).catch(error => {
+      if (error.code !== 'PRODUCT_REFERENCE_NOT_FOUND') throw error;
+      const names = materials.map(row => `${row.nombre} (${row.sku})`).join(', ');
+      throw guideError(`No identifiqué el material «${productTerm}». Los materiales de OP ID ${order.id} son: ${names}. Indícalo con su nombre o SKU. No cambié el borrador.`);
     }) : null;
     if (productTerm && !materials.some(row => Number(row.producto_id) === Number(product.id))) {
       throw guideError(`El producto ${productTerm} no es un material de OP ID ${order.id}`);
@@ -1395,4 +1402,4 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
 }
 
 module.exports = { advanceCloseGuide, closeFields, closeOrderReference, confirmed,
-  finishDraft, guideSummary, isCloseFollowup, pendingCloseDraft };
+  finishDraft, guideSummary, isCloseFollowup, parseMaterialSegments, pendingCloseDraft };
