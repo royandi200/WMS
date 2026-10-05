@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Ban, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 import { useProductionStore } from '../store/productionStore'
-import { getCustomerOrderMaterialAvailability } from '../api/production.api'
+import { getCustomerOrderMaterialAvailability, getMaterialsReview } from '../api/production.api'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 import { formatBogotaDateTime } from '../utils/dateTime'
@@ -673,21 +673,67 @@ function StartForm({ loading, onSubmit, onDone, onChooseCustomer }) {
 function ConfirmMaterialsForm({ loading, onSubmit }) {
   const [orderId, setOrderId] = useState('')
   const [toast, setToast] = useState(null)
-  const handle = async (event) => {
+  const [review, setReview] = useState(null)
+  const [checked, setChecked] = useState({})
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const allChecked = review?.lines.length > 0 && review.lines.every(line => checked[line.id])
+
+  const loadReview = async (event) => {
     event.preventDefault()
-    const result = await onSubmit({ order_id: orderId.trim() })
+    setToast(null); setReview(null); setChecked({}); setReviewLoading(true)
+    try {
+      const payload = await getMaterialsReview(orderId.trim())
+      setReview(payload.data)
+    } catch (e) {
+      setToast({ msg: e.response?.data?.error || 'No se pudieron cargar los materiales', ok: false })
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  const handleConfirm = async () => {
+    const result = await onSubmit({ order_id: review.order.id, reviewed_fingerprint: review.fingerprint })
     setToast(result.ok
       ? { msg: `${result.data?.already_confirmed ? 'Los materiales ya estaban confirmados' : 'Materiales confirmados; producción iniciada'}. Lote PT asignado: ${result.data?.lpn_terminado || 'no disponible'}. El PT conforme ingresará al cerrar la OP.`, ok: true }
       : { msg: result.message, ok: false })
+    if (result.ok) { setReview(null); setChecked({}) }
   }
+
   return (
-    <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
+    <div className="max-w-2xl bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="Orden de producción *">
-        <input value={orderId} onChange={(event) => setOrderId(event.target.value)} placeholder="OP ID 88 u OP-..." className="input-field" required />
-      </Field>
-      <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Confirmando...' : 'Confirmar materiales e iniciar'}</button>
-    </form>
+      <form onSubmit={loadReview} className="space-y-4">
+        <Field label="Orden de producción *">
+          <input value={orderId} onChange={(event) => { setOrderId(event.target.value); setReview(null); setChecked({}) }} placeholder="OP ID 88 u OP-..." className="input-field" required />
+        </Field>
+        <button type="submit" disabled={reviewLoading} className="btn-secondary">{reviewLoading ? 'Cargando...' : 'Revisar materiales'}</button>
+      </form>
+      {review && (
+        <div className="space-y-3">
+          <p className="text-sm">
+            <strong>OP ID {review.order.id}</strong> · {review.order.codigo_orden} · {review.order.producto_nombre} ({review.order.producto_sku})
+          </p>
+          <p className="text-sm text-muted">Verifica físicamente cada partida (producto, lote, ubicación y cantidad) y márcala. Hasta confirmar no se consume inventario.</p>
+          <ul className="space-y-2">
+            {review.lines.map((line, index) => (
+              <li key={line.id}>
+                <label className="flex items-start gap-3 p-3 border border-border rounded-md cursor-pointer">
+                  <input type="checkbox" checked={Boolean(checked[line.id])} onChange={(event) => setChecked(prev => ({ ...prev, [line.id]: event.target.checked }))} className="mt-1" />
+                  <span className="text-sm">
+                    <strong>{index + 1}. {line.producto}</strong> ({line.sku}): {line.cantidad} {line.unidad}<br />
+                    Lote: {line.lote} · Ubicación: {line.ubicacion || 'sin ubicación'}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted">Si algo no coincide, no confirmes: corrige la partida por WhatsApp («Revisa materiales OP ID {review.order.id}») y vuelve a cargar esta revisión.</p>
+          <button type="button" onClick={handleConfirm} disabled={loading || !allChecked} className="btn-primary">
+            {loading ? 'Confirmando...' : `Confirmar materiales OP ID ${review.order.id} e iniciar`}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

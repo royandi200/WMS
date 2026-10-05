@@ -279,7 +279,10 @@ async function releaseProductionOrder({
   }
 }
 
-async function confirmProductionMaterials({ orderId, userId, requireReviewedPick = false }) {
+// requireReviewedPick: WhatsApp, revisión guardada por usuario.
+// reviewedFingerprint: dashboard, huella de las partidas que el usuario vio y marcó.
+async function confirmProductionMaterials({ orderId, userId, requireReviewedPick = false, reviewedFingerprint }) {
+  const dashboardReview = reviewedFingerprint !== undefined;
   const conn = await createConnection();
   try {
     await conn.beginTransaction();
@@ -326,6 +329,11 @@ async function confirmProductionMaterials({ orderId, userId, requireReviewedPick
       }
       if (reviews[0].seleccion_pendiente) throw httpError(409,
         `Falta elegir el lote de la corrección pendiente para OP ID ${order.id}. No se inició producción.`);
+    }
+    if (dashboardReview && String(reviewedFingerprint || '') !== allocationFingerprint(allocations)) {
+      throw httpError(409, `Los materiales de OP ID ${order.id} cambiaron o no fueron revisados. Vuelve a cargar la revisión y verifica cada partida. No se inició producción.`);
+    }
+    if (requireReviewedPick || dashboardReview) {
       for (const allocation of allocations) {
         const [validStock] = await conn.execute(
           `SELECT s.id FROM stock s

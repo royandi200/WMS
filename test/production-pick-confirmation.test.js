@@ -79,6 +79,27 @@ test('una selección de lote pendiente impide iniciar aunque la huella coincida'
   } finally { pendingChoice = null; }
 });
 
+test('dashboard no descuenta material sin la huella de las partidas revisadas', async () => {
+  for (const reviewedFingerprint of ['', 'huella-antigua']) {
+    queries.length = 0;
+    await assert.rejects(confirmProductionMaterials({ orderId: 110, userId: 7, reviewedFingerprint }),
+      /cambiaron o no fueron revisados/u);
+    assert.ok(!queries.some(({ sql }) => /UPDATE stock|UPDATE lots|INSERT INTO movimientos/u.test(sql)));
+  }
+  queries.length = 0;
+  const result = await confirmProductionMaterials({ orderId: 110, userId: 7,
+    reviewedFingerprint: allocationFingerprint([allocation]) });
+  assert.equal(result.phase, 'F1');
+  assert.ok(queries.some(({ sql }) => sql.includes('SELECT s.id FROM stock s')));
+});
+
+test('recepción/cierre no puede crear OC ni borradores de pedidos de cliente', () => {
+  const { hasCapability, CAPABILITIES } = require('../api/_lib/capabilities');
+  assert.equal(hasCapability(['recepcion_cierre'], CAPABILITIES.RECEPTION_CREATE), false);
+  assert.equal(hasCapability(['recepcion_cierre'], CAPABILITIES.RECEPTION_CONFIRM), true);
+  assert.equal(hasCapability(['supervisor'], CAPABILITIES.RECEPTION_CREATE), true);
+});
+
 test('una partida bloqueada o vencida después del resumen impide iniciar la OP', async () => {
   reviewedHash = allocationFingerprint([allocation]);
   stockUsable = false;

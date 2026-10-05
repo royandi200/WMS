@@ -71,9 +71,9 @@ const ROLE_CAPABILITIES = Object.freeze({
     CAPABILITIES.SIIGO_POLL,
   ],
   consulta: READ_ONLY,
+  // Crear OC (borradores de proveedor o cliente) es de administración/supervisión.
   recepcion_cierre: [
     ...READ_ONLY,
-    CAPABILITIES.RECEPTION_CREATE,
     CAPABILITIES.RECEPTION_CONFIRM,
     CAPABILITIES.PRODUCTION_CLOSE,
     CAPABILITIES.OUTSOURCING_RECEIVE,
