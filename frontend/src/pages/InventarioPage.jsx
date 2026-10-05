@@ -1,6 +1,9 @@
 import MapaBodega from '../components/MapaBodega'
 import { useEffect, useRef, useState } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { searchProducts } from '../utils/lookups'
 
 const TABS = ['Resumen', 'Stock Bajo', 'Permanencia', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
 
@@ -94,6 +97,10 @@ export default function InventarioPage() {
                 r.min_stock ?? '—',
                 <span className="text-danger tabular-nums">{r.min_stock != null && r.stock != null ? r.min_stock - r.stock : '—'}</span>,
               ])}
+              values={lowStock.map((r) => [
+                r.sku || r.id, r.name, Number(r.stock), Number(r.min_stock),
+                r.min_stock != null && r.stock != null ? r.min_stock - r.stock : null,
+              ])}
             />
           )}
         </div>
@@ -117,14 +124,20 @@ export default function InventarioPage() {
               `${row.dias_limite} días`, <span className="text-danger font-semibold">+{row.dias_exceso} días</span>,
               formatQuantity(row.cantidad, row.unidad), formatQuantity(row.disponible, row.unidad), formatDate(row.fecha_vencimiento),
             ])}
+            values={aging.rows.map((row) => [
+              row.sku, row.producto, row.lpn, row.estado, `${row.bodega} / ${row.ubicacion || ''}`,
+              formatDate(row.fecha_ingreso), Number(row.dias_permanencia), Number(row.dias_limite), Number(row.dias_exceso),
+              Number(row.cantidad), Number(row.disponible), row.fecha_vencimiento ? formatDate(row.fecha_vencimiento) : null,
+            ])}
           />}
         </div>
       )}
 
       {tab === 3 && (
         <SearchPane
-          label="SKU o ID del producto"
-          placeholder="Ej: RM-TAP-MED"
+          label="SKU o nombre del producto"
+          placeholder="Ej: 00006-TRP o tarro"
+          fetchOptions={searchProducts}
           query={query}
           setQuery={setQuery}
           onSearch={handleSearch}
@@ -155,18 +168,26 @@ export default function InventarioPage() {
   )
 }
 
-function SearchPane({ label, placeholder, query, setQuery, onSearch, loading, children }) {
+function SearchPane({ label, placeholder, query, setQuery, onSearch, loading, children, fetchOptions }) {
   return (
     <div>
       <form onSubmit={onSearch} className="flex gap-2 mb-6 max-w-md">
         <div className="flex-1">
           <label className="block text-xs text-muted mb-1">{label}</label>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={placeholder}
-            className="input-field"
-          />
+          {fetchOptions
+            ? <AutocompleteInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                fetchOptions={fetchOptions}
+                minChars={2}
+                placeholder={placeholder}
+              />
+            : <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={placeholder}
+                className="input-field"
+              />}
         </div>
         <button type="submit" disabled={loading} className="self-end btn-sm">
           {loading ? <SpinnerXs /> : 'Buscar'}
@@ -184,7 +205,19 @@ function ProductResult({ data }) {
   const movements = Array.isArray(data.movements) ? data.movements : []
   const externalCustody = Array.isArray(data.external_custody) ? data.external_custody : []
   const blockedRows = rows.filter((r) => Number(r.bloqueada || 0) > 0)
-  const displayRows = [...rows].sort((a, b) => Number(b.disponible || 0) - Number(a.disponible || 0))
+  const byAvailable = [...rows].sort((a, b) => Number(b.disponible || 0) - Number(a.disponible || 0))
+  const { rows: displayRows, sort, toggle } = useSortableRows(byAvailable, {
+    lote: (r) => r.lote_proveedor || r.lote || r.lpn,
+    bodega: (r) => r.bodega_codigo || r.bodega_nombre,
+    ubicacion: (r) => r.ubicacion_codigo || r.ubicacion_zona,
+    estado: (r) => r.estado_calculado || r.lot_status,
+    vence: (r) => (r.expiry_date || r.fecha_venc ? formatDate(r.expiry_date || r.fecha_venc) : null),
+    cantidad: (r) => Number(r.cantidad),
+    reservada: (r) => Number(r.reservada),
+    disponible: (r) => Number(r.disponible),
+  })
+  const lotColumns = [['Lote', 'lote'], ['Bodega', 'bodega'], ['Ubicación', 'ubicacion'], ['Estado', 'estado'],
+    ['Vence', 'vence'], ['Cantidad', 'cantidad'], ['Reservado', 'reservada'], ['Disponible', 'disponible']]
 
   return (
     <div className="space-y-4">
@@ -234,8 +267,9 @@ function ProductResult({ data }) {
         <table className="w-full text-sm min-w-[780px]">
           <thead>
             <tr className="bg-surface border-b border-border">
-              {['Lote', 'Bodega', 'Ubicación', 'Estado', 'Vence', 'Cantidad', 'Reservado', 'Disponible'].map((c) => (
-                <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
+              {lotColumns.map(([label, key]) => (
+                <SortableTh key={key} label={label} sortKey={key} sort={sort} onSort={toggle}
+                  className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider" />
               ))}
             </tr>
           </thead>
@@ -398,19 +432,27 @@ function formatSignedQuantity(value, unit) {
   return `${sign}${formatQuantity(quantity, unit)}`
 }
 
-function Table({ cols, rows }) {
+// values: valores crudos por fila y columna (mismo orden que rows) para
+// ordenar; sin values la tabla se muestra igual que antes, sin ordenar.
+function Table({ cols, rows, values }) {
+  const items = rows.map((cells, index) => ({ cells, values: values?.[index] || [] }))
+  const accessors = Object.fromEntries(cols.map((_, j) => [String(j), (item) => item.values[j]]))
+  const { rows: sorted, sort, toggle } = useSortableRows(items, accessors)
+  const headerClass = 'px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider'
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[600px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {cols.map((c) => <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>)}
+            {cols.map((c, j) => values
+              ? <SortableTh key={c} label={c} sortKey={String(j)} sort={sort} onSort={toggle} className={headerClass} />
+              : <th key={c} className={headerClass}>{c}</th>)}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {sorted.map((item, i) => (
             <tr key={i} className="border-b border-border/50 hover:bg-white/[0.02] transition-colors">
-              {row.map((cell, j) => <td key={j} className="px-4 py-3 text-foreground">{cell}</td>)}
+              {item.cells.map((cell, j) => <td key={j} className="px-4 py-3 text-foreground">{cell}</td>)}
             </tr>
           ))}
         </tbody>

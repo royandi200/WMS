@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react'
 import { formatBogotaDateTime } from '../utils/dateTime'
 import { useInventoryStore } from '../store/inventoryStore'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { searchProducts } from '../utils/lookups'
+
+const COLUMNS = [['Fecha', 'fecha'], ['Tipo', 'tipo'], ['SKU', 'sku'], ['Producto', 'producto'], ['Lote', 'lote'],
+  ['Ubicación', 'ubicacion'], ['Cantidad', 'cantidad'], ['Saldo', 'saldo'], ['Referencia', 'referencia']]
+
+const signedQuantity = (r) => {
+  const amount = Math.abs(Number(r.cantidad || 0))
+  return NEGATIVE_TYPES.has(String(r.tipo || '').toUpperCase()) || Number(r.cantidad) < 0 ? -amount : amount
+}
 
 const MOV_COLOR = {
   ENTRADA: 'text-green-400',
@@ -54,7 +65,11 @@ export default function KardexPage() {
 
   useEffect(() => { load() }, [])
 
-  const rows = kardex.map(norm)
+  const { rows, sort, toggle } = useSortableRows(kardex.map(norm), {
+    fecha: (r) => (r.fecha ? new Date(r.fecha).getTime() : null),
+    cantidad: signedQuantity,
+    saldo: (r) => (r.saldo === '—' ? null : Number(r.saldo)),
+  })
 
   return (
     <div>
@@ -63,11 +78,12 @@ export default function KardexPage() {
       <form onSubmit={handleSearch} className="flex gap-2 mb-6 max-w-md">
         <div className="flex-1">
           <label className="block text-xs text-muted mb-1">Filtrar por SKU (opcional)</label>
-          <input
+          <AutocompleteInput
             value={skuInput}
             onChange={(e) => setSkuInput(e.target.value)}
-            placeholder="Ej: 00007-TRG"
-            className="input-field"
+            fetchOptions={searchProducts}
+            minChars={2}
+            placeholder="Ej: 00007-TRG o tarro"
           />
         </div>
         <button
@@ -102,8 +118,9 @@ export default function KardexPage() {
             <table className="w-full text-sm min-w-[760px]">
               <thead>
                 <tr className="bg-surface border-b border-border">
-                  {['Fecha', 'Tipo', 'SKU', 'Producto', 'Lote', 'Ubicación', 'Cantidad', 'Saldo', 'Referencia'].map((c) => (
-                    <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
+                  {COLUMNS.map(([label, key]) => (
+                    <SortableTh key={key} label={label} sortKey={key} sort={sort} onSort={toggle}
+                      className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider" />
                   ))}
                 </tr>
               </thead>

@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createReturn, listReturns } from '../api/returns.api'
 import { formatBogotaDateTime } from '../utils/dateTime'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { dispatchLotSearchFor, dispatchSkuSearchFor, searchDispatchedInvoices, searchLocations } from '../utils/lookups'
 
 const EMPTY = {
   despacho_id: '',
@@ -43,6 +46,8 @@ export default function DevolucionesPage() {
   }
 
   useEffect(() => { fetchRows() }, [])
+  const searchSkus = useMemo(() => dispatchSkuSearchFor(form.despacho_id), [form.despacho_id])
+  const searchLots = useMemo(() => dispatchLotSearchFor(form.despacho_id, form.product_id), [form.despacho_id, form.product_id])
 
   const set = (key) => (event) => {
     setConfirmDuplicate(false)
@@ -140,11 +145,14 @@ export default function DevolucionesPage() {
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,640px)_minmax(320px,1fr)] gap-5">
           <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-5 space-y-4">
             <Field label="Factura o despacho origen *">
-              <input
+              <AutocompleteInput
                 value={form.despacho_id}
                 onChange={set('despacho_id')}
-                placeholder="Ej: FV-1-10000004804 o DSP-SIIGO-FV-1-10000004804"
-                className="input-field"
+                fetchOptions={searchDispatchedInvoices}
+                onSelect={(option) => option.cliente && setForm((current) => ({
+                  ...current, cliente_origen: current.cliente_origen || option.cliente,
+                }))}
+                placeholder="Ej: FV-1-10000004804 o nombre del cliente"
                 required
               />
             </Field>
@@ -159,11 +167,12 @@ export default function DevolucionesPage() {
             </Field>
 
             <Field label="SKU o ID del producto *">
-              <input
+              <AutocompleteInput
                 value={form.product_id}
                 onChange={set('product_id')}
+                fetchOptions={searchSkus}
+                minChars={form.despacho_id ? 0 : 2}
                 placeholder="Ej: 00102-PTASH60"
-                className="input-field"
                 required
               />
             </Field>
@@ -198,22 +207,23 @@ export default function DevolucionesPage() {
             </Field>
 
             <Field label="Lote original despachado *">
-              <input
+              <AutocompleteInput
                 value={form.lote_origen}
                 onChange={set('lote_origen')}
+                fetchOptions={searchLots}
+                minChars={form.despacho_id ? 0 : 1}
                 placeholder="Ej: WMSQA260721LOT01"
-                className="input-field"
                 required
               />
             </Field>
 
             {form.estado === 'RECUPERABLE' && (
               <Field label="Ubicación de reintegro *">
-                <input
+                <AutocompleteInput
                   value={form.ubicacion}
                   onChange={set('ubicacion')}
-                  placeholder="Ej: PPAL-A-1-01"
-                  className="input-field"
+                  fetchOptions={searchLocations}
+                  placeholder="Ej: A11"
                   required
                 />
               </Field>
@@ -259,21 +269,31 @@ export default function DevolucionesPage() {
   )
 }
 
+const RETURN_COLUMNS = [['Devolución', 'numero'], ['Origen', 'origen'], ['Fecha', 'creado_en'], ['Cliente', 'cliente_origen'],
+  ['SKU', 'sku'], ['Producto', 'producto_nombre'], ['Lotes', 'lote'], ['Ubicación', 'ubicacion'], ['Cantidad', 'cantidad'],
+  ['Estado', 'estado'], ['Usuario', 'usuario_nombre']]
+
 function ReturnsTable({ rows, loading }) {
+  const { rows: sorted, sort, toggle } = useSortableRows(rows, {
+    origen: (r) => r.siigo_invoice_name || r.referencia_externa || r.despacho_numero,
+    creado_en: (r) => (r.creado_en ? new Date(r.creado_en).getTime() : null),
+    cantidad: (r) => Number(r.cantidad),
+  })
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[920px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Devolución', 'Origen', 'Fecha', 'Cliente', 'SKU', 'Producto', 'Lotes', 'Ubicación', 'Cantidad', 'Estado', 'Usuario'].map((c) => (
-              <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
+            {RETURN_COLUMNS.map(([label, key]) => (
+              <SortableTh key={key} label={label} sortKey={key} sort={sort} onSort={toggle}
+                className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider" />
             ))}
           </tr>
         </thead>
         <tbody>
           {loading && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Cargando devoluciones...</td></tr>}
           {!loading && rows.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-muted">Sin devoluciones registradas</td></tr>}
-          {!loading && rows.map((r) => (
+          {!loading && sorted.map((r) => (
             <tr key={r.id} className="border-b border-border/50 hover:bg-white/[0.02]">
               <td className="px-4 py-3 font-mono text-xs">{r.numero}</td>
               <td className="px-4 py-3"><span className="block font-mono text-xs">{r.siigo_invoice_name || '-'}</span><span className="block text-xs text-muted">{r.referencia_externa || r.despacho_numero || ''}</span></td>

@@ -18,6 +18,9 @@ import { listPurchaseOrders } from '../api/purchaseOrders.api'
 import { listSuppliers } from '../api/suppliers.api'
 import { useAuthStore } from '../store/authStore'
 import { formatBogotaDateTime, formatDateOnly as formatCalendarDate } from '../utils/dateTime'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { searchProducts } from '../utils/lookups'
 
 const STATUS = {
   MATERIALES_RESERVADOS: ['Materiales reservados', 'text-yellow-400 bg-yellow-400/10'],
@@ -256,7 +259,7 @@ function DocumentPrepareModal({ row, suppliers, loading, onClose, onPrepare }) {
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
         <div className="grid gap-4 md:grid-cols-3">
           <Field label="Maquilador *"><select value={form.tercero_id} onChange={set('tercero_id')} className="input-field" required><option value="">Selecciona el maquilador</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select></Field>
-          <Field label="SKU producto terminado esperado *"><input value={form.sku} onChange={set('sku')} placeholder="Ej. 00105-PTBOS60" className="input-field" required /></Field>
+          <Field label="SKU producto terminado esperado *"><AutocompleteInput value={form.sku} onChange={set('sku')} fetchOptions={searchProducts} minChars={2} placeholder="Ej. 00105-PTBOS60" required /></Field>
           <Field label="Cantidad terminada esperada *"><input type="number" min="0.0001" step="any" value={form.cantidad_objetivo} onChange={set('cantidad_objetivo')} className="input-field" required /></Field>
         </div>
         <div className="border border-border">
@@ -325,7 +328,7 @@ function DocumentDraftReviewModal({ row, onClose, onSave }) {
         </div>
         <div className="space-y-2">
           {form.items.map((item, index) => <div key={`${index}-${item.sku}`} className="grid gap-2 border-b border-border/60 pb-2 lg:grid-cols-[150px_minmax(220px,1fr)_100px_90px_150px_150px_36px]">
-            <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" className="input-field font-mono" required />
+            <AutocompleteInput value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} fetchOptions={searchProducts} minChars={2} placeholder="SKU" className="input-field font-mono" required />
             <input value={item.descripcion} onChange={(event) => setItem(index, 'descripcion', event.target.value)} placeholder="Descripción" className="input-field" required />
             <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} className="input-field" required />
             <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" required />
@@ -365,7 +368,19 @@ function DocumentField({ label, value, emphasis = false }) {
   return <div><p className="text-xs uppercase text-muted">{label}</p><p className={`mt-1 text-sm ${emphasis ? 'text-yellow-400' : 'text-foreground'}`}>{value || '-'}</p></div>
 }
 
-function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCancel }) {
+const TRACKING_COLUMNS = [['Orden 3Q', 'codigo'], ['OC', 'orden_compra_numero'], ['Producto', 'sku'], ['Objetivo', 'cantidad_objetivo'],
+  ['Recibido disponible', 'cantidad_recibida'], ['Material enviado pendiente de conciliación', 'custodia'], ['Merma material', 'merma'],
+  ['Estado', 'estado'], ['Creada', 'creado_en']]
+const sumMaterials = (row, field) => (row.materiales || []).reduce((sum, item) => sum + Number(item[field] || 0), 0)
+
+function TrackingPanel({ rows: unsortedRows, shipments, loading, canManage, onConfirm, onCancel }) {
+  const { rows, sort, toggle } = useSortableRows(unsortedRows, {
+    cantidad_objetivo: (row) => Number(row.cantidad_objetivo),
+    cantidad_recibida: (row) => Number(row.cantidad_recibida),
+    custodia: (row) => sumMaterials(row, 'cantidad_en_custodia'),
+    merma: (row) => sumMaterials(row, 'cantidad_merma'),
+    creado_en: (row) => (row.creado_en ? new Date(row.creado_en).getTime() : null),
+  })
   return (
     <div className="space-y-7">
       {shipments.length > 0 && (
@@ -392,7 +407,7 @@ function TrackingPanel({ rows, shipments, loading, canManage, onConfirm, onCance
         <div className="overflow-x-auto border border-border">
           <table className="w-full min-w-[1040px] text-sm">
             <thead><tr className="border-b border-border bg-surface">
-              {['Orden 3Q', 'OC', 'Producto', 'Objetivo', 'Recibido disponible', 'Material enviado pendiente de conciliación', 'Merma material', 'Estado', 'Creada'].map((label) => <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted">{label}</th>)}
+              {TRACKING_COLUMNS.map(([label, key]) => <SortableTh key={key} label={label} sortKey={key} sort={sort} onSort={toggle} className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted" />)}
             </tr></thead>
             <tbody>
               {loading && !rows.length && <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Cargando...</td></tr>}
@@ -437,7 +452,7 @@ function CreateForm({ purchaseOrders, suppliers, loading, onSubmit }) {
     <div className="grid gap-4 md:grid-cols-2">
       <Field label="OC del producto esperado (opcional)"><select value={form.orden_compra_id} onChange={set('orden_compra_id')} className="input-field"><option value="">Pendiente de cargar o vincular</option>{purchaseOrders.map((order) => <option key={order.id} value={order.id}>OC ID {order.id} - {order.numero} - {order.proveedor_nombre}</option>)}</select></Field>
       {!form.orden_compra_id && <Field label="Maquilador *"><select value={form.tercero_id} onChange={set('tercero_id')} className="input-field" required><option value="">Selecciona el maquilador</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select></Field>}
-      <Field label="SKU del producto terminado PT *"><input value={form.sku} onChange={set('sku')} placeholder="Ej. 00105-PTBOS60" className="input-field" required /></Field>
+      <Field label="SKU del producto terminado PT *"><AutocompleteInput value={form.sku} onChange={set('sku')} fetchOptions={searchProducts} minChars={2} placeholder="Ej. 00105-PTBOS60" required /></Field>
       <Field label="Cantidad esperada de 3Q *"><input type="number" min="0.0001" step="any" value={form.cantidad_objetivo} onChange={set('cantidad_objetivo')} className="input-field" required /></Field>
     </div>
     <Field label="Notas"><textarea value={form.notas} onChange={set('notas')} rows={2} className="input-field resize-none" /></Field>
@@ -484,7 +499,7 @@ function AdditionalForm({ orders, loading, onSubmit }) {
     <p className="text-xs text-yellow-400">El material adicional quedará separado para la conciliación de merma de la maquila.</p>
     <div className="grid gap-4 md:grid-cols-2">
       <Field label="Orden 3Q *"><select value={form.orden_maquila_id} onChange={set('orden_maquila_id')} className="input-field" required><option value="">Selecciona una orden</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.codigo} - {order.sku}</option>)}</select></Field>
-      <Field label="SKU del material *"><input value={form.sku} onChange={set('sku')} className="input-field" required /></Field>
+      <Field label="SKU del material *"><AutocompleteInput value={form.sku} onChange={set('sku')} fetchOptions={searchProducts} minChars={2} required /></Field>
       <Field label="Cantidad adicional *"><input type="number" min="0.0001" step="any" value={form.cantidad} onChange={set('cantidad')} className="input-field" required /></Field>
       <Field label="Motivo *"><input value={form.motivo} onChange={set('motivo')} className="input-field" required /></Field>
     </div>

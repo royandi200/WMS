@@ -5,6 +5,13 @@ import { confirmDispatch, syncSiigoInvoices } from '../api/dispatch.api'
 import { useAuthStore } from '../store/authStore'
 import { openDispatchSheet } from '../utils/dispatchSheet'
 import { formatBogotaDateTime } from '../utils/dateTime'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+
+const DISPATCH_COLUMNS = [['Origen', 'origen'], ['Despacho', 'id'], ['Cliente / destino', 'cliente_nombre'], ['SKU', 'sku'],
+  ['Lote / ubicación', 'lote'], ['Solicitado', 'cantidad_facturada'], ['Asignado', 'asignado'], ['Reserva activa', 'reserva_activa'],
+  ['Despachado', 'cantidad_despachada_total'], ['Sin asignar', 'cantidad_pendiente'], ['Estado', 'estado'], ['Fecha', 'fecha'], ['Acción', null]]
+const DISPATCH_TH = 'px-2 py-2 text-left text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted'
+const firstItem = (row) => (row.items?.length ? row.items[0] : row)
 
 export default function DespachoPage() {
   const [tab, setTab] = useState(0)
@@ -80,15 +87,28 @@ export default function DespachoPage() {
   )
 }
 
-function DispatchTable({ rows, loading, workingId, onConfirm, pending, canConfirm }) {
+function DispatchTable({ rows: unsortedRows, loading, workingId, onConfirm, pending, canConfirm }) {
   const formatDate = formatBogotaDateTime
+  const { rows, sort, toggle } = useSortableRows(unsortedRows, {
+    origen: (row) => (row.source_type === 'MAQUILA_3Q' ? 'Salida a 3Q' : row.siigo_invoice_name),
+    id: (row) => (row.source_type === 'MAQUILA_3Q' ? `3Q-${row.source_id}` : Number(row.id)),
+    sku: (row) => firstItem(row).sku,
+    lote: (row) => firstItem(row).lote,
+    cantidad_facturada: (row) => Number(row.cantidad_facturada),
+    asignado: (row) => Number(row.cantidad_asignada ?? row.cantidad_reservada),
+    reserva_activa: (row) => Number(row.reserva_activa),
+    cantidad_despachada_total: (row) => Number(row.cantidad_despachada_total),
+    cantidad_pendiente: (row) => Number(row.cantidad_pendiente),
+    estado: (row) => row.estados_demanda || row.estado,
+    fecha: (row) => { const value = row.despachado_en || row.creado_en; return value ? new Date(value).getTime() : null },
+  })
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full min-w-[1050px] text-[11px] xl:min-w-0 xl:table-fixed">
         <thead><tr className="bg-surface border-b border-border">
-          {['Origen', 'Despacho', 'Cliente / destino', 'SKU', 'Lote / ubicación', 'Solicitado', 'Asignado', 'Reserva activa', 'Despachado', 'Sin asignar', 'Estado', 'Fecha', 'Acción'].map((label) => (
-            <th key={label} className={`px-2 py-2 text-left text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted ${label === 'Acción' ? 'sticky right-0 z-10 bg-surface' : ''}`}>{label}</th>
-          ))}
+          {DISPATCH_COLUMNS.map(([label, key]) => key
+            ? <SortableTh key={label} label={label} sortKey={key} sort={sort} onSort={toggle} className={DISPATCH_TH} />
+            : <th key={label} className={`${DISPATCH_TH} sticky right-0 z-10 bg-surface`}>{label}</th>)}
         </tr></thead>
         <tbody>
           {loading && <tr><td colSpan={13} className="px-4 py-10 text-center text-muted">Cargando despachos...</td></tr>}

@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatBogotaDate } from '../utils/dateTime'
 import { useWasteStore } from '../store/wasteStore'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { lotSearchFor, searchLocations, searchProducts } from '../utils/lookups'
+
+const HISTORY_COLUMNS = [['Referencia', 'referencia'], ['Tipo', 'type'], ['Producto', 'producto'], ['Cantidad', 'qty'],
+  ['Lote / orden', 'origen'], ['Ubicación', 'location_code'], ['Motivo', 'reason'], ['Fecha', 'created_at']]
 
 const EMPTY = {
   type: 'BODEGA',
@@ -23,6 +29,14 @@ export default function MermasPage() {
   const { list, loading, error, submit, fetchList, clearError } = useWasteStore()
 
   useEffect(() => { if (tab === 1) fetchList() }, [tab])
+  const searchLots = useMemo(() => lotSearchFor(form.product_id), [form.product_id])
+  const { rows: history, sort, toggle } = useSortableRows(list, {
+    referencia: (row) => row.external_reference || row.numero,
+    producto: (row) => row.sku || row.product_id,
+    qty: (row) => Number(row.qty),
+    origen: (row) => row.lot_id || row.production_order_code,
+    created_at: (row) => (row.created_at ? new Date(row.created_at).getTime() : null),
+  })
 
   const set = (key) => (event) => {
     setConfirmDuplicate(false)
@@ -101,8 +115,8 @@ export default function MermasPage() {
           </Field>
 
           <Field label="SKU del producto *">
-            <input value={form.product_id} onChange={set('product_id')}
-              placeholder="Ej. 00102-PTASH60" className="input-field" required />
+            <AutocompleteInput value={form.product_id} onChange={set('product_id')} fetchOptions={searchProducts}
+              minChars={2} placeholder="Ej. 00102-PTASH60 o ashwagandha" required />
           </Field>
 
           <Field label="Cantidad *">
@@ -113,12 +127,13 @@ export default function MermasPage() {
           {form.type === 'BODEGA' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Lote *">
-                <input value={form.lot_id} onChange={set('lot_id')}
-                  placeholder="Código visible del lote" className="input-field" required />
+                <AutocompleteInput value={form.lot_id} onChange={set('lot_id')} fetchOptions={searchLots}
+                  onSelect={(option) => option.location && setForm((current) => ({ ...current, location: option.location }))}
+                  placeholder={form.product_id ? 'Escribe o elige el lote' : 'Primero indica el SKU'} required />
               </Field>
               <Field label="Ubicación *">
-                <input value={form.location} onChange={set('location')}
-                  placeholder="Ej. PPAL-A-1-01" className="input-field" required />
+                <AutocompleteInput value={form.location} onChange={set('location')} fetchOptions={searchLocations}
+                  placeholder="Ej. A11" required />
               </Field>
             </div>
           ) : (
@@ -153,13 +168,14 @@ export default function MermasPage() {
               <table className="w-full text-sm min-w-[900px]">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['Referencia', 'Tipo', 'Producto', 'Cantidad', 'Lote / orden', 'Ubicación', 'Motivo', 'Fecha'].map((column) => (
-                      <th key={column} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase">{column}</th>
+                    {HISTORY_COLUMNS.map(([label, key]) => (
+                      <SortableTh key={key} label={label} sortKey={key} sort={sort} onSort={toggle}
+                        className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase" />
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((row) => (
+                  {history.map((row) => (
                     <tr key={row.id} className="border-b border-border/50 hover:bg-white/[0.02]">
                       <td className="px-4 py-3 font-mono text-xs">{row.external_reference || row.numero}</td>
                       <td className="px-4 py-3"><span className="text-xs bg-danger/10 text-danger px-2 py-0.5 rounded-full">{row.type}</span></td>

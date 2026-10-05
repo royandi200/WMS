@@ -22,7 +22,7 @@ test('post-demo inventory views expose custody, location, SKU and full lot histo
   const kardexPage = read('frontend', 'src', 'pages', 'KardexPage.jsx');
   assert.match(productRoute, /en_custodia_3q/u);
   assert.match(lotRoute, /FROM kardex k/u);
-  assert.match(kardexPage, /'SKU', 'Producto', 'Lote', 'Ubicación'/u);
+  assert.match(kardexPage, /\['SKU', 'sku'\], \['Producto', 'producto'\], \['Lote', 'lote'\],\s*\['Ubicación', 'ubicacion'\]/u);
   assert.doesNotMatch(kardexPage, /slice\(0, 24\)/u);
 });
 

@@ -20,6 +20,21 @@ import {
 import { listOutsourcingOrders } from '../api/outsourcing.api'
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { searchProducts } from '../utils/lookups'
+
+const TH_CLASS = 'px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider'
+const PO_COLUMNS = [['ID / Orden', 'id'], ['PDF', null], ['Proveedor', 'proveedor_nombre'], ['Fecha OC', 'fecha_orden'],
+  ['Estado', 'estado'], ['Ítems', 'total_items'], ['Cantidades', null], ['Cargada por', 'creado_por_nombre'],
+  ['Creada', 'creado_en'], ['Acciones', null]]
+const RECEPTION_COLUMNS = [['Recepción', 'numero'], ['OC / Maquila', 'orden_compra_numero'], ['Factura Siigo', 'siigo_purchase_name'],
+  ['Fecha', 'fecha'], ['Proveedor', 'proveedor_nombre'], ['SKU', 'sku'], ['Producto', 'producto_nombre'], ['Lote', 'lote'],
+  ['OC / Documento / Aceptado', null], ['Conciliación', 'saldo_oc'], ['Usuario', 'usuario_nombre']]
+const toTime = (value) => (value ? new Date(value).getTime() : null)
+const renderHeaders = (columns, sort, toggle) => columns.map(([label, key]) => key
+  ? <SortableTh key={label} label={label} sortKey={key} sort={sort} onSort={toggle} className={TH_CLASS} />
+  : <th key={label} className={TH_CLASS}>{label}</th>)
 
 const RECEPTION_TABS = [
   { key: 'orders', label: 'Órdenes de compra', capability: 'reception.create' },
@@ -642,7 +657,7 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
             {form.items.map((item, index) => (
               <div key={index} className="space-y-1">
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_120px_100px_36px] gap-2">
-                  <input value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, números, punto, guion, guion bajo o &amp;" className="input-field" required />
+                  <AutocompleteInput value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} fetchOptions={searchProducts} minChars={2} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, números, punto, guion, guion bajo o &amp;" required />
                   <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} placeholder="Cantidad" className="input-field" required />
                   <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" />
                   <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar ítem" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
@@ -801,7 +816,13 @@ function PurchaseOrderDrafts({ rows = [], loading, canDiscard, onReview, onDisca
   )
 }
 
-function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
+function PurchaseOrderTable({ rows: unsortedRows, loading, canCancel, onCancel }) {
+  const { rows, sort, toggle } = useSortableRows(unsortedRows, {
+    id: (row) => Number(row.id),
+    fecha_orden: (row) => toTime(row.fecha_orden),
+    creado_en: (row) => toTime(row.creado_en),
+    total_items: (row) => Number(row.total_items),
+  })
   const [cancelTarget, setCancelTarget] = useState(null)
   const [cancelReason, setCancelReason] = useState('')
   const [confirmed, setConfirmed] = useState(false)
@@ -839,9 +860,7 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
       <div className="overflow-x-auto border border-border rounded-lg">
       <table className="w-full text-sm min-w-[960px]">
         <thead><tr className="bg-surface border-b border-border">
-          {['ID / Orden', 'PDF', 'Proveedor', 'Fecha OC', 'Estado', 'Ítems', 'Cantidades', 'Cargada por', 'Creada', 'Acciones'].map((label) => (
-            <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>
-          ))}
+          {renderHeaders(PO_COLUMNS, sort, toggle)}
         </tr></thead>
         <tbody>
           {loading && <tr><td colSpan={10} className="px-4 py-10 text-center text-muted">Cargando órdenes...</td></tr>}
@@ -950,16 +969,19 @@ function PurchaseOrderTable({ rows, loading, canCancel, onCancel }) {
   )
 }
 
-function ReceptionTable({ rows, loading }) {
+function ReceptionTable({ rows: unsortedRows, loading }) {
   const formatDate = formatBogotaDateTime
+  const { rows, sort, toggle } = useSortableRows(unsortedRows, {
+    fecha: (r) => toTime(r.completado_en || r.creado_en),
+    lote: (r) => r.distribuciones?.[0]?.lote_proveedor || r.distribuciones?.[0]?.lote || r.lote,
+    saldo_oc: (r) => (r.saldo_oc == null ? null : Number(r.saldo_oc)),
+  })
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[860px]">
         <thead>
           <tr className="bg-surface border-b border-border">
-            {['Recepción', 'OC / Maquila', 'Factura Siigo', 'Fecha', 'Proveedor', 'SKU', 'Producto', 'Lote', 'OC / Documento / Aceptado', 'Conciliación', 'Usuario'].map((c) => (
-              <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
-            ))}
+            {renderHeaders(RECEPTION_COLUMNS, sort, toggle)}
           </tr>
         </thead>
         <tbody>

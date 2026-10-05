@@ -5,6 +5,9 @@ import { getCustomerOrderMaterialAvailability, getMaterialsReview } from '../api
 import { listUbicaciones } from '../api/inventory.api'
 import { useAuthStore } from '../store/authStore'
 import { formatBogotaDateTime } from '../utils/dateTime'
+import AutocompleteInput from '../components/AutocompleteInput'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
+import { lotSearchFor, searchLocations, searchProductionOrders, searchProducts } from '../utils/lookups'
 import {
   approveCustomerOrder, discardCustomerOrderDraft, downloadCustomerOrderPdf, listCustomerOrderDrafts,
   listCustomerOrders, uploadCustomerOrderPdf,
@@ -20,6 +23,11 @@ const STATUS_LABEL = {
 }
 const TABS = ['Listado', 'Nueva orden', 'Confirmar materiales', 'Ajustar materiales', 'Preparar reposición', 'Confirmar reposición', 'Avanzar fase', 'Cerrar orden', 'Pedidos de cliente']
 const TAB_CAPABILITIES = ['production.read', 'production.release', 'production.pick', 'production.pick', 'production.release', 'production.pick', 'production.advance', 'production.close', 'production.release']
+
+const ORDER_COLUMNS = [['Orden', 'id'], ['Producto', 'product_name'], ['SKU', 'sku'], ['Destino', 'destino'],
+  ['Cant. plan.', 'qty_planned'], ['Cant. real', 'qty_real'], ['Mermas', 'mermas'], ['Lote PT', 'output_lot'],
+  ['Fase', 'current_phase'], ['Estado', 'status'], ['Fecha', 'created_at'], ['Hora', 'hora'], ['Acciones', null]]
+const STATUS_ORDER = { PLANEADA: 0, APROBADA: 1, EN_PROCESO: 2, CERRADA: 3, CANCELADA: 4 }
 
 const empty = '-'
 const safeDate = (val) => {
@@ -46,6 +54,16 @@ export default function ProduccionPage() {
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
   const role = useAuthStore((state) => state.user?.rol || '')
   const canCancelOrder = capabilities.includes('*') || capabilities.includes('production.release')
+  const { rows: orders, sort, toggle: toggleSort } = useSortableRows(list, {
+    id: (r) => Number(r.id),
+    destino: (r) => (r.origen_tipo === 'OC_CLIENTE' ? `PED ${r.pedido_cliente_id || ''} ${r.cliente_final || ''}` : r.origen_tipo),
+    qty_planned: (r) => Number(r.qty_planned),
+    qty_real: (r) => (r.qty_real == null ? null : Number(r.qty_real)),
+    mermas: (r) => (r.mermas || []).reduce((sum, merma) => sum + Number(merma.cantidad || 0), 0),
+    status: (r) => STATUS_ORDER[r.status] ?? 9,
+    created_at: (r) => (r.created_at ? new Date(r.created_at).getTime() : null),
+    hora: (r) => safeTime(r.created_at),
+  })
   const visibleTabs = TABS.map((label, index) => ({ label, index, capability: TAB_CAPABILITIES[index] }))
     .filter((item) => ![4, 5].includes(item.index)
       && (capabilities.includes('*') || capabilities.includes(item.capability)))
@@ -121,13 +139,14 @@ export default function ProduccionPage() {
               <table className="w-full text-sm min-w-[1240px]">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['Orden', 'Producto', 'SKU', 'Destino', 'Cant. plan.', 'Cant. real', 'Mermas', 'Lote PT', 'Fase', 'Estado', 'Fecha', 'Hora', 'Acciones'].map((c) => (
-                      <th key={c} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{c}</th>
-                    ))}
+                    {ORDER_COLUMNS.map(([label, key]) => key
+                      ? <SortableTh key={label} label={label} sortKey={key} sort={sort} onSort={toggleSort}
+                          className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider" />
+                      : <th key={label} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">{label}</th>)}
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((r) => {
+                  {orders.map((r) => {
                     const st = STATUS_LABEL[r.status] || { label: r.status ?? empty, css: 'text-muted bg-white/5' }
                     return (
                       <tr key={r.id} className="border-b border-border/50 hover:bg-white/[0.02]">
@@ -488,7 +507,7 @@ function CustomerOrdersPanel({ canApprove, onStart, onReleased }) {
         <p className="text-xs font-medium text-muted">Ítems · cantidades en unidades</p>
         {reviewForm.items.map((item, index) => <div key={index} className="space-y-1">
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_140px_90px]">
-            <input value={item.sku} onChange={(event) => setReviewItem(index, 'sku', event.target.value)} placeholder="SKU de producto terminado" className="input-field" required />
+            <AutocompleteInput value={item.sku} onChange={(event) => setReviewItem(index, 'sku', event.target.value)} fetchOptions={searchProducts} minChars={2} placeholder="SKU de producto terminado" required />
             <input type="number" min="1" step="1" value={item.cantidad} onChange={(event) => setReviewItem(index, 'cantidad', event.target.value)} placeholder="Unidades" className="input-field" required />
             <button type="button" disabled={reviewForm.items.length === 1} title="Eliminar ítem" onClick={() => setReviewForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))} className="inline-flex h-10 items-center justify-center text-muted hover:text-danger disabled:opacity-30"><Trash2 size={16} /></button>
           </div>
@@ -651,7 +670,7 @@ function StartForm({ loading, onSubmit, onDone, onChooseCustomer }) {
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
       {form.origin_type === 'STOCK_SEGURIDAD' && <>
-        <Field label="ID del producto *"><input value={form.product_id} onChange={set('product_id')} placeholder="ID o SKU" className="input-field" required /></Field>
+        <Field label="ID del producto *"><AutocompleteInput value={form.product_id} onChange={set('product_id')} fetchOptions={searchProducts} minChars={2} placeholder="SKU o nombre" required /></Field>
         <Field label="Cantidad planificada *"><input type="number" min="1" value={form.qty_planned} onChange={set('qty_planned')} placeholder="0" className="input-field" required /></Field>
       </>}
       <Field label="Destino de la producción *">
@@ -704,7 +723,7 @@ function ConfirmMaterialsForm({ loading, onSubmit }) {
       {toast && <ToastInline toast={toast} />}
       <form onSubmit={loadReview} className="space-y-4">
         <Field label="Orden de producción *">
-          <input value={orderId} onChange={(event) => { setOrderId(event.target.value); setReview(null); setChecked({}) }} placeholder="OP ID 88 u OP-..." className="input-field" required />
+          <AutocompleteInput value={orderId} onChange={(event) => { setOrderId(event.target.value); setReview(null); setChecked({}) }} fetchOptions={searchProductionOrders} placeholder="OP ID 88 u OP-..." required />
         </Field>
         <button type="submit" disabled={reviewLoading} className="btn-secondary">{reviewLoading ? 'Cargando...' : 'Revisar materiales'}</button>
       </form>
@@ -768,10 +787,10 @@ function MaterialAdjustmentForm({ loading, onSubmit, locations }) {
     <form onSubmit={handle} className="max-w-xl bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
       <div className="grid md:grid-cols-2 gap-4">
-        <Field label="Orden *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
+        <Field label="Orden *"><AutocompleteInput value={form.order_id} onChange={set('order_id')} fetchOptions={searchProductionOrders} placeholder="OP ID 88 u OP-..." required /></Field>
         <Field label="Tipo *"><select value={form.tipo} onChange={set('tipo')} className="input-field"><option>ENTREGA_ADICIONAL</option><option>DEVOLUCION</option></select></Field>
-        <Field label="SKU de materia prima *"><input value={form.sku} onChange={set('sku')} className="input-field" required /></Field>
-        <Field label="Lote *"><input value={form.lote} onChange={set('lote')} className="input-field" required /></Field>
+        <Field label="SKU de materia prima *"><AutocompleteInput value={form.sku} onChange={set('sku')} fetchOptions={searchProducts} minChars={2} required /></Field>
+        <Field label="Lote *"><AutocompleteInput value={form.lote} onChange={set('lote')} fetchOptions={lotSearchFor(form.sku)} required /></Field>
         <Field label="Ubicación *"><select value={form.ubicacion_id} onChange={set('ubicacion_id')} className="input-field" required><option value="">Selecciona ubicación</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.bodega_codigo} / {location.codigo}</option>)}</select></Field>
         <Field label="Cantidad *"><input type="number" min="0.0001" step="any" value={form.cantidad} onChange={set('cantidad')} className="input-field" required /></Field>
       </div>
@@ -817,7 +836,7 @@ function PrepareReplenishmentForm({ loading, onSubmit, onCancel }) {
     <div className="max-w-xl space-y-4">
       {toast && <ToastInline toast={toast} />}
       <form onSubmit={handle} className="bg-surface border border-border rounded-lg p-6 space-y-4">
-        <Field label="Orden en proceso *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
+        <Field label="Orden en proceso *"><AutocompleteInput value={form.order_id} onChange={set('order_id')} fetchOptions={searchProductionOrders} placeholder="OP ID 88 u OP-..." required /></Field>
         <Field label="Unidades conformes faltantes *"><input type="number" min="1" step="1" value={form.cantidad_unidades} onChange={set('cantidad_unidades')} className="input-field" required /></Field>
         <Field label="Motivo *"><textarea value={form.motivo} onChange={set('motivo')} rows={2} placeholder="Ej. unidad no conforme por dano de empaque" className="input-field resize-none" required /></Field>
         <label className="flex items-start gap-3 text-sm text-foreground">
@@ -871,7 +890,7 @@ function AdvanceForm({ loading, onSubmit }) {
   return (
     <form onSubmit={handle} className="max-w-md bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="OP ID *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
+      <Field label="OP ID *"><AutocompleteInput value={form.order_id} onChange={set('order_id')} fetchOptions={searchProductionOrders} placeholder="OP ID 88 u OP-..." required /></Field>
       <Field label="Fase destino *">
         <select value={form.phase} onChange={set('phase')} className="input-field">
           {PHASES.map((p) => <option key={p}>{p}</option>)}
@@ -950,7 +969,7 @@ function CloseForm({ loading, onSubmit, locations }) {
   return (
     <form onSubmit={handle} className="max-w-2xl bg-surface border border-border rounded-lg p-6 space-y-4">
       {toast && <ToastInline toast={toast} />}
-      <Field label="OP ID *"><input value={form.order_id} onChange={set('order_id')} placeholder="OP ID 88 u OP-..." className="input-field" required /></Field>
+      <Field label="OP ID *"><AutocompleteInput value={form.order_id} onChange={set('order_id')} fetchOptions={searchProductionOrders} placeholder="OP ID 88 u OP-..." required /></Field>
       <Field label="Unidades conformes terminadas *"><input type="number" min="0" value={form.qty_real} onChange={set('qty_real')} placeholder="0" className="input-field" required /></Field>
       <Field label="Merma / no conforme *"><input type="number" min="0" value={form.qty_waste} onChange={set('qty_waste')} placeholder="0" className="input-field" required /></Field>
       <Field label="Ubicación del producto terminado *">
@@ -976,11 +995,12 @@ function CloseForm({ loading, onSubmit, locations }) {
         {materials.map((item, index) => <div key={index} className="rounded-lg border border-border p-4 space-y-3">
           <div className="flex items-center justify-between"><span className="text-sm font-medium">Material {index + 1}</span>
             <button type="button" aria-label={`Quitar material ${index + 1}`} onClick={() => { setReview(false); setMaterials((current) => current.filter((_, position) => position !== index)) }}><Trash2 size={16} /></button></div>
-          <Field label="SKU del material *"><input value={item.sku} onChange={(event) => setMaterial(index, 'sku', event.target.value)} className="input-field" required /></Field>
+          <Field label="SKU del material *"><AutocompleteInput value={item.sku} onChange={(event) => setMaterial(index, 'sku', event.target.value)} fetchOptions={searchProducts} minChars={2} required /></Field>
           <Field label="Cantidad repuesta *"><input type="number" min="0.001" step="0.001" value={item.cantidad} onChange={(event) => setMaterial(index, 'cantidad', event.target.value)} className="input-field" required /></Field>
-          <Field label="Lote del que se tomó *"><input value={item.lote} onChange={(event) => setMaterial(index, 'lote', event.target.value)} className="input-field" required /></Field>
+          <Field label="Lote del que se tomó *"><AutocompleteInput value={item.lote} onChange={(event) => setMaterial(index, 'lote', event.target.value)}
+            fetchOptions={lotSearchFor(item.sku)} onSelect={(option) => option.location && setMaterial(index, 'ubicacion', option.location)} required /></Field>
           <Field label="Causa concreta *"><input value={item.motivo} onChange={(event) => setMaterial(index, 'motivo', event.target.value)} placeholder="Por ejemplo: ruptura" className="input-field" required /></Field>
-          <Field label="Ubicación (si el lote está en varias)"><input value={item.ubicacion} onChange={(event) => setMaterial(index, 'ubicacion', event.target.value)} className="input-field" /></Field>
+          <Field label="Ubicación (si el lote está en varias)"><AutocompleteInput value={item.ubicacion} onChange={(event) => setMaterial(index, 'ubicacion', event.target.value)} fetchOptions={searchLocations} /></Field>
         </div>)}
         <button type="button" className="btn-secondary" onClick={() => { setReview(false); setMaterials((current) => [...current, { sku: '', cantidad: '', lote: '', motivo: '', ubicacion: '' }]) }}><Plus size={16} className="inline mr-1" />Añadir material</button>
       </div>}

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
 import { useAuthStore } from '../store/authStore'
 import AlertSettingsPage from './AlertSettingsPage'
+import { SortableTh, useSortableRows } from '../components/SortableTh'
 
 const PAGE_SIZE = 50
 
@@ -100,6 +101,12 @@ export default function ProductosPage() {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
   const filtered = typeF ? list.filter((p) => classifyProduct(p) === typeF) : list
+  const SEMAFORO_ORDER = { CRITICO: 0, ATENCION: 1, OK: 2 }
+  const { rows: sortedProducts, sort, toggle: toggleSort } = useSortableRows(filtered, {
+    tipo: (p) => typeLabel(classifyProduct(p)),
+    semaforo: (p) => SEMAFORO_ORDER[p.semaforo] ?? 3,
+    activo: (p) => (p.active ? 0 : 1),
+  })
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
   const rangeEnd = Math.min(page * PAGE_SIZE, total)
@@ -195,7 +202,7 @@ export default function ProductosPage() {
               </select>
             </div>
             <div className="self-end">
-              <button onClick={() => fetchList()} disabled={loading}
+              <button onClick={() => fetchList({ search, page, limit: PAGE_SIZE })} disabled={loading}
                 className="px-4 py-[9px] bg-surface border border-border hover:border-primary/50 text-sm text-muted hover:text-foreground rounded-md transition-colors disabled:opacity-50">
                 {loading ? '...' : '↺ Recargar'}
               </button>
@@ -214,19 +221,19 @@ export default function ProductosPage() {
                 <thead className="bg-white/5 text-muted text-xs sticky top-0 z-10">
                   <tr>
                     <th className="w-8 px-3 py-2"></th>
-                    <th className="hidden sm:table-cell text-left px-3 py-2 whitespace-nowrap">Tipo</th>
-                    <th className="text-left px-3 py-2 min-w-[240px]">Producto</th>
-                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Disp</th>
-                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Cuar</th>
-                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Res</th>
-                    <th className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap">Total</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">Estado stock</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">Activo</th>
+                    <SortableTh label="Tipo" sortKey="tipo" sort={sort} onSort={toggleSort} className="hidden sm:table-cell text-left px-3 py-2 whitespace-nowrap" />
+                    <SortableTh label="Producto" sortKey="sku" sort={sort} onSort={toggleSort} className="text-left px-3 py-2 min-w-[240px]" />
+                    <SortableTh label="Disp" sortKey="disponible" sort={sort} onSort={toggleSort} align="right" className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap" />
+                    <SortableTh label="Cuar" sortKey="cuarentena" sort={sort} onSort={toggleSort} align="right" className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap" />
+                    <SortableTh label="Res" sortKey="reservado" sort={sort} onSort={toggleSort} align="right" className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap" />
+                    <SortableTh label="Total" sortKey="total_fisico" sort={sort} onSort={toggleSort} align="right" className="hidden xl:table-cell text-right px-3 py-2 whitespace-nowrap" />
+                    <SortableTh label="Estado stock" sortKey="semaforo" sort={sort} onSort={toggleSort} className="text-left px-3 py-2 whitespace-nowrap" />
+                    <SortableTh label="Activo" sortKey="activo" sort={sort} onSort={toggleSort} className="text-left px-3 py-2 whitespace-nowrap" />
                     <th className="text-right px-3 py-2 whitespace-nowrap">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((p) => {
+                  {sortedProducts.map((p) => {
                     const showDetail = Number(expanded) === Number(p.id) && Number(detail?.id) === Number(p.id)
                     const lotes = showDetail ? (detail?.lotes || []) : []
                     const isOpen = Number(expanded) === Number(p.id)
