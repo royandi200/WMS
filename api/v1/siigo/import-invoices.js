@@ -8,6 +8,11 @@ const {
   cancelImportedInvoice,
   invoiceSignature,
 } = require('../../_lib/siigo.invoice-import');
+const {
+  issuesDueForRetry,
+  recordInvoiceIssue,
+  resolveInvoiceIssue,
+} = require('../../_lib/siigo.invoice-issues');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -346,6 +351,46 @@ async function reconcileCompleted(user, invoiceIds = [], cachedInvoices = new Ma
   return results;
 }
 
+// Importa una factura y mantiene su novedad: la registra si falla y la
+// resuelve si entra. `tracked` indica que el fallo quedó guardado.
+async function importAndTrack(invoice, user) {
+  try {
+    validateSandboxInvoice(invoice);
+    const result = await importInvoice(invoice, user.id);
+    await resolveInvoiceIssue(invoice.id, { userId: user.id }).catch(() => {});
+    return result;
+  } catch (err) {
+    const tracked = await recordInvoiceIssue(invoice, err).catch(() => false);
+    return {
+      status: 'error',
+      siigo_invoice_id: invoice?.id || null,
+      siigo_invoice_name: invoice?.name || null,
+      error: err.message,
+      tracked,
+    };
+  }
+}
+
+async function retryInvoiceById(invoiceId, user) {
+  let invoice;
+  try {
+    [invoice] = await fetchByIds([invoiceId]);
+  } catch (err) {
+    const status = err.response?.status || err.status;
+    if (status === 404 || status === 400) {
+      const nota = status === 404 ? 'La factura fue eliminada en SIIGO' : 'La factura no existe en esta cuenta de SIIGO';
+      await resolveInvoiceIssue(invoiceId, { userId: user.id, nota, estado: 'DESCARTADA' }).catch(() => {});
+      return { status: 'discarded', siigo_invoice_id: invoiceId, reason: nota };
+    }
+    return { status: 'error', siigo_invoice_id: invoiceId, error: err.message, tracked: true };
+  }
+  if (invoice?.annulled === true) {
+    await resolveInvoiceIssue(invoiceId, { userId: user.id, nota: 'La factura fue anulada en SIIGO', estado: 'DESCARTADA' }).catch(() => {});
+    return { status: 'discarded', siigo_invoice_id: invoiceId, reason: 'anulada' };
+  }
+  return importAndTrack(invoice, user);
+}
+
 async function shouldReconcileCompleted(force) {
   if (force) return true;
   const last = Date.parse(await getConfigValue('invoices_completed_reconcile_at') || '');
@@ -372,20 +417,19 @@ module.exports = async (req, res) => {
     const results = [];
 
     for (const invoice of invoices) {
-      try {
-        validateSandboxInvoice(invoice);
-        results.push(await importInvoice(invoice, user.id));
-      } catch (err) {
-        results.push({
-          status: 'error',
-          siigo_invoice_id: invoice?.id || null,
-          siigo_invoice_name: invoice?.name || null,
-          error: err.message,
-        });
-      }
+      results.push(await importAndTrack(invoice, user));
     }
 
     const processedIds = new Set(invoices.map(invoice => String(invoice?.id || '')).filter(Boolean));
+    // Las facturas con novedad abierta se reintentan solas cada pocos minutos:
+    // al sincronizar el producto faltante, la factura pasa sin intervención.
+    const retried = [];
+    for (const invoiceId of await issuesDueForRetry(processedIds).catch(() => [])) {
+      processedIds.add(invoiceId);
+      retried.push(await retryInvoiceById(invoiceId, user));
+    }
+    const importResults = [...results, ...retried];
+    results.push(...retried);
     results.push(...await reconcilePending(user, processedIds));
 
     const forceCompleted = req.body?.reconcile_completed === true
@@ -401,13 +445,21 @@ module.exports = async (req, res) => {
       }
     }
 
-    if (!ids.length
-        && !results.some(result => result.status === 'error')
-        && !completedReconciliation.some(result => result.status === 'error')) {
+    // Una factura con error ya no frena a las demás: queda registrada como
+    // novedad (visible y reintentable), así que el cursor puede avanzar. Solo
+    // se retiene si un error no pudo registrarse, para no perder la factura.
+    if (!ids.length && !importResults.some(result => result.status === 'error' && !result.tracked)) {
       await setCursor(startedAt.toISOString());
     }
     const errors = results.filter(result => result.status === 'error').length
       + completedReconciliation.filter(result => result.status === 'error').length;
+    const count = (status) => importResults.filter(result => result.status === status).length;
+    console.log(`[siigo/import-invoices] ${ids.length ? 'targeted' : 'incremental'} since=${ids.length ? '-' : since}`
+      + ` fetched=${invoices.length} retried=${retried.length} created=${count('created')} updated=${count('updated')}`
+      + ` converted=${count('converted')} duplicates=${count('duplicate')} cancelled=${count('cancelled')}`
+      + ` novedades=${count('error')}`
+      + importResults.filter(result => result.status === 'error')
+        .map(result => ` | ${result.siigo_invoice_name || result.siigo_invoice_id}: ${result.error}`).join(''));
     return res.status(errors ? 207 : 200).json({
       ok: errors === 0,
       data: {
@@ -430,3 +482,5 @@ module.exports = async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Error importando facturas desde SIIGO' });
   }
 };
+
+module.exports.retryInvoiceById = retryInvoiceById;

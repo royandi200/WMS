@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, FileText, RefreshCw, X } from 'lucide-react'
 import { useDispatchStore } from '../store/dispatchStore'
-import { confirmDispatch, syncSiigoInvoices } from '../api/dispatch.api'
+import { actOnSiigoInvoiceIssue, confirmDispatch, listSiigoInvoiceIssues, syncSiigoInvoices } from '../api/dispatch.api'
 import { useAuthStore } from '../store/authStore'
 import { openDispatchSheet } from '../utils/dispatchSheet'
 import { formatBogotaDateTime } from '../utils/dateTime'
@@ -22,8 +22,14 @@ export default function DespachoPage() {
   const capabilities = useAuthStore((state) => state.user?.capabilities || [])
   const canSync = capabilities.includes('*') || capabilities.includes('siigo.poll')
   const canConfirm = capabilities.includes('*') || capabilities.includes('dispatch.confirm')
+  const canFixIssues = capabilities.includes('*') || capabilities.includes('siigo.sync')
+  const [openIssues, setOpenIssues] = useState(0)
+  const refreshIssueCount = () => listSiigoInvoiceIssues()
+    .then((payload) => setOpenIssues(Number(payload?.data?.open || 0)))
+    .catch(() => {})
 
-  useEffect(() => { fetchList({ limit: 200 }) }, [tab])
+  useEffect(() => { if (tab !== 2) fetchList({ limit: 200 }) }, [tab])
+  useEffect(() => { refreshIssueCount() }, [])
   const rows = useMemo(() => list.filter((row) => tab === 0
     ? !['despachado', 'anulado'].includes(row.estado)
     : ['despachado', 'anulado'].includes(row.estado)), [list, tab])
@@ -36,8 +42,11 @@ export default function DespachoPage() {
     try {
       const payload = await syncSiigoInvoices({})
       const errors = Number(payload?.errors || 0)
-      notify(errors ? `Sincronización terminada con ${errors} error(es)` : 'Facturas sincronizadas', errors === 0)
+      notify(errors
+        ? `Sincronización terminada: ${errors} factura(s) con novedad. Revisa la pestaña «Novedades SIIGO».`
+        : 'Facturas sincronizadas', errors === 0)
       await fetchList({ limit: 200 })
+      refreshIssueCount()
     } catch (error) {
       notify(error.response?.data?.error || 'No fue posible consultar Siigo', false)
     } finally {
@@ -72,14 +81,17 @@ export default function DespachoPage() {
         )}
       </div>
       <div className="flex gap-1 mb-4 md:mb-6 border-b border-border overflow-x-auto pb-px scrollbar-none">
-        {['Pendientes', 'Histórico'].map((label, index) => (
-          <button key={label} onClick={() => setTab(index)} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === index ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-foreground'}`}>
+        {['Pendientes', 'Histórico', 'Novedades SIIGO'].map((label, index) => (
+          <button key={label} onClick={() => setTab(index)} className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === index ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-foreground'}`}>
             {label}
+            {index === 2 && openIssues > 0 && <span className="rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white">{openIssues}</span>}
           </button>
         ))}
       </div>
       {toast && <div className={`mb-4 px-4 py-3 border text-sm ${toast.ok ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-danger/10 border-danger/30 text-danger'}`}>{toast.message}</div>}
-      <DispatchTable rows={rows} loading={loading} workingId={workingId} onConfirm={setConfirmTarget} pending={tab === 0} canConfirm={canConfirm} />
+      {tab === 2
+        ? <SiigoIssuesPanel canRetry={canSync} canFix={canFixIssues} notify={notify} onChanged={() => { refreshIssueCount(); fetchList({ limit: 200 }) }} />
+        : <DispatchTable rows={rows} loading={loading} workingId={workingId} onConfirm={setConfirmTarget} pending={tab === 0} canConfirm={canConfirm} />}
       {confirmTarget && (
         <DispatchConfirmationModal row={confirmTarget} working={workingId === confirmTarget.id} onCancel={() => setConfirmTarget(null)} onConfirm={() => confirm(confirmTarget)} />
       )}
@@ -158,6 +170,135 @@ function DispatchTable({ rows: unsortedRows, loading, workingId, onConfirm, pend
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+const ISSUE_LABELS = {
+  PRODUCTO_NO_SINCRONIZADO: 'Producto que existe en SIIGO pero aún no en el WMS',
+  BODEGAS_MULTIPLES: 'La factura usa varias bodegas de SIIGO',
+  BODEGA_NO_MAPEADA: 'La bodega de SIIGO de la factura no está habilitada en el WMS',
+  COTIZACION: 'La factura no coincide con la cotización reservada',
+  FACTURA_SIN_PRODUCTOS: 'La factura no tiene productos',
+  OTRO: 'Error al importar',
+}
+const ISSUE_STATE = {
+  ABIERTA: 'text-danger bg-danger/10',
+  RESUELTA: 'text-green-400 bg-green-400/10',
+  DESCARTADA: 'text-muted bg-white/5',
+}
+
+function SiigoIssuesPanel({ canRetry, canFix, notify, onChanged }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showClosed, setShowClosed] = useState(false)
+  const [working, setWorking] = useState(null)
+  const [dismissTarget, setDismissTarget] = useState(null)
+  const [reason, setReason] = useState('')
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const payload = await listSiigoInvoiceIssues(showClosed)
+      setRows(payload?.data?.rows || [])
+    } catch (error) {
+      notify(error.response?.data?.error || 'No fue posible cargar las novedades', false)
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { load() }, [showClosed])
+
+  const act = async (row, action, extra = {}) => {
+    setWorking(`${row.siigo_invoice_id}:${action}`)
+    try {
+      const payload = await actOnSiigoInvoiceIssue({ action, invoice_id: row.siigo_invoice_id, ...extra })
+      const result = payload?.data?.result
+      const name = row.siigo_invoice_name || row.siigo_invoice_id
+      if (action === 'dismiss') notify(`Factura ${name} descartada.`, true)
+      else if (result?.status === 'error') notify(`La factura ${name} sigue con novedad: ${result.error}`, false)
+      else if (result?.status === 'discarded') notify(`Factura ${name}: ${result.reason}. Se cerró la novedad.`, true)
+      else notify(`Factura ${name} importada: el despacho ya está en Pendientes.`, true)
+      setDismissTarget(null)
+      setReason('')
+      await load()
+      onChanged()
+    } catch (error) {
+      notify(error.response?.data?.error || 'No fue posible completar la acción', false)
+    } finally {
+      setWorking(null)
+    }
+  }
+
+  const busy = (row, action) => working === `${row.siigo_invoice_id}:${action}`
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted max-w-2xl">
+          Facturas de venta de SIIGO que no se pudieron convertir en despacho. Se reintentan solas cada 10 minutos;
+          corrige la causa (por ejemplo, trae el producto nuevo desde SIIGO) o reintenta de inmediato.
+        </p>
+        <label className="inline-flex items-center gap-2 text-xs text-muted">
+          <input type="checkbox" checked={showClosed} onChange={(event) => setShowClosed(event.target.checked)} />
+          Ver también resueltas o descartadas (últimos 7 días)
+        </label>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead><tr className="bg-surface border-b border-border">
+            {['Factura', 'Fecha', 'Problema', 'Estado', 'Intentos', 'Último intento', 'Acciones'].map((label) => (
+              <th key={label} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted">{label}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">Cargando novedades...</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">Todas las facturas de SIIGO pasaron al WMS.</td></tr>}
+            {!loading && rows.map((row) => (
+              <tr key={row.id} className="border-b border-border/50 align-top hover:bg-white/[0.02]">
+                <td className="px-3 py-2 font-mono text-xs">{row.siigo_invoice_name || row.siigo_invoice_id}</td>
+                <td className="px-3 py-2 text-xs text-muted">{String(row.fecha_factura || '').slice(0, 10) || '-'}</td>
+                <td className="px-3 py-2 text-xs max-w-md">
+                  <span className="block font-medium text-foreground">{ISSUE_LABELS[row.tipo] || row.tipo}</span>
+                  {row.codigos?.length > 0 && <span className="block font-mono text-primary">{row.codigos.join(', ')}</span>}
+                  <span className="block text-muted">{row.detalle}</span>
+                  {row.nota && <span className="block text-muted">Nota: {row.nota}{row.resuelta_por_nombre ? ` · ${row.resuelta_por_nombre}` : ''}</span>}
+                </td>
+                <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${ISSUE_STATE[row.estado] || ''}`}>{row.estado}</span></td>
+                <td className="px-3 py-2 tabular-nums">{row.intentos}</td>
+                <td className="px-3 py-2 text-xs text-muted">{formatBogotaDateTime(row.ultimo_intento)}</td>
+                <td className="px-3 py-2">
+                  {row.estado === 'ABIERTA' ? (
+                    <div className="flex flex-col items-start gap-1.5 text-xs">
+                      {canFix && row.tipo === 'PRODUCTO_NO_SINCRONIZADO' && (
+                        <button type="button" disabled={Boolean(working)} onClick={() => act(row, 'sync_and_retry')} className="text-primary hover:underline disabled:opacity-50">
+                          {busy(row, 'sync_and_retry') ? 'Trayendo de SIIGO...' : 'Traer producto de SIIGO y reintentar'}
+                        </button>
+                      )}
+                      {canRetry && (
+                        <button type="button" disabled={Boolean(working)} onClick={() => act(row, 'retry')} className="inline-flex items-center gap-1 text-foreground hover:underline disabled:opacity-50">
+                          <RefreshCw size={12} className={busy(row, 'retry') ? 'animate-spin' : ''} /> Reintentar
+                        </button>
+                      )}
+                      {canFix && (dismissTarget === row.siigo_invoice_id ? (
+                        <div className="flex flex-col gap-1">
+                          <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Motivo (mín. 5 caracteres)" className="input-field py-1 text-xs" />
+                          <div className="flex gap-2">
+                            <button type="button" disabled={reason.trim().length < 5 || Boolean(working)} onClick={() => act(row, 'dismiss', { motivo: reason.trim() })} className="text-danger hover:underline disabled:opacity-50">Confirmar descarte</button>
+                            <button type="button" onClick={() => { setDismissTarget(null); setReason('') }} className="text-muted hover:underline">Volver</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" disabled={Boolean(working)} onClick={() => setDismissTarget(row.siigo_invoice_id)} className="text-muted hover:text-danger disabled:opacity-50">Descartar</button>
+                      ))}
+                    </div>
+                  ) : <span className="text-xs text-muted">-</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
