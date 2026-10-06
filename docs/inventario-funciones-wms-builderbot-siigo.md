@@ -163,9 +163,9 @@ Credenciales usadas: `SIIGO_USERNAME`, `SIIGO_ACCESS_KEY` y encabezado `Partner-
 | Webhook | Qué hace | Estado |
 |---|---|---|
 | `siigo-products` | Actualiza un producto cuando cambia en SIIGO | Protegido con secreto |
-| `siigo-invoices` | Aviso de facturas de venta | Solo valida `Partner-Id`; se recomienda desactivarlo y usar la consulta periódica |
-| `siigo-purchases` | Aviso de facturas de compra | Solo valida `Partner-Id`; se recomienda desactivarlo |
-| `siigo-credit-notes` | Aviso de notas crédito | Solo valida `Partner-Id`; se recomienda desactivarlo |
+| `siigo-invoices` | Aviso de facturas de venta | **Desactivado** (2026-10-05, auditoría F-01): responde 410. Las ventas llegan por la consulta periódica `import-invoices` |
+| `siigo-purchases` | Aviso de facturas de compra | **Desactivado** (2026-10-05): responde 410. El ingreso nace de la OC del WMS |
+| `siigo-credit-notes` | Aviso de notas crédito | **Desactivado** (2026-10-05): responde 410. Reactivar solo con firma HMAC, ventana de tiempo y deduplicación |
 | `webhooks-subscribe` | Suscribe los webhooks en SIIGO | Bloqueado en el sandbox compartido |
 
 ### 4.3 Lo que la API de SIIGO no permite
