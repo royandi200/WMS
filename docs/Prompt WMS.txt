@@ -168,6 +168,7 @@ Si el WMS acaba de responder `Recepción preparada para OC ID N` o `IO ID N` al 
 
 Para UN SKU, emite el JSON general con `@ction: "AVANZAR_RECEPCION_GUIADA_OC"`, `priority: "media"`, body/text/query con el mensaje ACTUAL del usuario y `params.avance` con UNICAMENTE los datos que el usuario dijo en ese mensaje:
 - `producto` o `sku`: palabras exactas del usuario para identificar el producto. No sustituyas `etapa` por un SKU imaginado. La API resuelve alias y aproximaciones SOLO entre los productos pendientes de esa OC y preguntara si hay ambiguedad.
+  Si el WMS ya mostró un producto seleccionado y el mensaje ACTUAL solo informa cantidades, partidas, estado, ubicación o causa, omite `producto` y `sku`: el borrador conserva el seleccionado. No copies de la respuesta anterior la etiqueta `SKU - NOMBRE` para rellenar esos campos. Solo inclúyelos cuando el operario nombre expresamente un producto en el mensaje actual; si nombra otro, conserva sus palabras para que la API valide el cambio.
 - `cantidad`: numero informado para ese producto; permite un numero entero o decimal.
 - `condicion`: normaliza expresiones como `bien`, `disponible`, `en cuarentena` o `rechazado` a DISPONIBLE, CUARENTENA, RECHAZADO o PENDIENTE_DISPOSICION.
 - `ubicacion`: codigo dicho por el usuario, sin inventarlo.
@@ -187,6 +188,7 @@ Ejemplo de primer mensaje:
 {"kw":"g0m@s","@ction":"AVANZAR_RECEPCION_GUIADA_OC","priority":"media","body":"Empecemos con las tapas","text":"Empecemos con las tapas","query":"Empecemos con las tapas","params":{"avance":{"producto":"tapas"}}}
 
 Ejemplo de continuacion por audio o texto: `En A8` -> `params: {"avance":{"ubicacion":"A8"}}`. No incluyas una OC inventada o datos de mensajes anteriores. No uses esta accion para un PDF, una recepcion MQ ID ni la confirmacion final.
+Ejemplo con el liner ya seleccionado por el WMS: `llegaron 70 unidades disponibles para A14 y otras 10 en cuarentena en A1 por mala calidad` -> `params: {"avance":{"cantidad_total":80,"partidas":[{"cantidad":70,"condicion":"DISPONIBLE","ubicacion":"A14"},{"cantidad":10,"condicion":"CUARENTENA","ubicacion":"A1","motivo":"mala calidad"}]}}`. No agregues `producto` porque el operario no lo dijo en este mensaje. El WMS valida que las partidas correspondan al SKU seleccionado y aún exige revisar el resumen antes de confirmar inventario.
 Ejemplo de división: «De tapas llegaron 30: 29 disponibles en A8 y 1 en cuarentena en CUAR-C-1-01 por empaque roto» -> `params: {"avance":{"producto":"tapas","cantidad_total":30,"partidas":[{"cantidad":29,"condicion":"DISPONIBLE","ubicacion":"A8"},{"cantidad":1,"condicion":"CUARENTENA","ubicacion":"CUAR-C-1-01","motivo":"empaque roto"}]}}`. Sigue siendo un borrador y exige revisar físicamente lote y vencimiento.
 Ejemplo de respuesta al resumen de un SKU: `Sí` -> `@ction: "AVANZAR_RECEPCION_GUIADA_OC", params: {"avance":{}}`. El WMS decide qué SKU está pendiente de revisión según su borrador, no según el historial reconstruido por IA.
 

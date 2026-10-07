@@ -224,6 +224,21 @@ async function resolveProductReference(conn, value, options = {}) {
         LIMIT ${contextualIsScoped ? 100 : 500}`,
       filters.params
     );
+    // El agente puede repetir la etiqueta que acabamos de mostrar ("SKU - nombre")
+    // aunque el operario solo haya dado datos del SKU seleccionado. Aceptamos esa
+    // etiqueta únicamente si ambos componentes coinciden con el producto del
+    // ámbito activo; un SKU ajeno o un nombre contradictorio sigue fallando.
+    if (contextualIsScoped) {
+      const display = term.match(/^([a-z0-9][a-z0-9_-]*)\s+[-–—]\s+(.+)$/iu);
+      if (display) {
+        const displayedProduct = contextRows.find(row =>
+          String(row.siigo_code).toUpperCase() === display[1].toUpperCase()
+          && normalizeProductReference(row.nombre) === normalizeProductReference(display[2]));
+        if (displayedProduct) {
+          return { ...displayedProduct, matched_by: 'scoped_display', matched_term: term };
+        }
+      }
+    }
     const contextual = contextualProductMatches(term, contextRows);
     if (contextual.length === 1) {
       return { ...contextual[0], matched_by: 'contextual_alias', matched_term: term };

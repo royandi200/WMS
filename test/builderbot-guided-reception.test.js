@@ -251,6 +251,8 @@ test('prompt batch example uses the same contract and leaves quarantine location
   assert.match(prompt, /solamente lo dicho en el mensaje actual/u);
   assert.match(prompt, /mal estado` NO es una causa concreta/u);
   assert.match(prompt, /no cambies a `CONFIRMAR_RECEPCION_OC` porque falten datos/u);
+  assert.match(prompt, /omite `producto` y `sku`: el borrador conserva el seleccionado/u);
+  assert.match(prompt, /No copies de la respuesta anterior la etiqueta `SKU - NOMBRE`/u);
 });
 
 test('guided OC reception accumulates audio-sized pieces and only creates a review draft', async () => {
@@ -992,6 +994,31 @@ test('an explicit OC ID correction updates a partition after a final preview', a
   const corrected = await send('Corrección, ubicación de la partida 2 de las tapas de OC ID 37 es A2');
   assert.equal(corrected.sku_review, true);
   assert.match(corrected.message, /Partida 2: 1 und · CUARENTENA · ubicación A2/u);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a selected liner accepts split quantities when the model echoes its displayed SKU and name', async () => {
+  const { db, state } = guidedDb({ batchProducts: true });
+  const user = { id: 5 };
+  await advanceGuidedReception({ db, user, rawText: 'OC ID 37: liners',
+    params: { avance: { producto: '00035-LNTP60' } } });
+  const result = await advanceGuidedReception({ db, user,
+    rawText: 'Llegaron 20 unidades disponibles a B10 y otras 10 en cuarentena en A1 por mala calidad',
+    params: { avance: {
+      producto: '00035-LNTP60 - LINER TARRO x 60', cantidad_total: 30,
+      partidas: [
+        { cantidad: 20, condicion: 'DISPONIBLE', ubicacion: 'B10' },
+        { cantidad: 10, condicion: 'CUARENTENA', ubicacion: 'A1', motivo: 'mala calidad' },
+      ],
+    } },
+  });
+  const draft = JSON.parse(state.draft.payload_json);
+  assert.equal(result.selected_sku, '00035-LNTP60');
+  assert.equal(draft.entries['00035-LNTP60'].cantidad, 30);
+  assert.deepEqual(draft.entries['00035-LNTP60'].partidas.map(part =>
+    [part.cantidad, part.condicion, part.ubicacion]), [
+    [20, 'DISPONIBLE', 'B10'], [10, 'CUARENTENA', 'A1'],
+  ]);
   assert.equal(state.inventoryWrites, 0);
 });
 

@@ -107,6 +107,30 @@ test('resolver uses partial aliases only when explicitly scoped', async () => {
   assert.equal(calls, 3);
 });
 
+test('a displayed SKU and name resolve only when both match a product in the active operation', async () => {
+  const rows = [
+    { id: 49, siigo_code: '00036-LNTG120', nombre: 'LINER TARRO GRANDE x 120', alias: null },
+    { id: 20, siigo_code: '00003-TPGG', nombre: 'TAPA TARRO GRANDE GRIS x 120', alias: null },
+  ];
+  const db = { async execute(sql, params) {
+    return /LEFT JOIN producto_aliases/u.test(sql)
+      ? [rows.filter(row => params.includes(row.id))] : [[]];
+  } };
+  const options = { productIds: [49, 20], allowContextualPartial: true,
+    allowScopedApproximate: true };
+  const liner = await resolveProductReference(db,
+    '00036-LNTG120 - LINER TARRO GRANDE x 120', options);
+  assert.equal(liner.siigo_code, '00036-LNTG120');
+  assert.equal(liner.matched_by, 'scoped_display');
+  await assert.rejects(resolveProductReference(db,
+    '00036-LNTG120 - TAPA TARRO GRANDE GRIS x 120', options),
+  error => error.code === 'PRODUCT_REFERENCE_NOT_FOUND');
+  await assert.rejects(resolveProductReference(db,
+    '00036-LNTG120 - LINER TARRO GRANDE x 120', {
+      productIds: [20], allowContextualPartial: true, allowScopedApproximate: true,
+    }), error => error.code === 'PRODUCT_REFERENCE_NOT_FOUND');
+});
+
 test('spoken "por 60" preserves the presentation while ignoring the filler word', () => {
   const rows = [
     { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO (60 UNID)' },
