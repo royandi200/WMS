@@ -1,4 +1,6 @@
-const { extractPdfTextLayer, deriveCatalogItemsFromPdfTokens, preferNativeItems } = require('./pdf-text-layer');
+const {
+  extractPdfTextLayer, deriveCatalogItemsFromPdfTokens, preferNativeItems, unmatchedTableRowCodes,
+} = require('./pdf-text-layer');
 const { recoverWarehousePdfHeaders } = require('./document-pdf-headers');
 
 function safePdfFailure(error) {
@@ -37,7 +39,15 @@ async function nativePdfEvidence(db, document, body) {
     const used = recoveredBody !== body;
     diagnostics.native_rows = nativeItems.length;
     diagnostics.status = used ? 'NATIVE_APPLIED' : 'MODEL_FALLBACK';
-    return { body: recoverWarehousePdfHeaders(recoveredBody, extracted.text), text: extracted.text, used, diagnostics, pages: extracted.pages };
+    let finalBody = recoverWarehousePdfHeaders(recoveredBody, extracted.text);
+    const unmatched = unmatchedTableRowCodes(extracted.text, products);
+    if (unmatched.length) {
+      const target = finalBody.params && typeof finalBody.params === 'object' ? finalBody.params : finalBody;
+      const warning = `SKU no encontrado o inactivo: ${unmatched.join(', ')}. Esas filas del PDF no se cargaron; sincroniza el producto o corrige el documento.`;
+      const updated = { ...target, advertencias: [...(Array.isArray(target.advertencias) ? target.advertencias : []), warning] };
+      finalBody = finalBody.params && typeof finalBody.params === 'object' ? { ...finalBody, params: updated } : updated;
+    }
+    return { body: finalBody, text: extracted.text, used, diagnostics, pages: extracted.pages };
   } catch (cause) {
     diagnostics.status = stage;
     diagnostics.failure = stage === 'PDF_PARSE_FAILED' ? safePdfFailure(cause) : stage;

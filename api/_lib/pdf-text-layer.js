@@ -103,6 +103,29 @@ function lotFromTokens(tokens, unitIndex, expiryIndex, knownSkus) {
   }) || null;
 }
 
+function hasQuantityAndUnit(tokens) {
+  return tokens.some((token, index) => index > 0
+    && normalizedUnit(token.text) && parseNumberToken(tokens[index - 1].text) != null)
+    || tokens.some((token) => /^\d+(?:[.,]\d{1,4})?\s+(und|unidad(?:es)?|g|gr|kg)$/iu.test(token.text));
+}
+
+// Catalogs synced from SIIGO contain numeric codes such as "2" or "12". A numeric
+// token is a quantity, not a new row, when a unit follows it or when the row
+// already open has not reached its quantity yet.
+function acceptedSkuPositions(positions, tokens) {
+  const accepted = [];
+  for (const position of positions) {
+    if (/^\d+$/u.test(position.token)) {
+      if (normalizedUnit(tokens[position.index + 1]?.text)) continue;
+      const previous = accepted[accepted.length - 1];
+      if (previous && previous.page === position.page
+        && !hasQuantityAndUnit(tokens.slice(previous.index + 1, position.index))) continue;
+    }
+    accepted.push(position);
+  }
+  return accepted;
+}
+
 function deriveCatalogItemsFromPdfTokens(tokens = [], products = []) {
   const catalog = new Map(products.map((product) => [String(product.siigo_code || '').toUpperCase(), product]));
   const knownSkus = new Set(catalog.keys());
@@ -110,9 +133,9 @@ function deriveCatalogItemsFromPdfTokens(tokens = [], products = []) {
     text: cleanToken(typeof token === 'object' && token !== null ? token.text : token),
     page: typeof token === 'object' && token !== null ? token.page : null,
   })).filter((token) => token.text);
-  const positions = normalizedTokens
+  const positions = acceptedSkuPositions(normalizedTokens
     .map((token, index) => ({ token: token.text.toUpperCase(), page: token.page, index }))
-    .filter(({ token }) => knownSkus.has(token));
+    .filter(({ token }) => knownSkus.has(token)), normalizedTokens);
   const items = [];
   for (let positionIndex = 0; positionIndex < positions.length && items.length < 100; positionIndex += 1) {
     const position = positions[positionIndex];
@@ -153,6 +176,23 @@ function deriveCatalogItemsFromPdfTokens(tokens = [], products = []) {
   return items;
 }
 
+// Table rows (first cell, then a quantity followed by a unit) whose first cell is
+// not a catalog SKU. These rows are not extracted, so the reviewer must see them.
+function unmatchedTableRowCodes(text = '', products = []) {
+  const knownSkus = new Set(products.map((product) => String(product.siigo_code || '').toUpperCase()));
+  const codes = [];
+  for (const line of String(text).split('\n')) {
+    const cells = line.split('\t').map(cleanToken).filter(Boolean);
+    if (cells.length < 3) continue;
+    const first = cells[0].toUpperCase();
+    if (knownSkus.has(first) || !/^[A-Z0-9][A-Z0-9._&/-]{2,79}$/u.test(first) || !/\d/u.test(first)) continue;
+    const isRow = cells.some((cell, index) => index > 1
+      && normalizedUnit(cell) && parseNumberToken(cells[index - 1]) != null);
+    if (isRow && !codes.includes(first)) codes.push(first);
+  }
+  return codes.slice(0, 20);
+}
+
 function sourceObject(body = {}) {
   return body.params && typeof body.params === 'object' ? body.params : body;
 }
@@ -184,4 +224,5 @@ module.exports = {
   extractPdfTextLayer,
   parseNumberToken,
   preferNativeItems,
+  unmatchedTableRowCodes,
 };

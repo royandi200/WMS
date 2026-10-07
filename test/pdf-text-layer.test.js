@@ -65,3 +65,39 @@ test('ambiguous formatted quantities are not guessed', () => {
   assert.equal(parseNumberToken('0,25'), 0.25);
   assert.equal(parseNumberToken('1.200'), null);
 });
+
+test('a quantity equal to a numeric catalog code does not drop its row', async () => {
+  const pdf = buildPurchaseOrderPdf({
+    number: 'OC-NUMERIC-CODE-001',
+    supplier: 'Proveedor QA',
+    date: '2026-10-07',
+    title: 'ORDEN DE COMPRA',
+    purpose: 'Codigos numericos SIIGO',
+    items: [
+      { sku: '00001-TPBI', description: 'Tapa blanca 60', quantity: 3, unit: 'und' },
+      { sku: '00006-TRP', description: 'Tarro cuadrado 60', quantity: 2, unit: 'und' },
+      { sku: '12', description: 'Muebles de carton', quantity: 12, unit: 'und' },
+    ],
+  });
+  const extracted = await extractPdfTextLayer(pdf);
+  const catalog = [...PRODUCTS, { siigo_code: '2', nombre: 'Servicios' }, { siigo_code: '12', nombre: 'Muebles' }];
+  const items = deriveCatalogItemsFromPdfTokens(extracted.tokens, catalog);
+  assert.deepEqual(items.map(item => [item.sku, item.cantidad]), [['00001-TPBI', 3], ['00006-TRP', 2], ['12', 12]]);
+});
+
+test('table rows with SKUs outside the catalog are reported, not silently dropped', async () => {
+  const { unmatchedTableRowCodes } = require('../api/_lib/pdf-text-layer');
+  const pdf = buildPurchaseOrderPdf({
+    number: 'OC-UNKNOWN-SKU-001',
+    supplier: 'Proveedor QA',
+    date: '2026-10-07',
+    title: 'ORDEN DE COMPRA',
+    purpose: 'SKU inexistente',
+    items: [
+      { sku: '00001-TPBI', description: 'Tapa blanca 60', quantity: 5, unit: 'und' },
+      { sku: '99999-NOEXISTE', description: 'Insumo que no existe', quantity: 7, unit: 'und' },
+    ],
+  });
+  const extracted = await extractPdfTextLayer(pdf);
+  assert.deepEqual(unmatchedTableRowCodes(extracted.text, PRODUCTS), ['99999-NOEXISTE']);
+});
