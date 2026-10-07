@@ -619,11 +619,19 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
           <p className="text-sm font-medium text-foreground">Órdenes esperadas</p>
           <p className="text-xs text-muted">No generan stock hasta confirmar la recepción física.</p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-start justify-end gap-3">
+          <div className="flex flex-col items-end gap-1">
+            <button type="button" onClick={() => creating ? closeForm() : setCreating(true)}
+              className="inline-flex items-center gap-2 border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/60 hover:text-primary">
+              <Plus size={16} /> Crear OC manual
+            </button>
+            <span className="max-w-[14rem] text-right text-xs text-muted">Solo si el PDF no se puede leer: digitas los datos a mano.</span>
+          </div>
           {onUploadPdf && (
-            <label className={`inline-flex cursor-pointer items-center gap-2 border border-primary/50 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 ${loading ? 'pointer-events-none opacity-50' : ''}`}
+            <div className="flex flex-col items-end gap-1">
+            <label className={`btn-primary inline-flex cursor-pointer items-center gap-2 ${loading ? 'pointer-events-none opacity-50' : ''}`}
               title="El sistema lee el PDF y deja el borrador listo para revisar">
-              <FileText size={16} /> {loading ? 'Leyendo PDF...' : 'Cargar PDF'}
+              <FileText size={16} /> {loading ? 'Leyendo PDF...' : 'Cargar PDF de OC'}
               <input
                 type="file"
                 accept="application/pdf,.pdf"
@@ -643,18 +651,17 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
                 }}
               />
             </label>
+            <span className="max-w-[14rem] text-right text-xs text-muted">Paso 1: el sistema lee la OC y te la deja lista para revisar.</span>
+            </div>
           )}
-          <button type="button" onClick={() => creating ? closeForm() : setCreating(true)} className="btn-primary inline-flex items-center gap-2">
-            <Plus size={16} /> Nueva OC
-          </button>
         </div>
       </div>
 
       {creating && (
         <form onSubmit={submit} className="border-y border-border py-5 space-y-4">
           <div>
-            <h2 className="text-sm font-semibold text-foreground">{form.document_draft_id ? `Revisar OC de proveedor · Borrador ID ${form.document_draft_id}` : 'Cargar OC de proveedor'}</h2>
-            <p className="text-xs text-muted">{form.document_draft_id ? 'Compara proveedor, fecha, SKU y cantidades con el PDF original antes de aprobar la OC.' : 'El PDF y los datos de la orden se conservarán para conciliar la recepción.'}</p>
+            <h2 className="text-sm font-semibold text-foreground">{form.document_draft_id ? `Revisar OC de proveedor · Borrador ID ${form.document_draft_id}` : 'Crear OC manualmente'}</h2>
+            <p className="text-xs text-muted">{form.document_draft_id ? 'Compara proveedor, fecha, SKU y cantidades con el PDF original antes de aprobar la OC.' : 'Digita los datos de la orden. Si el PDF se puede leer, usa mejor «Cargar PDF de OC».'}</p>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
             <Field label="Número de OC *"><input value={form.numero} onChange={setHeader('numero')} readOnly={Boolean(form.document_draft_id)} className="input-field read-only:opacity-70" required /></Field>
@@ -676,12 +683,12 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
               <span className="flex-1">PDF recibido. Revisa los datos extraídos antes de crear la OC operativa.</span>
               {selectedDraft?.archivo_id && <button type="button" onClick={() => downloadPurchaseOrderDraftDocument(selectedDraft.archivo_id, selectedDraft.archivo_nombre)} className="inline-flex items-center gap-2 text-primary hover:underline"><Download size={15} /> Ver PDF original</button>}
             </div>
-          ) : <Field label="Orden de compra en PDF *">
+          ) : <Field label="PDF de soporte *">
             <label className="flex min-h-20 cursor-pointer items-center gap-3 border border-dashed border-border px-4 py-3 hover:border-primary/60">
               <FileText size={20} className="text-primary" />
               <span className="min-w-0 flex-1 text-sm text-foreground">
-                {form.documento_pdf ? form.documento_pdf.name : 'Seleccionar PDF'}
-                <span className="block text-xs text-muted">Máximo 2.5 MB. Los ítems se transcriben para permitir la conciliación.</span>
+                {form.documento_pdf ? form.documento_pdf.name : 'Adjuntar PDF de soporte'}
+                <span className="block text-xs text-muted">Máximo 2.5 MB. Queda guardado como soporte; no se lee automáticamente.</span>
               </span>
               <input
                 type="file"
