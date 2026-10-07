@@ -283,7 +283,7 @@ async function createPurchaseOrderRecord(conn, { input, document, userId }) {
 
 async function loadPurchaseOrderDraft(conn, draftId) {
   const [drafts] = await conn.execute(
-    `SELECT d.id, d.estado, d.orden_compra_id, d.referencia_documento,
+    `SELECT d.id, d.estado, d.orden_compra_id, d.referencia_documento, d.proveedor_nit,
             a.nombre_original, a.mime_type, a.tamano_bytes, a.sha256, a.contenido
        FROM documentos_bodega_borrador d
        LEFT JOIN documento_bodega_borrador_archivos a ON a.documento_id = d.id
@@ -328,6 +328,21 @@ async function createPurchaseOrderForUser({ body = {}, user }) {
       };
       if (input.numero !== draft.referencia_documento) {
         throw httpError(409, 'El numero revisado no coincide con la referencia del PDF');
+      }
+      const pdfTaxId = String(draft.proveedor_nit || '').replace(/\D/g, '');
+      if (pdfTaxId) {
+        const [suppliers] = await conn.execute(
+          `SELECT identification FROM terceros WHERE id = ? LIMIT 1`,
+          [input.terceroId]
+        );
+        const chosenTaxId = String(suppliers[0]?.identification || '').replace(/\D/g, '');
+        // Either side may carry the NIT check digit.
+        const sameNit = pdfTaxId === chosenTaxId
+          || pdfTaxId.slice(0, -1) === chosenTaxId
+          || chosenTaxId.slice(0, -1) === pdfTaxId;
+        if (!chosenTaxId || !sameNit) {
+          throw httpError(409, `El proveedor elegido no coincide con el NIT ${draft.proveedor_nit} del PDF. Sincroniza el proveedor desde SIIGO antes de crear la OC.`);
+        }
       }
       const [extractedItems] = await conn.execute(
         `SELECT sku_extraido AS sku, descripcion_extraida AS descripcion,

@@ -211,10 +211,15 @@ export default function RecepcionPage() {
               const rows = refreshedDrafts?.data?.rows || []
               setPurchaseOrderDrafts(rows)
               const data = payload?.data
+              const draft = rows.find((row) => Number(row.id) === Number(data?.id)) || null
+              if (draft?.orden_compra_id) {
+                showToast(`Este PDF ya está registrado como OC ID ${draft.orden_compra_id}. No se creó nada nuevo.`, true)
+                return { ok: true, draft: null }
+              }
               showToast(data?.duplicate
                 ? `El PDF ya estaba cargado como borrador ID ${data.id}.`
                 : `PDF leído: borrador ID ${data?.id}. Revisa los datos antes de crear la OC.`, true)
-              return { ok: true, draft: rows.find((row) => Number(row.id) === Number(data?.id)) || null }
+              return { ok: true, draft }
             } catch (error) {
               const message = error.response?.data?.error || error.message || 'No fue posible leer el PDF'
               showToast(message, false)
@@ -524,6 +529,7 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
   const [formError, setFormError] = useState('')
   const [reviewConfirmed, setReviewConfirmed] = useState(false)
   const selectedDraft = drafts.find((draft) => draft.id === form.document_draft_id)
+  const supplierMissing = Boolean(selectedDraft?.proveedor_nit && !selectedDraft?.tercero_id)
   const setHeader = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
   const setItem = (index, key, value) => setForm((current) => ({
     ...current,
@@ -614,22 +620,22 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
         onReview={reviewDraft}
         onDiscard={onDiscardDraft}
       />
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium text-foreground">Órdenes esperadas</p>
           <p className="text-xs text-muted">No generan stock hasta confirmar la recepción física.</p>
         </div>
-        <div className="flex flex-wrap items-start justify-end gap-3">
-          <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-start sm:justify-end">
+          <div className="flex flex-col gap-1 sm:items-end">
             <button type="button" onClick={() => creating ? closeForm() : setCreating(true)}
-              className="inline-flex items-center gap-2 border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/60 hover:text-primary">
+              className="inline-flex items-center justify-center gap-2 border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/60 hover:text-primary">
               <Plus size={16} /> Crear OC manual
             </button>
-            <span className="max-w-[14rem] text-right text-xs text-muted">Solo si el PDF no se puede leer: digitas los datos a mano.</span>
+            <span className="text-xs text-muted sm:max-w-[14rem] sm:text-right">Solo si el PDF no se puede leer: digitas los datos a mano.</span>
           </div>
           {onUploadPdf && (
-            <div className="flex flex-col items-end gap-1">
-            <label className={`btn-primary inline-flex cursor-pointer items-center gap-2 ${loading ? 'pointer-events-none opacity-50' : ''}`}
+            <div className="flex flex-col gap-1 sm:items-end">
+            <label className={`btn-primary inline-flex cursor-pointer items-center justify-center gap-2 ${loading ? 'pointer-events-none opacity-50' : ''}`}
               title="El sistema lee el PDF y deja el borrador listo para revisar">
               <FileText size={16} /> {loading ? 'Leyendo PDF...' : 'Cargar PDF de OC'}
               <input
@@ -651,7 +657,7 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
                 }}
               />
             </label>
-            <span className="max-w-[14rem] text-right text-xs text-muted">Paso 1: el sistema lee la OC y te la deja lista para revisar.</span>
+            <span className="text-xs text-muted sm:max-w-[14rem] sm:text-right">Paso 1: el sistema lee la OC y te la deja lista para revisar.</span>
             </div>
           )}
         </div>
@@ -666,7 +672,7 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
           <div className="grid gap-4 md:grid-cols-3">
             <Field label="Número de OC *"><input value={form.numero} onChange={setHeader('numero')} readOnly={Boolean(form.document_draft_id)} className="input-field read-only:opacity-70" required /></Field>
             <Field label="Proveedor sincronizado *">
-              <select value={form.tercero_id} onChange={setHeader('tercero_id')} className="input-field" required>
+              <select value={form.tercero_id} onChange={setHeader('tercero_id')} disabled={supplierMissing} className="input-field disabled:opacity-60" required>
                 <option value="">Seleccionar proveedor</option>
                 {suppliers.map((supplier) => (
                   <option key={supplier.id} value={supplier.id}>
@@ -674,6 +680,11 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
                   </option>
                 ))}
               </select>
+              {supplierMissing && (
+                <p className="mt-1 text-xs text-yellow-400">
+                  El proveedor del PDF (NIT {selectedDraft.proveedor_nit}) no está en el catálogo. Sincronízalo desde SIIGO; no elijas otro proveedor.
+                </p>
+              )}
             </Field>
             <Field label="Fecha de orden"><input type="date" value={form.fecha_orden} onChange={setHeader('fecha_orden')} className="input-field" /></Field>
           </div>
@@ -742,7 +753,7 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
             <button type="button" onClick={addItem} className="px-3 py-2 border border-border text-sm text-foreground hover:bg-white/5 inline-flex items-center gap-2">
               <Plus size={15} /> Agregar item
             </button>
-            <button type="submit" disabled={loading || (Boolean(form.document_draft_id) && !reviewConfirmed)} className="btn-primary disabled:opacity-50">{loading ? 'Cargando...' : form.document_draft_id ? 'Confirmar y crear OC' : 'Cargar orden'}</button>
+            <button type="submit" disabled={loading || supplierMissing || (Boolean(form.document_draft_id) && !reviewConfirmed)} className="btn-primary disabled:opacity-50">{loading ? 'Cargando...' : form.document_draft_id ? 'Confirmar y crear OC' : 'Cargar orden'}</button>
             <button type="button" onClick={closeForm} className="px-3 py-2 border border-border text-sm text-muted hover:text-foreground">Cancelar</button>
           </div>
         </form>
