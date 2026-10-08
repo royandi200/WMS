@@ -389,7 +389,7 @@ async function applyLotChoice(db, draft, order, text) {
 
 function isLotChangeRequest(text) {
   const raw = normalize(text);
-  return (/\b(?:cambiar|cambia|cambio|escoger|elegir|seleccionar|ver|mostrar)\b.*\blote\b/u.test(raw)
+  return (/\b(?:cambiar|cambia|cambio|cambiemos|cambiamos|cambie|modificar|modifica|modifico|modifiquemos|modificamos|modifique|corregir|corrige|corrijo|corrijamos|escoger|elegir|seleccionar|ver|mostrar)\b.*\blote\b/u.test(raw)
     || /^(?:el\s+)?lote\s+(?:de|del|en)\s+.+?\s+(?:es|era|fue|queda)\s+(?:otro|diferente|distinto|incorrecto|equivocado)\b/u.test(raw)
     || /^(?:las?\s+|los?\s+)?[\w\s-]+\s+(?:son|es)\s+de\s+otro\s+lote\b/u.test(raw))
     && !/\blote\b.*\b(?:a|por)\s+[a-z0-9][a-z0-9_-]*[.!]?$/u.test(raw);
@@ -397,7 +397,7 @@ function isLotChangeRequest(text) {
 
 function lotChangeProductTerm(text) {
   const raw = normalize(text).replace(/[.!?]+$/u, '').trim();
-  const action = /^(?:(?:quiero|necesito|voy a|vamos a)\s+)?(?:cambiar|cambia|cambio|escoger|elegir|seleccionar|ver|mostrar)\s+(?:(?:de|el|la)\s+)*lote(?:\s+(?:de|del|en|para)\s+(.+))?$/u.exec(raw);
+  const action = /^(?:(?:quiero|necesito|voy a|vamos a|podemos|hay que)\s+)?(?:cambiar|cambia|cambio|cambiemos|cambiamos|cambie|modificar|modifica|modifico|modifiquemos|modificamos|modifique|corregir|corrige|corrijo|corrijamos|escoger|elegir|seleccionar|ver|mostrar)\s+(?:(?:de|el|la)\s+)*lote(?:\s+(?:de|del|en|para)\s+(.+))?$/u.exec(raw);
   const inverted = /^(?:el\s+)?lote\s+(?:de|del|en)\s+(.+?)\s+(?:es|era|fue|queda)\s+(?:otro|diferente|distinto|incorrecto|equivocado)\b/u.exec(raw);
   const alternative = /^(?:las?\s+|los?\s+)?(.+?)\s+(?:son|es)\s+de\s+otro\s+lote\b/u.exec(raw);
   return (action?.[1] || inverted?.[1] || alternative?.[1] || '')

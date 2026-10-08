@@ -1462,6 +1462,31 @@ test('OP 115 acepta cambiar el lote de etiquetas por nombre o SKU sin pedir part
   }
 });
 
+test('el cierre entiende peticiones naturales de cambiar el lote de un material único', async () => {
+  const materials = [
+    { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und',
+      cantidad: 2, lote: 'ACC-260910-TPBI', motivo: 'averiadas', ubicacion: 'A8' },
+    { sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und',
+      cantidad: 2, lote: 'R5-260923-LINER', motivo: 'estado rotos', ubicacion: 'A14' },
+  ];
+  for (const phrase of ['Cambiemos el lote de las tapas', 'Cambiamos el lote de las tapas',
+    'Podemos cambiar el lote de las tapas', 'Modifiquemos el lote de las tapas',
+    'El lote de las tapas es otro']) {
+    const db = fakeDb({ orderId: 116, planned: 6, initialDraft: {
+      orderId: 116, conforming: 5, waste: 1, wasteClassified: true,
+      reason: 'mala calidad', location: 'C2', materials: structuredClone(materials),
+      materialsAnswered: true, materialPending: null, reviewShown: true,
+    } });
+    assert.equal(isCloseFollowup(phrase, { orderId: 116, materials }), true, phrase);
+    const result = await advanceCloseGuide({ db, userId: 7, rawText: phrase });
+    assert.equal(result.draft.materialChoice?.target, 'existing', phrase);
+    assert.equal(result.draft.materialChoice?.index, 0, phrase);
+    assert.match(result.message, /elige lote/u, phrase);
+    assert.equal(result.draft.materials[0].lote, 'ACC-260910-TPBI', phrase);
+    assert.equal(result.draft.materials[1].lote, 'R5-260923-LINER', phrase);
+  }
+});
+
 test('cambiar lote por producto exige partida solo cuando ese producto se repuso varias veces', async () => {
   const db = fakeDb({ orderId: 115, planned: 5, initialDraft: {
     orderId: 115, conforming: 4, waste: 1, wasteClassified: true,
@@ -1477,6 +1502,8 @@ test('cambiar lote por producto exige partida solo cuando ese producto se repuso
   const base = { db, userId: 7 };
   await assert.rejects(() => advanceCloseGuide({ ...base,
     rawText: 'Cambio de lote en etiquetas' }), /Hay 2 partidas de ETIQUETA ASHWAGANDHA/u);
+  await assert.rejects(() => advanceCloseGuide({ ...base,
+    rawText: 'Cambiemos el lote de las etiquetas' }), /Hay 2 partidas de ETIQUETA ASHWAGANDHA/u);
   const selected = await advanceCloseGuide({ ...base,
     rawText: 'cambia lote de partida 3' });
   assert.equal(selected.draft.materialChoice.index, 2);
