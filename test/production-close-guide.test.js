@@ -354,6 +354,58 @@ test('corrige la ubicación del PT con expresiones naturales sin cerrar la OP', 
   }
 });
 
+test('corrige el destino del producto conforme con distintas intenciones y sin alterar insumos', async () => {
+  const materials = [{ sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und',
+    cantidad: 2, lote: 'ACC-260910-TPBI', motivo: 'daño', ubicacion: 'A8' }];
+  for (const phrase of [
+    'Cambiamos ubicación del producto conforme a C1',
+    'la ubicación del producto conforme es C1',
+    'la ubicación de los conformes será C1',
+    'El producto conforme va a C1',
+    'el producto terminado va para C1',
+    'las unidades conformes van a C1',
+    'los conformes quedan en C1',
+    'pasemos los conformes para C1',
+  ]) {
+    const db = fakeDb({ orderId: 116, planned: 6, initialDraft: {
+      orderId: 116, conforming: 5, waste: 1, wasteClassified: true,
+      reason: 'mala calidad', location: 'C2', materials: structuredClone(materials),
+      materialsAnswered: true, materialPending: null, reviewShown: true,
+    } });
+    assert.equal(isCloseFollowup(phrase, { orderId: 116, materials }), true, phrase);
+    const result = await advanceCloseGuide({ db, userId: 7, rawText: phrase });
+    assert.equal(result.draft.location, 'C1', phrase);
+    assert.equal(result.draft.materials.length, 1, phrase);
+    for (const [key, value] of Object.entries(materials[0])) {
+      assert.equal(result.draft.materials[0][key], value, `${phrase}: ${key}`);
+    }
+    assert.match(result.message, /Ubicación del conforme: C1/u, phrase);
+    assert.equal(result.params, undefined, phrase);
+  }
+});
+
+test('la cantidad conforme admite frases declarativas además de comandos de corrección', () => {
+  for (const phrase of ['5 conformes', 'conformes a 5', 'los conformes son 5',
+    'los conformes eran 5', 'quedan 5 unidades conformes',
+    'la cantidad de conformes es 5']) {
+    assert.equal(closeFields(phrase).conforming, 5, phrase);
+  }
+});
+
+test('un destino del producto no conforme no cambia la ubicación de los conformes', async () => {
+  for (const phrase of ['el producto no conforme va para C1',
+    'la ubicación del producto no conforme es C1']) {
+    const db = fakeDb({ orderId: 116, planned: 6, initialDraft: {
+      orderId: 116, conforming: 5, waste: 1, wasteClassified: true,
+      reason: 'mala calidad', location: 'C2', materials: [], materialsAnswered: true,
+      materialPending: null, reviewShown: true,
+    } });
+    const result = await advanceCloseGuide({ db, userId: 7, rawText: phrase });
+    assert.equal(result.draft.location, 'C2', phrase);
+    assert.equal(result.params, undefined, phrase);
+  }
+});
+
 test('una corrección de ubicación incomprensible informa que conservó la anterior', async () => {
   const db = fakeDb({ orderId: 108, planned: 5 });
   const base = { db, userId: 7 };

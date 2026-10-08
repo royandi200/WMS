@@ -63,7 +63,7 @@ function contextualOrderCandidate(text, hasDraft) {
 
 function fieldMatch(text, before, after) {
   const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
-    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|fue|son|fueron|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
+    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|eran|fue|son|fueron|quedan|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
   return quantity(value);
 }
 
@@ -93,9 +93,15 @@ function closeFields(text) {
   const locationCode = '([a-z][a-z0-9-]*\\d[a-z0-9-]*|[a-z]\\s+\\d+)';
   const negated = new RegExp(`\\bubicacion\\s+no\\s+(?:es|era|fue)\\s+${locationCode}\\s*(?:,|;|sino)?\\s*(?:es|sino(?:\\s+que\\s+es)?)\\s+${locationCode}\\b`, 'u').exec(raw);
   const changedFrom = new RegExp(`\\bubicacion\\s+(?:(?:de|desde)\\s+)?${locationCode}\\s+(?:a|para|por)\\s+${locationCode}\\b`, 'u').exec(raw);
-  const direct = new RegExp(`\\bubicacion(?:\\s+(?:del?\\s+)?(?:(?:producto\\s+)?terminado(?:\\s+conforme)?|conforme|pt))?\\s*(?:(?:correcta|nueva|ahora)\\s+)?(?:(?:es|fue|sera|seria|queda|quedara|debe\\s+ser|va\\s+para|van\\s+para|a|en)\\s+)?[:=\\-]?\\s*${locationCode}\\b`, 'u').exec(raw);
+  const finishedTarget = '(?:(?:del?\\s+)?(?:(?:producto\\s+)?terminado(?:\\s+conforme)?|(?:producto\\s+)?conforme|pt)|de\\s+los\\s+conformes)';
+  const direct = new RegExp(`\\bubicacion(?:\\s+${finishedTarget})?\\s*(?:(?:correcta|nueva|ahora)\\s+)?(?:(?:es|fue|sera|seria|queda|quedara|debe\\s+ser|va\\s+(?:para|a)|van\\s+(?:para|a)|a|en|para)\\s+)?[:=\\-]?\\s*${locationCode}\\b`, 'u').exec(raw);
+  // El destino del PT también puede expresarse sin la palabra «ubicación».
+  // Se ancla al producto terminado o conforme para no confundirlo con un insumo.
+  const finishedDestination = new RegExp(`\\b(?:producto\\s+terminado\\s+conforme|producto\\s+conforme|producto\\s+terminado|unidades?\\s+conformes?|(?<!no\\s)conformes?|pt)\\s+(?:(?:va|van|queda|quedan|ira|iran)\\s+)?(?:a|en|para)\\s+(?:la\\s+)?(?:ubicacion\\s+)?${locationCode}\\b`, 'u').exec(raw);
+  const nonConformingDestination = /\b(?:ubicacion\s+(?:del?\s+)?(?:producto\s+(?:terminado\s+)?)?no\s+conforme|(?:producto\s+(?:terminado\s+)?)?no\s+conformes?)\b/u.test(raw);
   const contextual = new RegExp(`\\b(?:quedan?\\s+en|dejar\\s+en|ubicar\\s+en|van?\\s+para|en)\\s*(?:la\\s+)?(?:ubicacion\\s+)?${locationCode}\\b`, 'u').exec(raw);
-  const location = (negated?.[2] || changedFrom?.[2] || direct?.[1] || contextual?.[1] || null)
+  const location = (negated?.[2] || changedFrom?.[2] || direct?.[1] || finishedDestination?.[1]
+    || (!nonConformingDestination && contextual?.[1]) || null)
     ?.replace(/\s+/gu, '').toUpperCase() || null;
   const rawReason = raw.match(/\b(?:por|motivo|causa|debido a)\s+(.+?)(?=\s+(?:(?:van?|quedan?)\s+(?:para|a|en)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d|ubicacion|quedan en|dejar en)\b|$)/u)?.[1]
     ?.replace(/[,;\s]+$/u, '').trim() || null;
