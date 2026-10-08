@@ -121,6 +121,7 @@ const { closeProductionOrder } = require('../../_lib/production-close');
 const { closedProductionMessage } = require('../../_lib/production-close-message');
 const { advanceCloseGuide,
   closeOrderReference, finishDraft: finishCloseDraft, isCloseFollowup, pendingCloseDraft } = require('../../_lib/production-close-guide');
+const { groundedCloseCorrection } = require('../../_lib/production-close-correction');
 const {
   hasProductionCloseIntent,
   normalizeProductionCloseParams,
@@ -1870,11 +1871,15 @@ module.exports = async (req, res) => {
     }
     if (['UNKNOWN', 'MODO_CHARLA', 'REPORTE_MERMA'].includes(action) && rawText) {
       const explicitWasteReport = /^\s*(?:reporta|registra|registrar)\s+(?:una\s+)?merma\b/iu.test(rawText);
+      const groundedFinishedCorrection = activeCloseDraft?.orderId
+        && Object.keys(groundedCloseCorrection(rawText, params)).length > 0;
       if ((['UNKNOWN', 'MODO_CHARLA'].includes(action) && hasProductionCloseIntent(rawText))
-        || (isCloseFollowup(rawText, activeCloseDraft) && !explicitWasteReport && !standaloneMaterialWaste)) {
+        || ((isCloseFollowup(rawText, activeCloseDraft) || groundedFinishedCorrection)
+          && !explicitWasteReport && !standaloneMaterialWaste)) {
         action = 'CERRAR_ORDEN_PRODUCCION';
-        params = activeCloseDraft?.materialPending?.damageReport || activeCloseDraft?.materials?.length
-          ? { avance_materiales: params.avance_materiales } : {};
+        params = { ...(groundedFinishedCorrection ? { correccion_pt: params.correccion_pt } : {}),
+          ...(activeCloseDraft?.materialPending?.damageReport || activeCloseDraft?.materials?.length
+            ? { avance_materiales: params.avance_materiales } : {}) };
       }
     }
 

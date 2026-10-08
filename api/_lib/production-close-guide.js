@@ -1,6 +1,7 @@
 const { explicitReferences, referenceKey } = require('./production-order-reference');
 const { recentOrderContext } = require('./production-waste-guide');
 const { resolveProductReference } = require('./product-references');
+const { groundedCloseCorrection } = require('./production-close-correction');
 
 const NUMBER_WORDS = Object.freeze({ cero: 0, ninguna: 0, ninguno: 0,
   una: 1, un: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
@@ -1381,6 +1382,11 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     : damageMarker ? String(rawText).slice(0, damageMarker.index)
       : changedMaterialMarker ? '' : rawText;
   const parsed = closeFields(closeText);
+  if (prior?.orderId) {
+    const suggested = groundedCloseCorrection(closeText, params);
+    if (parsed.conforming == null && suggested.conformes != null) parsed.conforming = suggested.conformes;
+    if (!parsed.location && suggested.ubicacion) parsed.location = suggested.ubicacion;
+  }
   const partTargeted = /\b(?:partida|fila|renglon)\s*#?\s*\d+\b/u.test(normalize(rawText));
   const naturalDestination = /^(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(normalize(rawText));
   if (naturalDestination && draft.materials?.length && !draft.materialPending && draft.location) {

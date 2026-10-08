@@ -62,7 +62,7 @@ require.cache[dbPath] = {
           cantidad_planeada: params[0] === 101 ? '3.000' : '2.000', producto_id: 74,
           sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
         }]];
-        if (/FROM ubicaciones u JOIN bodegas b/u.test(sql)) return [[{ codigo: 'C2' }]];
+        if (/FROM ubicaciones u JOIN bodegas b/u.test(sql)) return [[{ codigo: String(params[0]).toUpperCase() }]];
         if (/FROM produccion_materiales pm JOIN productos/u.test(sql)) return [[{
           producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
         }]];
@@ -134,6 +134,24 @@ test('un cierre incompleto devuelve la pregunta y finaliza la bandeja antes de c
   const waste = await invoke('REPORTE_MERMA', '0 merma', { motivo: 'merma' });
   assert.match(waste.body.mensaje, /ubicación quedará/iu);
   assert.ok(!writes.some(entry => /INSERT INTO mermas|INSERT INTO lots|INSERT INTO stock/u.test(entry.sql)));
+});
+
+test('una corrección PT respaldada por el audio vuelve al borrador aunque BBC diga modo charla', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 101, conforming: 2, waste: 0,
+    wasteClassified: true, reason: null, location: 'C2', materials: [],
+    materialsAnswered: true, materialPending: null, reviewShown: true });
+  try {
+    const res = await invoke('MODO_CHARLA', 'las buenas, destino C1', {
+      correccion_pt: [{ campo: 'ubicacion', valor: 'C1', evidencia: 'las buenas, destino C1' }],
+    });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.mensaje, /Ubicación del conforme: C1/u);
+    assert.equal(JSON.parse(closeDraft).location, 'C1');
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE lots|UPDATE ordenes_produccion/u.test(entry.sql)));
+  } finally {
+    closeDraft = null;
+  }
 });
 
 test('una ubicación negada mal clasificada como confirmación de alistamiento no inicia la OP', async () => {

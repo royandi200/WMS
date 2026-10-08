@@ -392,6 +392,31 @@ test('la cantidad conforme admite frases declarativas además de comandos de cor
   }
 });
 
+test('el respaldo del clasificador corrige solo campos no entendidos por el parser', async () => {
+  const db = fakeDb({ orderId: 116, planned: 6, initialDraft: {
+    orderId: 116, conforming: 4, waste: 1, wasteClassified: true,
+    reason: 'mala calidad', location: 'C2', materials: [], materialsAnswered: true,
+    materialPending: null, reviewShown: true,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'La producción buena, cinco unidades; las buenas, destino C1',
+    params: { correccion_pt: [
+      { campo: 'conformes', valor: 5, evidencia: 'producción buena, cinco unidades' },
+      { campo: 'ubicacion', valor: 'C1', evidencia: 'las buenas, destino C1' },
+    ] } });
+  assert.equal(result.draft.conforming, 5);
+  assert.equal(result.draft.location, 'C1');
+  assert.equal(result.params, undefined);
+  assert.match(result.message, /Ubicación del conforme: C1/u);
+
+  const rejected = await advanceCloseGuide({ db, userId: 7,
+    rawText: 'las buenas, destino C3',
+    params: { correccion_pt: [
+      { campo: 'ubicacion', valor: 'C4', evidencia: 'las buenas, destino C4' },
+    ] } });
+  assert.equal(rejected.draft.location, 'C1');
+});
+
 test('un destino del producto no conforme no cambia la ubicación de los conformes', async () => {
   for (const phrase of ['el producto no conforme va para C1',
     'la ubicación del producto no conforme es C1']) {
