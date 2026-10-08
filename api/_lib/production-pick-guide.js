@@ -16,7 +16,7 @@ function explicitPickConfirmation(text) {
   const raw = normalize(text);
   const prefix = /^confirmo\s+(?:los\s+)?materiales(?:\s+e\s+inicio\s+de\s+produccion)?(?:\s+(?:de\s+la\s+orden|para|de|orden))?\s+/u;
   const remainder = raw.replace(prefix, '');
-  return remainder !== raw && /^(?:op\s*(?:id|iv|i\s*[dv]|y\s+de)?\s*#?\s*[1-9]\d*|op-\d{8}-\d{6})[.!]?$/u.test(remainder);
+  return remainder !== raw && /^(?:o\s*p\s*(?:id|iv|i\s*[dv]|y\s+de)?\s*#?\s*[1-9]\d*|op-\d{8}-\d{6})[.!]?$/u.test(remainder);
 }
 
 function isPickCorrection(text) {
@@ -145,7 +145,7 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
 }
 
 function mentionedOrderId(text) {
-  const fuzzy = [...normalize(text).matchAll(/\bop\s*(?:iv|i\s*[dv]|y\s+de)\s*#?\s*([1-9]\d*)\b/gu)]
+  const fuzzy = [...normalize(text).matchAll(/\bo\s*p\s*(?:iv|i\s*[dv]|y\s+de)\s*#?\s*([1-9]\d*)\b/gu)]
     .map(match => Number(match[1]));
   const ids = [...new Set([...explicitReferences(text).map(referenceKey), ...fuzzy].filter(Boolean))];
   if (ids.length > 1) throw pickError('Mencionaste varias OP. Indica solo una; no se inició producción.');

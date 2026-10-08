@@ -147,6 +147,20 @@ test('una orden de confirmar primero muestra las partidas; solo una frase explí
   assert.equal(db.stocks.get(11).reservada, 7);
 });
 
+test('audio «confirmo materiales o p y de» confirma solo la OP revisada y coincidente', async () => {
+  const db = fakeDb();
+  const first = await advanceProductionPick({ db, userId: 7,
+    rawText: 'Revisa materiales OP ID 116' });
+  assert.match(first.message, /Revisa el alistamiento de OP ID 116/u);
+  assert.equal(explicitPickConfirmation('confirmo materiales o p y de 116'), true);
+  const confirmed = await advanceProductionPick({ db, userId: 7,
+    rawText: 'confirmo materiales o p y de 116' });
+  assert.deepEqual(confirmed, { orderId: 116, confirm: true });
+  await assert.rejects(advanceProductionPick({ db, userId: 7,
+    rawText: 'confirmo materiales o p y de 117' }), /resumen de materiales cambió/u);
+  assert.equal(explicitPickConfirmation('confirmo materiales o p y de 116 y cambia el lote'), false);
+});
+
 test('una negación transcrita como «los dos» corrige contexto o pide partida, nunca confirma', async () => {
   const db = fakeDb();
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
