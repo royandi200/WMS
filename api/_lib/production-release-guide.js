@@ -47,6 +47,7 @@ function productionReleaseFollowup(text) {
     || /^(?:no\s*[,;]?\s*)?(?:cambia|cambio|corrige|modifica|mejor)\s+(?:a|por)\s+[a-z0-9]/u.test(raw)
     || /^(?:es|va|seria)\s+para\s+(?:(?:el\s+)?stock|(?:un\s+)?pedido)\b/u.test(raw)
     || /^(?:the\s+)?(?:quantity|amount)\s+(?:will\s+be|should\s+be|is|to|:)\s*\d+\s*(?:units?|pcs?)\b/u.test(raw)
+    || subjectQuantity(raw) != null
     || new RegExp(`^(?:correccion|corrijo|mejor)\\s*[,;:-]?\\s*${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?)\\b`, 'u').test(raw)
     || new RegExp(`^${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?|units?|pcs?)\\b`, 'u').test(raw);
 }
@@ -55,6 +56,14 @@ function positiveQuantity(value) {
   const raw = normalized(value).replace(',', '.');
   const number = WORD_NUMBERS[raw] ?? Number(raw);
   return Number.isSafeInteger(number) && number > 0 && number <= 100000 ? number : null;
+}
+
+function subjectQuantity(text) {
+  const match = normalized(text).match(new RegExp(
+    `^(?:(?:la\\s+)?cantidad|(?:las?\\s+)?(?:unidades?|und|tarros?|frascos?))\\s+` +
+    `(?:(?:planeada|correcta)\\s+)?(?:era|eran|es|son|sera|seran|queda|quedan|fue|fueron)\\s+${NUMBER}\\b`, 'u'
+  ));
+  return match ? positiveQuantity(match[1]) : null;
 }
 
 function correctionFields(text) {
@@ -66,7 +75,7 @@ function correctionFields(text) {
   const quantityMatch = raw.match(new RegExp(`\\b(?:cantidad(?:\\s+(?:nueva|correcta))?\\s*(?:es|sera|a|por|de)?|son|seran|eran|quedan)\\s*${NUMBER}\\b`, 'u'))
     || raw.match(/^(?:the\s+)?(?:quantity|amount)\s+(?:will\s+be|should\s+be|is|to|:)\s*(\d+)\s*(?:units?|pcs?)\b/u)
     || raw.match(new RegExp(`^(?:(?:correccion|corrijo|mejor|cambia|corrige|modifica)\\s*[:,]?\\s*(?:a\\s+)?)?${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?|units?|pcs?)\\b`, 'u'));
-  const quantity = quantityMatch ? positiveQuantity(quantityMatch[1]) : null;
+  const quantity = subjectQuantity(raw) ?? (quantityMatch ? positiveQuantity(quantityMatch[1]) : null);
   let product = raw.match(/\b(?:producto|referencia|sku)\s*(?:es|sera|a|por|:|debe\s+ser)\s+(.+)$/u)?.[1]
     || raw.match(/\b(?:producto|referencia|sku)\s+([a-z0-9][a-z0-9 -]+)$/u)?.[1]
     || raw.match(/^(?:cambia|cambio|corrige|modifica|mejor)\s+(?:a|por)\s+([a-z0-9][a-z0-9 -]+)$/u)?.[1]

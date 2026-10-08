@@ -232,6 +232,22 @@ test('translated English quantity corrects the active stock draft without a clar
   assert.equal(h.calls.length, 0);
 });
 
+test('spoken correction "las unidades eran 7" keeps the active stock destination and product', async () => {
+  for (const action of ['LIBERAR_ORDEN_PRODUCCION', 'MODO_CHARLA']) {
+    const h = harness();
+    const preview = await h.send('LIBERAR_ORDEN_PRODUCCION',
+      'Vamos a producir 5 tarros de ashwagandha por 60 para stock de seguridad',
+      { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+    assert.match(preview.mensaje, /Cantidad planeada: 5 und/u);
+    const corrected = await h.send(action, 'las unidades eran 7',
+      { cantidad_planificada: 7 });
+    assert.match(corrected.mensaje, /Cantidad planeada: 7 und/u);
+    assert.match(corrected.mensaje, /ASHWAGANDHA X 60/u);
+    assert.match(corrected.mensaje, /Destino: stock de seguridad/u);
+    assert.equal(h.calls.length, 0);
+  }
+});
+
 test('yes to a previous stock quantity question recovers only an operator-stated quantity', async () => {
   const h = harness();
   await h.send('LIBERAR_ORDEN_PRODUCCION',

@@ -51,6 +51,10 @@ test('numeric SKU is not misread as a new quantity', () => {
     { product: '00201-ptpbs120', quantity: null });
   assert.deepEqual(correctionFields('The quantity will be 8 units'),
     { product: null, quantity: 8 });
+  assert.deepEqual(correctionFields('las unidades eran 7'),
+    { product: null, quantity: 7 });
+  assert.deepEqual(correctionFields('la cantidad era 7'),
+    { product: null, quantity: 7 });
 });
 
 test('a negated or quoted confirmation cannot authorize release', () => {
@@ -63,6 +67,7 @@ test('a negated or quoted confirmation cannot authorize release', () => {
   assert.equal(productionReleaseFollowup('corrección: cantidad a 12'), true);
   assert.equal(productionReleaseFollowup('corrección: 12 unidades'), true);
   assert.equal(productionReleaseFollowup('The quantity will be 8 units'), true);
+  assert.equal(productionReleaseFollowup('las unidades eran 7'), true);
   assert.equal(productionReleaseFollowup('cambia el producto a probióticos'), true);
   assert.equal(productionReleaseConfirmation(
     '[Sunday, September 6, 2026 23:34:14]: Confirmo crear OP para stock de seguridad.'), true);
