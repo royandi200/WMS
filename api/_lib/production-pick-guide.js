@@ -21,9 +21,9 @@ function explicitPickConfirmation(text) {
 
 function isPickCorrection(text) {
   const raw = normalize(text);
-  return /\b(?:correccion|corrijo|corrige|cambia|cambio|ajusta|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(raw)
+  return /\b(?:correccion|corrijo|corrige|corregir|cambia|cambiar|cambio|modifica|modificar|ajusta|ajustar|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(raw)
     || /\b[a-z]{1,5}\s*\d{1,3}\s+y\s+no\s+(?:de\s+)?(?:la\s+)?[a-z]{1,5}\s*\d{1,3}\b/u.test(raw)
-    || /^(?:(?:la\s+)?(?:partida|fila|renglon)\s*#?\s*\d+\s*[,;:]?\s*)?(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico)|las?\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(raw);
+    || /\b(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico)|las?\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(raw);
 }
 
 function isPickReviewIntent(text) {
@@ -133,8 +133,8 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
       `   Lote: ${row.lote} | ubicación: ${row.ubicacion || 'sin ubicación'}`,
     ]),
     '', note || 'Verifica físicamente cada partida antes de iniciar la producción.',
-    '', 'Para corregir, identifica la partida. Por ejemplo: «partida 1 va para la A10» o «corrección de partida 1, quiero cambiar ubicación». No necesitas repetir el SKU ni el lote anterior.',
-    'Para escoger otro lote, puedes decir «corrección: partida 1, quiero cambiar el lote».',
+    '', 'Para corregir, puedes decir el producto o SKU si identifica una sola partida: «el tarro va para la A10» o «cambiar lote de las etiquetas». También puedes decir «partida 1 va para la A10».',
+    'Si el mismo producto tiene varias partidas, indica su número o el lote y ubicación actuales para distinguirla.',
     'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
     choicePending
       ? 'Primero elige una de las opciones de lote mostradas arriba; todavía no confirmes los materiales.'
@@ -165,8 +165,12 @@ function pickLocations(text) {
   return natural ? [natural[1].toUpperCase()] : [];
 }
 
-function pickLots(text) {
-  return [...normalize(text).matchAll(/\blote\s+(?:(?:es|fue|correcto|nuevo|del?)\s+)?([a-z0-9]+(?:-[a-z0-9]+)+|[a-z]*\d+[a-z0-9]*)\b/gu)]
+function pickLots(text, { splitPart = false } = {}) {
+  // «lote de 00006-TRP» nombra el SKU que se quiere corregir, no un lote nuevo.
+  // «del lote R5» identifica el origen; tampoco es el lote de destino.
+  const raw = normalize(text);
+  return [...raw.matchAll(/\blote\s+(?:(?:es|fue|correcto|nuevo)\s+)?([a-z0-9]+(?:-[a-z0-9]+)+|[a-z]*\d+[a-z0-9]*)\b/gu)]
+    .filter(match => splitPart || !/\b(?:de|del|desde)(?:\s+el)?\s+$/u.test(raw.slice(0, match.index)))
     .map(match => match[1].toUpperCase());
 }
 
@@ -181,7 +185,7 @@ function parseSplit(text, oldQuantity) {
   const segments = pieces.map(piece => {
     const amount = /^(\d+(?:[.,]\d+)?)\s*(?:und|unidades?|g|gramos?)?\b/u.exec(piece);
     const location = pickLocations(piece).at(-1);
-    const lot = pickLots(piece).at(-1) || null;
+    const lot = pickLots(piece, { splitPart: true }).at(-1) || null;
     if (!amount || !location) throw pickError('Para repartir, indica cantidad y ubicación de cada parte. No cambié las reservas.');
     return { quantity: roundQty(Number(amount[1].replace(',', '.'))), location, lot };
   });
@@ -192,6 +196,42 @@ function parseSplit(text, oldQuantity) {
   return segments;
 }
 
+function correctionProductReference(text) {
+  const raw = normalize(text).replace(/[.!?]+$/u, '').trim();
+  const destination = '[a-z][a-z0-9-]*\\d[a-z0-9-]*';
+  const field = /\b(?:lote|ubicacion)(?:\s+(?:correcta|nueva))?\s+(?:de|del)\s+(.+)$/u.exec(raw);
+  const motion = /^(?:(?:correccion|corrijo|corrige|cambia|cambio|modifica|ajusta)\b\s*[,;:-]?\s*)?(?:(?:el|la|los|las)\s+)?(.+?)\s+(?:no\s+)?(?:estaban?|estan|salen?|va|van|queda|quedan|se\s+sacan)\b/u.exec(raw);
+  const sourced = /^(?:(?:correccion|corrijo|corrige|cambia|cambio|modifica|ajusta)\b\s*[,;:-]?\s*)?(?:(?:el|la|los|las)\s+)?(.+?)\s+(?:del|desde\s+el)\s+lote\b/u.exec(raw);
+  const direct = new RegExp(`^(?:(?:correccion|corrijo|corrige|cambia|cambio|modifica|ajusta)\\b\\s*[,;:-]?\\s*)?(?:(?:el|la|los|las)\\s+)?(.+?)\\s+(?:a|en|para)\\s+(?:la\\s+)?(?:ubicacion\\s+)?${destination}$`, 'u').exec(raw);
+  const command = /^(?:(?:correccion|corrijo)\b\s*[,;:-]?\s*)?(?:(?:quiero|necesito)\s+)?(?:cambia|cambiar|corrige|corregir|modifica|modificar|ajusta|ajustar)\s+(?:(?:el|la|los|las)\s+)?(.+)$/u.exec(raw);
+  let reference = field?.[1] || motion?.[1] || sourced?.[1] || direct?.[1] || command?.[1] || null;
+  if (!reference) return null;
+  reference = reference.replace(new RegExp(`\\s+(?:a|en|para|es|fue)\\s+(?:la\\s+)?(?:ubicacion\\s+)?${destination}$`, 'u'), '')
+    .replace(new RegExp(`\\s+(?:desde|de|antes\\s+en)\\s+(?:la\\s+)?(?:ubicacion\\s+)?${destination}$`, 'u'), '')
+    .replace(/\s+(?:del|desde\s+el)\s+lote\s+[a-z0-9][a-z0-9._-]*$/u, '')
+    .replace(/\s+(?:ubicacion|lote)(?:\s+(?:correcta|nuevo|nueva))?$/u, '')
+    .replace(/^(?:(?:de|del)\s+)?(?:el|la|los|las)\s+/u, '')
+    .trim();
+  return /^(?:va|van|queda|quedan|lote|ubicacion|partida|materiales?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/u.test(reference)
+    ? null : reference || null;
+}
+
+function uniqueProductAllocation(rows, productId, reference, text) {
+  const matching = rows.filter(row => Number(row.producto_id) === Number(productId));
+  if (matching.length === 1) return matching[0];
+  if (matching.length > 1) {
+    const raw = normalize(text);
+    const sourceLot = /\b(?:del|desde\s+el)\s+lote\s+([a-z0-9][a-z0-9._-]*)\b/u.exec(raw)?.[1];
+    const sourceLocation = /\b(?:desde|antes\s+en|estaba\s+en|estaban\s+en)\s+(?:la\s+)?(?:ubicacion\s+)?([a-z][a-z0-9-]*\d[a-z0-9-]*)\b/u.exec(raw)?.[1];
+    const identified = matching.filter(row => (!sourceLot || normalize(row.lote) === sourceLot)
+      && (!sourceLocation || normalize(row.ubicacion) === sourceLocation));
+    if ((sourceLot || sourceLocation) && identified.length === 1) return identified[0];
+    const numbers = matching.map(row => rows.indexOf(row) + 1).join(', ');
+    throw pickError(`${reference} tiene ${matching.length} partidas (${numbers}). Indica «partida N» o el lote y ubicación actuales para saber cuál corriges. No cambié las reservas.`);
+  }
+  return null;
+}
+
 async function selectedAllocation(db, rows, text) {
   const index = /\b(?:partida|fila|renglon|numero)\s*#?\s*(\d+)\b/u.exec(normalize(text));
   if (index) {
@@ -199,20 +239,24 @@ async function selectedAllocation(db, rows, text) {
     if (!selected) throw pickError(`No existe la partida ${index[1]} de esta OP. No cambié las reservas.`);
     return selected;
   }
-  const sku = rows.find(row => normalize(text).includes(normalize(row.sku)));
-  if (sku && rows.filter(row => row.producto_id === sku.producto_id).length === 1) return sku;
-  const productPhrase = /\b(?:los?|las?)\s+(.+?)\s+(?:no\s+)?(?:estaban?|estan|salen?|van|se\s+sacan)\b/u.exec(normalize(text))?.[1]
-    || /\b(?:de\s+)?(?:los?|las?)\s+(.+?)\s+(?:en\s+|a\s+)(?:la\s+)?ubicacion\b/u.exec(normalize(text))?.[1]
-    || /\bubicacion(?: correcta)?\s+de\s+(?:los?|las?)\s+(.+?)\s+(?:es|fue|queda)\b/u.exec(normalize(text))?.[1];
-  if (productPhrase && !/^(?:dos|tres|cuatro|cinco|un|una|uno|materiales?)$/u.test(productPhrase)) {
+  const mentionedSkus = [...new Map(rows.filter(row => new RegExp(`(?<![a-z0-9-])${normalize(row.sku).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![a-z0-9-])`, 'u')
+    .test(normalize(text))).map(row => [Number(row.producto_id), row])).values()];
+  if (mentionedSkus.length > 1) throw pickError('Mencionaste varios SKU. Indica solo el producto o la partida que quieres corregir; no cambié las reservas.');
+  if (mentionedSkus.length === 1) {
+    return uniqueProductAllocation(rows, mentionedSkus[0].producto_id,
+      `${mentionedSkus[0].producto} (${mentionedSkus[0].sku})`, text);
+  }
+  const productPhrase = correctionProductReference(text);
+  if (productPhrase) {
     try {
       const product = await resolveProductReference(db, productPhrase,
         { productIds: [...new Set(rows.map(row => Number(row.producto_id)))],
           allowContextualPartial: true, allowScopedApproximate: true });
-      const matching = rows.filter(row => Number(row.producto_id) === Number(product.id));
-      if (matching.length === 1) return matching[0];
+      return uniqueProductAllocation(rows, product.id, `${product.nombre} (${product.siigo_code})`, text);
     } catch (error) {
-      if (!['PRODUCT_REFERENCE_NOT_FOUND', 'PRODUCT_REFERENCE_AMBIGUOUS'].includes(error.code)) throw error;
+      if (error.code === 'PRODUCT_REFERENCE_AMBIGUOUS') throw pickError(`${error.message} No cambié las reservas.`);
+      if (error.code !== 'PRODUCT_REFERENCE_NOT_FOUND') throw error;
+      throw pickError(`No identifiqué «${productPhrase}» entre los materiales de esta OP. Indica el SKU o la partida; no cambié las reservas.`);
     }
   }
   const locations = pickLocations(text);
@@ -284,7 +328,7 @@ async function correctAllocation(db, rows, text) {
   const desired = segments || [{ quantity: roundQty(selected.cantidad_reservada),
     location: pickLocations(text).at(-1) || null, lot: pickLots(text).at(-1) || null }];
   const raw = normalize(text);
-  const wantsAnotherLot = /\b(?:otro|diferente|distinto)\s+lote\b|\b(?:elegir|escoger|cambiar|modificar|ajustar)\s+(?:(?:de|un|el)\s+)?(?:otro\s+)?lote\b|\blote\s+(?:no\s+es\s+(?:(?:este|ese|el)\s+)?correcto|no\s+es\s+(?:este|ese)|incorrecto|equivocado|esta\s+mal)\b|\b(?:lotes\s+disponibles|cambio\s+(?:de\s+)?lote)\b/u.test(raw);
+  const wantsAnotherLot = /\b(?:otro|diferente|distinto)\s+lote\b|\b(?:elegir|escoger|cambia|cambiar|corrige|corregir|modifica|modificar|ajusta|ajustar)\s+(?:(?:de|un|el)\s+)?(?:otro\s+)?lote\b|\blote\s+(?:no\s+es\s+(?:(?:este|ese|el)\s+)?correcto|no\s+es\s+(?:este|ese)|incorrecto|equivocado|esta\s+mal)\b|\b(?:lotes\s+disponibles|cambio\s+(?:de\s+)?lote)\b/u.test(raw);
   const wantsAnotherLocation = /\bubicacion\b/u.test(raw)
     && !desired[0].location && !desired[0].lot;
   if (!segments && !desired[0].location && !desired[0].lot && !wantsAnotherLot && !wantsAnotherLocation) {

@@ -39,10 +39,13 @@ require.cache[dbPath] = {
           const stocks = [{ id: 12, lote: 'R5-260923-TRP', ubicacion_id: 2,
             ubicacion: 'A10', cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: null },
           { id: 13, lote: 'R7-260927-TRP', ubicacion_id: 2, ubicacion: 'A10',
-            cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: '2027-12-31' }];
+            cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: '2027-12-31' },
+          { id: 14, lote: 'R8-260928-TRP', ubicacion_id: 1, ubicacion: 'A11',
+            cantidad: 10, reservada: 0, status: 'DISPONIBLE', vence: '2028-06-30' }];
           return [/UPPER\(s\.lote\)/u.test(sql)
             ? stocks.filter(stock => stock.lote === params[2]
-              && (!params[5] || stock.id === Number(params[5]))) : stocks];
+              && (!params[5] || stock.id === Number(params[5])))
+            : stocks.filter(stock => !params[2] || stock.ubicacion === params[2])];
         }
         if (/FROM lots/u.test(sql) && /UPPER\(lpn\)/u.test(sql)) return [params[0] === '123456'
           ? [] : [{ id: 1, lpn: String(params[0]).toUpperCase(), qty_current: 100,
@@ -63,10 +66,19 @@ require.cache[dbPath] = {
         if (/FROM produccion_materiales pm JOIN productos/u.test(sql)) return [[{
           producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
         }]];
+        if (pickAllocations && /FROM producto_aliases pa/u.test(sql)
+          && params[0] === 'tarros') return [[{
+            id: 6, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60',
+            unit_label: 'und', alias: 'tarros',
+          }]];
         if (/FROM producto_aliases pa/u.test(sql)) return [[{
           id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
           unit_label: 'und', alias: 'tapa',
         }]];
+        if (pickAllocations && /FROM productos p/u.test(sql)
+          && /LEFT JOIN producto_aliases pa/u.test(sql)) return [[{
+            id: 6, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60',
+          }]];
         if (pickAllocations && /UPDATE produccion_material_lotes/u.test(sql)) {
           pickAllocations[0].stock_id = params[0];
           pickAllocations[0].lote = params[1];
@@ -177,6 +189,32 @@ test('el webhook mantiene OP y partida entre el resumen y la corrección de alis
     assert.match(choice.body.mensaje, /Lote: R7-260927-TRP/u);
     assert.equal(pickAllocations[0].stock_id, 13);
     assert.ok(!writes.some(entry => /UPDATE stock\s+SET cantidad = cantidad -|UPDATE ordenes_produccion\s+SET fase/u.test(entry.sql)));
+  } finally {
+    pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
+});
+
+test('MODO_CHARLA no impone partida si «cambiar lote de tarros» identifica una sola del alistamiento', async () => {
+  writes.length = 0;
+  closeDraft = null;
+  pickReview = null;
+  pickAllocations = [{ id: 501, produccion_material_id: 10, stock_id: 11,
+    lote: 'R5-260923-TRP', ubicacion_id: 1, cantidad_reservada: 7,
+    producto_id: 6, unidad: 'und', bodega_id: 1, sku: '00006-TRP',
+    producto: 'TARRO CUADRADO x 60', ubicacion: 'A11' }];
+  try {
+    await invoke('MODO_CHARLA', 'Revisa materiales OP ID 110');
+    lastWorkflowAction = 'CONFIRMAR_MATERIALES_PRODUCCION';
+    const correction = await invoke('MODO_CHARLA', 'Cambiar lote de tarros', {
+      texto: '¿Qué partida de tarros quieres corregir? Indica el número de partida.',
+    });
+    assert.equal(correction.statusCode, 200);
+    assert.match(correction.body.mensaje, /Partida 1: TARRO CUADRADO/u);
+    assert.match(correction.body.mensaje, /Lote R8-260928-TRP/u);
+    assert.doesNotMatch(correction.body.mensaje, /Qué partida de tarros/u);
+    assert.equal(pickAllocations[0].stock_id, 11);
   } finally {
     pickReview = null;
     pickAllocations = null;

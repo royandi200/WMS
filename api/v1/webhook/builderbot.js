@@ -1638,6 +1638,17 @@ module.exports = async (req, res) => {
       ? await lastProcessedWorkflowAction(db, from) : null;
     const pickOnlyOperator = hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_PICK)
       && !hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_CLOSE);
+    // La respuesta libre de BBC no debe desplazar una corrección inequívoca del
+    // último alistamiento. Exigimos además un resumen activo del mismo usuario.
+    const activePickCorrection = contextualPickCorrection
+      && lastWorkflowAction === 'CONFIRMAR_MATERIALES_PRODUCCION'
+      && hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_PICK)
+      ? await pendingPickReview(db, user.id) : null;
+    if (activePickCorrection && ['UNKNOWN', 'MODO_CHARLA',
+      'CERRAR_ORDEN_PRODUCCION', 'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action)) {
+      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+      params = {};
+    }
     // Un alistador no puede cerrar una OP. Si una transcripción parcial expresa
     // una corrección de materiales, no se debe enviar al cierre ni a su RBAC.
     // La guía de alistamiento pedirá OP/partida si el contexto no es inequívoco.

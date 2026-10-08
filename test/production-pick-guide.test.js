@@ -6,10 +6,10 @@ const {
 } = require('../api/_lib/production-pick-guide');
 
 function fakeDb({ a10Quantity = 12, extraA10Lot = false, extraA11Lot = false,
-  extraTarroPart = false, notices = [] } = {}) {
+  extraTarroPart = false, withEtiqueta = false, notices = [] } = {}) {
   let snapshot = null;
   let review = null;
-  let nextId = 3;
+  let nextId = withEtiqueta ? 4 : 3;
   let allocations = [
     { id: 1, produccion_material_id: 10, stock_id: 11, lote: 'R5-260923-TRP',
       ubicacion_id: 1, cantidad_reservada: 7, producto_id: 6, unidad: 'und',
@@ -19,7 +19,12 @@ function fakeDb({ a10Quantity = 12, extraA10Lot = false, extraA11Lot = false,
       bodega_id: 1, sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO', ubicacion: 'A8' },
   ];
   if (extraTarroPart) allocations.push({ ...allocations[0], id: 3, stock_id: 13,
+    lote: 'R6-260925-TRP',
     ubicacion_id: 4, cantidad_reservada: 2, ubicacion: 'A9' });
+  if (withEtiqueta) allocations.push({ id: 4, produccion_material_id: 30, stock_id: 31,
+    lote: 'R5-260923-ETASH', ubicacion_id: 5, cantidad_reservada: 7,
+    producto_id: 17, unidad: 'und', bodega_id: 1, sku: '00017-ETASH60',
+    producto: 'ETIQUETA ASHWAGANDHA x 60', ubicacion: 'A1' });
   const stocks = new Map([
     [11, { id: 11, lote: 'R5-260923-TRP', ubicacion_id: 1, ubicacion: 'A11',
       cantidad: 10, reservada: 7, productId: 6, status: 'DISPONIBLE' }],
@@ -35,6 +40,12 @@ function fakeDb({ a10Quantity = 12, extraA10Lot = false, extraA11Lot = false,
       status: 'DISPONIBLE', vence: '2028-06-30' }]] : []),
     [21, { id: 21, lote: 'R5-260923-TPBI', ubicacion_id: 3, ubicacion: 'A8',
       cantidad: 10, reservada: 7, productId: 1, status: 'DISPONIBLE' }],
+    ...(withEtiqueta ? [
+      [31, { id: 31, lote: 'R5-260923-ETASH', ubicacion_id: 5, ubicacion: 'A1',
+        cantidad: 10, reservada: 7, productId: 17, status: 'DISPONIBLE' }],
+      [32, { id: 32, lote: 'R6-260925-ETASH', ubicacion_id: 5, ubicacion: 'A1',
+        cantidad: 10, reservada: 0, productId: 17, status: 'DISPONIBLE' }],
+    ] : []),
   ]);
   const db = {
     get review() { return review; },
@@ -79,7 +90,10 @@ function fakeDb({ a10Quantity = 12, extraA10Lot = false, extraA11Lot = false,
       if (sql.includes('FROM producto_aliases pa')) return [[]];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN producto_aliases')) {
         return [[{ id: 6, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60' },
-          { id: 1, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO' }]];
+          { id: 1, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO' },
+          ...(withEtiqueta ? [{ id: 17, siigo_code: '00017-ETASH60',
+            nombre: 'ETIQUETA ASHWAGANDHA x 60' }] : [])]
+          .filter(product => params.includes(product.id))];
       }
       if (sql.includes('UPDATE stock SET reservada = reservada -')) {
         const stock = stocks.get(Number(params[1]));
@@ -300,6 +314,83 @@ test('«los tarros» identifica el producto del resumen sin exigir su SKU', asyn
   const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
   assert.match(chosen.message, /Corrección aplicada a la partida 1/u);
   assert.equal(db.allocations[0].stock_id, 12);
+});
+
+test('un nombre inequívoco permite cambiar el lote de las etiquetas sin mencionar partida', async () => {
+  const db = fakeDb({ withEtiqueta: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const offered = await advanceProductionPick({ db, userId: 7,
+    rawText: 'quiero cambiar el lote de las etiquetas' });
+  assert.match(offered.message, /Partida 3: ETIQUETA ASHWAGANDHA/u);
+  assert.match(offered.message, /1\. Lote R6-260925-ETASH/u);
+  assert.equal(db.allocations[2].stock_id, 31);
+  const selected = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
+  assert.match(selected.message, /Corrección aplicada a la partida 3/u);
+  assert.equal(db.allocations[2].stock_id, 32);
+  assert.equal(db.allocations[0].stock_id, 11);
+});
+
+test('un nombre singular y un SKU exacto identifican el tarro sin confundir el SKU con un lote', async () => {
+  const byName = fakeDb();
+  await advanceProductionPick({ db: byName, userId: 7,
+    rawText: 'Revisa materiales OP ID 110' });
+  const location = await advanceProductionPick({ db: byName, userId: 7,
+    rawText: 'corrige la ubicación del tarro a A10' });
+  assert.match(location.message, /Partida 1: TARRO CUADRADO/u);
+  assert.equal(byName.allocations[0].stock_id, 11);
+
+  const bySku = fakeDb({ extraA11Lot: true });
+  await advanceProductionPick({ db: bySku, userId: 7,
+    rawText: 'Revisa materiales OP ID 110' });
+  const lot = await advanceProductionPick({ db: bySku, userId: 7,
+    rawText: 'cambiar lote de 00006-TRP' });
+  assert.match(lot.message, /1\. Lote R8-260928-TRP/u);
+  assert.equal(bySku.allocations[0].stock_id, 11);
+});
+
+test('un nombre o SKU con dos partidas pide aclaración y conserva reservas', async () => {
+  for (const phrase of ['cambia el lote del tarro', 'cambia lote de 00006-TRP']) {
+    const db = fakeDb({ extraTarroPart: true });
+    await advanceProductionPick({ db, userId: 7,
+      rawText: 'Revisa materiales OP ID 110' });
+    const reply = await advanceProductionPick({ db, userId: 7, rawText: phrase });
+    assert.match(reply.message, /tiene 2 partidas/u, phrase);
+    assert.match(reply.message, /partida N/u, phrase);
+    assert.equal(db.allocations[0].stock_id, 11, phrase);
+    assert.equal(db.allocations[2].stock_id, 13, phrase);
+    assert.equal(db.stocks.get(11).reservada, 7, phrase);
+  }
+});
+
+test('el lote o ubicación anterior desambigua dos partidas del mismo tarro', async () => {
+  for (const phrase of [
+    'corrige ubicación del tarro del lote R6-260925-TRP a A10',
+    'corrige ubicación del tarro desde A9 a A10',
+  ]) {
+    const db = fakeDb({ extraTarroPart: true });
+    await advanceProductionPick({ db, userId: 7,
+      rawText: 'Revisa materiales OP ID 110' });
+    const offered = await advanceProductionPick({ db, userId: 7, rawText: phrase });
+    assert.match(offered.message, /Partida 3: TARRO CUADRADO/u, phrase);
+    assert.equal(db.allocations[2].stock_id, 13, phrase);
+    assert.equal(db.stocks.get(13).reservada, 2, phrase);
+  }
+});
+
+test('dos SKU o un producto ajeno a la OP no seleccionan una partida por aproximación', async () => {
+  for (const phrase of [
+    'cambia ubicación de 00006-TRP y 00001-TPBI a A10',
+    'cambia ubicación de etiqueta probióticos a A10',
+  ]) {
+    const db = fakeDb({ withEtiqueta: true });
+    await advanceProductionPick({ db, userId: 7,
+      rawText: 'Revisa materiales OP ID 110' });
+    const reply = await advanceProductionPick({ db, userId: 7, rawText: phrase });
+    assert.match(reply.message, /no cambié las reservas/iu, phrase);
+    assert.equal(db.allocations[0].stock_id, 11, phrase);
+    assert.equal(db.allocations[1].stock_id, 21, phrase);
+    assert.equal(db.allocations[2].stock_id, 31, phrase);
+  }
 });
 
 test('una corrección natural de ubicación conserva el producto contextual', async () => {
