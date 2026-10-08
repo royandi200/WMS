@@ -21,6 +21,20 @@ module.exports = async (req, res) => {
 
     const startedAt = Date.now();
 
+    if (req.query?.ai === 'true') {
+      const configured = Boolean(process.env.GROQ_API_KEY);
+      let status = null;
+      let detail = null;
+      if (configured) {
+        const response = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+        });
+        status = response.status;
+        if (!response.ok) detail = (await response.text()).slice(0, 300);
+      }
+      return res.status(200).json({ ok: true, data: { groq_configured: configured, groq_status: status, detalle: detail } });
+    }
+
     if (req.query?.warehouses === 'true') {
       const warehouses = await siigoGet('/v1/warehouses', { entidad: 'health-check' });
       const list = Array.isArray(warehouses) ? warehouses : (warehouses?.results || []);
