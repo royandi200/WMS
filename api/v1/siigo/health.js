@@ -26,8 +26,15 @@ module.exports = async (req, res) => {
       let status = null;
       let detail = null;
       if (configured) {
-        const response = await fetch('https://api.groq.com/openai/v1/models', {
-          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+            temperature: 0,
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'user', content: 'Responde el objeto JSON {"ok":true}' }],
+          }),
         });
         status = response.status;
         if (!response.ok) detail = (await response.text()).slice(0, 300);
