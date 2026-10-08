@@ -63,13 +63,14 @@ function contextualOrderCandidate(text, hasDraft) {
 
 function fieldMatch(text, before, after) {
   const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
-    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|son|fueron|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
+    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|fue|son|fueron|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
   return quantity(value);
 }
 
 function explicitFinishedWasteReason(text) {
   const raw = normalize(text);
-  const match = /^(?:(?:correccion|corrijo|corrige|cambia|modifica)\s*[:,.-]?\s*)?(?:(?:el|la)\s+)?(?:motivo|causa)\s+(?:(?:de|del)\s+)?(?:(?:la\s+)?merma|(?:el\s+)?producto\s+terminado|(?:el\s+)?no\s+conforme)\s*(?:(?:es|fue|a|por)\s+)?(.+)$/u.exec(raw);
+  const target = '(?:(?:la\\s+)?merma|(?:el\\s+)?producto\\s+terminado(?:\\s+no\\s+conforme)?|(?:el\\s+)?producto\\s+no\\s+conforme|(?:(?:el|los)\\s+)?no\\s+conformes?|(?:(?:la|las)\\s+)?unidades?\\s+no\\s+conformes?)';
+  const match = new RegExp(`^(?:(?:correccion|correcion|corrijo|corrige|cambia|modifica)\\s*[:,.-]?\\s*)?(?:(?:el|la)\\s+)?(?:motivo|causa)\\s+(?:(?:de|del)\\s+)?${target}\\s*(?:(?:es|fue|era|a|por)\\s+)?(.+)$`, 'u').exec(raw);
   return match?.[1]?.trim() || null;
 }
 
@@ -1158,7 +1159,7 @@ function closeCorrectionHelp(draft) {
     const finished = [];
     if (draft.conforming != null) finished.push('«conformes a [nueva cantidad]»');
     if (draft.waste != null) finished.push('«no conformes a [nueva cantidad]»');
-    if (draft.waste > 0) finished.push('«la causa de la merma es [nuevo motivo]»');
+    if (draft.waste > 0) finished.push('«la causa del producto no conforme es [nuevo motivo]»');
     if (draft.location) finished.push('«el conforme va para [nueva ubicación]»');
     tips.push(`• Producto terminado: para cambiar un dato, di ${finished.join(', ')}. Puedes dar varios cambios juntos.`);
   }
@@ -1203,7 +1204,7 @@ function guideSummary(order, draft, locationHint) {
   if (draft.unclassifiedWaste) missing.push('identificar la merma mencionada');
   if (draft.conforming == null) missing.push('cantidad conforme');
   if (draft.waste == null && !draft.unclassifiedWaste) missing.push('cantidad no conforme de producto terminado');
-  if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
+  if (draft.waste > 0 && !draft.reason) missing.push('causa del producto no conforme');
   if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto terminado');
   if (!draft.materialsAnswered || draft.materialPending || draft.materialQueue?.length) missing.push('reposición de insumos');
   if (draft.materialIssue) missing.push('aclarar un material que no se pudo registrar');
@@ -1276,7 +1277,7 @@ function guideSummary(order, draft, locationHint) {
   }
   else if (draft.waste == null) lines.push('¿Cuántas unidades de producto terminado fueron no conformes? Si ninguna, responde «0 no conformes».');
   else if (draft.conforming === 0 && draft.waste === 0) lines.push('Ambas cantidades son cero. Corrige conformes o merma para poder cerrar.');
-  else if (draft.waste > 0 && !draft.reason) lines.push('¿Cuál fue la causa de la merma de producto terminado?');
+  else if (draft.waste > 0 && !draft.reason) lines.push('¿Cuál fue la causa del producto terminado no conforme?');
   else if (draft.conforming > 0 && !draft.location) {
     lines.push('¿En qué ubicación quedará el producto terminado conforme?');
   } else if (draft.materialPending) {
@@ -1381,7 +1382,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   }
   const explicitPtReason = explicitFinishedWasteReason(rawText);
   const targetedPtReason = explicitPtReason
-    && (!draft.materialPending || /\b(?:producto\s+terminado|no\s+conforme)\b/u.test(normalize(rawText)))
+    && (!draft.materialPending || /\b(?:producto\s+terminado|no\s+conformes?)\b/u.test(normalize(rawText)))
     ? explicitPtReason : null;
   if (/^(?:correccion|correcion|corrijo|corrige|cambio|cambia|perdon|perdona)\b.*\bubicacion\b/u.test(normalize(rawText))
     && !parsed.location && !draft.materials?.length && !draft.materialPending) {

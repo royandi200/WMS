@@ -300,7 +300,7 @@ test('el operario puede declarar conformes y no conformes juntos y completar lo 
   assert.equal(first.draft.wasteClassified, true);
   assert.match(first.message, /Conformes: 10 und/u);
   assert.match(first.message, /No conformes de producto terminado: 10 und/u);
-  assert.match(first.message, /Falta:.*motivo de la merma.*ubicación del producto terminado.*reposición de insumos/u);
+  assert.match(first.message, /Falta:.*causa del producto no conforme.*ubicación del producto terminado.*reposición de insumos/u);
   assert.equal(first.params, undefined);
 
   const reason = await advanceCloseGuide({ ...base, rawText: 'por ruptura' });
@@ -1282,6 +1282,56 @@ test('la causa de merma del PT se puede corregir sin alterar dos materiales ya r
   assert.equal(corrected.draft.materials[1].motivo, 'mala impresión');
   assert.match(corrected.message, /Producto terminado no conforme: 1 und \| Causa: tapa defectuosa/u);
   assert.equal(corrected.params, undefined);
+});
+
+test('corrige causa y cantidad del no conforme sin mencionar merma ni tocar materiales', async () => {
+  const originalMaterials = [
+    { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 1, lote: 'ACC-260910-TPBI', motivo: 'ruptura', ubicacion: 'A8' },
+    { sku: '00017-ETASH60', producto: 'ETIQUETA ASHWAGANDHA',
+      unidad: 'und', cantidad: 2, lote: 'AA-260929-01-ETASH', motivo: 'mala impresión', ubicacion: 'A1' },
+  ];
+  const db = fakeDb({ orderId: 116, planned: 8, initialDraft: {
+    orderId: 116, conforming: 6, waste: 1, wasteClassified: true,
+    reason: 'fue mal de calidad van para la', location: 'C2',
+    materials: originalMaterials, materialsAnswered: true,
+    materialPending: null, reviewShown: true,
+  } });
+  const base = { db, userId: 116 };
+  for (const [utterance, expected] of [
+    ['Corrección, la causa del producto no conforme fue mala calidad', 'mala calidad'],
+    ['La causa del no conforme es sello defectuoso', 'sello defectuoso'],
+    ['El motivo de las unidades no conformes era mal sellado', 'mal sellado'],
+    ['Cambia la causa del producto terminado no conforme a rotura', 'rotura'],
+  ]) {
+    const result = await advanceCloseGuide({ ...base, rawText: utterance });
+    assert.equal(result.draft.reason, expected, utterance);
+    assert.deepEqual(result.draft.materials.map(item => [item.sku, item.lote, item.motivo]),
+      originalMaterials.map(item => [item.sku, item.lote, item.motivo]));
+    assert.match(result.message, /Producto terminado no conforme: 1 und/u);
+    assert.match(result.message, /la causa del producto no conforme es \[nuevo motivo\]/u);
+  }
+  const quantityCorrection = await advanceCloseGuide({ ...base,
+    rawText: 'El no conforme fue 2' });
+  assert.equal(quantityCorrection.draft.waste, 2);
+  assert.equal(quantityCorrection.draft.reason, 'rotura');
+  assert.equal(quantityCorrection.params, undefined);
+});
+
+test('la causa explícita del no conforme no se aplica al insumo en curso', async () => {
+  const db = fakeDb({ orderId: 116, planned: 2, initialDraft: {
+    orderId: 116, conforming: 1, waste: 1, wasteClassified: true,
+    reason: 'causa anterior', location: 'C2', materials: [], materialsAnswered: false,
+    materialPending: { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+      unidad: 'und', cantidad: 1, lote: 'ACC-260910-TPBI', motivo: null,
+      ubicacion: 'A8' }, reviewShown: false,
+  } });
+  const result = await advanceCloseGuide({ db, userId: 117,
+    rawText: 'La causa de los no conformes fue mala calidad' });
+  assert.equal(result.draft.reason, 'mala calidad');
+  assert.equal(result.draft.materialPending.motivo, null);
+  assert.equal(result.draft.materials.length, 0);
+  assert.match(result.message, /causa concreta de reponer TAPA/u);
 });
 
 test('un lote elegido se revalida y no permite confirmar si desapareció el saldo', async () => {
