@@ -20,11 +20,31 @@ function harness({ operationError, role = 'admin' } = {}) {
       if (sql.includes('INSERT INTO webhook_ingress_inbox')) return [{ insertId: inboxId++ }];
       if (sql.includes('UPDATE webhook_ingress_inbox')) return [{ affectedRows: 1 }];
       if (sql.includes('INSERT INTO webhook_logs')) {
-        if (args[5] !== 'RECEIVED') logged.push({ payload: args[3], response: args[4],
+        if (args[5] !== 'RECEIVED') logged.push({ action: args[1], payload: args[3], response: args[4],
           status: args[5] });
         return [{ affectedRows: 1 }];
       }
+      if (sql.includes('SELECT action, response FROM webhook_logs')) {
+        const latest = logged.filter(row => row.status === 'PROCESSED').at(-1);
+        return [latest ? [latest] : []];
+      }
       if (sql.includes('FROM webhook_logs')) return [logged.length ? [logged.at(-1)] : []];
+      if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
+        const sku = String(args[1] || '').toUpperCase();
+        const probiotic = sku.includes('PROBIOT') || sku.includes('00201');
+        return [[{ id: probiotic ? 201 : sku.includes('120') ? 120 : 60,
+          siigo_code: probiotic ? '00201-PTPBS120' : sku.includes('120') ? '00110-PTASH120' : '00102-PTASH60',
+          nombre: probiotic ? 'PROBIOTICOS X 120' : sku.includes('120') ? 'ASHWAGANDHA X 120' : 'ASHWAGANDHA X 60',
+          modalidad_operativa: 'PR' }]];
+      }
+      if (sql.includes('FROM producto_aliases pa')) {
+        const term = String(args[0] || '');
+        const probiotic = term.includes('probiot') || term.includes('00201');
+        return [[{ id: probiotic ? 201 : term.includes('120') ? 120 : 60,
+          siigo_code: probiotic ? '00201-PTPBS120' : term.includes('120') ? '00110-PTASH120' : '00102-PTASH60',
+          nombre: probiotic ? 'PROBIOTICOS X 120' : term.includes('120') ? 'ASHWAGANDHA X 120' : 'ASHWAGANDHA X 60',
+          modalidad_operativa: 'PR' }]];
+      }
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM usuario_roles ur')) return [[{ rol: role }]];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];
@@ -152,8 +172,13 @@ test('production destination reply carries only the latest asked product and qua
   assert.equal(h.calls.length, 0);
   const stock = await h.send('MODO_CHARLA', 'stock de seguridad', {});
   assert.equal(stock.ok, true, stock.mensaje);
+  assert.match(stock.mensaje, /Revisa la nueva OP antes de liberarla/u);
+  assert.equal(h.calls.length, 0);
+  const released = await h.send('CONFIRMAR_MATERIALES_PRODUCCION',
+    'confirmo crear OP para stock de seguridad', {});
+  assert.equal(released.ok, true, released.mensaje);
   assert.deepEqual([h.calls[0].product, h.calls[0].quantity, h.calls[0].originType],
-    ['ashwagandha 120', 1, 'STOCK_SEGURIDAD']);
+    ['00110-PTASH120', 1, 'STOCK_SEGURIDAD']);
 
   const second = await h.send('LIBERAR_ORDEN_PRODUCCION',
     'vamos a producir 1 tarro de ashwagandha 60', { id_producto_final: 'ashwagandha 120', cantidad_planificada: 10 });
@@ -162,6 +187,59 @@ test('production destination reply carries only the latest asked product and qua
   assert.equal(customer.ok, true, customer.mensaje);
   assert.match(customer.mensaje, /1 und de ashwagandha 60/u);
   assert.equal(h.calls.length, 1);
+});
+
+test('stock OP is previewed, corrected in two messages and released only after confirmation', async () => {
+  const h = harness();
+  const first = await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Vamos a producir 5 unidades de ashwagandha 60 para stock de seguridad',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+  assert.equal(first.ok, true, first.mensaje);
+  assert.match(first.mensaje, /Cantidad planeada: 5 und/u);
+  assert.equal(h.calls.length, 0);
+  const quantity = await h.send('MODO_CHARLA', 'serán 12 unidades', {});
+  assert.match(quantity.mensaje, /Cantidad planeada: 12 und/u);
+  assert.equal(h.calls.length, 0);
+  const product = await h.send('MODO_CHARLA', 'cambia el producto a probioticos 120', {});
+  assert.match(product.mensaje, /PROBIOTICOS X 120 \(00201-PTPBS120\)/u);
+  assert.match(product.mensaje, /Cantidad planeada: 12 und/u);
+  assert.equal(h.calls.length, 0);
+  const released = await h.send('MODO_CHARLA', 'confirmo crear OP para stock de seguridad', {});
+  assert.equal(released.ok, true, released.mensaje);
+  assert.equal(h.calls.length, 1);
+  assert.deepEqual([h.calls[0].product, h.calls[0].quantity, h.calls[0].originType],
+    ['00201-PTPBS120', 12, 'STOCK_SEGURIDAD']);
+});
+
+test('cancelled stock OP cannot be released by a later confirmation', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+  const cancelled = await h.send('MODO_CHARLA', 'cancela esta OP', {});
+  assert.match(cancelled.mensaje, /Descarté el borrador/u);
+  const late = await h.send('LIBERAR_ORDEN_PRODUCCION', 'confirmo crear OP para stock de seguridad', {});
+  assert.match(late.mensaje, /No hay un resumen/u);
+  assert.equal(h.calls.length, 0);
+});
+
+test('model parameters alone cannot bypass the stock OP preview', async () => {
+  const h = harness();
+  const first = await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+  assert.match(first.mensaje, /Cantidad planeada: 5 und/u);
+  const ambiguous = await h.send('LIBERAR_ORDEN_PRODUCCION', 'confirmo',
+    { id_producto_final: '00201-PTPBS120', cantidad_planificada: 20,
+      origen_tipo: 'STOCK_SEGURIDAD' });
+  assert.equal(ambiguous.ok, false);
+  assert.equal(h.calls.length, 0);
+  const confirmed = await h.send('MODO_CHARLA', 'confirmo crear OP',
+    { id_producto_final: '00201-PTPBS120', cantidad_planificada: 20 });
+  assert.equal(confirmed.ok, true, confirmed.mensaje);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].product, '00102-PTASH60');
+  assert.equal(h.calls[0].quantity, 5);
 });
 
 test('WhatsApp lists and confirms a pending 3Q dispatch through its typed ID', async () => {
@@ -396,7 +474,8 @@ for (const s of scenarios) {
     assert.equal(h.calls[0][s.flag], true);
     const repeat = harness();
     await repeat.send(s.action, s.text, { ...s.params, ...s.flags }, outer);
-    assert.equal(repeat.calls[0][s.flag], false);
+    if (s.name === 'production') assert.equal(repeat.calls.length, 0);
+    else assert.equal(repeat.calls[0][s.flag], false);
     const missing = harness();
     assert.equal((await missing.send(s.action, '', s.flags, outer)).ok, false);
     assert.equal(missing.calls.length, 0);
@@ -422,6 +501,10 @@ for (const s of scenarios) {
     const h = harness();
     assert.equal((await h.send(s.action, s.text, s.params)).ok, true);
     assert.equal((await h.send(s.action, s.text, { ...s.params, ...s.flags, confirm_new_return: true })).ok, true);
+    if (s.name === 'production') {
+      assert.equal(h.calls.length, 0);
+      return;
+    }
     assert.equal(h.calls.length, 2);
     assert.equal(h.calls[1][s.flag], false);
     assert.notEqual(h.calls[1].confirm_new_return, true);

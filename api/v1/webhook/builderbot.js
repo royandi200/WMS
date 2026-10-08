@@ -83,6 +83,7 @@ const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { currentUserText } = require('../../_lib/builderbot-user-text');
 const { productionRequestIntent, productionDestinationReply,
   contextualProductionReply } = require('../../_lib/stock-production-intent');
+const { advanceProductionReleaseGuide, productionReleaseFollowup } = require('../../_lib/production-release-guide');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
 const {
@@ -511,6 +512,19 @@ async function findRecentProductionDestinationQuestion(db, from, rawText) {
   return contextualProductionReply(rawText,
     getUserText(payload, parseBuilderBotInfo(payload)),
     response.message || response.mensaje || response.error);
+}
+
+async function pendingStockProductionDraft(db, from) {
+  if (!from) return null;
+  const [rows] = await db.execute(
+    `SELECT action, response FROM webhook_logs
+      WHERE from_phone = ? AND status = 'PROCESSED'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE)
+      ORDER BY id DESC LIMIT 1`, [from]
+  );
+  if (rows[0]?.action !== 'LIBERAR_ORDEN_PRODUCCION') return null;
+  const state = asObject(asObject(rows[0]?.response).context).stock_production_draft;
+  return state?.status === 'PENDING' && state.sku && state.quantity ? state : null;
 }
 
 async function notifiedProductionCloseReference(db, from, text) {
@@ -1612,6 +1626,17 @@ module.exports = async (req, res) => {
     // log de la pregunta; una respuesta corta solo retoma la pregunta más
     // reciente del mismo remitente, nunca una OP ni un destino por defecto.
     const productionRequest = productionRequestIntent(contractUserText);
+    let activeStockProductionDraft = null;
+    if (!productionRequest && productionReleaseFollowup(contractUserText)
+      && ['UNKNOWN', 'MODO_CHARLA', 'LIBERAR_ORDEN_PRODUCCION',
+        'CONFIRMAR_MATERIALES_PRODUCCION', 'AJUSTAR_MATERIALES_PRODUCCION',
+        'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'].includes(action)) {
+      activeStockProductionDraft = await pendingStockProductionDraft(db, from);
+      if (activeStockProductionDraft) {
+        action = 'LIBERAR_ORDEN_PRODUCCION';
+        params = {};
+      }
+    }
     if (productionRequest && ['UNKNOWN', 'MODO_CHARLA', 'LIBERAR_ORDEN_PRODUCCION',
       'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'].includes(action)) {
       action = 'LIBERAR_ORDEN_PRODUCCION';
@@ -1841,6 +1866,13 @@ module.exports = async (req, res) => {
       params = {
         texto: 'El despacho debe originarse en una factura de venta de Siigo. Puedo consultar nuevas facturas o confirmar una tarea de despacho existente.',
       };
+    }
+
+    // Un borrador de OP de stock abierto conserva su propia conversación aunque
+    // el clasificador intente mover una corrección de producto/cantidad a otro flujo.
+    if (activeStockProductionDraft && productionReleaseFollowup(contractUserText)) {
+      action = 'LIBERAR_ORDEN_PRODUCCION';
+      params = {};
     }
 
     // Flujos retirados (depuracion 2026-09-17): se responde con la guia hacia
@@ -3291,6 +3323,29 @@ module.exports = async (req, res) => {
 
       case 'LIBERAR_ORDEN_PRODUCCION': {
         let releaseParams = { ...params };
+        let confirmedStockRelease = null;
+        const stockDraft = activeStockProductionDraft
+          || (params.confirmar_nueva_orden === true ? null : await pendingStockProductionDraft(db, from));
+        if (!stockDraft && !productionRequest && params.confirmar_nueva_orden !== true
+          && productionReleaseFollowup(contractUserText)
+          && !(params.id_producto_final || params.id_item || params.sku)) {
+          mensaje = 'No hay un resumen de OP de stock de seguridad pendiente para confirmar o corregir. Indica producto, cantidad y destino para preparar uno nuevo. No se creó ninguna orden.';
+          responseContext.inventory_changed = false;
+          break;
+        }
+        if (stockDraft && !productionRequest && productionReleaseFollowup(contractUserText)) {
+          const review = await advanceProductionReleaseGuide({
+            db, rawText: contractUserText, draft: stockDraft,
+          });
+          if (review.status !== 'CONFIRMED') {
+            mensaje = review.message;
+            responseContext.stock_production_draft = review.draft || { status: review.status };
+            responseContext.inventory_changed = false;
+            break;
+          }
+          confirmedStockRelease = review.release;
+          responseContext.stock_production_draft = { status: 'COMPLETED' };
+        }
         if (params.confirmar_nueva_orden === true && params.id_orden_existente) {
           const existingOrderId = String(params.id_orden_existente).trim();
           const [existingOrders] = await db.execute(
@@ -3315,10 +3370,12 @@ module.exports = async (req, res) => {
             cliente_final: existing.cliente_final,
           };
         }
-        const selectedCustomerOrderId = reconcileCustomerOrderId(releaseParams, contractUserText);
+        const selectedCustomerOrderId = confirmedStockRelease
+          ? null : reconcileCustomerOrderId(releaseParams, contractUserText);
         let originType;
         try {
-          originType = selectedCustomerOrderId ? 'OC_CLIENTE'
+          originType = confirmedStockRelease ? 'STOCK_SEGURIDAD'
+          : selectedCustomerOrderId ? 'OC_CLIENTE'
           : params.confirmar_nueva_orden === true && params.id_orden_existente
           ? releaseParams.origen_tipo
           : resolveProductionOrigin(contractUserText, releaseParams.origen_tipo);
@@ -3342,9 +3399,25 @@ module.exports = async (req, res) => {
                 releaseParams.cliente_final
               )
           : { customerReference: null, finalCustomer: null };
+        if (originType === 'STOCK_SEGURIDAD' && !confirmedStockRelease
+          && params.confirmar_nueva_orden !== true) {
+          const review = await advanceProductionReleaseGuide({
+            db, rawText: contractUserText,
+            request: {
+              product: releaseParams.id_producto_final || releaseParams.id_item || releaseParams.sku,
+              quantity: releaseParams.cantidad_planificada || releaseParams.cantidad,
+            },
+          });
+          mensaje = review.message;
+          responseContext.stock_production_draft = review.draft;
+          responseContext.inventory_changed = false;
+          break;
+        }
         const productionResult = await releaseProductionOrder({
-          product: releaseParams.id_producto_final || releaseParams.id_item || releaseParams.sku,
-          quantity: releaseParams.cantidad_planificada || releaseParams.cantidad,
+          product: confirmedStockRelease?.product
+            || releaseParams.id_producto_final || releaseParams.id_item || releaseParams.sku,
+          quantity: confirmedStockRelease?.quantity
+            || releaseParams.cantidad_planificada || releaseParams.cantidad,
           originType,
           customerReference: customerOrder.customerReference,
           finalCustomer: customerOrder.finalCustomer,
