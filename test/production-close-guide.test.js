@@ -50,7 +50,17 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
       { producto_id: 35, unidad: 'und', sku: '00035-LNTP60', nombre: 'LINER TARRO x 60' },
       ...(withGomas ? [{ producto_id: 50, unidad: 'g', sku: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' }] : [])]];
-      if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) return [[]];
+      if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
+        const products = [
+          { id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO' },
+          { id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
+          { id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60' },
+        ];
+        const scoped = params.slice(3);
+        return [products.filter(item => (!scoped.length || scoped.includes(item.id))
+          && (Number(params[0]) === item.id
+            || String(params[1]).toUpperCase() === item.siigo_code))];
+      }
       if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[/gomas?/u.test(params[0]) && withGomas ? {
         id: 50, siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS',
         unit_label: 'g', alias: 'gomas',
@@ -1209,6 +1219,66 @@ test('cambiar lote ofrece otras ubicaciones cuando ambas cubren la reposición',
   assert.match(filtered.message, /Lote \*LOTE-B11\*/u);
   assert.doesNotMatch(filtered.message, /Lote \*LOTE-C5\*/u);
   assert.equal(filtered.draft.location, 'C7');
+});
+
+test('OP 115 acepta cambiar el lote de etiquetas por nombre o SKU sin pedir partida', async () => {
+  const materials = [
+    { sku: '00035-LNTP60', producto: 'LINER TARRO x 60', unidad: 'und',
+      cantidad: 1, lote: 'R5-260923-LINER', motivo: 'ruptura', ubicacion: 'A14' },
+    { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und',
+      cantidad: 1, lote: 'ACC-260910-TPBI', motivo: 'mal olor', ubicacion: 'A8' },
+    { sku: '00017-ETASH60', producto: 'ETIQUETA ASHWAGANDHA', unidad: 'und',
+      cantidad: 1, lote: 'AA-260929-01-ETASH', motivo: 'mala impresión', ubicacion: 'A1' },
+  ];
+  for (const phrase of ['Cambio de lote en etiquetas',
+    'el lote de las etiquetas es otro', 'cambia lote de 00017-ETASH60']) {
+    const db = fakeDb({ orderId: 115, planned: 5,
+      replacementOptions: [
+        { lote: 'AA-260929-01-ETASH', ubicacion: 'A1', disponible: 10 },
+        { lote: 'AA-260930-14-ETASH', ubicacion: 'B1', disponible: 10 },
+      ], stockLocations: { 'AA-260930-14-ETASH': 'B1' },
+      initialDraft: { orderId: 115, conforming: 4, waste: 1, wasteClassified: true,
+        reason: 'daño', location: 'C2', materials: structuredClone(materials),
+        materialsAnswered: true, materialPending: null, reviewShown: true } });
+    const base = { db, userId: 7 };
+    assert.equal(isCloseFollowup(phrase, { orderId: 115, materials }), true, phrase);
+    const options = await advanceCloseGuide({ ...base, rawText: phrase });
+    assert.equal(options.draft.materialChoice.target, 'existing', phrase);
+    assert.equal(options.draft.materialChoice.index, 2, phrase);
+    assert.match(options.message, /elige lote/u);
+    assert.match(options.message, /AA-260930-14-ETASH/u);
+    assert.equal(options.draft.materials[2].lote, 'AA-260929-01-ETASH', phrase);
+    assert.equal(options.draft.location, 'C2', phrase);
+    assert.equal(options.params, undefined, phrase);
+    const chosen = await advanceCloseGuide({ ...base, rawText: 'opción 2' });
+    assert.equal(chosen.draft.materials[2].lote, 'AA-260930-14-ETASH', phrase);
+    assert.equal(chosen.draft.materials[2].ubicacion, 'B1', phrase);
+    assert.equal(chosen.draft.materials[0].lote, 'R5-260923-LINER', phrase);
+    assert.equal(chosen.draft.materials[1].lote, 'ACC-260910-TPBI', phrase);
+    assert.match(chosen.message, /Si un insumo aparece una sola vez/u);
+  }
+});
+
+test('cambiar lote por producto exige partida solo cuando ese producto se repuso varias veces', async () => {
+  const db = fakeDb({ orderId: 115, planned: 5, initialDraft: {
+    orderId: 115, conforming: 4, waste: 1, wasteClassified: true,
+    reason: 'daño', location: 'C2', materials: [
+      { sku: '00017-ETASH60', producto: 'ETIQUETA ASHWAGANDHA', unidad: 'und',
+        cantidad: 1, lote: 'AA-260929-01-ETASH', motivo: 'mala impresión', ubicacion: 'A1' },
+      { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO', unidad: 'und',
+        cantidad: 1, lote: 'ACC-260910-TPBI', motivo: 'ruptura', ubicacion: 'A8' },
+      { sku: '00017-ETASH60', producto: 'ETIQUETA ASHWAGANDHA', unidad: 'und',
+        cantidad: 1, lote: 'AA-260930-14-ETASH', motivo: 'mala impresión', ubicacion: 'A1' },
+    ], materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  const base = { db, userId: 7 };
+  await assert.rejects(() => advanceCloseGuide({ ...base,
+    rawText: 'Cambio de lote en etiquetas' }), /Hay 2 partidas de ETIQUETA ASHWAGANDHA/u);
+  const selected = await advanceCloseGuide({ ...base,
+    rawText: 'cambia lote de partida 3' });
+  assert.equal(selected.draft.materialChoice.index, 2);
+  assert.equal(selected.draft.materials[0].lote, 'AA-260929-01-ETASH');
+  assert.equal(selected.params, undefined);
 });
 
 test('las opciones de reposición se limitan a la ubicación declarada y permiten paginar', async () => {

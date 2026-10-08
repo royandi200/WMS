@@ -383,35 +383,56 @@ async function applyLotChoice(db, draft, order, text) {
 
 function isLotChangeRequest(text) {
   const raw = normalize(text);
-  return /\b(?:cambiar|cambia|cambio|escoger|elegir|seleccionar|ver|mostrar)\b.*\blote\b/u.test(raw)
+  return (/\b(?:cambiar|cambia|cambio|escoger|elegir|seleccionar|ver|mostrar)\b.*\blote\b/u.test(raw)
+    || /^(?:el\s+)?lote\s+(?:de|del|en)\s+.+?\s+(?:es|era|fue|queda)\s+(?:otro|diferente|distinto|incorrecto|equivocado)\b/u.test(raw)
+    || /^(?:las?\s+|los?\s+)?[\w\s-]+\s+(?:son|es)\s+de\s+otro\s+lote\b/u.test(raw))
     && !/\blote\b.*\b(?:a|por)\s+[a-z0-9][a-z0-9_-]*[.!]?$/u.test(raw);
+}
+
+function lotChangeProductTerm(text) {
+  const raw = normalize(text).replace(/[.!?]+$/u, '').trim();
+  const action = /^(?:(?:quiero|necesito|voy a|vamos a)\s+)?(?:cambiar|cambia|cambio|escoger|elegir|seleccionar|ver|mostrar)\s+(?:(?:de|el|la)\s+)*lote(?:\s+(?:de|del|en|para)\s+(.+))?$/u.exec(raw);
+  const inverted = /^(?:el\s+)?lote\s+(?:de|del|en)\s+(.+?)\s+(?:es|era|fue|queda)\s+(?:otro|diferente|distinto|incorrecto|equivocado)\b/u.exec(raw);
+  const alternative = /^(?:las?\s+|los?\s+)?(.+?)\s+(?:son|es)\s+de\s+otro\s+lote\b/u.exec(raw);
+  return (action?.[1] || inverted?.[1] || alternative?.[1] || '')
+    .replace(/^(?:de\s+)?(?:las?|los?)\s+/u, '').trim() || null;
 }
 
 async function requestLotChange(db, draft, order, text) {
   if (!isLotChangeRequest(text)) return false;
   const raw = normalize(text);
+  const term = lotChangeProductTerm(text);
+  const partition = /\bpartida\s*#?\s*(\d{1,2})\b/u.exec(raw);
+  const lines = draft.materials || [];
+  const available = term && !partition ? await orderMaterials(db, order.id) : [];
+  const recordedSkus = new Set([...lines, draft.materialPending].filter(Boolean).map(line => line.sku));
+  const recordedIds = available.filter(item => recordedSkus.has(item.sku)).map(item => item.producto_id);
+  const product = term && !partition ? await resolveProductReference(db, term, {
+    productIds: recordedIds, allowContextualPartial: true, allowScopedApproximate: true,
+  }) : null;
   if (draft.materialPending?.sku && draft.materialPending.cantidad != null) {
+    if (partition || (product && product.siigo_code !== draft.materialPending.sku)) {
+      throw guideError(`Termina primero la reposición en curso de ${draft.materialPending.producto}; no cambié el borrador.`);
+    }
     await startLotChoice(db, draft, order, 'pending');
     return true;
   }
-  const lines = draft.materials || [];
   if (!lines.length) return false;
   let index = 0;
-  if (lines.length > 1) {
-    const partition = /\bpartida\s*#?\s*(\d{1,2})\b/u.exec(raw);
-    if (partition && Number(partition[1]) >= 1 && Number(partition[1]) <= lines.length) {
+  if (partition) {
+    if (Number(partition[1]) >= 1 && Number(partition[1]) <= lines.length) {
       index = Number(partition[1]) - 1;
     } else {
-      const available = await orderMaterials(db, order.id);
-      const matches = [];
-      for (const material of available) {
-        if (raw.includes(normalize(material.sku)) || raw.includes(normalize(material.nombre))) matches.push(material.sku);
-      }
-      const selected = lines.map((line, lineIndex) => ({ line, lineIndex }))
-        .filter(item => matches.includes(item.line.sku));
-      if (selected.length !== 1) throw guideError('Hay varias partidas. Di «cambia lote de partida 1» o indica el SKU; no modifiqué el borrador.');
-      index = selected[0].lineIndex;
+      throw guideError(`No existe la partida ${partition[1]} en este cierre. Revisa el resumen; no cambié el borrador.`);
     }
+  } else if (product) {
+    const selected = lines.map((line, lineIndex) => ({ line, lineIndex }))
+      .filter(item => item.line.sku === product.siigo_code);
+    if (!selected.length) throw guideError(`No hay una reposición registrada de ${product.nombre}; no cambié el borrador.`);
+    if (selected.length > 1) throw guideError(`Hay ${selected.length} partidas de ${product.nombre}. Di «cambia lote de partida N» usando el número del resumen; no cambié el borrador.`);
+    index = selected[0].lineIndex;
+  } else if (lines.length > 1) {
+    throw guideError('Hay varias reposiciones. Di «cambio de lote en etiquetas» o «cambia lote de partida N»; no cambié el borrador.');
   }
   // Cambiar lote no implica conservar la ubicación del lote anterior. Una
   // ubicación dicha ahora sí limita la lista; sin ella se muestran todas.
@@ -1143,7 +1164,7 @@ function guideSummary(order, draft, locationHint) {
     lines.push('', `Conciliación de producto terminado: ${draft.conforming} conforme(s) + ${draft.waste} no conforme(s) = ${draft.conforming + draft.waste} und frente a ${Number(order.cantidad_planeada)} planeadas.`);
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
     lines.push('', 'Si repusiste otro SKU, lote o ubicación, repórtalo antes de confirmar; te mostraré sus lotes por separado.');
-    lines.push('Correcciones: «conformes a 18», «no conformes a 2» o «ubicación del conforme a C7». Para un insumo, usa su número: «corrección: partida 3, cantidad 100 g» o «cambia lote de partida 3».');
+    lines.push('Correcciones: «conformes a 18», «no conformes a 2» o «ubicación del conforme a C7». Si un insumo aparece una sola vez, di «cambio de lote en etiquetas» para elegir otro lote o «corrige cantidad de etiquetas a 2 und». Si el mismo insumo tiene varias partidas, indica cuál: «cambia lote de partida 3» o «corrección: partida 3, cantidad 100 g».');
     lines.push(`Revisa el resumen. Si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
     return lines.join('\n');
