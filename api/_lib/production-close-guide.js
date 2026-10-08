@@ -1130,6 +1130,45 @@ async function finishDraft(db, userId, draft) {
   );
 }
 
+function closeCorrectionHelp(draft) {
+  const tips = [];
+  if (draft.conforming != null || draft.waste != null || draft.location) {
+    const finished = [];
+    if (draft.conforming != null) finished.push('«conformes a [nueva cantidad]»');
+    if (draft.waste != null) finished.push('«no conformes a [nueva cantidad]»');
+    if (draft.waste > 0) finished.push('«la causa de la merma es [nuevo motivo]»');
+    if (draft.location) finished.push('«el conforme va para [nueva ubicación]»');
+    tips.push(`• Producto terminado: para cambiar un dato, di ${finished.join(', ')}. Puedes dar varios cambios juntos.`);
+  }
+
+  const materials = draft.materials || [];
+  const counts = new Map();
+  for (const item of materials) counts.set(item.sku, (counts.get(item.sku) || 0) + 1);
+  const unique = materials.find(item => counts.get(item.sku) === 1);
+  if (unique) {
+    const shortName = normalize(unique.producto).split(' ')[0];
+    const ambiguousName = materials.some(item => item.sku !== unique.sku
+      && normalize(item.producto).split(' ')[0] === shortName);
+    const reference = shortName.length >= 3 && !ambiguousName ? shortName : unique.sku;
+    const exampleQuantity = ['g', 'gr', 'gramo', 'gramos'].includes(normalize(unique.unidad))
+      ? '100 g' : `2 ${unique.unidad || 'und'}`;
+    tips.push(`• Insumo que aparece una sola vez: basta nombrarlo o indicar su SKU. Di «cambio de lote en ${reference}» para elegir otro lote, «corrige cantidad de ${reference} a ${exampleQuantity}», «corrige causa de ${reference} a [nuevo motivo]» o «corrige ubicación de ${reference} a [nueva ubicación]». No necesitas decir «corrección» ni el número de partida.`);
+  }
+  if (materials.length) {
+    const repeatedIndex = materials.findIndex(item => counts.get(item.sku) > 1);
+    if (repeatedIndex >= 0) {
+      const unit = materials[repeatedIndex].unidad || 'und';
+      const exampleQuantity = ['g', 'gr', 'gramo', 'gramos'].includes(normalize(unit)) ? '100 g' : `2 ${unit}`;
+      tips.push(`• El mismo insumo figura en varias partidas: indica cuál quieres cambiar, por ejemplo «cambia lote de partida ${repeatedIndex + 1}» o «partida ${repeatedIndex + 1}, cantidad ${exampleQuantity}».`);
+    } else {
+      tips.push('• Si más adelante un insumo figura en varias partidas, indica el número de partida que aparece en el resumen para distinguirlas.');
+    }
+  } else if (draft.materialPending?.sku) {
+    tips.push(`• Insumo en curso: si la cantidad está mal, di «corrige cantidad a 2 ${draft.materialPending.unidad || 'und'}»; si el lote está mal, di «cambia lote». Termina este insumo antes de añadir otro.`);
+  }
+  return tips.length ? ['*Si necesitas corregir algo registrado*', ...tips] : [];
+}
+
 function guideSummary(order, draft, locationHint) {
   // Igual que en alistamiento, una elección activa muestra solo sus opciones.
   // El resumen completo se presenta después de elegir el lote y antes de cerrar.
@@ -1163,13 +1202,13 @@ function guideSummary(order, draft, locationHint) {
       '', '*Insumos repuestos*');
     lines.push(...(draft.materials || []).length
       ? draft.materials.map((item, index) =>
-        `• ${index + 1}. ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote de reposición: ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`)
+        `• Partida ${index + 1} — ${item.producto} (${item.sku}): ${item.cantidad} ${item.unidad || ''} | Lote de reposición: ${item.lote} | Causa: ${item.motivo}${item.ubicacion ? ` | Ubicación: ${item.ubicacion}` : ''}`)
       : ['• Ninguno']);
     const difference = Number(order.cantidad_planeada) - draft.conforming - draft.waste;
     lines.push('', `Conciliación de producto terminado: ${draft.conforming} conforme(s) + ${draft.waste} no conforme(s) = ${draft.conforming + draft.waste} und frente a ${Number(order.cantidad_planeada)} planeadas.`);
     if (difference !== 0) lines.push('', `Diferencia frente al plan: ${difference} und. Verifica este dato.`);
     lines.push('', 'Si repusiste otro SKU, lote o ubicación, repórtalo antes de confirmar; te mostraré sus lotes por separado.');
-    lines.push('Correcciones: «conformes a 18», «no conformes a 2» o «ubicación del conforme a C7». Si un insumo aparece una sola vez, di «cambio de lote en etiquetas» para elegir otro lote o «corrige cantidad de etiquetas a 2 und». Si el mismo insumo tiene varias partidas, indica cuál: «cambia lote de partida 3» o «corrección: partida 3, cantidad 100 g».');
+    lines.push('', ...closeCorrectionHelp(draft));
     lines.push(`Revisa el resumen. Si está correcto, responde *confirmo cierre OP ID ${order.id}*.`);
     lines.push('', 'Este borrador no cierra la OP ni modifica inventario.');
     return lines.join('\n');
@@ -1179,9 +1218,9 @@ function guideSummary(order, draft, locationHint) {
   if (draft.waste != null) captured.push(`• No conformes de producto terminado: ${draft.waste} und${draft.reason ? ` | Causa: ${draft.reason}` : ''}`);
   if (draft.location) captured.push(`• Ubicación del terminado: ${draft.location}`);
   if (draft.unclassifiedWaste) captured.push(`• Merma sin clasificar: ${draft.unclassifiedWaste.quantity} und${draft.unclassifiedWaste.cause ? ` | Causa indicada: ${draft.unclassifiedWaste.cause}` : ''}`);
-  for (const item of draft.materials || []) {
+  for (const [index, item] of (draft.materials || []).entries()) {
     const lot = item.lote || `pendiente${item.loteIntentado ? ` (se rechazó ${item.loteIntentado})` : ''}`;
-    captured.push(`• Insumo ${item.lote ? 'repuesto' : 'en corrección'}: ${item.cantidad} ${item.unidad || ''} de ${item.producto} | Lote ${lot} | Causa: ${item.motivo}${item.loteAnterior ? ` | Lote anterior sin ratificar: ${item.loteAnterior}` : ''}`);
+    captured.push(`• Partida ${index + 1} — Insumo ${item.lote ? 'repuesto' : 'en corrección'}: ${item.cantidad} ${item.unidad || ''} de ${item.producto} | Lote ${lot} | Causa: ${item.motivo}${item.loteAnterior ? ` | Lote anterior sin ratificar: ${item.loteAnterior}` : ''}`);
   }
   if (draft.materialPending) {
     const item = draft.materialPending;
@@ -1231,7 +1270,9 @@ function guideSummary(order, draft, locationHint) {
   } else {
     lines.push('Ambas cantidades están en cero. Corrige conformes o no conformes antes de cerrar.');
   }
-  lines.push('', 'Puedes responder paso a paso o dar juntos conformes, no conformes, causa, ubicación y materiales repuestos. Conservaré lo ya registrado.',
+  const corrections = closeCorrectionHelp(draft);
+  lines.push('', ...(corrections.length ? [...corrections, ''] : []),
+    'Puedes responder el siguiente paso o dar varios datos juntos. Conservaré lo ya registrado.',
     'Aún no se modifica inventario.');
   return lines.join('\n');
 }

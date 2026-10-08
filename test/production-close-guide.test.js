@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  advanceCloseGuide, closeFields, closeOrderReference, confirmed, isCloseFollowup,
+  advanceCloseGuide, closeFields, closeOrderReference, confirmed, guideSummary, isCloseFollowup,
 } = require('../api/_lib/production-close-guide');
 const { hasProductionCloseIntent } = require('../api/_lib/production-close-input');
 
@@ -505,7 +505,7 @@ test('el audio sin cantidades no puede convertirse en cierre por los parámetros
   assert.match(result.message, /Aún no hay datos del cierre/u);
   assert.match(result.message, /Falta:.*cantidad conforme, cantidad no conforme de producto terminado/u);
   assert.match(result.message, /¿Cuántas unidades de producto terminado salieron conformes/iu);
-  assert.match(result.message, /responder paso a paso o dar juntos conformes, no conformes/u);
+  assert.match(result.message, /responder el siguiente paso o dar varios datos juntos/u);
 });
 
 test('conserva el OP ID propuesto ante una transcripción OCID y acepta sí sin repetir el prefijo', async () => {
@@ -1293,7 +1293,7 @@ test('OP 115 acepta cambiar el lote de etiquetas por nombre o SKU sin pedir part
     assert.equal(chosen.draft.materials[2].ubicacion, 'B1', phrase);
     assert.equal(chosen.draft.materials[0].lote, 'R5-260923-LINER', phrase);
     assert.equal(chosen.draft.materials[1].lote, 'ACC-260910-TPBI', phrase);
-    assert.match(chosen.message, /Si un insumo aparece una sola vez/u);
+    assert.match(chosen.message, /Insumo que aparece una sola vez/u);
     const materialsBeforeRepeat = structuredClone(chosen.draft.materials);
     assert.equal(isCloseFollowup('opción 2', chosen.draft), true, phrase);
     const repeated = await advanceCloseGuide({ ...base, rawText: 'opción 2' });
@@ -1392,6 +1392,34 @@ function gomasLine(quantity, lot = 'GOMEZ-L24', location = 'A8') {
   return { sku: '00050-MPRO', producto: 'GOMAS PROBIOTICOS', unidad: 'g',
     cantidad: quantity, lote: lot, motivo: 'derrame', ubicacion: location };
 }
+
+test('resumen parcial identifica partidas y explica cómo corregir un insumo único', () => {
+  const draft = { ...gomasDraft([gomasLine(120)]), materialsAnswered: false };
+  const message = guideSummary({ id: 113, producto: 'GOMAS PROBIOTICOS', sku: '00050-MPRO',
+    cantidad_planeada: 20 }, draft, 'C2');
+  assert.match(message, /Registrado hasta ahora/u);
+  assert.match(message, /Partida 1 — Insumo repuesto: 120 g de GOMAS PROBIOTICOS/u);
+  assert.match(message, /Si necesitas corregir algo registrado/u);
+  assert.match(message, /cambio de lote en gomas/u);
+  assert.match(message, /corrige cantidad de gomas a 100 g/u);
+  assert.match(message, /corrige causa de gomas a \[nuevo motivo\]/u);
+  assert.match(message, /corrige ubicación de gomas a \[nueva ubicación\]/u);
+  assert.match(message, /No necesitas decir «corrección» ni el número de partida/u);
+  assert.doesNotMatch(message, /conformes a 18/u);
+});
+
+test('resumen final distingue partidas repetidas y conserva confirmación exacta', () => {
+  const draft = gomasDraft([gomasLine(120), gomasLine(80, 'LOTE-2')]);
+  const message = guideSummary({ id: 113, producto: 'GOMAS PROBIOTICOS', sku: '00050-MPRO',
+    cantidad_planeada: 20 }, draft, 'C2');
+  assert.match(message, /Resumen para confirmar/u);
+  assert.match(message, /Partida 1 — GOMAS PROBIOTICOS/u);
+  assert.match(message, /Partida 2 — GOMAS PROBIOTICOS/u);
+  assert.match(message, /partida 1.*cantidad 100 g/u);
+  assert.match(message, /mismo insumo figura en varias partidas/u);
+  assert.doesNotMatch(message, /basta nombrarlo/u);
+  assert.match(message, /confirmo cierre OP ID 113/u);
+});
 
 test('OP 113 corrige 120 a 100 g en la partida existente sin pedir de nuevo el lote', async () => {
   for (const phrase of ['Corrección partida 1, la reposición fue de 100 gramos.',
