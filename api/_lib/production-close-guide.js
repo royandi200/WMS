@@ -33,10 +33,10 @@ function quantity(value) {
 
 function closeOrderReference(text, params = {}) {
   const standard = explicitReferences(text).map(referenceKey).filter(Boolean);
-  // Transcripciones de "OP ID": OPIV, OPID, OPI y OP y de.
+  // Transcripciones de "OP ID": OPIV, OPIB, OPID, OPI y OP y de.
   const normalized = normalize(text);
   const fuzzy = [
-    ...normalized.matchAll(/\bop\s*(?:i\s*[dv]?|iv|y\s+de)?\s*#?\s*([1-9]\d*)\b/gu),
+    ...normalized.matchAll(/\bop\s*(?:i\s*[dbv]?|y\s+de)?\s*#?\s*([1-9]\d*)\b/gu),
     ...normalized.matchAll(/\borden(?:\s+de\s+produccion)?\s+(?:id\s*)?([1-9]\d*)\b/gu),
   ].map(match => Number(match[1]));
   const unique = [...new Set([...standard, ...fuzzy])];
@@ -1022,13 +1022,16 @@ async function applyMaterialReport(db, draft, order, text, params) {
 }
 
 function confirmed(text) {
-  return /^confirmo\s+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?\s+op\s+id\s+#?\s*[1-9]\d*[.!]?$/u
+  // El verbo, el cierre y el número deben constar en el mensaje del operario.
+  // Solo se toleran variantes acotadas de la transcripción de «OP ID».
+  return /^confirmo\s+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?\s+op\s*(?:i\s*[dbv]?|y\s+de)?\s*#?\s*[1-9]\d*[.!]?$/u
     .test(normalize(closeUtterance(text)));
 }
 
 function confirmationAttempt(text) {
   const raw = normalize(closeUtterance(text));
-  return /^(?:si|correcto|todo bien|adelante|confirmo|confirmar)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?(?:\s+op(?:\s+id)?\s+#?\s*[1-9]\d*)?)?[.!]?$/u.test(raw)
+  return confirmed(text)
+    || /^(?:si|correcto|todo bien|adelante|confirmo|confirmar)(?:[,. ]+(?:el\s+)?cierre(?:\s+de\s+produccion)?(?:\s+de(?:\s+la)?)?(?:\s+op(?:\s+id)?\s+#?\s*[1-9]\d*)?)?[.!]?$/u.test(raw)
     || /^confirmo\s+(?:la\s+)?op(?:\s+id)?\s+#?\s*[1-9]\d*[.!]?$/u.test(raw)
     || /^(?:cerrar|cierre|cierro)(?:\s+(?:la\s+)?(?:orden|op))?[.!]?$/u.test(raw);
 }
@@ -1059,8 +1062,10 @@ async function pendingCloseDraft(db, userId) {
 function isCloseFollowup(text, draft) {
   if (!draft) return false;
   const raw = normalize(closeUtterance(text));
-  if (draft.materialChoice && (lotOptionNumber(raw) != null
-    || /^(?:mas opciones|siguientes opciones|siguiente pagina|opciones anteriores|pagina anterior)$/u.test(raw))) return true;
+  // Si la primera selección ya se guardó pero la respuesta no llegó al chat,
+  // repetir «opción N» debe mostrar el resumen, nunca caer en modo charla.
+  if ((draft.materialChoice || draft.reviewShown) && lotOptionNumber(raw) != null) return true;
+  if (draft.materialChoice && /^(?:mas opciones|siguientes opciones|siguiente pagina|opciones anteriores|pagina anterior)$/u.test(raw)) return true;
   if (isLotChangeRequest(raw)) return true;
   if (materialLossCandidate(raw)) return true;
   if (changedMaterialCandidate(raw)) return true;

@@ -132,6 +132,44 @@ test('confirma con OP ID explícito solo si coincide con el borrador completo y 
   }
 });
 
+test('transcripciones inequívocas de OP ID confirman solo la orden revisada', async () => {
+  const variants = ['Confirmo cierre OPIB 115', 'confirmo cierre OPIV 115',
+    'confirmo cierre OPI 115', 'confirmo cierre OP 115', 'confirmo cierre OP y de 115'];
+  for (const phrase of variants) {
+    const db = fakeDb({ orderId: 115, planned: 5 });
+    const base = { db, userId: 7 };
+    const preview = await advanceCloseGuide({ ...base,
+      rawText: 'Cerrar OP ID 115: 5 conformes, 0 no conformes, ubicación C2, no repuse material' });
+    assert.equal(closeOrderReference(phrase), 115, phrase);
+    assert.equal(confirmed(phrase), true, phrase);
+    assert.equal(isCloseFollowup(phrase, preview.draft), true, phrase);
+    const result = await advanceCloseGuide({ ...base, rawText: phrase,
+      params: { id_orden: 115 } });
+    assert.equal(result.params.id_orden, 115, phrase);
+  }
+});
+
+test('OPIB no autoriza cierre sin verbo, con otro número o con referencia inventada', async () => {
+  const db = fakeDb({ orderId: 115, planned: 5 });
+  const base = { db, userId: 7 };
+  await advanceCloseGuide({ ...base,
+    rawText: 'Cerrar OP ID 115: 5 conformes, 0 no conformes, ubicación C2, no repuse material' });
+  for (const phrase of ['confirmo cierre OPIB', 'OPIB 115', 'confirmo cierre OPIB 116']) {
+    const result = await advanceCloseGuide({ ...base, rawText: phrase });
+    assert.equal(result.params, undefined, phrase);
+    assert.equal(result.draft.orderId, 115, phrase);
+  }
+  const inferred = await advanceCloseGuide({ ...base,
+    rawText: 'confirmo cierre', params: { id_orden: 115 } });
+  assert.equal(inferred.params, undefined);
+  const mismatch = await advanceCloseGuide({ ...base,
+    rawText: 'confirmo cierre OPIB 115', params: { id_orden: 116 } });
+  assert.equal(mismatch.params, undefined);
+  assert.match(mismatch.message, /No pude verificar la referencia/u);
+  const valid = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OPIB 115' });
+  assert.equal(valid.params.id_orden, 115);
+});
+
 test('BBC puede envolver el mensaje actual sin perder la confirmación explícita', async () => {
   const db = fakeDb({ orderId: 108, planned: 5 });
   const base = { db, userId: 18 };
@@ -1256,6 +1294,12 @@ test('OP 115 acepta cambiar el lote de etiquetas por nombre o SKU sin pedir part
     assert.equal(chosen.draft.materials[0].lote, 'R5-260923-LINER', phrase);
     assert.equal(chosen.draft.materials[1].lote, 'ACC-260910-TPBI', phrase);
     assert.match(chosen.message, /Si un insumo aparece una sola vez/u);
+    const materialsBeforeRepeat = structuredClone(chosen.draft.materials);
+    assert.equal(isCloseFollowup('opción 2', chosen.draft), true, phrase);
+    const repeated = await advanceCloseGuide({ ...base, rawText: 'opción 2' });
+    assert.match(repeated.message, /Resumen para confirmar/u);
+    assert.deepEqual(repeated.draft.materials, materialsBeforeRepeat);
+    assert.equal(repeated.params, undefined);
   }
 });
 

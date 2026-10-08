@@ -167,6 +167,26 @@ test('una corrección después del resumen de cierre conserva ese contexto aunqu
   }
 });
 
+test('un número de lote repetido después de guardarlo vuelve al resumen aunque BBC diga modo charla', async () => {
+  writes.length = 0;
+  closeDraft = JSON.stringify({ orderId: 115, conforming: 2, waste: 0,
+    wasteClassified: true, reason: null, location: 'C2', materials: [],
+    materialsAnswered: true, materialPending: null, materialChoice: null,
+    reviewShown: true, candidateOrderId: null });
+  try {
+    const res = await invoke('MODO_CHARLA', 'opción 2', {
+      texto: '¿A qué lote o partida te refieres con «opción 2»?',
+    });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.mensaje, /OP ID 115 — cierre en borrador/u);
+    assert.match(res.body.mensaje, /Resumen para confirmar/u);
+    assert.doesNotMatch(res.body.mensaje, /¿A qué lote o partida/u);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE lots|UPDATE ordenes_produccion/u.test(entry.sql)));
+  } finally {
+    closeDraft = null;
+  }
+});
+
 test('el webhook mantiene OP y partida entre el resumen y la corrección de alistamiento', async () => {
   writes.length = 0;
   closeDraft = null;
