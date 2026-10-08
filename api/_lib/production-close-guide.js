@@ -96,11 +96,12 @@ function closeFields(text) {
   const contextual = new RegExp(`\\b(?:quedan?\\s+en|dejar\\s+en|ubicar\\s+en|van?\\s+para|en)\\s*(?:la\\s+)?(?:ubicacion\\s+)?${locationCode}\\b`, 'u').exec(raw);
   const location = (negated?.[2] || changedFrom?.[2] || direct?.[1] || contextual?.[1] || null)
     ?.replace(/\s+/gu, '').toUpperCase() || null;
-  const rawReason = raw.match(/\b(?:por|motivo|causa|debido a)\s+(.+?)(?=\s+(?:ubicacion|quedan en|dejar en)\b|$)/u)?.[1]
+  const rawReason = raw.match(/\b(?:por|motivo|causa|debido a)\s+(.+?)(?=\s+(?:(?:van?|quedan?)\s+(?:para|a|en)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d|ubicacion|quedan en|dejar en)\b|$)/u)?.[1]
     ?.replace(/[,;\s]+$/u, '').trim() || null;
   const locationTail = location ? ` en ${location.toLowerCase()}` : '';
-  const reason = explicitFinishedWasteReason(raw) || (rawReason && locationTail && rawReason.endsWith(locationTail)
+  const reasonText = explicitFinishedWasteReason(raw) || (rawReason && locationTail && rawReason.endsWith(locationTail)
     ? rawReason.slice(0, -locationTail.length).trim() : rawReason);
+  const reason = reasonText?.replace(/^(?:fue|es|era)\s+/u, '').trim() || null;
   return { conforming, waste, reason, location };
 }
 
@@ -171,7 +172,7 @@ function promoteQueuedMaterial(draft) {
 }
 
 function replacementsFinished(text) {
-  return /^(?:no hay mas|ninguno mas|eso es todo|sin mas materiales|listo con los materiales)[.!]?$/u.test(normalize(text));
+  return /^(?:no hay mas(?: materiales)?|ninguno mas|eso es todo|sin mas materiales|listo con los materiales)[.!]?$/u.test(normalize(text));
 }
 
 const MATERIAL_START = /\b(?:repuse|repusimos|repusieron|repuso|repusiste|repongo|reponi|reponimos|tom[eé]|tomamos|saqu[eé]|sacamos|material(?:es)?\s+repuesto(?:s)?)\b/iu;
@@ -179,10 +180,11 @@ const MATERIAL_START = /\b(?:repuse|repusimos|repusieron|repuso|repusiste|repong
 function cleanMaterialCause(value) {
   let cause = String(value || '').trim().replace(/[.,;\s]+$/u, '');
   cause = cause.replace(/^(?:(?:de\s+la\s+reposici[oó]n|de(?:l)?\s+material)\s+(?:fue|es|era)\s+|(?:fue|es|era|por)\s+)/iu, '').trim();
+  if (/^(?:merma|p[eé]rdida|reposici[oó]n|material|insumo)$/iu.test(cause)) return null;
   return /^ruptura+$/iu.test(cause) ? 'ruptura' : cause || null;
 }
 
-function parseMaterialSegments(text, { allowImplicit = false } = {}) {
+function materialTextSegments(text, { allowImplicit = false } = {}) {
   if (noReplacements(text)) return [];
   const raw = String(text || '');
   const marker = MATERIAL_START.exec(raw);
@@ -190,8 +192,11 @@ function parseMaterialSegments(text, { allowImplicit = false } = {}) {
   if (!marker && (!/^\s*(?:\d+(?:[.,]\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+/iu.test(raw)
     || /\b(?:conformes?|mermas?|no\s+conformes?|ubicaci[oó]n)\b/iu.test(raw))) return [];
   const source = marker ? raw.slice(marker.index + marker[0].length) : raw;
-  const segments = source.split(/\s*;\s*|\s*,\s*(?=(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)|\s+y\s+(?=(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)/iu);
-  return segments.map(segment => {
+  return source.split(/\s*;\s*|\s*,\s*(?=(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)|\s+y\s+(?=(?:\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)/iu);
+}
+
+function parseMaterialSegments(text, options = {}) {
+  return materialTextSegments(text, options).map(segment => {
     const quantityMatch = segment.match(/^\s*(\d+(?:[.,]\d+)?|una|uno|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b\s*(?:und|unidad(?:es)?|gramos?|g)?\s*(?:de\s+)?/iu);
     const lot = segment.match(/\blote\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]*)/iu)?.[1] || null;
     const cause = cleanMaterialCause(segment.match(/\b(?:por|causa|motivo|debido a)\s+(.+?)(?=\s+ubicaci[oó]n\b|$)/iu)?.[1]);
@@ -447,6 +452,13 @@ function groundedLotHint(text, value) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/u.test(lot)) return null;
   const compact = value => normalize(value).replace(/[^a-z0-9]/gu, '');
   return compact(text).includes(compact(lot)) ? lot : null;
+}
+
+function groundedLocationHint(text, value) {
+  const code = String(value || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9-]*\d[A-Za-z0-9-]*$/u.test(code)) return null;
+  const mentioned = normalize(text).match(/\b[a-z][a-z0-9-]*\d[a-z0-9-]*\b/gu) || [];
+  return mentioned.includes(normalize(code)) ? code.toUpperCase() : null;
 }
 
 async function orderMaterials(db, orderId) {
@@ -872,6 +884,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
     draft.materialPending = null;
     draft.materialQueue = [];
     draft.materialsAnswered = true;
+    draft.materialIssue = null;
     return;
   }
   const advance = params.avance_materiales && typeof params.avance_materiales === 'object'
@@ -880,12 +893,15 @@ async function applyMaterialReport(db, draft, order, text, params) {
     if (draft.materialPending || draft.materialQueue?.length) throw guideError('Termina primero los materiales pendientes: faltan cantidad, lote o causa.');
     if (!draft.materials.length) throw guideError('Confirma expresamente si no repusiste material durante esta OP.');
     draft.materialsAnswered = true;
+    draft.materialIssue = null;
     return;
   }
   const readyForMaterials = draft.conforming != null && draft.waste != null
     && (draft.waste === 0 || draft.reason) && (draft.conforming === 0 || draft.location);
   const changedMaterial = changedMaterialCandidate(text);
-  const spoken = parseMaterialSegments(text, { allowImplicit: readyForMaterials && !draft.materialPending });
+  const segmentOptions = { allowImplicit: readyForMaterials && !draft.materialPending };
+  const spokenSegments = materialTextSegments(text, segmentOptions);
+  const spoken = parseMaterialSegments(text, segmentOptions);
   if (!spoken.length && changedMaterial) spoken.push(changedMaterial);
   if (MATERIAL_START.test(String(text || '')) && !spoken.length && !draft.materialPending) {
     draft.materialPending = { sku: null, producto: null, cantidad: null, lote: null,
@@ -901,9 +917,15 @@ async function applyMaterialReport(db, draft, order, text, params) {
     ? spoken.map((said, index) => ({ ...interpreted[index],
       producto: said.producto || interpreted[index].producto || interpreted[index].sku,
       cantidad: said.cantidad ?? interpreted[index].cantidad,
-      lote: said.lote || groundedLotHint(text, interpreted[index].lote),
-      motivo: said.motivo || interpreted[index].motivo || interpreted[index].causa,
-      ubicacion: said.ubicacion || interpreted[index].ubicacion,
+      lote: said.lote || groundedLotHint(spokenSegments[index] || '', interpreted[index].lote),
+      // El LLM puede sugerir una causa, pero debe constar en la frase de este
+      // insumo. No trasladar la merma del PT ni «reposición» a todos los SKU.
+      motivo: said.motivo || (() => {
+        const candidate = cleanMaterialCause(interpreted[index].motivo || interpreted[index].causa);
+        return candidate && normalize(spokenSegments[index] || '').includes(normalize(candidate))
+          ? candidate : null;
+      })(),
+      ubicacion: said.ubicacion || groundedLocationHint(spokenSegments[index] || '', interpreted[index].ubicacion),
     })) : spoken;
   const materials = incoming.length ? await orderMaterials(db, order.id) : [];
   const pendingBeforeMessage = draft.materialPending;
@@ -1184,6 +1206,7 @@ function guideSummary(order, draft, locationHint) {
   if (draft.waste > 0 && !draft.reason) missing.push('motivo de la merma');
   if (draft.conforming > 0 && !draft.location) missing.push('ubicación del producto terminado');
   if (!draft.materialsAnswered || draft.materialPending || draft.materialQueue?.length) missing.push('reposición de insumos');
+  if (draft.materialIssue) missing.push('aclarar un material que no se pudo registrar');
   if ((draft.materials || []).some(item => !item.lote)) missing.push('lote válido del material repuesto');
   if (draft.materialChoice) missing.push('elegir el lote del material repuesto');
   const readyForReview = !missing.length && draft.conforming + draft.waste > 0;
@@ -1265,6 +1288,8 @@ function guideSummary(order, draft, locationHint) {
   } else if ((draft.materials || []).some(item => !item.lote)) {
     const item = draft.materials.find(line => !line.lote);
     lines.push(`Indica el lote correcto de ${item.producto}. Por ejemplo: «corrige lote de ${item.producto} a [lote]». El cierre sigue en borrador.`);
+  } else if (draft.materialIssue) {
+    lines.push(`No pude registrar una reposición: ${draft.materialIssue} Indica de nuevo ese material con la cantidad correcta. Cuando estén todos registrados, di *no hay más materiales* para revisar el cierre.`);
   } else if (!draft.materialsAnswered) {
     lines.push('¿Repusiste algún material de esta OP? Puedes decir uno o varios productos con cantidad, lote y causa; también por partes. Si no repusiste ninguno, di *no repuse material*.');
   } else {
@@ -1367,9 +1392,23 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const choiceWarning = choiceHandled ? draft.lotValidationMessage : null;
   if (!choiceHandled && draft.materialChoice && !confirmationAttempt(rawText)) draft.materialChoice = null;
   const wantsLotChange = !choiceHandled && isLotChangeRequest(rawText);
+  let materialWarning = null;
   if (!choiceHandled && !wantsLotChange && !targetedPtReason
     && ((!confirmationAttempt(rawText) && !rejected(rawText)) || draft.materialPending?.damageReport)) {
-    await applyMaterialReport(db, draft, order, rawText, params);
+    try {
+      await applyMaterialReport(db, draft, order, rawText, params);
+    } catch (error) {
+      // Un material incorrecto en un mensaje mixto no debe borrar cantidades,
+      // merma ni ubicación válidas, ni autorizar el cierre incompleto.
+      const hasFinishedFields = parsed.conforming != null || parsed.waste != null
+        || parsed.location || parsed.reason;
+      if (error.status !== 409 || !hasFinishedFields
+        || !parseMaterialSegments(rawText).length) throw error;
+      materialWarning = error.message;
+      draft.materialIssue = materialWarning;
+      draft.materialsAnswered = false;
+      draft.reviewShown = false;
+    }
   }
   if (draft.unclassifiedWaste && !damageMarker && !draft.materialPending) {
     await resolveUnclassifiedWaste(db, draft, order, rawText);
@@ -1449,7 +1488,8 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const complete = draft.conforming != null && draft.waste != null
     && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
     && (draft.conforming === 0 || !!draft.location)
-    && draft.materialsAnswered && !draft.materialPending && !draft.materialQueue?.length
+    && draft.materialsAnswered && !draft.materialIssue && !materialWarning
+    && !draft.materialPending && !draft.materialQueue?.length
     && !draft.materialChoice && !draft.unclassifiedWaste
     && draft.materials.every(item => !!item.lote);
   if (confirmed(rawText) && complete && draft.reviewShown) {
@@ -1465,7 +1505,10 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   if (rejected(rawText)) draft.reviewShown = false;
   else draft.reviewShown = complete;
   await saveDraft(db, userId, draft);
-  return { message: guideSummary(order, draft, draft.suggestedLocation), draft };
+  const summary = guideSummary(order, draft, draft.suggestedLocation);
+  return { message: materialWarning
+    ? `⚠️ ${materialWarning}\nConservé los datos válidos. Repite solo el material pendiente o corrige su cantidad; todavía no se puede confirmar.\n\n${summary}`
+    : summary, draft };
 }
 
 module.exports = { advanceCloseGuide, closeFields, closeOrderReference, confirmed,

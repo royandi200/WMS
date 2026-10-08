@@ -7,6 +7,7 @@ const { hasProductionCloseIntent } = require('../api/_lib/production-close-input
 
 function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
   invalidLots = [], stockAvailable = 100, replacementOptions = null, withGomas = false,
+  withTarros = false,
   stockLocations = {} } = {}) {
   let stored = initialDraft;
   let freeStock = stockAvailable;
@@ -49,12 +50,14 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
         producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
       }, { producto_id: 17, unidad: 'und', sku: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
       { producto_id: 35, unidad: 'und', sku: '00035-LNTP60', nombre: 'LINER TARRO x 60' },
+      ...(withTarros ? [{ producto_id: 36, unidad: 'und', sku: '00006-TRP', nombre: 'TARRO CUADRADO x 60' }] : []),
       ...(withGomas ? [{ producto_id: 50, unidad: 'g', sku: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' }] : [])]];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
         const products = [
           { id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO' },
           { id: 17, siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA' },
           { id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60' },
+          ...(withTarros ? [{ id: 36, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60' }] : []),
         ];
         const scoped = params.slice(3);
         return [products.filter(item => (!scoped.length || scoped.includes(item.id))
@@ -64,6 +67,9 @@ function fakeDb({ orderId = 97, planned = 2, initialDraft = null,
       if (sql.includes('FROM producto_aliases pa')) { aliasTerms.push(params[0]); return [[/gomas?/u.test(params[0]) && withGomas ? {
         id: 50, siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS',
         unit_label: 'g', alias: 'gomas',
+      } : /^tarros?$/u.test(params[0]) && withTarros ? {
+        id: 36, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60',
+        unit_label: 'und', alias: 'tarros',
       } : /^liners?$/u.test(params[0]) ? {
         id: 35, siigo_code: '00035-LNTP60', nombre: 'LINER TARRO x 60',
         unit_label: 'und', alias: 'liners',
@@ -799,6 +805,109 @@ test('un solo audio puede cerrar el resultado y declarar dos materiales sin dupl
   assert.equal(done.params.materiales_repuestos.length, 2);
   assert.equal(done.params.materiales_repuestos[0].motivo, 'ruptura');
   assert.equal(done.params.materiales_repuestos[1].lote, 'L-ET');
+});
+
+test('un mensaje compuesto conserva el PT y tres reposiciones sin causa ni lote inventados por IA', async () => {
+  const db = fakeDb({ orderId: 116, planned: 6, withTarros: true });
+  const base = { db, userId: 116 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 116' });
+  const text = 'salieron 5 unidades conformes, una no conforme, el motivo fue mal de calidad van para la ubicación C2 y se repusieron 2 tapas, 2 liners y 2 tarros';
+  const first = await advanceCloseGuide({ ...base, rawText: text,
+    params: { avance_materiales: { items: [
+      { producto: 'tapas', cantidad: 2, motivo: 'reposición' },
+      { producto: 'liners', cantidad: 2, motivo: 'reposición' },
+      { producto: 'tarros', cantidad: 2, motivo: 'reposición' },
+    ] } } });
+  assert.equal(first.params, undefined);
+  assert.equal(first.draft.conforming, 5);
+  assert.equal(first.draft.waste, 1);
+  assert.equal(first.draft.reason, 'mal de calidad');
+  assert.equal(first.draft.location, 'C2');
+  assert.equal(first.draft.materialPending.sku, '00001-TPBI');
+  assert.equal(first.draft.materialPending.cantidad, 2);
+  assert.equal(first.draft.materialPending.motivo, null);
+  assert.deepEqual(first.draft.materialQueue.map(item => [item.sku, item.cantidad, item.motivo]), [
+    ['00035-LNTP60', 2, null], ['00006-TRP', 2, null],
+  ]);
+  assert.match(first.message, /Lotes disponibles para TAPA/u);
+  assert.ok(db.writes.length >= 2, 'el borrador debe persistirse');
+
+  const lidLot = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(lidLot.draft.materialPending.motivo, null);
+  assert.match(lidLot.message, /causa concreta/u);
+  const lidCause = await advanceCloseGuide({ ...base, rawText: 'ruptura' });
+  assert.equal(lidCause.draft.materials[0].motivo, 'ruptura');
+  assert.equal(lidCause.draft.materialPending.sku, '00035-LNTP60');
+  assert.match(lidCause.message, /Lotes disponibles para LINER/u);
+  assert.equal(lidCause.params, undefined);
+});
+
+test('la interpretación de una causa de PT no se copia a materiales sin motivo propio', async () => {
+  const db = fakeDb({ orderId: 117, planned: 4 });
+  const base = { db, userId: 117 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 117' });
+  const partial = await advanceCloseGuide({ ...base,
+    rawText: '3 conformes, 1 no conforme por sello defectuoso, ubicación C2; repuse 1 tapa por ruptura y 2 liners',
+    params: { avance_materiales: { items: [
+      { producto: 'tapa', cantidad: 1, motivo: 'ruptura' },
+      { producto: 'liners', cantidad: 2, motivo: 'sello defectuoso' },
+    ] } } });
+  assert.equal(partial.draft.reason, 'sello defectuoso');
+  assert.equal(partial.draft.materialPending.motivo, 'ruptura');
+  assert.equal(partial.draft.materialQueue[0].motivo, null);
+  assert.equal(partial.params, undefined);
+});
+
+test('en varias reposiciones, lote y ubicación de una no se asignan a las demás', async () => {
+  const db = fakeDb({ orderId: 118, planned: 3 });
+  const base = { db, userId: 118 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 118' });
+  const result = await advanceCloseGuide({ ...base,
+    rawText: '3 conformes, 0 no conformes, ubicación C2; repuse 1 tapa lote L1 ubicación A8 por ruptura y 2 liners',
+    params: { avance_materiales: { items: [
+      { producto: 'tapa', cantidad: 1, lote: 'L1', ubicacion: 'A8', motivo: 'ruptura' },
+      { producto: 'liners', cantidad: 2, lote: 'L1', ubicacion: 'A8', motivo: 'ruptura' },
+    ] } } });
+  assert.equal(result.draft.materials.length, 1);
+  assert.equal(result.draft.materials[0].lote, 'L1');
+  assert.equal(result.draft.materials[0].ubicacion, 'A8');
+  assert.equal(result.draft.materialPending.sku, '00035-LNTP60');
+  assert.equal(result.draft.materialPending.lote, null);
+  assert.equal(result.draft.materialPending.ubicacion, null);
+  assert.equal(result.draft.materialPending.motivo, null);
+  assert.equal(result.draft.reviewShown, false);
+});
+
+test('un insumo inválido en mensaje mixto no descarta el PT ni otra reposición válida', async () => {
+  const db = fakeDb({ orderId: 119, planned: 4 });
+  const base = { db, userId: 119 };
+  await advanceCloseGuide({ ...base, rawText: 'cerrar OP ID 119' });
+  const result = await advanceCloseGuide({ ...base,
+    rawText: '3 conformes, 1 no conforme por defecto, ubicación C2; repuse 1 tapa lote L1 por ruptura y 1.5 liners por daño',
+  });
+  assert.equal(result.draft.conforming, 3);
+  assert.equal(result.draft.waste, 1);
+  assert.equal(result.draft.reason, 'defecto');
+  assert.equal(result.draft.location, 'C2');
+  assert.equal(result.draft.materials.length, 1);
+  assert.equal(result.draft.materials[0].sku, '00001-TPBI');
+  assert.equal(result.draft.materials[0].cantidad, 1);
+  assert.equal(result.draft.materialsAnswered, false);
+  assert.match(result.draft.materialIssue, /unidades enteras/u);
+  assert.equal(result.draft.reviewShown, false);
+  assert.match(result.message, /Conservé los datos válidos/u);
+  assert.match(result.message, /LINER TARRO x 60 debe informarse en unidades enteras/u);
+  const pending = await advanceCloseGuide({ ...base, rawText: 'confirmo cierre OP ID 119' });
+  assert.equal(pending.params, undefined);
+  const corrected = await advanceCloseGuide({ ...base, rawText: 'repuse 2 liners por daño' });
+  assert.match(corrected.message, /Lotes disponibles para LINER/u);
+  const lot = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+  assert.equal(lot.draft.materials.length, 2);
+  assert.equal(lot.draft.reviewShown, false);
+  assert.match(lot.message, /no hay más materiales/u);
+  const review = await advanceCloseGuide({ ...base, rawText: 'no hay más materiales' });
+  assert.equal(review.draft.materialIssue, null);
+  assert.match(review.message, /Resumen para confirmar/u);
 });
 
 test('si solo dice que repuso material, pregunta producto y conserva la OP', async () => {
