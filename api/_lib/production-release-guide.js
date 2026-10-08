@@ -23,19 +23,32 @@ function productionReleaseConfirmation(text) {
 }
 
 function productionReleaseCancellation(text) {
-  return /^(?:cancela|cancelar|descarta|descartar|anula|anular)\s+(?:(?:esta|la|el)\s+)?(?:op|orden(?:\s+de\s+produccion)?|borrador)(?:\s+de\s+stock)?[.!]?$/u.test(normalized(text));
+  const raw = normalized(text).replace(/[.!]+$/u, '');
+  const match = /^(?:cancela|cancele|cancelar|descarta|descarte|descartar|anula|anule|anular)\s+(?:(?:esta|este|la|el)\s+)?(.+?)(?:\s+de\s+stock)?$/u.exec(raw);
+  if (!match) return false;
+  if (/^(?:orden(?:\s+de\s+produccion)?|borrador)$/u.test(match[1])) return true;
+  // En un borrador activo, «OPF», «OPE», «OB», «OOB» y variantes cercanas
+  // son la misma referencia oral a la OP. Nunca se acepta «OC» ni un ID.
+  const spokenOp = match[1].replace(/[.\s-]/gu, '');
+  return /^o{1,2}[pbf](?:[eifb]){0,2}$/u.test(spokenOp);
+}
+
+function productionReleaseAffirmation(text) {
+  return /^(?:si|yes|correcto|asi\s+es|de\s+acuerdo)[.!]?$/u.test(normalized(text));
 }
 
 function productionReleaseFollowup(text) {
   const raw = normalized(text);
   return productionReleaseConfirmation(raw) || productionReleaseCancellation(raw)
+    || productionReleaseAffirmation(raw)
     || /^(?:no|todavia\s+no)\s+confirmo\b/u.test(raw)
     || /^(?:no\s*[,;]?\s*)?(?:(?:corrige|correccion|corrijo|cambia|cambio|modifica|mejor|perdon)\s*[,;:-]?\s*)?(?:la\s+|el\s+)?(?:cantidad|producto|sku|referencia)\b/u.test(raw)
     || new RegExp(`^(?:no\\s*[,;]?\\s*)?(?:son|seran|eran|quedan|fueron)\\s+${NUMBER}\\b`, 'u').test(raw)
     || /^(?:no\s*[,;]?\s*)?(?:cambia|cambio|corrige|modifica|mejor)\s+(?:a|por)\s+[a-z0-9]/u.test(raw)
     || /^(?:es|va|seria)\s+para\s+(?:(?:el\s+)?stock|(?:un\s+)?pedido)\b/u.test(raw)
+    || /^(?:the\s+)?(?:quantity|amount)\s+(?:will\s+be|should\s+be|is|to|:)\s*\d+\s*(?:units?|pcs?)\b/u.test(raw)
     || new RegExp(`^(?:correccion|corrijo|mejor)\\s*[,;:-]?\\s*${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?)\\b`, 'u').test(raw)
-    || new RegExp(`^${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?)\\b`, 'u').test(raw);
+    || new RegExp(`^${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?|units?|pcs?)\\b`, 'u').test(raw);
 }
 
 function positiveQuantity(value) {
@@ -51,7 +64,8 @@ function correctionFields(text) {
     return { product: full.id_producto_final, quantity: full.cantidad_planificada };
   }
   const quantityMatch = raw.match(new RegExp(`\\b(?:cantidad(?:\\s+(?:nueva|correcta))?\\s*(?:es|sera|a|por|de)?|son|seran|eran|quedan)\\s*${NUMBER}\\b`, 'u'))
-    || raw.match(new RegExp(`^(?:(?:correccion|corrijo|mejor|cambia|corrige|modifica)\\s*[:,]?\\s*(?:a\\s+)?)?${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?)\\b`, 'u'));
+    || raw.match(/^(?:the\s+)?(?:quantity|amount)\s+(?:will\s+be|should\s+be|is|to|:)\s*(\d+)\s*(?:units?|pcs?)\b/u)
+    || raw.match(new RegExp(`^(?:(?:correccion|corrijo|mejor|cambia|corrige|modifica)\\s*[:,]?\\s*(?:a\\s+)?)?${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?|units?|pcs?)\\b`, 'u'));
   const quantity = quantityMatch ? positiveQuantity(quantityMatch[1]) : null;
   let product = raw.match(/\b(?:producto|referencia|sku)\s*(?:es|sera|a|por|:|debe\s+ser)\s+(.+)$/u)?.[1]
     || raw.match(/\b(?:producto|referencia|sku)\s+([a-z0-9][a-z0-9 -]+)$/u)?.[1]
@@ -73,7 +87,7 @@ function productionReleaseSummary(draft) {
     'Destino: stock de seguridad',
     '',
     'Si necesitas corregir, di «serán [cantidad] unidades» o «cambia el producto a [nombre o SKU]». Puedes cambiar ambos datos antes de confirmar; te mostraré el resumen actualizado.',
-    'Si está correcto, responde *confirmo crear OP para stock de seguridad*. Para descartarla, di *cancela esta OP*.',
+    'Si está correcto, responde *confirmo crear OP para stock de seguridad*. Para descartarla, di *cancela esta orden* (también puedes decir *cancela esta OP*).',
     '',
     'Aún no se creó la OP, no se reservaron materiales y no se avisó al alistador.',
   ].join('\n');
@@ -81,6 +95,10 @@ function productionReleaseSummary(draft) {
 
 async function advanceProductionReleaseGuide({ db, rawText, draft, request }) {
   if (!request && !draft) return null;
+  if (!request && productionReleaseAffirmation(rawText)) {
+    return { status: 'PENDING', draft,
+      message: `El borrador sigue pendiente. Revisa los datos y, para crear la OP, di «confirmo crear OP para stock de seguridad».\n\n${productionReleaseSummary(draft)}` };
+  }
   if (!request && /^(?:no|todavia\s+no)\s+confirmo\b/u.test(normalized(rawText))) {
     return { status: 'PENDING', draft,
       message: `No liberé la OP. Puedes corregir el producto o la cantidad, o descartarla.\n\n${productionReleaseSummary(draft)}` };
@@ -126,6 +144,6 @@ async function advanceProductionReleaseGuide({ db, rawText, draft, request }) {
   return { status: 'PENDING', draft: next, message: productionReleaseSummary(next) };
 }
 
-module.exports = { advanceProductionReleaseGuide, correctionFields,
+module.exports = { advanceProductionReleaseGuide, correctionFields, productionReleaseAffirmation,
   productionReleaseCancellation, productionReleaseConfirmation,
   productionReleaseFollowup, productionReleaseSummary };

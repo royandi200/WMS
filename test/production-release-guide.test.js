@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { advanceProductionReleaseGuide, correctionFields,
-  productionReleaseConfirmation, productionReleaseFollowup } =
+  productionReleaseCancellation, productionReleaseConfirmation, productionReleaseFollowup } =
   require('../api/_lib/production-release-guide');
 
 const products = [
@@ -49,6 +49,8 @@ test('numeric SKU is not misread as a new quantity', () => {
     { product: null, quantity: 12 });
   assert.deepEqual(correctionFields('el SKU 00201-PTPBS120'),
     { product: '00201-ptpbs120', quantity: null });
+  assert.deepEqual(correctionFields('The quantity will be 8 units'),
+    { product: null, quantity: 8 });
 });
 
 test('a negated or quoted confirmation cannot authorize release', () => {
@@ -60,6 +62,7 @@ test('a negated or quoted confirmation cannot authorize release', () => {
   assert.equal(productionReleaseFollowup('serán doce'), true);
   assert.equal(productionReleaseFollowup('corrección: cantidad a 12'), true);
   assert.equal(productionReleaseFollowup('corrección: 12 unidades'), true);
+  assert.equal(productionReleaseFollowup('The quantity will be 8 units'), true);
   assert.equal(productionReleaseFollowup('cambia el producto a probióticos'), true);
   assert.equal(productionReleaseConfirmation(
     '[Sunday, September 6, 2026 23:34:14]: Confirmo crear OP para stock de seguridad.'), true);
@@ -80,4 +83,23 @@ test('an unresolved product correction leaves the reviewed OP unchanged', async 
   const notConfirmed = await advanceProductionReleaseGuide({ db, draft, rawText: 'no confirmo' });
   assert.equal(notConfirmed.status, 'PENDING');
   assert.match(notConfirmed.message, /No liberé la OP/u);
+});
+
+test('a spoken OP variant cancels only the pending stock draft, never an OC or a numbered order', async () => {
+  const draft = { status: 'PENDING', sku: '00102-PTASH60',
+    name: 'ASHWAGANDHA X 60', quantity: 5 };
+  for (const phrase of ['cancela esta orden', 'Cancele esta orden',
+    'Cancele esta OPF', 'Cancele esta OPE',
+    'Cancela esta OB', 'Descarta esta OOB', 'Anule esta OPIB', 'Cancele esta O. P.']) {
+    assert.equal(productionReleaseCancellation(phrase), true, phrase);
+    assert.equal(productionReleaseFollowup(phrase), true, phrase);
+    const result = await advanceProductionReleaseGuide({ db, draft, rawText: phrase });
+    assert.equal(result.status, 'CANCELLED', phrase);
+    assert.match(result.message, /No se creó la orden/u);
+  }
+  assert.equal(await advanceProductionReleaseGuide({ db, rawText: 'cancela esta orden' }), null);
+  for (const phrase of ['Cancela esta OC', 'Cancela OP ID 115',
+    'Cancela el despacho', 'No canceles esta OP']) {
+    assert.equal(productionReleaseCancellation(phrase), false, phrase);
+  }
 });

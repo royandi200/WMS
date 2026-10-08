@@ -83,7 +83,8 @@ const { draftQuantitySummary } = require('../../_lib/quantity-totals');
 const { currentUserText } = require('../../_lib/builderbot-user-text');
 const { productionRequestIntent, productionDestinationReply,
   contextualProductionReply } = require('../../_lib/stock-production-intent');
-const { advanceProductionReleaseGuide, productionReleaseFollowup } = require('../../_lib/production-release-guide');
+const { advanceProductionReleaseGuide, correctionFields,
+  productionReleaseAffirmation, productionReleaseFollowup } = require('../../_lib/production-release-guide');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
 const {
@@ -525,6 +526,44 @@ async function pendingStockProductionDraft(db, from) {
   if (rows[0]?.action !== 'LIBERAR_ORDEN_PRODUCCION') return null;
   const state = asObject(asObject(rows[0]?.response).context).stock_production_draft;
   return state?.status === 'PENDING' && state.sku && state.quantity ? state : null;
+}
+
+function stockQuantityClarification(message) {
+  const text = String(message || '').normalize('NFD').replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase().replace(/\s+/gu, ' ');
+  const quantity = text.match(/\b(?:deseas|quieres)\s+cambiar\s+la\s+cantidad\s+a\s+(\d+)\s+unidades?\b/u)?.[1];
+  return quantity && /\b(?:op|orden)\s+de\s+stock\s+de\s+seguridad\b/u.test(text)
+    ? Number(quantity) : null;
+}
+
+async function acknowledgedStockQuantity(db, from, rawText) {
+  if (!from || !productionReleaseAffirmation(rawText)) return null;
+  const [rows] = await db.execute(
+    `SELECT action, payload, response FROM webhook_logs
+      WHERE from_phone = ? AND status = 'PROCESSED'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)
+      ORDER BY id DESC LIMIT 8`, [from]
+  );
+  const firstResponse = asObject(rows[0]?.response);
+  const amount = stockQuantityClarification(firstResponse.mensaje || firstResponse.message);
+  if (!amount || rows[0]?.action !== 'MODO_CHARLA') return null;
+  let operatorSaidAmount = false;
+  for (const row of rows) {
+    if (row.action === 'LIBERAR_ORDEN_PRODUCCION') {
+      const draft = asObject(asObject(row.response).context).stock_production_draft;
+      return operatorSaidAmount && draft?.status === 'PENDING' && draft.sku && draft.quantity
+        ? { draft, quantity: amount } : null;
+    }
+    const response = asObject(row.response);
+    if (row.action !== 'MODO_CHARLA'
+      || stockQuantityClarification(response.mensaje || response.message) !== amount) return null;
+    const payload = asObject(row.payload);
+    const said = getUserText(payload, parseBuilderBotInfo(payload));
+    const stated = correctionFields(said).quantity;
+    if (stated === amount) operatorSaidAmount = true;
+    else if (!productionReleaseAffirmation(said)) return null;
+  }
+  return null;
 }
 
 async function notifiedProductionCloseReference(db, from, text) {
@@ -1627,11 +1666,17 @@ module.exports = async (req, res) => {
     // reciente del mismo remitente, nunca una OP ni un destino por defecto.
     const productionRequest = productionRequestIntent(contractUserText);
     let activeStockProductionDraft = null;
+    let acknowledgedStockCorrection = null;
     if (!productionRequest && productionReleaseFollowup(contractUserText)
       && ['UNKNOWN', 'MODO_CHARLA', 'LIBERAR_ORDEN_PRODUCCION',
         'CONFIRMAR_MATERIALES_PRODUCCION', 'AJUSTAR_MATERIALES_PRODUCCION',
         'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'].includes(action)) {
       activeStockProductionDraft = await pendingStockProductionDraft(db, from);
+      if (!activeStockProductionDraft && productionReleaseAffirmation(contractUserText)) {
+        const acknowledged = await acknowledgedStockQuantity(db, from, contractUserText);
+        activeStockProductionDraft = acknowledged?.draft || null;
+        acknowledgedStockCorrection = acknowledged?.quantity || null;
+      }
       if (activeStockProductionDraft) {
         action = 'LIBERAR_ORDEN_PRODUCCION';
         params = {};
@@ -3335,7 +3380,9 @@ module.exports = async (req, res) => {
         }
         if (stockDraft && !productionRequest && productionReleaseFollowup(contractUserText)) {
           const review = await advanceProductionReleaseGuide({
-            db, rawText: contractUserText, draft: stockDraft,
+            db, rawText: acknowledgedStockCorrection
+              ? `son ${acknowledgedStockCorrection} unidades` : contractUserText,
+            draft: stockDraft,
           });
           if (review.status !== 'CONFIRMED') {
             mensaje = review.message;

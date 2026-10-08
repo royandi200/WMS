@@ -28,6 +28,9 @@ function harness({ operationError, role = 'admin' } = {}) {
         const latest = logged.filter(row => row.status === 'PROCESSED').at(-1);
         return [latest ? [latest] : []];
       }
+      if (sql.includes('SELECT action, payload, response FROM webhook_logs')) {
+        return [logged.filter(row => row.status === 'PROCESSED').slice(-8).reverse()];
+      }
       if (sql.includes('FROM webhook_logs')) return [logged.length ? [logged.at(-1)] : []];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
         const sku = String(args[1] || '').toUpperCase();
@@ -141,7 +144,11 @@ function harness({ operationError, role = 'admin' } = {}) {
     module, exports: module.exports, require: name => mocks[name] || nativeRequire(name),
     process: { env: {} }, console: { log() {}, warn() {}, error() {} }, Buffer,
   }, { filename });
-  return { calls, baseReads, async send(action, text, params, outer = {}) {
+  return { calls, baseReads, seedLog(action, text, message) {
+    logged.push({ action, status: 'PROCESSED',
+      payload: JSON.stringify({ from: 'QA-ACTOR', info: { '@ction': action, body: text, text, query: text, params: {} } }),
+      response: JSON.stringify({ ok: true, message, mensaje: message, context: {} }) });
+  }, async send(action, text, params, outer = {}) {
     let body;
     const res = { setHeader() {}, status() { return this; }, json(value) { body = value; return this; } };
     await module.exports({ method: 'POST', headers: {}, body: {
@@ -211,6 +218,48 @@ test('stock OP is previewed, corrected in two messages and released only after c
     ['00201-PTPBS120', 12, 'STOCK_SEGURIDAD']);
 });
 
+test('translated English quantity corrects the active stock draft without a clarification loop', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+  const changed = await h.send('MODO_CHARLA', 'The quantity will be 8 units', {});
+  assert.match(changed.mensaje, /Cantidad planeada: 8 und/u);
+  assert.equal(h.calls.length, 0);
+  const yes = await h.send('MODO_CHARLA', 'Sí', {});
+  assert.match(yes.mensaje, /Cantidad planeada: 8 und/u);
+  assert.match(yes.mensaje, /confirmo crear OP/u);
+  assert.equal(h.calls.length, 0);
+});
+
+test('yes to a previous stock quantity question recovers only an operator-stated quantity', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+  const question = 'Entendido Juan Esteban. ¿Deseas cambiar la cantidad a 8 unidades para la OP de stock de seguridad?';
+  h.seedLog('MODO_CHARLA', 'The quantity will be 8 units', question);
+  h.seedLog('MODO_CHARLA', 'Sí', question);
+  const changed = await h.send('MODO_CHARLA', 'Sí', {});
+  assert.match(changed.mensaje, /Cantidad planeada: 8 und/u);
+  assert.equal(h.calls.length, 0);
+  const released = await h.send('MODO_CHARLA', 'confirmo crear OP para stock de seguridad', {});
+  assert.equal(released.ok, true, released.mensaje);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].quantity, 8);
+});
+
+test('yes cannot adopt a stock quantity invented by an earlier chatbot question', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 5, origen_tipo: 'STOCK_SEGURIDAD' });
+  h.seedLog('MODO_CHARLA', 'Sí',
+    '¿Deseas cambiar la cantidad a 8 unidades para la OP de stock de seguridad?');
+  await h.send('MODO_CHARLA', 'Sí', {});
+  assert.equal(h.calls.length, 0);
+});
+
 test('cancelled stock OP cannot be released by a later confirmation', async () => {
   const h = harness();
   await h.send('LIBERAR_ORDEN_PRODUCCION',
@@ -221,6 +270,22 @@ test('cancelled stock OP cannot be released by a later confirmation', async () =
   const late = await h.send('LIBERAR_ORDEN_PRODUCCION', 'confirmo crear OP para stock de seguridad', {});
   assert.match(late.mensaje, /No hay un resumen/u);
   assert.equal(h.calls.length, 0);
+});
+
+test('natural order and spoken OPF/OPE/OB/OOB cancellation reach the stock draft even as MODO_CHARLA', async () => {
+  for (const phrase of ['cancela esta orden', 'Cancele esta orden',
+    'Cancele esta OPF', 'Cancele esta OPE',
+    'Cancela esta OB', 'Cancela esta OOB']) {
+    const h = harness();
+    await h.send('LIBERAR_ORDEN_PRODUCCION',
+      'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+      { id_producto_final: '00102-PTASH60', cantidad_planificada: 5,
+        origen_tipo: 'STOCK_SEGURIDAD' });
+    const cancelled = await h.send('MODO_CHARLA', phrase, {});
+    assert.equal(cancelled.ok, true, phrase);
+    assert.match(cancelled.mensaje, /Descarté el borrador de la OP/u, phrase);
+    assert.equal(h.calls.length, 0, phrase);
+  }
 });
 
 test('model parameters alone cannot bypass the stock OP preview', async () => {
