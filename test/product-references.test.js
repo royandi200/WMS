@@ -140,6 +140,25 @@ test('spoken "por 60" preserves the presentation while ignoring the filler word'
     .map(product => product.siigo_code), ['00001-TPBI']);
 });
 
+test('transcribed "ashaguanta por 60" resolves only the 60-unit finished product', async () => {
+  assert.equal(normalizeProductReference('ashaguanta por 60'), 'ashwagandha por 60');
+  const rows = [
+    { id: 102, siigo_code: '00102-PTASH60', nombre: 'PRODUCTO TERMINADO ASHWAGANDHA X 60',
+      alias: 'ashwagandha 60', modalidad_operativa: 'PR' },
+    { id: 200, siigo_code: '00200-PTASH120', nombre: 'PRODUCTO TERMINADO ASHWAGANDHA X 120',
+      alias: 'ashwagandha 120', modalidad_operativa: 'PR' },
+  ];
+  const db = { async execute(sql) {
+    if (/LEFT JOIN producto_aliases pa/u.test(sql)) return [rows];
+    return [[]];
+  } };
+  const product = await resolveProductReference(db, 'ashaguanta por 60', {
+    modes: ['PR'], allowContextualPartial: true, allowCatalogContextual: true,
+  });
+  assert.equal(product.siigo_code, '00102-PTASH60');
+  assert.equal(product.matched_by, 'contextual_alias');
+});
+
 test('scoped reception references tolerate one transcription error only when unique', () => {
   const rows = [
     { id: 19, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', alias: 'tapa pequeña' },
