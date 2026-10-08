@@ -39,7 +39,14 @@ module.exports = async (req, res) => {
         status = response.status;
         if (!response.ok) detail = (await response.text()).slice(0, 300);
       }
-      return res.status(200).json({ ok: true, data: { groq_configured: configured, groq_status: status, detalle: detail } });
+      let models = [];
+      if (configured) {
+        const listed = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+        });
+        if (listed.ok) models = ((await listed.json()).data || []).map(model => model.id);
+      }
+      return res.status(200).json({ ok: true, data: { groq_configured: configured, groq_status: status, detalle: detail, modelos: models } });
     }
 
     if (req.query?.warehouses === 'true') {
