@@ -4,9 +4,12 @@ import { resolve } from 'node:path';
 
 const apply = process.argv.includes('--apply');
 const reboot = process.argv.includes('--reboot');
+const stock = process.argv.includes('--stock');
 if (reboot && !apply) throw new Error('--reboot requires --apply');
-const beforePath = resolve('.tmp', 'builderbot-pre-close-fallback-20261008.json');
-const afterPath = resolve('.tmp', 'builderbot-post-close-fallback-20261008.json');
+const beforePath = resolve('.tmp', stock
+  ? 'builderbot-pre-stock-confirm-20261008.json' : 'builderbot-pre-close-fallback-20261008.json');
+const afterPath = resolve('.tmp', stock
+  ? 'builderbot-post-stock-confirm-20261008.json' : 'builderbot-post-close-fallback-20261008.json');
 const before = JSON.parse(await readFile(beforePath, 'utf8'));
 if (before.projectId !== '7fdf8f81-e227-4a04-8943-5402d3be4b15'
   || before.prompts.map(prompt => prompt.name).join(',') !== 'Entrada,Voz') {
@@ -20,21 +23,33 @@ if (!key) throw new Error('Builderbot Manager API key is unavailable');
 const hash = value => createHash('sha256').update(value).digest('hex');
 const unix = value => value.replace(/\r\n/gu, '\n');
 
-function closeSection(source) {
-  const start = source.indexOf('### 10.');
-  const end = source.indexOf('### 11.', start + 7);
-  if (start < 0 || end < 0 || source.indexOf('### 10.', start + 1) >= 0) {
-    throw new Error('Cannot isolate section 10 of the prompt');
+function selectedSection(source) {
+  const startHeading = stock ? '### 5. LIBERAR_ORDEN_PRODUCCION' : '### 10.';
+  const endHeading = stock ? '### 6. CONFIRMAR_MATERIALES_PRODUCCION' : '### 11.';
+  const start = source.indexOf(startHeading);
+  const end = source.indexOf(endHeading, start + startHeading.length);
+  if (start < 0 || end < 0 || source.indexOf(startHeading, start + 1) >= 0) {
+    throw new Error(`Cannot isolate ${startHeading} of the prompt`);
   }
   return source.slice(start, end);
 }
 
-const originalSection = closeSection(before.prompts[0].instructions);
-const desiredSection = closeSection(local);
-if (unix(closeSection(before.prompts[1].instructions)) !== unix(originalSection)) {
-  throw new Error('Entrada and Voz section 10 differ in checkpoint');
+function languageRule(source) {
+  const line = source.split(/\r?\n/u).find(value => value.startsWith('5B. '));
+  if (!line) throw new Error('Cannot isolate language rule 5B');
+  return line;
 }
-if (unix(desiredSection).split('params.correccion_pt').length !== 2) {
+
+const originalSection = selectedSection(before.prompts[0].instructions);
+const desiredSection = selectedSection(local);
+if (unix(selectedSection(before.prompts[1].instructions)) !== unix(originalSection)) {
+  throw new Error('Entrada and Voz selected sections differ in checkpoint');
+}
+if (stock && (languageRule(before.prompts[0].instructions) !== languageRule(before.prompts[1].instructions)
+  || !desiredSection.includes('Confirm create op for security stock'))) {
+  throw new Error('Stock confirmation checkpoint or replacement is inconsistent');
+}
+if (!stock && unix(desiredSection).split('params.correccion_pt').length !== 2) {
   throw new Error('Expected exactly one new correction instruction');
 }
 
@@ -60,7 +75,8 @@ const changes = before.prompts.map(saved => {
   const current = instructions(live, saved);
   if (current !== saved.instructions) throw new Error(`Live ${saved.name} changed since checkpoint; no overwrite`);
   const newline = current.includes('\r\n') ? '\r\n' : '\n';
-  const updated = current.replace(closeSection(current), unix(desiredSection).replace(/\n/gu, newline));
+  let updated = current.replace(selectedSection(current), unix(desiredSection).replace(/\n/gu, newline));
+  if (stock) updated = updated.replace(languageRule(current), languageRule(local));
   return { saved, current, updated };
 });
 if (!apply) {

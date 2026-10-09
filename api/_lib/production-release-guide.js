@@ -19,7 +19,9 @@ function normalized(value) {
 
 function productionReleaseConfirmation(text) {
   const raw = normalized(text).replace(/[.!]+$/u, '');
-  return /^(?:confirmo|confirmamos|apruebo|autorizo)\s+(?:(?:crear|liberar|hacer)\s+)?(?:la\s+|esta\s+|nueva\s+)?(?:op|orden(?:\s+de\s+produccion)?|produccion)(?:\s+para\s+(?:el\s+)?stock(?:\s+de\s+seguridad)?)?$/u.test(raw);
+  const spanish = /^(?:(?:confirmo|confirmamos|apruebo|autorizo)\s+(?:(?:crear|liberar|hacer)\s+)?|(?:crea|crear|libera|liberar)\s+)(?:(?:la|esta|nueva)\s+)?(?:op|orden(?:\s+de\s+produccion)?|produccion)(?:\s+para\s+(?:el\s+)?stock(?:\s+de\s+seguridad)?)?(?:\s+por\s+favor)?$/u;
+  const english = /^(?:(?:i|we)\s+)?(?:confirm|approve|authorize)\s+(?:(?:to\s+)?(?:create|release|make)|creation\s+of)\s+(?:(?:the|this|a|new)\s+)?(?:op|production\s+order)(?:\s+for\s+(?:the\s+)?(?:security|safety)\s+stock)?$/u;
+  return spanish.test(raw) || english.test(raw);
 }
 
 function productionReleaseCancellation(text) {
@@ -96,7 +98,7 @@ function productionReleaseSummary(draft) {
     'Destino: stock de seguridad',
     '',
     'Si necesitas corregir, di «serán [cantidad] unidades» o «cambia el producto a [nombre o SKU]». Puedes cambiar ambos datos antes de confirmar; te mostraré el resumen actualizado.',
-    'Si está correcto, responde *confirmo crear OP para stock de seguridad*. Para descartarla, di *cancela esta orden* (también puedes decir *cancela esta OP*).',
+    'Si está correcto, di *confirmo crear OP para stock de seguridad*, *confirmo esta OP* o *crea esta orden*. Para descartarla, di *cancela esta orden* (también puedes decir *cancela esta OP*).',
     '',
     'Aún no se creó la OP, no se reservaron materiales y no se avisó al alistador.',
   ].join('\n');
@@ -106,7 +108,7 @@ async function advanceProductionReleaseGuide({ db, rawText, draft, request }) {
   if (!request && !draft) return null;
   if (!request && productionReleaseAffirmation(rawText)) {
     return { status: 'PENDING', draft,
-      message: `El borrador sigue pendiente. Revisa los datos y, para crear la OP, di «confirmo crear OP para stock de seguridad».\n\n${productionReleaseSummary(draft)}` };
+      message: `El borrador sigue pendiente. Revisa los datos y, para crear la OP, di «confirmo esta OP» o «crea esta orden».\n\n${productionReleaseSummary(draft)}` };
   }
   if (!request && /^(?:no|todavia\s+no)\s+confirmo\b/u.test(normalized(rawText))) {
     return { status: 'PENDING', draft,

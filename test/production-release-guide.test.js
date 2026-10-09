@@ -59,8 +59,15 @@ test('numeric SKU is not misread as a new quantity', () => {
 
 test('a negated or quoted confirmation cannot authorize release', () => {
   for (const text of ['no confirmo crear OP', 'ayer dije: confirmo crear OP',
-    '¿confirmo crear OP?', 'confirmo crear OP pero cambia a 10 unidades']) {
+    '¿confirmo crear OP?', 'confirmo crear OP pero cambia a 10 unidades',
+    'confirm', 'sí', 'confirm create op for security stock?',
+    'do not confirm create op for security stock']) {
     assert.equal(productionReleaseConfirmation(text), false, text);
+  }
+  for (const text of ['Confirm create op for security stock', 'Confirmo esta OP',
+    'Autorizo crear la orden', 'Crea esta orden por favor']) {
+    assert.equal(productionReleaseConfirmation(text), true, text);
+    assert.equal(productionReleaseFollowup(text), true, text);
   }
   assert.equal(productionReleaseFollowup('son 20 unidades'), true);
   assert.equal(productionReleaseFollowup('serán doce'), true);

@@ -522,11 +522,19 @@ async function pendingStockProductionDraft(db, from) {
     `SELECT action, response FROM webhook_logs
       WHERE from_phone = ? AND status = 'PROCESSED'
         AND created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE)
-      ORDER BY id DESC LIMIT 1`, [from]
+      ORDER BY id DESC LIMIT 16`, [from]
   );
-  if (rows[0]?.action !== 'LIBERAR_ORDEN_PRODUCCION') return null;
-  const state = asObject(asObject(rows[0]?.response).context).stock_production_draft;
-  return state?.status === 'PENDING' && state.sku && state.quantity ? state : null;
+  for (const row of rows) {
+    const state = asObject(asObject(asObject(row.response).context).stock_production_draft);
+    if (state.status === 'CANCELLED' || state.status === 'COMPLETED') return null;
+    if (row.action === 'LIBERAR_ORDEN_PRODUCCION') {
+      return state.status === 'PENDING' && state.sku && state.quantity ? state : null;
+    }
+    // Un turno de charla entre el resumen y la confirmación no descarta el
+    // borrador. Otra operación sí corta el contexto para no revivir una OP vieja.
+    if (row.action !== 'MODO_CHARLA' && row.action !== 'UNKNOWN') return null;
+  }
+  return null;
 }
 
 function stockQuantityClarification(message) {
@@ -1673,9 +1681,9 @@ module.exports = async (req, res) => {
         'CONFIRMAR_MATERIALES_PRODUCCION', 'AJUSTAR_MATERIALES_PRODUCCION',
         'CONSULTAR_PEDIDOS_CLIENTE_PENDIENTES'].includes(action)) {
       activeStockProductionDraft = await pendingStockProductionDraft(db, from);
-      if (!activeStockProductionDraft && productionReleaseAffirmation(contractUserText)) {
+      if (productionReleaseAffirmation(contractUserText)) {
         const acknowledged = await acknowledgedStockQuantity(db, from, contractUserText);
-        activeStockProductionDraft = acknowledged?.draft || null;
+        activeStockProductionDraft = acknowledged?.draft || activeStockProductionDraft;
         acknowledgedStockCorrection = acknowledged?.quantity || null;
       }
       if (activeStockProductionDraft) {

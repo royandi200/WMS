@@ -25,8 +25,7 @@ function harness({ operationError, role = 'admin' } = {}) {
         return [{ affectedRows: 1 }];
       }
       if (sql.includes('SELECT action, response FROM webhook_logs')) {
-        const latest = logged.filter(row => row.status === 'PROCESSED').at(-1);
-        return [latest ? [latest] : []];
+        return [logged.filter(row => row.status === 'PROCESSED').slice(-16).reverse()];
       }
       if (sql.includes('SELECT action, payload, response FROM webhook_logs')) {
         return [logged.filter(row => row.status === 'PROCESSED').slice(-8).reverse()];
@@ -228,8 +227,29 @@ test('translated English quantity corrects the active stock draft without a clar
   assert.equal(h.calls.length, 0);
   const yes = await h.send('MODO_CHARLA', 'Sí', {});
   assert.match(yes.mensaje, /Cantidad planeada: 8 und/u);
-  assert.match(yes.mensaje, /confirmo crear OP/u);
+  assert.match(yes.mensaje, /confirmo esta OP/u);
   assert.equal(h.calls.length, 0);
+});
+
+test('translated and natural confirmations release only the active reviewed stock OP', async () => {
+  for (const phrase of ['Confirm create op for security stock', 'Confirmo esta OP',
+    'Autorizo crear la orden', 'Crea esta orden por favor']) {
+    const h = harness();
+    const absent = await h.send('LIBERAR_ORDEN_PRODUCCION', phrase, {});
+    assert.match(absent.mensaje, /No hay un resumen/u, phrase);
+    assert.equal(h.calls.length, 0, phrase);
+    const preview = await h.send('LIBERAR_ORDEN_PRODUCCION',
+      'Produce 5 unidades de ashwagandha 60 para stock de seguridad',
+      { id_producto_final: '00102-PTASH60', cantidad_planificada: 5,
+        origen_tipo: 'STOCK_SEGURIDAD' });
+    assert.match(preview.mensaje, /Revisa la nueva OP/u, phrase);
+    h.seedLog('MODO_CHARLA', 'Gracias', 'Con gusto.');
+    const released = await h.send('MODO_CHARLA', phrase, {});
+    assert.equal(released.ok, true, `${phrase}: ${released.mensaje}`);
+    assert.equal(h.calls.length, 1, phrase);
+    assert.equal(h.calls[0].product, '00102-PTASH60', phrase);
+    assert.equal(h.calls[0].quantity, 5, phrase);
+  }
 });
 
 test('spoken correction "las unidades eran 7" keeps the active stock destination and product', async () => {
