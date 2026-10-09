@@ -1017,6 +1017,55 @@ test('corrige lote y cantidad dentro del borrador antes de confirmar', async () 
   assert.equal(done.params.materiales_repuestos[0].cantidad, 2);
 });
 
+test('corrige la causa de un material inequívoco aunque haya otras reposiciones', async () => {
+  const db = fakeDb({ orderId: 117, planned: 2, initialDraft: {
+    orderId: 117, conforming: 2, waste: 0, reason: null, location: 'C2',
+    materials: [
+      { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+        cantidad: 1, unidad: 'und', lote: 'ACC-260910-TPBI', motivo: 'ruptura' },
+      { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+        cantidad: 2, unidad: 'und', lote: 'R5-260923-LINER', motivo: 'rotura' },
+    ],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  const text = 'Cambia la causa de los liners a mala calidad';
+  assert.equal(isCloseFollowup(text, { orderId: 117 }), true);
+  const corrected = await advanceCloseGuide({ db, userId: 117, rawText: text });
+  assert.equal(corrected.params, undefined);
+  assert.equal(corrected.draft.materials[0].motivo, 'ruptura');
+  assert.equal(corrected.draft.materials[1].motivo, 'mala calidad');
+  assert.match(corrected.message, /Causa: mala calidad/u);
+  assert.ok(db.writes.every(sql => sql.includes('produccion_cierre_borradores')));
+});
+
+test('una causa por alias no elige entre dos lotes del mismo material', async () => {
+  const db = fakeDb({ orderId: 117, planned: 2, initialDraft: {
+    orderId: 117, conforming: 2, waste: 0, reason: null, location: 'C2',
+    materials: [
+      { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+        cantidad: 1, unidad: 'und', lote: 'L1', motivo: 'rotura' },
+      { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+        cantidad: 1, unidad: 'und', lote: 'L2', motivo: 'rotura' },
+    ],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  await assert.rejects(advanceCloseGuide({ db, userId: 117,
+    rawText: 'Cambia la causa de los liners a mala calidad' }), /varios lotes/u);
+  assert.equal(db.writes.length, 0);
+});
+
+test('la corrección del motivo admite el artículo y la contracción del material', async () => {
+  const db = fakeDb({ orderId: 117, planned: 2, initialDraft: {
+    orderId: 117, conforming: 2, waste: 0, reason: null, location: 'C2',
+    materials: [{ sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+      cantidad: 2, unidad: 'und', lote: 'R5-260923-LINER', motivo: 'rotura' }],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  const corrected = await advanceCloseGuide({ db, userId: 117,
+    rawText: 'Modifica el motivo del liner a mala calidad' });
+  assert.equal(corrected.draft.materials[0].motivo, 'mala calidad');
+});
+
 test('corrige el lote con la frase natural y su transcripción imperfecta sin cerrar la OP', async () => {
   for (const phrase of ['corrección, las 2 tapas salieron de R2-260920-TPBI',
     'correción, las 2 tapas salieron de R2-260920-TPBI']) {

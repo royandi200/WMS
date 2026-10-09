@@ -727,7 +727,7 @@ async function applyMaterialCorrection(db, draft, order, text, params) {
     draft.materialsAnswered = true;
     return true;
   }
-  const match = String(text || '').trim().match(/^(corrige|cambia|modifica|quita|elimina)\s+(?:(lote|cantidad|causa|motivo|ubicaci[oó]n)\s+de\s+)?(?:la\s+|el\s+)?(.+?)(?:\s+(?:a|por)\s+(.+))?$/iu);
+  const match = String(text || '').trim().match(/^(corrige|cambia|modifica|quita|elimina)\s+(?:(?:la|el)\s+)?(?:(lote|cantidad|causa|motivo|ubicaci[oó]n)\s+(?:de|del)\s+)?(?:(?:la|el|los|las)\s+)?(.+?)(?:\s+(?:a|por)\s+(.+))?$/iu);
   if (!match || !draft.materials?.length) return false;
   const [, operation, field, term, value] = match;
   if (!['quita', 'elimina'].includes(normalize(operation)) && (!field || !value)) {
