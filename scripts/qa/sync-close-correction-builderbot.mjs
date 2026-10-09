@@ -5,11 +5,15 @@ import { resolve } from 'node:path';
 const apply = process.argv.includes('--apply');
 const reboot = process.argv.includes('--reboot');
 const stock = process.argv.includes('--stock');
+const language = process.argv.includes('--language');
+if (stock && language) throw new Error('Choose only one sync scope');
 if (reboot && !apply) throw new Error('--reboot requires --apply');
-const beforePath = resolve('.tmp', stock
-  ? 'builderbot-pre-stock-confirm-20261008.json' : 'builderbot-pre-close-fallback-20261008.json');
-const afterPath = resolve('.tmp', stock
-  ? 'builderbot-post-stock-confirm-20261008.json' : 'builderbot-post-close-fallback-20261008.json');
+const beforePath = resolve('.tmp', language ? 'builderbot-pre-language-audit-20261008.json'
+  : stock ? 'builderbot-pre-stock-confirm-20261008.json'
+    : 'builderbot-pre-close-fallback-20261008.json');
+const afterPath = resolve('.tmp', language ? 'builderbot-post-language-audit-20261008.json'
+  : stock ? 'builderbot-post-stock-confirm-20261008.json'
+    : 'builderbot-post-close-fallback-20261008.json');
 const before = JSON.parse(await readFile(beforePath, 'utf8'));
 if (before.projectId !== '7fdf8f81-e227-4a04-8943-5402d3be4b15'
   || before.prompts.map(prompt => prompt.name).join(',') !== 'Entrada,Voz') {
@@ -24,8 +28,8 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const unix = value => value.replace(/\r\n/gu, '\n');
 
 function selectedSection(source) {
-  const startHeading = stock ? '### 5. LIBERAR_ORDEN_PRODUCCION' : '### 10.';
-  const endHeading = stock ? '### 6. CONFIRMAR_MATERIALES_PRODUCCION' : '### 11.';
+  const startHeading = stock || language ? '### 5. LIBERAR_ORDEN_PRODUCCION' : '### 10.';
+  const endHeading = stock || language ? '### 6. CONFIRMAR_MATERIALES_PRODUCCION' : '### 11.';
   const start = source.indexOf(startHeading);
   const end = source.indexOf(endHeading, start + startHeading.length);
   if (start < 0 || end < 0 || source.indexOf(startHeading, start + 1) >= 0) {
@@ -34,9 +38,9 @@ function selectedSection(source) {
   return source.slice(start, end);
 }
 
-function languageRule(source) {
-  const line = source.split(/\r?\n/u).find(value => value.startsWith('5B. '));
-  if (!line) throw new Error('Cannot isolate language rule 5B');
+function languageRule(source, label = '5B.') {
+  const line = source.split(/\r?\n/u).find(value => value.startsWith(`${label} `));
+  if (!line) throw new Error(`Cannot isolate language rule ${label}`);
   return line;
 }
 
@@ -49,7 +53,13 @@ if (stock && (languageRule(before.prompts[0].instructions) !== languageRule(befo
   || !desiredSection.includes('Confirm create op for security stock'))) {
   throw new Error('Stock confirmation checkpoint or replacement is inconsistent');
 }
-if (!stock && unix(desiredSection).split('params.correccion_pt').length !== 2) {
+if (language && (['5A.', '5B.', '5C.'].some(label =>
+  languageRule(before.prompts[0].instructions, label)
+    !== languageRule(before.prompts[1].instructions, label))
+  || /traduc|traducci|ingl[eé]s|english|idioma|language/iu.test(local))) {
+  throw new Error('Language checkpoint differs or local prompt retains language priming');
+}
+if (!stock && !language && unix(desiredSection).split('params.correccion_pt').length !== 2) {
   throw new Error('Expected exactly one new correction instruction');
 }
 
@@ -77,6 +87,14 @@ const changes = before.prompts.map(saved => {
   const newline = current.includes('\r\n') ? '\r\n' : '\n';
   let updated = current.replace(selectedSection(current), unix(desiredSection).replace(/\n/gu, newline));
   if (stock) updated = updated.replace(languageRule(current), languageRule(local));
+  if (language) {
+    for (const label of ['5A.', '5B.', '5C.']) {
+      updated = updated.replace(languageRule(current, label), languageRule(local, label));
+    }
+    if (/traduc|traducci|ingl[eé]s|english|idioma|language/iu.test(updated)) {
+      throw new Error(`Updated ${saved.name} still contains language priming`);
+    }
+  }
   return { saved, current, updated };
 });
 if (!apply) {
