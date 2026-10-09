@@ -664,6 +664,18 @@ function applyIndexedMaterialCorrection(draft, text) {
   return true;
 }
 
+function declarativeMaterialCorrection(text) {
+  const raw = String(text || '').trim().replace(/[.!]+$/u, '');
+  const field = '(lote|cantidad|causa|motivo|ubicaci[oó]n)';
+  const separator = '(?:\\s+(?:es|era|fue|sera|será|queda|quedo|quedó|debe\\s+ser|va\\s+a\\s+ser)\\s+|\\s*[:=]\\s*)';
+  const fieldFirst = new RegExp(`^(?:(?:la|el)\\s+)?${field}\\s+(?:de|del)\\s+(?:(?:la|el|los|las)\\s+)?(.+?)${separator}(.+)$`, 'iu').exec(raw);
+  const productFirst = !fieldFirst && new RegExp(`^(?:la|el|los|las)\\s+(.+?)\\s*[,;]?\\s+(?:(?:la|el)\\s+)?${field}${separator}(.+)$`, 'iu').exec(raw);
+  const term = fieldFirst?.[2] || productFirst?.[1];
+  if (!term || /\b(?:producto|terminado|conformes?|merma|correcci[oó]n)\b/iu.test(term)) return null;
+  return { operation: 'corrige', field: fieldFirst?.[1] || productFirst?.[2],
+    term, value: fieldFirst?.[3] || productFirst?.[3] };
+}
+
 async function applyMaterialCorrection(db, draft, order, text, params) {
   const raw = normalize(text);
   if (await applyQuantityCorrection(db, draft, order, text)) return true;
@@ -728,8 +740,11 @@ async function applyMaterialCorrection(db, draft, order, text, params) {
     return true;
   }
   const match = String(text || '').trim().match(/^(corrige|cambia|modifica|quita|elimina)\s+(?:(?:la|el)\s+)?(?:(lote|cantidad|causa|motivo|ubicaci[oó]n)\s+(?:de|del)\s+)?(?:(?:la|el|los|las)\s+)?(.+?)(?:\s+(?:a|por)\s+(.+))?$/iu);
-  if (!match || !draft.materials?.length) return false;
-  const [, operation, field, term, value] = match;
+  const correction = declarativeMaterialCorrection(text) || (match && {
+    operation: match[1], field: match[2], term: match[3], value: match[4],
+  });
+  if (!correction || !draft.materials?.length) return false;
+  const { operation, field, term, value } = correction;
   if (!['quita', 'elimina'].includes(normalize(operation)) && (!field || !value)) {
     throw guideError('Para corregir un material, indica el dato nuevo. Ejemplo: «corrige lote de tapa a L-123».');
   }
@@ -749,6 +764,9 @@ async function applyMaterialCorrection(db, draft, order, text, params) {
     return true;
   }
   const newValue = value.trim();
+  if (/\b(?:y|ademas)\s+(?:(?:la|el)\s+)?(?:causa|motivo|lote|cantidad|ubicaci[oó]n)\b/iu.test(newValue)) {
+    throw guideError('Indica cada cambio de material por separado; no cambié el borrador.');
+  }
   if (normalize(field) === 'cantidad') {
     const amount = quantity(newValue.replace(/\s*(?:und|unidades?|gramos?|g)$/iu, ''));
     if (amount == null || amount <= 0 || Math.abs(amount * 1000 - Math.round(amount * 1000)) > 0.000001
@@ -1096,6 +1114,7 @@ function isCloseFollowup(text, draft) {
   // repetir «opción N» debe mostrar el resumen, nunca caer en modo charla.
   if ((draft.materialChoice || draft.reviewShown) && lotOptionNumber(raw) != null) return true;
   if (draft.materialChoice && /^(?:mas opciones|siguientes opciones|siguiente pagina|opciones anteriores|pagina anterior)$/u.test(raw)) return true;
+  if (declarativeMaterialCorrection(raw)) return true;
   if (isLotChangeRequest(raw)) return true;
   if (materialLossCandidate(raw)) return true;
   if (changedMaterialCandidate(raw)) return true;
@@ -1182,7 +1201,7 @@ function closeCorrectionHelp(draft) {
     const reference = shortName.length >= 3 && !ambiguousName ? shortName : unique.sku;
     const exampleQuantity = ['g', 'gr', 'gramo', 'gramos'].includes(normalize(unique.unidad))
       ? '100 g' : `2 ${unique.unidad || 'und'}`;
-    tips.push(`• Insumo que aparece una sola vez: basta nombrarlo o indicar su SKU. Di «cambio de lote en ${reference}» para elegir otro lote, «corrige cantidad de ${reference} a ${exampleQuantity}», «corrige causa de ${reference} a [nuevo motivo]» o «corrige ubicación de ${reference} a [nueva ubicación]». No necesitas decir «corrección» ni el número de partida.`);
+    tips.push(`• Insumo que aparece una sola vez: basta nombrarlo o indicar su SKU. Puedes decir «la causa de ${reference} es [nuevo motivo]», «el lote de ${reference} es [nuevo lote]», «la cantidad de ${reference} es ${exampleQuantity}» o «la ubicación de ${reference} es [nueva ubicación]». Para elegir otro lote sin dictarlo, di «cambio de lote en ${reference}». No necesitas decir «corrección» ni el número de partida.`);
   }
   if (materials.length) {
     const repeatedIndex = materials.findIndex(item => counts.get(item.sku) > 1);
@@ -1378,9 +1397,10 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
   const materialMarker = MATERIAL_START.exec(String(rawText || ''));
   const damageMarker = materialLossCandidate(rawText);
   const changedMaterialMarker = changedMaterialCandidate(rawText);
+  const materialStatement = declarativeMaterialCorrection(rawText);
   const closeText = materialMarker ? String(rawText).slice(0, materialMarker.index)
     : damageMarker ? String(rawText).slice(0, damageMarker.index)
-      : changedMaterialMarker ? '' : rawText;
+      : changedMaterialMarker || materialStatement ? '' : rawText;
   const parsed = closeFields(closeText);
   if (prior?.orderId) {
     const suggested = groundedCloseCorrection(closeText, params);

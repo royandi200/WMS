@@ -6,12 +6,15 @@ const apply = process.argv.includes('--apply');
 const reboot = process.argv.includes('--reboot');
 const stock = process.argv.includes('--stock');
 const language = process.argv.includes('--language');
-if (stock && language) throw new Error('Choose only one sync scope');
+const naturalMaterial = process.argv.includes('--natural-material');
+if ([stock, language, naturalMaterial].filter(Boolean).length > 1) throw new Error('Choose only one sync scope');
 if (reboot && !apply) throw new Error('--reboot requires --apply');
-const beforePath = resolve('.tmp', language ? 'builderbot-pre-language-audit-20261008.json'
+const beforePath = resolve('.tmp', naturalMaterial ? 'builderbot-pre-natural-material-close-20261008.json'
+  : language ? 'builderbot-pre-language-audit-20261008.json'
   : stock ? 'builderbot-pre-stock-confirm-20261008.json'
     : 'builderbot-pre-close-fallback-20261008.json');
-const afterPath = resolve('.tmp', language ? 'builderbot-post-language-audit-20261008.json'
+const afterPath = resolve('.tmp', naturalMaterial ? 'builderbot-post-natural-material-close-20261008.json'
+  : language ? 'builderbot-post-language-audit-20261008.json'
   : stock ? 'builderbot-post-stock-confirm-20261008.json'
     : 'builderbot-post-close-fallback-20261008.json');
 const before = JSON.parse(await readFile(beforePath, 'utf8'));
@@ -59,7 +62,10 @@ if (language && (['5A.', '5B.', '5C.'].some(label =>
   || /traduc|traducci|ingl[eé]s|english|idioma|language/iu.test(local))) {
   throw new Error('Language checkpoint differs or local prompt retains language priming');
 }
-if (!stock && !language && unix(desiredSection).split('params.correccion_pt').length !== 2) {
+if (naturalMaterial && !desiredSection.includes('Una corrección del insumo también puede ser declarativa:')) {
+  throw new Error('Natural material correction rule missing from local prompt');
+}
+if (!stock && !language && !naturalMaterial && unix(desiredSection).split('params.correccion_pt').length !== 2) {
   throw new Error('Expected exactly one new correction instruction');
 }
 

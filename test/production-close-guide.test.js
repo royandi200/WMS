@@ -1066,6 +1066,51 @@ test('la corrección del motivo admite el artículo y la contracción del materi
   assert.equal(corrected.draft.materials[0].motivo, 'mala calidad');
 });
 
+test('declaraciones inequívocas corrigen datos del insumo sin exigir un verbo fijo', async () => {
+  for (const [phrase, field, expected] of [
+    ['La causa de los liners es mala calidad', 'motivo', 'mala calidad'],
+    ['El motivo del liner fue mala calidad', 'motivo', 'mala calidad'],
+    ['Los liners, la causa es mala calidad', 'motivo', 'mala calidad'],
+    ['El lote de los liners es L-NUEVO', 'lote', 'L-NUEVO'],
+    ['La cantidad de los liners es 3 unidades', 'cantidad', 3],
+    ['La ubicación de los liners es A14', 'ubicacion', 'A14'],
+  ]) {
+    const db = fakeDb({ orderId: 117, planned: 3, initialDraft: {
+      orderId: 117, conforming: 2, waste: 1, wasteClassified: true,
+      reason: 'defecto del producto terminado', location: 'C2',
+      materials: [
+        { sku: '00001-TPBI', producto: 'TAPA TARRO CUADRADO BLANCO',
+          cantidad: 1, unidad: 'und', lote: 'ACC-260910-TPBI', motivo: 'ruptura' },
+        { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+          cantidad: 2, unidad: 'und', lote: 'R5-260923-LINER', motivo: 'rotura' },
+      ],
+      materialsAnswered: true, materialPending: null, reviewShown: true,
+    } });
+    assert.equal(isCloseFollowup(phrase, { orderId: 117 }), true, phrase);
+    const corrected = await advanceCloseGuide({ db, userId: 117, rawText: phrase });
+    assert.equal(corrected.params, undefined, phrase);
+    assert.equal(corrected.draft.materials[1][field], expected, phrase);
+    assert.equal(corrected.draft.materials[0].motivo, 'ruptura', phrase);
+    assert.equal(corrected.draft.reason, 'defecto del producto terminado', phrase);
+  }
+});
+
+test('una causa declarada para varios lotes de liners exige distinguir la partida', async () => {
+  const db = fakeDb({ orderId: 117, planned: 2, initialDraft: {
+    orderId: 117, conforming: 2, waste: 0, reason: null, location: 'C2',
+    materials: [
+      { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+        cantidad: 1, unidad: 'und', lote: 'L1', motivo: 'rotura' },
+      { sku: '00035-LNTP60', producto: 'LINER TARRO x 60',
+        cantidad: 1, unidad: 'und', lote: 'L2', motivo: 'rotura' },
+    ],
+    materialsAnswered: true, materialPending: null, reviewShown: true,
+  } });
+  await assert.rejects(advanceCloseGuide({ db, userId: 117,
+    rawText: 'La causa de los liners es mala calidad' }), /varios lotes/u);
+  assert.equal(db.writes.length, 0);
+});
+
 test('corrige el lote con la frase natural y su transcripción imperfecta sin cerrar la OP', async () => {
   for (const phrase of ['corrección, las 2 tapas salieron de R2-260920-TPBI',
     'correción, las 2 tapas salieron de R2-260920-TPBI']) {
@@ -1713,9 +1758,9 @@ test('resumen parcial identifica partidas y explica cómo corregir un insumo ún
   assert.match(message, /Partida 1 — Insumo repuesto: 120 g de GOMAS PROBIOTICOS/u);
   assert.match(message, /Si necesitas corregir algo registrado/u);
   assert.match(message, /cambio de lote en gomas/u);
-  assert.match(message, /corrige cantidad de gomas a 100 g/u);
-  assert.match(message, /corrige causa de gomas a \[nuevo motivo\]/u);
-  assert.match(message, /corrige ubicación de gomas a \[nueva ubicación\]/u);
+  assert.match(message, /la cantidad de gomas es 100 g/u);
+  assert.match(message, /la causa de gomas es \[nuevo motivo\]/u);
+  assert.match(message, /la ubicación de gomas es \[nueva ubicación\]/u);
   assert.match(message, /No necesitas decir «corrección» ni el número de partida/u);
   assert.doesNotMatch(message, /conformes a 18/u);
 });
