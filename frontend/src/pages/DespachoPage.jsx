@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, FileText, RefreshCw, X } from 'lucide-react'
 import { useDispatchStore } from '../store/dispatchStore'
-import { actOnSiigoInvoiceIssue, confirmDispatch, listSiigoInvoiceIssues, syncSiigoInvoices } from '../api/dispatch.api'
+import { actOnSiigoInvoiceIssue, confirmDispatch, listSiigoInvoiceIssues, simulateSiigoInvoices, syncSiigoInvoices } from '../api/dispatch.api'
 import { useAuthStore } from '../store/authStore'
 import { openDispatchSheet } from '../utils/dispatchSheet'
 import { formatBogotaDateTime } from '../utils/dateTime'
@@ -234,6 +234,7 @@ function SiigoIssuesPanel({ canRetry, canFix, notify, onChanged }) {
 
   return (
     <div className="space-y-3">
+      {canFix && <InvoiceSimulation notify={notify} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted max-w-2xl">
           Facturas de venta de SIIGO que no se pudieron convertir en despacho. Se reintentan solas cada 10 minutos;
@@ -300,6 +301,93 @@ function SiigoIssuesPanel({ canRetry, canFix, notify, onChanged }) {
         </table>
       </div>
     </div>
+  )
+}
+
+const VERDICT_STYLE = {
+  PASARIA: 'text-green-400 bg-green-400/10',
+  CON_PROBLEMAS: 'text-danger bg-danger/10',
+  YA_IMPORTADA: 'text-sky-400 bg-sky-400/10',
+  IGNORADA: 'text-muted bg-white/5',
+}
+const VERDICT_LABEL = { PASARIA: 'Pasaría', CON_PROBLEMAS: 'Con problemas', YA_IMPORTADA: 'Ya importada', IGNORADA: 'Ignorada' }
+
+function InvoiceSimulation({ notify }) {
+  const todayBogota = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const [desde, setDesde] = useState('2026-10-05')
+  const [hasta, setHasta] = useState(todayBogota)
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState(null)
+  const [onlyProblems, setOnlyProblems] = useState(true)
+
+  const run = async (event) => {
+    event.preventDefault()
+    setRunning(true)
+    try {
+      const payload = await simulateSiigoInvoices(desde, hasta)
+      setResult(payload?.data || null)
+    } catch (error) {
+      notify(error.response?.data?.error || 'No fue posible simular las facturas', false)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const rows = (result?.facturas || []).filter((row) => !onlyProblems || row.veredicto === 'CON_PROBLEMAS')
+  return (
+    <section className="rounded-lg border border-border bg-surface/40 p-4 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">Simular facturas reales de SIIGO</h2>
+        <p className="text-xs text-muted">Revisa las facturas del rango con las mismas reglas de la importación y dice qué pasaría. Solo lectura: no crea despachos, no reserva stock ni escribe en SIIGO.</p>
+      </div>
+      <form onSubmit={run} className="flex flex-wrap items-end gap-3">
+        <label className="text-xs text-muted">Desde<input type="date" value={desde} onChange={(event) => setDesde(event.target.value)} className="input-field mt-1 py-1.5" required /></label>
+        <label className="text-xs text-muted">Hasta<input type="date" value={hasta} onChange={(event) => setHasta(event.target.value)} className="input-field mt-1 py-1.5" required /></label>
+        <button type="submit" disabled={running} className="btn-primary inline-flex items-center gap-2">
+          <RefreshCw size={15} className={running ? 'animate-spin' : ''} /> {running ? 'Consultando SIIGO...' : 'Simular'}
+        </button>
+      </form>
+      {result && (
+        <div className="space-y-2">
+          <p className="text-sm text-foreground">
+            {result.total} facturas: <span className="text-green-400">{result.pasarian} pasarían</span> · <span className="text-danger">{result.con_problemas} con problemas</span> · {result.ya_importadas} ya importadas · {result.ignoradas} ignoradas
+            {result.truncado && <span className="text-yellow-400"> · Hay más facturas de las revisadas (máx. 250): acorta el rango.</span>}
+          </p>
+          {Object.keys(result.por_problema || {}).length > 0 && (
+            <p className="text-xs text-muted">Por problema: {Object.entries(result.por_problema).map(([code, total]) => `${code} ${total}`).join(' · ')}</p>
+          )}
+          <label className="inline-flex items-center gap-2 text-xs text-muted">
+            <input type="checkbox" checked={onlyProblems} onChange={(event) => setOnlyProblems(event.target.checked)} /> Ver solo las que tienen problemas
+          </label>
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[900px] text-xs">
+              <thead><tr className="bg-surface border-b border-border">
+                {['Factura', 'Fecha', 'Cliente', 'Productos', 'Resultado', 'Problemas'].map((label) => (
+                  <th key={label} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-muted">{label}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {rows.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-muted">Sin facturas para mostrar.</td></tr>}
+                {rows.map((row) => (
+                  <tr key={row.siigo_invoice_id} className="border-b border-border/50 align-top">
+                    <td className="px-3 py-2 font-mono">{row.factura}</td>
+                    <td className="px-3 py-2 text-muted">{row.fecha || '-'}</td>
+                    <td className="px-3 py-2 font-mono">{row.cliente || '-'}</td>
+                    <td className="px-3 py-2">{row.lineas.map((line, index) => (
+                      <span key={`${line.code}-${index}`} className="block"><span className="font-mono">{line.code}</span> × {line.cantidad}{line.bodega ? ` · bod. ${line.bodega}` : ''}</span>
+                    ))}</td>
+                    <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 font-semibold ${VERDICT_STYLE[row.veredicto] || ''}`}>{VERDICT_LABEL[row.veredicto] || row.veredicto}</span></td>
+                    <td className="px-3 py-2 max-w-md">{row.problemas.map((issue) => (
+                      <span key={issue.code} className="block"><span className="text-foreground">{issue.text}</span>{issue.detalle ? <span className="text-muted"> ({issue.detalle})</span> : null}</span>
+                    ))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 

@@ -7,5 +7,8 @@ export const syncSiigoInvoices = (body = {}) => client.post('/siigo/import-invoi
 // Facturas de SIIGO que no pasaron al WMS y sus acciones de corrección.
 export const listSiigoInvoiceIssues = (all = false) => client
   .get('/siigo/novedades', { params: all ? { all: 'true' } : {} }).then((r) => r.data)
+// Solo lectura: qué pasaría al importar las facturas reales del rango.
+export const simulateSiigoInvoices = (desde, hasta) => client
+  .get('/siigo/simulate-invoices', { params: { desde, hasta }, timeout: 120000 }).then((r) => r.data)
 export const actOnSiigoInvoiceIssue = (body) => client
   .post('/siigo/novedades', body, { timeout: 60000 }).then((r) => r.data)
