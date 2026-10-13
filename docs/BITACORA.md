@@ -36,21 +36,21 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
    Borrador enviado a validar el 13/10 (20 códigos: 16 con SKU propuesto, planes 127/128/129
    por definir, `env-1` ignorar). Además, casi todos los PT del WMS tienen stock 0: falta
    cargar inventario inicial de producto terminado o las facturas quedarán PENDIENTE_STOCK.
-2. **Clientes no sincronizados** (24/24): el despacho queda en borrador sin reservar y nada
-   lo reintenta. Traer el cliente desde SIIGO al importar.
-3. **La importación trae 0 facturas**: usa `updated_start`, que SIIGO ignora (ya visto en
-   julio). Cambiar a consulta por fecha como el simulador. Hacerlo después de 1 y 2.
-4. Ignorar líneas de envío/servicio en la importación.
-5. La revisión de cambios de facturas pendientes solo toma 20 despachos por corrida.
-6. Alertas de factura cambiada después de despachar: sin pantalla.
-7. Reporte stock WMS vs SIIGO (Etapa 1).
-8. Guía operativa v2 (frases cambiadas: «confirmo cierre OP ID n», «Revisa materiales OP ID n»).
-9. Hallazgos menores: cuarentena en misma ubicación que disponible; lote interno de
+2. **La importación trae 0 facturas**: usa `updated_start`, que SIIGO ignora. Corrección
+   lista en la rama `siigo-importacion-por-fecha` (consulta por fecha de factura, salta las ya
+   importadas). **Fusionar a main solo cuando 1 esté validado**: al activarla entran de golpe
+   las ventas desde el 05/10.
+3. Ignorar líneas de envío/servicio en la importación.
+4. La revisión de cambios de facturas pendientes solo toma 20 despachos por corrida.
+5. Alertas de factura cambiada después de despachar: sin pantalla.
+6. Reporte stock WMS vs SIIGO (Etapa 1).
+7. Guía operativa v2 (frases cambiadas: «confirmo cierre OP ID n», «Revisa materiales OP ID n»).
+8. Hallazgos menores: cuarentena en misma ubicación que disponible; lote interno de
    cuarentena ilegible; lote demo `DEMO-MAPA-*` como disponible; artículos de suscripción
    en el catálogo; renovar token de sesión del dashboard (hoy cierra a las 8 h).
-10. Limpieza de pruebas del 07/10: OC 64 quedó con proveedor equivocado (3Q demo en vez
+9. Limpieza de pruebas del 07/10: OC 64 quedó con proveedor equivocado (3Q demo en vez
     del NIT del PDF; anular, no se puede editar) y borradores de OC por PDF 84–95 sin descartar.
-11. Probar la lectura con IA con un PDF real de OC emitida en SIIGO (solo hay PDFs de prueba).
+10. Probar la lectura con IA con un PDF real de OC emitida en SIIGO (solo hay PDFs de prueba).
 
 ## Registro (más reciente primero)
 
@@ -60,6 +60,8 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
   Resultado: 24 facturas, 0 pasarían → Pendientes 1–3.
 - Borrador de equivalencias SIIGO→SKU (Excel) para validación del cliente; hallado stock 0
   en casi todos los PT del WMS.
+- Clientes faltantes: la importación los trae de SIIGO al vuelo y reintenta los despachos en
+  borrador (en main). Consulta por fecha en rama aparte, pendiente de fusionar.
 
 ### 2026-10-07 / 08 (otra sesión, Juan y royandi200)
 - PDF de OC por web: proveedor debe coincidir con el NIT, filas con códigos numéricos,

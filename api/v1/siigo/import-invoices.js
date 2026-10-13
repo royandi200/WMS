@@ -13,6 +13,15 @@ const {
   recordInvoiceIssue,
   resolveInvoiceIssue,
 } = require('../../_lib/siigo.invoice-issues');
+const { ensureInvoiceCustomer } = require('../../_lib/siigo.terceros');
+
+async function syncCustomer(invoice) {
+  try {
+    await ensureInvoiceCustomer(invoice);
+  } catch (err) {
+    console.error('[siigo/import-invoices] cliente', invoice?.customer?.identification, err.message);
+  }
+}
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -191,7 +200,7 @@ async function reconcilePending(user, excludedIds = new Set()) {
   const pending = await query(
     `SELECT id, siigo_invoice_id, siigo_invoice_name
      FROM despachos
-     WHERE estado = 'picking' AND siigo_invoice_id IS NOT NULL
+     WHERE estado IN ('picking', 'borrador') AND siigo_invoice_id IS NOT NULL
      ORDER BY creado_en ASC
      LIMIT 20`
   );
@@ -210,6 +219,7 @@ async function reconcilePending(user, excludedIds = new Set()) {
           `Factura ${dispatch.siigo_invoice_name} anulada en SIIGO; reserva liberada`
         ));
       } else {
+        await syncCustomer(invoice);
         results.push(await importInvoice(invoice, user.id));
       }
     } catch (err) {
@@ -356,6 +366,7 @@ async function reconcileCompleted(user, invoiceIds = [], cachedInvoices = new Ma
 async function importAndTrack(invoice, user) {
   try {
     validateSandboxInvoice(invoice);
+    await syncCustomer(invoice);
     const result = await importInvoice(invoice, user.id);
     await resolveInvoiceIssue(invoice.id, { userId: user.id }).catch(() => {});
     return result;
