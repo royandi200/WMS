@@ -45,6 +45,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 9. Hallazgos menores: cuarentena en misma ubicación que disponible; lote interno de
    cuarentena ilegible; lote demo `DEMO-MAPA-*` como disponible; artículos de suscripción
    en el catálogo; renovar token de sesión del dashboard (hoy cierra a las 8 h).
+10. Limpieza de pruebas del 07/10: OC 64 quedó con proveedor equivocado (3Q demo en vez
+    del NIT del PDF; anular, no se puede editar) y borradores de OC por PDF 84–95 sin descartar.
+11. Probar la lectura con IA con un PDF real de OC emitida en SIIGO (solo hay PDFs de prueba).
 
 ## Registro (más reciente primero)
 
