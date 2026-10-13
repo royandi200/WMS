@@ -13,13 +13,21 @@ const {
   recordInvoiceIssue,
   resolveInvoiceIssue,
 } = require('../../_lib/siigo.invoice-issues');
+const { ensureInvoiceCustomer } = require('../../_lib/siigo.terceros');
+
+async function syncCustomer(invoice) {
+  try {
+    await ensureInvoiceCustomer(invoice);
+  } catch (err) {
+    console.error('[siigo/import-invoices] cliente', invoice?.customer?.identification, err.message);
+  }
+}
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
 const PAGE_SIZE = 50;
 const MAX_INCREMENTAL_PAGES = 10;
 const MAX_SANDBOX_PAGES = 3;
-const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
 const COMPLETED_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // Real operation starts on this date; earlier invoices never become dispatches.
 const IMPORT_START_DATE = String(process.env.SIIGO_IMPORT_START_DATE || '2026-10-05').trim();
@@ -48,16 +56,6 @@ function requestedIds(req) {
   return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
 }
 
-function parseSiigoTimestamp(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return NaN;
-  if (/Z$|[+-]\d{2}:?\d{2}$/i.test(raw)) return Date.parse(raw);
-  if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
-    return Date.parse(`${raw}${String(process.env.SIIGO_TIMEZONE_OFFSET || '-05:00')}`);
-  }
-  return Date.parse(raw);
-}
-
 function validateSandboxInvoice(invoice) {
   if (!isSharedSandbox()) return;
   const prefix = testPrefix();
@@ -77,60 +75,53 @@ async function fetchByIds(ids) {
   return invoices;
 }
 
+// SIIGO ignores updated_start on /v1/invoices, so the window is requested by
+// invoice date. It starts two days before the cursor (invoices are sometimes
+// registered with an earlier date) and never before the go-live date. Invoices
+// that already became a dispatch are skipped; changes to them are handled by
+// the pending reconciliation.
+function localDate(ms) {
+  const offset = String(process.env.SIIGO_TIMEZONE_OFFSET || '-05:00');
+  const [, sign, hours, minutes] = offset.match(/([+-])(\d{2}):?(\d{2})/) || [null, '-', '05', '00'];
+  const shift = (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes)) * 60 * 1000;
+  return new Date(ms + shift).toISOString().slice(0, 10);
+}
+
 async function fetchIncremental(since) {
   const sinceMs = Date.parse(since);
   if (!Number.isFinite(sinceMs)) {
     throw Object.assign(new Error('Cursor de facturas invalido'), { status: 400 });
   }
-  const cutoffMs = sinceMs - CURSOR_OVERLAP_MS;
+  const windowStart = localDate(sinceMs - 2 * 24 * 60 * 60 * 1000);
+  const dateStart = windowStart < IMPORT_START_DATE ? IMPORT_START_DATE : windowStart;
+  const dateEnd = localDate(Date.now());
+  const imported = new Set((await query(
+    `SELECT siigo_invoice_id FROM despachos
+      WHERE siigo_invoice_id IS NOT NULL AND creado_en >= DATE_SUB(NOW(), INTERVAL 45 DAY)`
+  )).map(row => String(row.siigo_invoice_id)));
   const invoices = [];
-  let page = 1;
-
   const maxPages = isSharedSandbox() ? MAX_SANDBOX_PAGES : MAX_INCREMENTAL_PAGES;
-  while (page <= maxPages) {
+  for (let page = 1; page <= maxPages; page++) {
     const response = await siigoGet('/v1/invoices', {
-      // The shared sandbox returns zero rows for valid updated_start values.
-      // Read newest pages there and enforce the cursor locally. Production
-      // keeps the documented UTC filter to reduce API traffic.
-      params: {
-        page,
-        page_size: PAGE_SIZE,
-        ...(!isSharedSandbox() ? { updated_start: new Date(cutoffMs).toISOString() } : {}),
-      },
+      params: { date_start: dateStart, date_end: dateEnd, page, page_size: PAGE_SIZE },
       entidad: 'factura_importada',
       logResponse: false,
     });
     const results = response?.results ?? (Array.isArray(response) ? response : []);
     if (!results.length) break;
-
-    let reachedCursor = false;
     for (const summary of results) {
-      const changedMs = parseSiigoTimestamp(
-        summary?.metadata?.last_updated || summary?.metadata?.created || summary?.date || ''
-      );
-      if (!isSharedSandbox() && Number.isFinite(changedMs) && changedMs < cutoffMs) {
-        reachedCursor = true;
-        continue;
-      }
       if (summary?.annulled === true || !summary?.id) continue;
-      if (isBeforeImportStart(summary)) continue;
+      if (isBeforeImportStart(summary) || imported.has(String(summary.id))) continue;
       if (isSharedSandbox()) {
         const codes = (summary.items || []).map(item => String(item.code || '').toUpperCase());
         if (!codes.some(code => code.startsWith(testPrefix()))) continue;
-        if (summary.items?.length && summary.customer) {
-          invoices.push(summary);
-          continue;
-        }
       }
       invoices.push(await siigoGet(`/v1/invoices/${encodeURIComponent(summary.id)}`, {
         entidad: 'factura_importada',
       }));
     }
-
-    if (reachedCursor) break;
     const totalPages = Number(response?.pagination?.total_pages || 0);
     if (results.length < PAGE_SIZE || (totalPages && page >= totalPages)) break;
-    page++;
   }
   return invoices;
 }
@@ -191,7 +182,7 @@ async function reconcilePending(user, excludedIds = new Set()) {
   const pending = await query(
     `SELECT id, siigo_invoice_id, siigo_invoice_name
      FROM despachos
-     WHERE estado = 'picking' AND siigo_invoice_id IS NOT NULL
+     WHERE estado IN ('picking', 'borrador') AND siigo_invoice_id IS NOT NULL
      ORDER BY creado_en ASC
      LIMIT 20`
   );
@@ -210,6 +201,7 @@ async function reconcilePending(user, excludedIds = new Set()) {
           `Factura ${dispatch.siigo_invoice_name} anulada en SIIGO; reserva liberada`
         ));
       } else {
+        await syncCustomer(invoice);
         results.push(await importInvoice(invoice, user.id));
       }
     } catch (err) {
@@ -356,6 +348,7 @@ async function reconcileCompleted(user, invoiceIds = [], cachedInvoices = new Ma
 async function importAndTrack(invoice, user) {
   try {
     validateSandboxInvoice(invoice);
+    await syncCustomer(invoice);
     const result = await importInvoice(invoice, user.id);
     await resolveInvoiceIssue(invoice.id, { userId: user.id }).catch(() => {});
     return result;
