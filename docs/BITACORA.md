@@ -33,6 +33,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
    (`7709771394853XX1`, `S00974`, `127` plan 2 tarros, `env-1` envío…) que nunca han tenido
    lotes; el inventario está en los SKU internos (`00102-PTASH60`…). Falta tabla de
    equivalencias código SIIGO → SKU WMS con factor (X2, planes/combos) validada por el cliente.
+   Borrador enviado a validar el 13/10 (20 códigos: 16 con SKU propuesto, planes 127/128/129
+   por definir, `env-1` ignorar). Además, casi todos los PT del WMS tienen stock 0: falta
+   cargar inventario inicial de producto terminado o las facturas quedarán PENDIENTE_STOCK.
 2. **Clientes no sincronizados** (24/24): el despacho queda en borrador sin reservar y nada
    lo reintenta. Traer el cliente desde SIIGO al importar.
 3. **La importación trae 0 facturas**: usa `updated_start`, que SIIGO ignora (ya visto en
@@ -55,6 +58,8 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Manual de pruebas SIIGO–WMS (doc en Claude Docs).
 - Simulador de facturas reales SIIGO (solo lectura) en Despachos > Novedades SIIGO.
   Resultado: 24 facturas, 0 pasarían → Pendientes 1–3.
+- Borrador de equivalencias SIIGO→SKU (Excel) para validación del cliente; hallado stock 0
+  en casi todos los PT del WMS.
 
 ### 2026-10-07 / 08 (otra sesión, Juan y royandi200)
 - PDF de OC por web: proveedor debe coincidir con el NIT, filas con códigos numéricos,
