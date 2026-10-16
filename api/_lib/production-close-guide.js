@@ -63,8 +63,10 @@ function contextualOrderCandidate(text, hasDraft) {
 }
 
 function fieldMatch(text, before, after) {
-  const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
-    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|eran|fue|son|fueron|quedan|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
+  // «ubicación C2\nNo conforme 0» no significa «2 no conformes».
+  // La cifra que sigue al nombre del campo prevalece sobre una cifra previa.
+  const value = text.match(new RegExp(`${before}\\s*(?:de|a|es|era|eran|fue|son|fueron|quedan|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1]
+    || text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1];
   return quantity(value);
 }
 
@@ -219,6 +221,35 @@ function parseMaterialSegments(text, options = {}) {
     return { producto: productTerm || null, cantidad: quantityMatch ? quantity(quantityMatch[1]) : null,
       lote: lot, motivo: cause, ubicacion: location?.toUpperCase() || null };
   }).filter(item => item.producto || item.cantidad != null || item.lote || item.motivo);
+}
+
+async function expandNamedMaterialList(db, materials, spoken) {
+  if (spoken.length !== 1) return null;
+  const item = spoken[0];
+  // Solo descomponer una enumeración de nombres. No atribuir a todos los
+  // insumos una cantidad, lote, causa o ubicación que el operario no precisó.
+  if (!item.producto || item.cantidad != null || item.lote || item.motivo || item.ubicacion) return null;
+  if (materials.some(row => normalize(row.nombre) === normalize(item.producto)
+    || normalize(row.sku) === normalize(item.producto))) return null;
+  const names = item.producto.split(/\s*,\s*|\s+y\s+/iu).map(name => name.trim()).filter(Boolean);
+  if (names.length < 2) return null;
+  const productIds = materials.map(row => row.producto_id);
+  const distinct = new Set();
+  for (const name of names) {
+    let product;
+    try {
+      product = await resolveProductReference(db, name, {
+        productIds, allowContextualPartial: true, allowScopedApproximate: true,
+      });
+    } catch (error) {
+      if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND' || error.code === 'PRODUCT_REFERENCE_AMBIGUOUS') return null;
+      throw error;
+    }
+    if (!materials.some(row => Number(row.producto_id) === Number(product.id))
+      || distinct.has(Number(product.id))) return null;
+    distinct.add(Number(product.id));
+  }
+  return names.map(producto => ({ producto, cantidad: null, lote: null, motivo: null, ubicacion: null }));
 }
 
 function changedMaterialCandidate(text) {
@@ -927,7 +958,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
   const changedMaterial = changedMaterialCandidate(text);
   const segmentOptions = { allowImplicit: readyForMaterials && !draft.materialPending };
   const spokenSegments = materialTextSegments(text, segmentOptions);
-  const spoken = parseMaterialSegments(text, segmentOptions);
+  let spoken = parseMaterialSegments(text, segmentOptions);
   if (!spoken.length && changedMaterial) spoken.push(changedMaterial);
   if (MATERIAL_START.test(String(text || '')) && !spoken.length && !draft.materialPending) {
     draft.materialPending = { sku: null, producto: null, cantidad: null, lote: null,
@@ -935,11 +966,14 @@ async function applyMaterialReport(db, draft, order, text, params) {
     draft.materialsAnswered = false;
     return;
   }
+  const materials = spoken.length ? await orderMaterials(db, order.id) : [];
+  const expandedList = !changedMaterial && await expandNamedMaterialList(db, materials, spoken);
+  if (expandedList) spoken = expandedList;
   const hasNewMaterial = spoken.length > 0;
   const interpreted = Array.isArray(advance.items) && advance.items.length
     ? advance.items : Array.isArray(params.materiales_repuestos) && params.materiales_repuestos.length
       ? params.materiales_repuestos : [];
-  const incoming = hasNewMaterial && !changedMaterial && interpreted.length === spoken.length
+  const incoming = !expandedList && hasNewMaterial && !changedMaterial && interpreted.length === spoken.length
     ? spoken.map((said, index) => ({ ...interpreted[index],
       producto: said.producto || interpreted[index].producto || interpreted[index].sku,
       cantidad: said.cantidad ?? interpreted[index].cantidad,
@@ -953,7 +987,6 @@ async function applyMaterialReport(db, draft, order, text, params) {
       })(),
       ubicacion: said.ubicacion || groundedLocationHint(spokenSegments[index] || '', interpreted[index].ubicacion),
     })) : spoken;
-  const materials = incoming.length ? await orderMaterials(db, order.id) : [];
   const pendingBeforeMessage = draft.materialPending;
   for (const item of incoming) {
     const productTerm = String(item.producto || item.sku || item.id_item || '').trim();
@@ -1026,7 +1059,9 @@ async function applyMaterialReport(db, draft, order, text, params) {
   }
   if (!incoming.length && draft.materialPending) {
     const followup = materialFollowup(text);
-    const standaloneQuantity = quantity(text);
+    const standaloneQuantity = quantity(text)
+      ?? quantity(new RegExp(`^${NUMBER}\\s*(?:und|unidad(?:es)?|uds?|g|gramos?)\\.?$`, 'u')
+        .exec(normalize(text))?.[1]);
     if (standaloneQuantity != null && draft.materialPending.cantidad == null) {
       if (standaloneQuantity <= 0) throw guideError('La cantidad de material repuesto debe ser mayor que cero.');
       if (Math.abs(standaloneQuantity * 1000 - Math.round(standaloneQuantity * 1000)) > 0.000001
