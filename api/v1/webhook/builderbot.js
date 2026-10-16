@@ -98,6 +98,8 @@ const { CAPABILITIES, capabilityForAction, hasCapability } = require('../../_lib
 const { loadUserRolesFromConnection } = require('../../_lib/user-roles');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { confirmOutsourcingShipment } = require('../../_lib/outsourcing-workflow');
+const { advanceDispatchPackaging, pendingDispatchPackagingDraft,
+  clearDispatchPackagingDraft } = require('../../_lib/dispatch-packaging-guide');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
 const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document-message-policy');
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
@@ -1667,6 +1669,18 @@ module.exports = async (req, res) => {
         console.log(`[webhook] Documento recuperado por texto nativo: "${action}" → "${recoveredDocument.action}"`);
         action = recoveredDocument.action;
         params = recoveredDocument.params;
+      }
+    }
+
+    // Un borrador de despacho pendiente tiene prioridad sobre los extractores
+    // genéricos de producción: «0 cajas y 0 tapas» pertenece al embalaje.
+    if (rawText && hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.DISPATCH_CONFIRM)
+      && ['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_DESPACHO_SIIGO',
+        'CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA'].includes(action)) {
+      const packagingDraft = await pendingDispatchPackagingDraft(db, user.id);
+      if (packagingDraft && /\b(?:cajas?|tapas?|opci[oó]n|embalaje|despacho|borrador)\b|^\s*\d+\s*$/iu.test(rawText)) {
+        action = 'CONFIRMAR_DESPACHO_SIIGO';
+        params = {};
       }
     }
 
@@ -3572,22 +3586,30 @@ module.exports = async (req, res) => {
 
       case 'CONFIRMAR_DESPACHO_SIIGO': {
         const dispatchText = currentText(rawBody, info);
-        const dispatchInput = dispatchConfirmationInput(dispatchText, params);
-        const typedOutsourcing = dispatchText.match(/\b(?:DSP\s+)?ID\s+3Q-(\d+)\b/i);
-        const parameterReference = String(params.despacho_id || params.id_despacho || '').trim();
-        const parameterOutsourcing = parameterReference.match(/^(?:DSP\s+ID\s+)?3Q-(\d+)$/i);
-        if (typedOutsourcing && parameterOutsourcing
-            && Number(typedOutsourcing[1]) !== Number(parameterOutsourcing[1])) {
-          throw { status: 409, message: 'La referencia del despacho 3Q no coincide con el mensaje. No se modificó inventario.' };
-        }
-        const outsourcingShipmentId = typedOutsourcing?.[1] || parameterOutsourcing?.[1];
-        if (outsourcingShipmentId) {
-          if (dispatchInput.expectedQuantity != null) {
-            throw { status: 409, message: 'Confirma el despacho 3Q completo usando solo su ID, sin indicar cantidades. No se modifico inventario.' };
+        const existingPackaging = await pendingDispatchPackagingDraft(db, user.id);
+        if (!existingPackaging) {
+          const dispatchInput = dispatchConfirmationInput(dispatchText, params);
+          if (/\bID\s+3Q-\d+\b/iu.test(dispatchText) && dispatchInput.expectedQuantity != null) {
+            throw { status: 409, message: 'La salida 3Q debe confirmarse completa, sin modificar la cantidad de materiales enviados.' };
           }
+          params = { ...params, ...dispatchInput };
+        }
+        const guided = await advanceDispatchPackaging({ db, userId: user.id,
+          rawText: dispatchText, params });
+        if (guided.message) {
+          mensaje = guided.message;
+          break;
+        }
+        dispatchConfirmationInput(dispatchText, {});
+        if (guided.type === 'MAQUILA_3Q') {
+          const outsourcingShipmentId = guided.referenceId;
           const shipment = await confirmOutsourcingShipment({
-            shipmentId: Number(outsourcingShipmentId),
+            shipmentId: outsourcingShipmentId,
             userId: user.id,
+            packaging: guided.packaging,
+          });
+          await clearDispatchPackagingDraft(db, user.id).catch(error => {
+            console.error(`[webhook] Despacho 3Q confirmado; no se pudo limpiar borrador de embalaje: ${error.message}`);
           });
           mensaje = shipment.already_confirmed
             ? [
@@ -3611,15 +3633,22 @@ module.exports = async (req, res) => {
                   `   Lote: ${item.lote}`,
                   `   Ubicación de origen: ${item.ubicacion_origen}`,
                 ]),
+                '', '*Embalaje consumido*',
+                ...(shipment.embalaje?.length
+                  ? shipment.embalaje.map(item => `• ${item.nombre} (${item.sku}): ${item.cantidad} und | lote ${item.lote}`)
+                  : ['• Sin cajas ni tapas']),
               ].join('\n');
           responseContext.dispatch = { ...shipment, dispatch_id: `3Q-${outsourcingShipmentId}` };
           break;
         }
         const dispatchResult = await confirmImportedDispatch({
-          dispatchId: params.despacho_id || params.id_despacho,
-          invoiceId: params.siigo_invoice_id || params.id_factura,
+          dispatchId: guided.referenceId,
           userId: user.id,
-          ...dispatchInput,
+          expectedQuantity: guided.expectedQuantity,
+          packaging: guided.packaging,
+        });
+        await clearDispatchPackagingDraft(db, user.id).catch(error => {
+          console.error(`[webhook] Despacho Siigo confirmado; no se pudo limpiar borrador de embalaje: ${error.message}`);
         });
         const lots = (dispatchResult.lotes || []).flatMap((item, index) => [
           `${index + 1}. *${item.sku}*`,
@@ -3642,6 +3671,10 @@ module.exports = async (req, res) => {
               '',
               '*Productos despachados*',
               ...lots,
+              '', '*Embalaje consumido*',
+              ...(dispatchResult.embalaje?.length
+                ? dispatchResult.embalaje.map(item => `• ${item.nombre} (${item.sku}): ${item.cantidad} und | lote ${item.lote}`)
+                : ['• Sin cajas ni tapas']),
             ].join('\n');
         responseContext.dispatch = dispatchResult;
         break;

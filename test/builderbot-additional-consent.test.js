@@ -11,7 +11,10 @@ function harness({ operationError, role = 'admin' } = {}) {
   const calls = [];
   const baseReads = [];
   const logged = [];
+  const guideTexts = [];
+  const errors = [];
   let inboxId = 1;
+  let packagingDraft = null;
   const filename = path.resolve(__dirname, '../api/v1/webhook/builderbot.js');
   const nativeRequire = createRequire(filename);
   const db = {
@@ -74,6 +77,28 @@ function harness({ operationError, role = 'admin' } = {}) {
     },
   };
   const mocks = {
+    '../../_lib/dispatch-packaging-guide': {
+      pendingDispatchPackagingDraft: async () => packagingDraft,
+      clearDispatchPackagingDraft: async () => { packagingDraft = null; },
+      advanceDispatchPackaging: async ({ rawText, params }) => {
+        guideTexts.push(rawText);
+        if (!packagingDraft) {
+          const typed = rawText.match(/ID\s+(3Q-)?(\d+)/iu);
+          packagingDraft = { type: typed?.[1] ? 'MAQUILA_3Q' : 'SIIGO',
+            referenceId: Number(typed?.[2] || params.id_despacho),
+            expectedQuantity: params.expectedQuantity ?? null, reviewed: false };
+          return { message: 'Indica cajas y tapas usadas.' };
+        }
+        if (/0 cajas y 0 tapas/iu.test(rawText)) {
+          packagingDraft.reviewed = true;
+          return { message: 'Revisa el embalaje; confirmo despacho ID.' };
+        }
+        if (!packagingDraft.reviewed) return { message: 'Indica cajas y tapas usadas.' };
+        return { type: packagingDraft.type, referenceId: packagingDraft.referenceId,
+          expectedQuantity: packagingDraft.expectedQuantity,
+          packaging: { boxesDeclared: true, lidsDeclared: true, lines: [] } };
+      },
+    },
     '../../_lib/builderbot-guided-reception': {
       ...nativeRequire('../../_lib/builderbot-guided-reception'),
       advanceGuidedReception: async input => {
@@ -141,9 +166,9 @@ function harness({ operationError, role = 'admin' } = {}) {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
     module, exports: module.exports, require: name => mocks[name] || nativeRequire(name),
-    process: { env: {} }, console: { log() {}, warn() {}, error() {} }, Buffer,
+    process: { env: {} }, console: { log() {}, warn() {}, error(...args) { errors.push(args.map(String).join(' ')); } }, Buffer,
   }, { filename });
-  return { calls, baseReads, seedLog(action, text, message) {
+  return { calls, baseReads, guideTexts, errors, seedLog(action, text, message) {
     logged.push({ action, status: 'PROCESSED',
       payload: JSON.stringify({ from: 'QA-ACTOR', info: { '@ction': action, body: text, text, query: text, params: {} } }),
       response: JSON.stringify({ ok: true, message, mensaje: message, context: {} }) });
@@ -165,9 +190,14 @@ test('N1-05 real webhook: partial intent never reaches dispatch; complete confir
   assert.equal(h.calls.length, 0);
   const complete = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60.', { id_despacho: 60 });
   assert.equal(complete.ok, true, complete.mensaje);
-  assert.equal(h.calls.length, 1);
-  await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60 con 2 unidades.', { id_despacho: 60 });
-  assert.equal(h.calls[1].expectedQuantity, 2);
+  assert.match(complete.mensaje, /Indica cajas y tapas/u);
+  assert.equal(h.calls.length, 0);
+  const packaging = await h.send('MODO_CHARLA', '0 cajas y 0 tapas', {});
+  assert.match(packaging.mensaje, /Revisa el embalaje/u, JSON.stringify({ packaging, guideTexts: h.guideTexts, errors: h.errors }));
+  const finalized = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'confirmo despacho ID 60', {});
+  assert.equal(finalized.ok, true, finalized.mensaje);
+  assert.equal(h.calls.length, 1, JSON.stringify(h.guideTexts));
+  assert.equal(h.calls[0].packaging.boxesDeclared, true);
 });
 
 test('production destination reply carries only the latest asked product and quantity', async () => {
@@ -354,7 +384,11 @@ test('WhatsApp lists and confirms a pending 3Q dispatch through its typed ID', a
   assert.match(pending.mensaje, /\*Siguiente paso\*\n\nEscribe: confirma el despacho \*ID 3Q-17\*\./u);
   assert.equal(h.calls.length, 0);
 
-  const confirmed = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 3Q-17.', { id_despacho: 17 });
+  const prepared = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 3Q-17.', { id_despacho: 17 });
+  assert.match(prepared.mensaje, /Indica cajas y tapas/u);
+  const packaging = await h.send('MODO_CHARLA', '0 cajas y 0 tapas', {});
+  assert.match(packaging.mensaje, /Revisa el embalaje/u, JSON.stringify({ packaging, guideTexts: h.guideTexts, errors: h.errors }));
+  const confirmed = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'confirmo despacho ID 3Q-17', {});
   assert.equal(confirmed.ok, true, confirmed.mensaje);
   assert.match(confirmed.mensaje, /Salida a maquila 3Q confirmada/u);
   assert.match(confirmed.mensaje, /Despacho: \*DSP ID 3Q-17\* \| REM-3Q-20260910-000017/u);
