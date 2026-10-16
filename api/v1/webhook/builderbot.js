@@ -1772,7 +1772,8 @@ module.exports = async (req, res) => {
       }
     }
     if (!selectedPreparationReference && skuReviewReply(rawText)
-      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC',
+        'CERRAR_ORDEN_PRODUCCION', 'CONFIRMAR_MATERIALES_PRODUCCION', 'REPORTE_MERMA'].includes(action)
       && await hasPendingSkuReview(db, user.id, from)
       && await hasRecentReceptionContext(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';

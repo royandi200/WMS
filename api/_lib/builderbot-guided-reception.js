@@ -31,11 +31,17 @@ function currentMessageText(rawText) {
 }
 
 function skuReviewReply(rawText) {
-  const text = currentMessageText(rawText).trim().normalize('NFD')
+  const utterance = currentMessageText(rawText).trim();
+  const text = utterance.normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toUpperCase()
     .replace(/[.!?]+$/u, '').replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  if (/^(?:SIM|SI+(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO|TODO CORRECTO|PERFECTO|ESTA PERFECTO|DE ACUERDO|OK|OKAY)$/u.test(text)) return 'YES';
-  if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO ES CORRECTO|ESTA MAL)$/u.test(text)) return 'NO';
+  // A question or a compound correction is not approval of the entire SKU.
+  if (/[¿?]/u.test(utterance)) return null;
+  const affirmative = /^(?:SIM|SI+|CLARO|CORRECTO|EXACTO|PERFECTO|DE ACUERDO|OK|OKAY)$/u;
+  const clearStatement = /^(?:CORRECTO|EXACTO|PERFECTO|ASI ES|ESTA BIEN ASI|TODO (?:CORRECTO|BIEN|PERFECTO)|(?:ES|ESTA) (?:CORRECT[OA]|BIEN|PERFECT[OA])|(?:ESO|ESTO|TODO|ASI) (?:ES|ESTA) (?:CORRECT[OA]|BIEN|PERFECT[OA])|LOS DATOS (?:ESTAN|SON) (?:CORRECTOS|BIEN)|(?:EL SKU|EL PRODUCTO|LO REGISTRADO) (?:ES|ESTA) (?:CORRECTO|BIEN)|(?:LA INFORMACION|LA RECEPCION) (?:ES|ESTA) (?:CORRECTA|BIEN)|REVISADO Y CORRECTO)$/u;
+  const withoutAffirmation = text.replace(/^(?:SIM|SI+|CLARO|DE ACUERDO|OK|OKAY)\s+/u, '');
+  if (affirmative.test(text) || clearStatement.test(withoutAffirmation)) return 'YES';
+  if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO (?:ES|ESTA) CORRECT[OA]|ESTA MAL)$/u.test(text)) return 'NO';
   return null;
 }
 
@@ -704,7 +710,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),
       entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-      '¿Están correctas las partidas de este SKU? Responde «sí», «correcto» o «perfecto» para continuar. Si hay un error, di por ejemplo «corrección, cantidad de la partida 2 es 4»; el total se recalculará. Verifica también el motivo de cada partida bloqueada y el de la diferencia frente a la OC.',
+      '¿Están correctas las partidas de este SKU? Puedes responder de forma natural, por ejemplo «sí» o «es correcto». Si hay un error, di por ejemplo «corrección, cantidad de la partida 2 es 4»; el total se recalculará. Verifica también el motivo de cada partida bloqueada y el de la diferencia frente a la OC.',
       'Este paso no confirma la recepción ni modifica inventario.',
     ].filter(Boolean).join('\n');
   }
@@ -725,7 +731,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
     `Vencimiento: ${entry.fecha_vencimiento || prepared.fecha_vencimiento_documento}${expiryFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
     entry.motivo ? `Motivo de condición: ${entry.motivo}.` : null,
     entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-    '¿Está correcto este SKU? Responde «sí», «correcto» o «perfecto» para continuar, o dime qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
+    '¿Está correcto este SKU? Puedes responder de forma natural, por ejemplo «sí» o «es correcto», o decirme qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
     'Este paso no confirma la recepción ni modifica inventario.',
   ].filter(Boolean).join('\n');
 }

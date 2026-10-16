@@ -761,15 +761,24 @@ test('a bare yes is scoped to a stored SKU review, not final inventory confirmat
   assert.equal(skuReviewReply('sim.'), 'YES');
   assert.equal(skuReviewReply('Sí, todo está bien'), 'YES');
   for (const reply of ['sii', 'síííí', 'correcto', 'todo está bien', 'perfecto',
-    'está perfecto', 'todo correcto', 'de acuerdo', 'ok']) {
+    'está perfecto', 'todo correcto', 'de acuerdo', 'ok', 'es correcto',
+    'sí, es correcto', 'claro, está correcto', 'todo está correcto',
+    'así está bien', 'está bien así', 'eso es correcto', 'el SKU es correcto',
+    'los datos están correctos', 'los datos están bien', 'todo es correcto',
+    'así es correcto', 'la información es correcta', 'revisado y correcto']) {
     assert.equal(skuReviewReply(reply), 'YES', reply);
   }
   assert.equal(skuReviewReply('No'), 'NO');
   assert.equal(skuReviewReply('No está bien'), 'NO');
+  assert.equal(skuReviewReply('No está correcto'), 'NO');
   assert.equal(skuReviewReply('Sí, pero cambia la cantidad'), null);
   assert.equal(skuReviewReply('similar'), null);
   assert.equal(skuReviewReply('sim, cambia la cantidad'), null);
   assert.equal(skuReviewReply('perfecto, pero cambia la ubicación'), null);
+  assert.equal(skuReviewReply('es correcto, pero cambia el lote'), null);
+  assert.equal(skuReviewReply('sí, es correcto aunque falta la ubicación'), null);
+  assert.equal(skuReviewReply('¿es correcto?'), null);
+  assert.equal(skuReviewReply('es correcto el lote, falta la ubicación'), null);
   assert.equal(skuReviewReply('Confirmo la recepción OC ID 37'), null);
   const echoedYes = 'Sí\n{name}="Juan Esteban"\n[Friday, September 25, 2026 12:16:03]: Sí';
   assert.equal(skuReviewReply(echoedYes), 'YES');
@@ -786,7 +795,8 @@ test('a bare yes is scoped to a stored SKU review, not final inventory confirmat
 });
 
 test('positive SKU replies only advance the draft and never confirm inventory', async () => {
-  for (const reply of ['sim', 'siiii', 'correcto', 'todo está bien', 'perfecto']) {
+  for (const reply of ['sim', 'siiii', 'correcto', 'es correcto', 'sí, es correcto',
+    'todo está bien', 'perfecto']) {
     const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
     const user = { id: 5 };
     await advanceGuidedReception({ db, user, rawText: 'OC ID 37: dos tapas disponibles en A8',

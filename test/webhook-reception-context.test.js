@@ -136,13 +136,19 @@ test('an explicit OC correction recovers after the last reply was about producti
   assert.equal(routed.params.id_orden, undefined);
 });
 
-test('perfecto resumes only the most recent SKU review', async () => {
-  for (const [recent, shouldResume] of [[true, true], [false, false]]) {
+test('clear natural affirmations resume only the most recent SKU review', async () => {
+  for (const [text, action, recent, shouldResume] of [
+    ['perfecto', 'MODO_CHARLA', true, true],
+    ['es correcto', 'MODO_CHARLA', true, true],
+    ['sí, es correcto', 'CERRAR_ORDEN_PRODUCCION', true, true],
+    ['es correcto, pero cambia el lote', 'MODO_CHARLA', true, false],
+    ['es correcto', 'MODO_CHARLA', false, false],
+  ]) {
     recentReception = recent;
     routed = null;
     const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
-      body: { from: '573150000059', body: 'perfecto',
-        info: { '@ction': 'MODO_CHARLA', body: 'perfecto', params: {} } } };
+      body: { from: '573150000059', body: text,
+        info: { '@ction': action, body: text, params: {} } } };
     const res = { statusCode: 200, body: null, setHeader() {},
       status(code) { this.statusCode = code; return this; },
       json(body) { this.body = body; return this; }, end() { return this; } };
