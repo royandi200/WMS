@@ -54,6 +54,20 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Registro (más reciente primero)
 
+### 2026-10-20
+- Formato enviado a la persona de Sysplus (según el usuario; pendiente su respuesta).
+- Revisión de la bitácora: faltaban los commits del 14–16/10 (abajo). La sesión de Juan
+  no está aplicando la regla de `CLAUDE.md`.
+
+### 2026-10-14 / 16 (Juan)
+- Embalaje separado en despachos SIIGO y 3Q: el operario declara cajas y tapas de caja
+  máster al confirmar; se descuentan por lote (`database/42_dispatch_packaging.sql`,
+  migración manual `scripts/apply-dispatch-packaging-migration.js`; sin confirmar si ya
+  se aplicó en producción). Sin declarar embalaje, el despacho funciona como antes.
+- Cierre de OP: «0 no conformes» y listas de materiales por nombre.
+- Recepción guiada: afirmaciones naturales al revisar SKU.
+- Webhook BuilderBot: usa el mensaje actual cuando BuilderBot repite texto con hora.
+
 ### 2026-10-13
 - Manual de pruebas SIIGO–WMS (doc en Claude Docs).
 - Simulador de facturas reales SIIGO (solo lectura) en Despachos > Novedades SIIGO.
