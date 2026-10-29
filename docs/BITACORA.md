@@ -54,6 +54,12 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Registro (más reciente primero)
 
+### 2026-10-29
+- Guía de pruebas SIIGO con contabilidad (`docs/WMS_Guia_Pruebas_SIIGO_Contabilidad_2026-10-29.pdf`):
+  5 pruebas posibles hoy (lectura de ventas con el simulador, validar equivalencias,
+  productos, OC en PDF de SIIGO, stock WMS vs SIIGO) y fase 2 venta→despacho con requisitos.
+- Equivalencias SIIGO→SKU siguen sin respuesta del cliente (el Excel volvió vacío el 16/10).
+
 ### 2026-10-20
 - Formato enviado a la persona de Sysplus (según el usuario; pendiente su respuesta).
 - Revisión de la bitácora: faltaban los commits del 14–16/10 (abajo). La sesión de Juan
