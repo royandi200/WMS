@@ -6,6 +6,7 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Estado actual (2026-10-13)
 
+- Prueba de publicación GitHub → Vercel iniciada el 03/11 con un cambio cosmético en el pie del menú.
 - En producción (`wms-seven-ebon.vercel.app`) desde el 05/10. Agente WhatsApp operativo.
 - **Integración SIIGO de ventas: NO está pasando ninguna factura real al WMS.** El
   simulador (Despachos > Novedades SIIGO) encontró 24 facturas del 05 al 13/10: 0
@@ -29,6 +30,7 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Pendientes (en orden)
 
+0. Confirmar que el cambio cosmético de prueba llega a `main` y aparece en el despliegue de Vercel.
 1. **Códigos SIIGO ≠ SKU del WMS.** Las facturas usan códigos de SIIGO/Shopify
    (`7709771394853XX1`, `S00974`, `127` plan 2 tarros, `env-1` envío…) que nunca han tenido
    lotes; el inventario está en los SKU internos (`00102-PTASH60`…). Falta tabla de
@@ -53,6 +55,10 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 10. Probar la lectura con IA con un PDF real de OC emitida en SIIGO (solo hay PDFs de prueba).
 
 ## Registro (más reciente primero)
+
+### 2026-11-03
+- Se preparó una prueba de publicación con un cambio solo tipográfico en el pie del menú lateral; no altera flujos ni inventario.
+- Se verificará el commit en `main` y la publicación de Vercel antes de continuar con ajustes funcionales.
 
 ### 2026-10-29
 - Guía de pruebas SIIGO con contabilidad (`docs/WMS_Guia_Pruebas_SIIGO_Contabilidad_2026-10-29.pdf`):
