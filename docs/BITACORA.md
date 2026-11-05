@@ -73,6 +73,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Lector sin IA de OC SIIGO probado con 5 OC reales (349, 351–354): lee la tabla en el orden
   del PDF; propone SKU solo si el tipo coincide (funda/etiqueta/tapa/goma) y es claro. 349
   (fundas NAPS) y 353 (tampografía, servicio) no tienen producto en el WMS: se avisan.
+- Productos: el catálogo NO se sincroniza solo desde SIIGO (se cargó del Excel del cliente).
+  Botón «Traer productos nuevos de SIIGO» (admin, Catálogos > Productos): solo agrega
+  productos faltantes; no toca los existentes (la sync completa sobrescribe activo/stock).
 - Manual de validación para la persona de SIIGO (Claude Docs): parte A de lectura, posible hoy;
   parte B venta→despacho, tras activar la integración.
 - Rosa aclaró `527667` (FE 17775, PriceSmart): fueron 4.536 tarros de Ashwagandha x120 →
