@@ -166,47 +166,58 @@ function recoverSiigoPurchaseOrderHeaders(body, text) {
 
 module.exports = { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders };
 
-// Deterministic fallback for SIIGO OC item tables (used when the AI reader is
-// unavailable). Rows start with "description<TAB>quantity"; continuation lines
-// carry the rest of the description. The SKU is matched by shared name words.
-const STOP_WORDS = new Set(['DE', 'Y', 'LA', 'EL', 'CON', 'X', 'POR', 'PARA']);
+// Deterministic reader for SIIGO OC item tables (no AI). PDF.js returns the
+// table cells in reading order: index, description (1+ cells), quantity,
+// unit price, discount, tax %, withholding %, total. A SKU is proposed only when
+// the product type matches (FUNDA, ETIQUETA, TAPA...) and the match is clear.
+const STOP_WORDS = new Set(['DE', 'Y', 'LA', 'EL', 'CON', 'X', 'POR', 'PARA', 'UND', 'UNIDADES', 'SEGUN', 'A', 'UNA']);
+const TYPE_WORDS = new Set(['GOMA', 'FUNDA', 'ETIQUETA', 'TAPA', 'CAJA', 'TARRO', 'LINER', 'FRASCO', 'BOLSA', 'PRODUCTO']);
 
 function nameWords(value) {
-  return new Set(normalizeMarkerText(value).split(/[^A-Z0-9]+/u)
+  const text = normalizeMarkerText(value)
+    .replace(/\bLB\b/gu, 'LINEA BLANCA')
+    .replace(/\bMATERIA PRIMA\b/gu, 'GOMAS')
+    .replace(/\bX\s*(\d+)/gu, 'X$1');
+  return text.split(/[^A-Z0-9]+/u)
     .filter((word) => word.length > 1 && !STOP_WORDS.has(word))
-    .map((word) => (word.length > 3 ? word.replace(/S$/u, '') : word)));
+    .map((word) => (word.length > 3 && !/\d/u.test(word) ? word.replace(/S$/u, '') : word));
 }
 
-function siigoPurchaseOrderItems(text, products = []) {
-  const lines = String(text || '').split(/\r?\n/);
-  const start = lines.findIndex((line) => /^Unitario\t/u.test(line) || /^[ÍI]tem\tDescripci/u.test(line));
-  const end = lines.findIndex((line, index) => index > start && /^Total Bruto/u.test(line));
-  if (start < 0 || end < 0) return [];
-  const isNumber = (cell) => /^-?[\d.,]+\s*%?$/u.test(cell.trim());
+function matchCatalog(description, products) {
+  const wanted = nameWords(description);
+  const wantedType = wanted.find((word) => TYPE_WORDS.has(word)) || null;
+  const scored = products.map((product) => {
+    const words = nameWords(product.nombre);
+    const type = words.find((word) => TYPE_WORDS.has(word)) || null;
+    if (wantedType && type !== wantedType) return null;
+    const shared = wanted.filter((word) => !TYPE_WORDS.has(word) && words.includes(word));
+    return shared.length ? { sku: String(product.siigo_code), score: shared.length, extra: words.length - shared.length } : null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score || a.extra - b.extra);
+  if (!scored.length) return {};
+  const top = scored.filter((entry) => entry.score === scored[0].score);
+  // Without a type word, demand two shared words; never pick among 3+ equals.
+  if ((!wantedType && scored[0].score < 2) || top.length > 2) return { candidatos: top.slice(0, 4).map((e) => e.sku) };
+  return { sku: top[0].sku, alternativas: scored.slice(1, 3).map((entry) => entry.sku) };
+}
+
+function siigoPurchaseOrderItems(tokens = [], products = []) {
+  const cells = tokens.map((token) => String(typeof token === 'object' && token ? token.text : token).trim()).filter(Boolean);
+  const start = cells.findIndex((cell) => cell === 'Vr. Total');
+  if (start < 0) return [];
+  const isNumber = (cell) => /^-?\d[\d.,]*$/u.test(cell);
   const rows = [];
-  for (const line of lines.slice(start + 1, end)) {
-    if (/^(Unitario|[ÍI]tem)\t/u.test(line)) continue;
-    const cells = line.split('\t').map((cell) => cell.trim()).filter(Boolean);
-    if (!cells.length || cells.every(isNumber)) continue;
-    const textCells = cells.filter((cell) => !isNumber(cell));
-    const quantityCell = cells.find((cell, index) => index > 0 && isNumber(cell) && !cell.includes('%'));
-    if (quantityCell && !isNumber(cells[0])) {
-      const quantity = Number(quantityCell.replace(/,/gu, ''));
-      if (Number.isFinite(quantity) && quantity > 0) rows.push({ descripcion: textCells.join(' '), cantidad: quantity });
-    } else if (rows.length) {
-      rows[rows.length - 1].descripcion = `${rows[rows.length - 1].descripcion} ${textCells.join(' ')}`.trim();
-    }
+  let i = start + 1;
+  while (i < cells.length && /^\d{1,3}$/u.test(cells[i])) {
+    const description = [];
+    i += 1;
+    while (i < cells.length && !isNumber(cells[i])) description.push(cells[i++]);
+    const quantity = Number(String(cells[i] || '').replace(/,/gu, ''));
+    if (!description.length || !Number.isFinite(quantity) || quantity <= 0) break;
+    rows.push({ descripcion: description.join(' '), cantidad: quantity });
+    i += 1;
+    while (i < cells.length && !/^\d{1,3}$/u.test(cells[i]) && (isNumber(cells[i]) || /%$/u.test(cells[i]))) i += 1;
   }
-  return rows.map((row) => {
-    const wanted = nameWords(row.descripcion);
-    const scored = products.map((product) => {
-      const words = nameWords(product.nombre);
-      return { sku: String(product.siigo_code), score: [...wanted].filter((word) => words.has(word)).length };
-    }).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
-    if (!scored.length) return { ...row };
-    const close = scored.filter((entry) => entry.score >= scored[0].score - 0).slice(1, 4).map((entry) => entry.sku);
-    return { ...row, sku: scored[0].sku, alternativas: close };
-  });
+  return rows.map((row) => ({ ...row, ...matchCatalog(row.descripcion, products) }));
 }
 
 module.exports.siigoPurchaseOrderItems = siigoPurchaseOrderItems;

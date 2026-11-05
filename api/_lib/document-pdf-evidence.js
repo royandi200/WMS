@@ -5,10 +5,10 @@ const { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders, siigoPurch
 
 // SIIGO OC PDFs interleave buyer and supplier names; take the name from terceros by NIT.
 // When neither the AI nor the SKU-code reader found rows, read SIIGO's own table.
-function withSiigoFallbackItems(body, text, products) {
+function withSiigoFallbackItems(body, tokens, products) {
   const target = body?.params && typeof body.params === 'object' ? body.params : body;
   if (Array.isArray(target?.items) && target.items.length) return body;
-  const rows = siigoPurchaseOrderItems(text, products);
+  const rows = siigoPurchaseOrderItems(tokens, products);
   if (!rows.length) return body;
   const matched = rows.filter((row) => row.sku);
   const warnings = [];
@@ -18,7 +18,7 @@ function withSiigoFallbackItems(body, text, products) {
   }
   const unmatched = rows.filter((row) => !row.sku);
   if (unmatched.length) {
-    warnings.push(`Filas sin SKU reconocible en el catalogo: ${unmatched.map((row) => `«${row.descripcion}» (${row.cantidad})`).join('; ')}.`);
+    warnings.push(`Filas sin producto equivalente en el WMS (no se cargaron): ${unmatched.map((row) => `«${row.descripcion}» x ${row.cantidad}${row.candidatos?.length ? ` (posibles: ${row.candidatos.join(', ')})` : ''}`).join('; ')}. Crea o sincroniza el producto en el WMS si se debe recibir en bodega.`);
   }
   const updated = {
     ...target,
@@ -84,7 +84,7 @@ async function nativePdfEvidence(db, document, body) {
     let finalBody = recoverWarehousePdfHeaders(
       recoverSiigoPurchaseOrderHeaders(recoveredBody, extracted.text), extracted.text
     );
-    finalBody = withSiigoFallbackItems(finalBody, extracted.text, products);
+    finalBody = withSiigoFallbackItems(finalBody, extracted.tokens, products);
     stage = 'SUPPLIER_LOOKUP_FAILED';
     finalBody = await supplierNameByTaxId(db, finalBody, extracted.text);
     const unmatched = unmatchedTableRowCodes(extracted.text, products);

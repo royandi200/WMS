@@ -423,6 +423,8 @@ function evidenceIncludesQuantity(evidence, quantity) {
     String(number).replace('.', ','),
     number.toLocaleString('en-US', { maximumFractionDigits: 4 }),
     number.toLocaleString('es-CO', { maximumFractionDigits: 4 }),
+    // SIIGO prints quantities with two decimals: 3,000.00
+    number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }),
   ]);
   return [...forms].some((form) => {
     const escaped = escapeRegExp(form.toUpperCase());

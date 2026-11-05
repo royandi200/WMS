@@ -111,17 +111,20 @@ test('SIIGO purchase order headers are recovered from the printed layout', () =>
   assert.equal(result.proveedor_nit, '901.600.946-5');
 });
 
-test('SIIGO purchase order rows are read without AI and matched by name', () => {
+test('SIIGO purchase order rows are read without AI and matched only when clear', () => {
   const { siigoPurchaseOrderItems } = require('../api/_lib/document-pdf-headers');
-  const text = 'Ítem\tDescripción\tCantidad\tVr. Total\nUnitario\tdesc.\tCargo\tRete.\nGOMA DE GELATINA - CREATINA, FOS Y\t90,000.00\t19 %\t2,5 %\n193.00\t0.00\t20,236,050.00\n1\nPROBIOTICOS\nTotal Bruto\t17,370,000.00\n';
-  const items = siigoPurchaseOrderItems(text, [
-    { siigo_code: '00052-MPCG', nombre: 'GOMAS CREAGUMS - CREATINA CREAPURE' },
-    { siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' },
-    { siigo_code: '00001-TPBI', nombre: 'TAPA BLANCA' },
+  const tokens = ['Ítem', 'Descripción', 'Vr. Total',
+    '1', 'ETIQUETA ASHWAGANDHA LB X80', '3,000.00', '458.00', '0.00', '19 %', '2,5 %', '1,600,710.00',
+    '2', 'FUNDA NAPS', 'VINAGRE', '1,000.00', '990.00', '0.00', '19 %', '2,5 %', '1,153,350.00',
+    'Observaciones:', 'Total Bruto'];
+  const items = siigoPurchaseOrderItems(tokens, [
+    { siigo_code: '00031-ETLBASH', nombre: 'ETIQUETA AZUL ASHWAGANDHA LINEA BLANCA x 60' },
+    { siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA x 60' },
+    { siigo_code: '00009-ETVM60', nombre: 'ETIQUETA VINAGRE DE MANZANA x 60' },
+    { siigo_code: '000-34FLB', nombre: 'FUNDAS LINEA BLANCA' },
   ]);
-  assert.equal(items.length, 1);
-  assert.equal(items[0].descripcion, 'GOMA DE GELATINA - CREATINA, FOS Y PROBIOTICOS');
-  assert.equal(items[0].cantidad, 90000);
-  assert.ok(['00052-MPCG', '00050-MPRO'].includes(items[0].sku));
-  assert.equal(items[0].alternativas.length, 1);
+  assert.deepEqual(items.map((item) => [item.cantidad, item.sku, item.descripcion]), [
+    [3000, '00031-ETLBASH', 'ETIQUETA ASHWAGANDHA LB X80'],
+    [1000, undefined, 'FUNDA NAPS VINAGRE'],
+  ]);
 });
