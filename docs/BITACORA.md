@@ -52,9 +52,21 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
    en el catálogo; renovar token de sesión del dashboard (hoy cierra a las 8 h).
 9. Limpieza de pruebas del 07/10: OC 64 quedó con proveedor equivocado (3Q demo en vez
     del NIT del PDF; anular, no se puede editar) y borradores de OC por PDF 84–95 sin descartar.
-10. Probar la lectura con IA con un PDF real de OC emitida en SIIGO (solo hay PDFs de prueba).
+10. OC real de SIIGO (OC-1-354, Alnature, 05/11): no trae código, solo descripción. Ya se
+    asigna SKU por descripción con aviso «confírmalo»; validar con Rosa qué SKU es «GOMA DE
+    GELATINA - CREATINA, FOS Y PROBIOTICOS» (¿00052-MPCG Creagums o 00050-MPRO Probióticos?).
 
 ## Registro (más reciente primero)
+
+### 2026-11-05
+- Prueba con Rosa: la OC real de SIIGO (OC-1-354) quedaba sin ítems porque SIIGO no imprime
+  código de producto. La lectura con IA recibe el catálogo y propone el SKU por descripción
+  con advertencia para confirmar; las filas sin coincidencia se avisan en vez de perderse.
+- Manual de validación para la persona de SIIGO (Claude Docs): parte A de lectura, posible hoy;
+  parte B venta→despacho, tras activar la integración.
+- Rosa aclaró `527667` (FE 17775, PriceSmart): fueron 4.536 tarros de Ashwagandha x120 →
+  `00200-PTASH120`, factor 1. Verifica si Ashwagandha x60 y Calm Vibes x60 comparten código.
+- Siguen sin respuesta: `2835000921`, planes 127/128/129, `28350010101`, conteo y fecha de inicio.
 
 ### 2026-11-03
 - Se preparó una prueba de publicación con un cambio solo tipográfico en el pie del menú lateral; no altera flujos ni inventario.
