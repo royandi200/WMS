@@ -101,3 +101,12 @@ test('table rows with SKUs outside the catalog are reported, not silently droppe
   const extracted = await extractPdfTextLayer(pdf);
   assert.deepEqual(unmatchedTableRowCodes(extracted.text, PRODUCTS), ['99999-NOEXISTE']);
 });
+
+test('SIIGO purchase order headers are recovered from the printed layout', () => {
+  const { recoverSiigoPurchaseOrderHeaders } = require('../api/_lib/document-pdf-headers');
+  const text = 'Orden de compra\nNo. OC-1-354\nALNATURE NUTRITION LAB\nPara\nINFINITY BRANDS SAS\tSAS\nNit 901.189.721-2\nNit\t901.600.946-5\nFecha\t2026-10-16\n';
+  const result = recoverSiigoPurchaseOrderHeaders({ tipo_documento: 'ORDEN_COMPRA' }, text);
+  assert.equal(result.referencia_documento, 'OC-1-354');
+  assert.equal(result.fecha_documento, '2026-10-16');
+  assert.equal(result.proveedor_nit, '901.600.946-5');
+});

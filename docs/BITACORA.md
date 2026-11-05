@@ -62,6 +62,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Prueba con Rosa: la OC real de SIIGO (OC-1-354) quedaba sin ítems porque SIIGO no imprime
   código de producto. La lectura con IA recibe el catálogo y propone el SKU por descripción
   con advertencia para confirmar; las filas sin coincidencia se avisan en vez de perderse.
+- Segundo intento: «requiere número visible». El encabezado de SIIGO («No. OC-1-354»,
+  «Fecha», dos «Nit» entrelazados) ahora se lee sin IA; el proveedor sale de terceros por
+  NIT. Groq se reintenta una vez si falla (sin acceso a logs de Vercel: 403).
 - Manual de validación para la persona de SIIGO (Claude Docs): parte A de lectura, posible hoy;
   parte B venta→despacho, tras activar la integración.
 - Rosa aclaró `527667` (FE 17775, PriceSmart): fueron 4.536 tarros de Ashwagandha x120 →

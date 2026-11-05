@@ -138,4 +138,30 @@ function parseCustomerOrderDate(value) {
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== candidate ? null : candidate;
 }
 
-module.exports = { recoverWarehousePdfHeaders };
+// SIIGO prints its purchase orders as "No. OC-1-354", "Fecha<TAB>2026-10-16" and two
+// "Nit" lines (buyer and supplier) whose columns interleave. Fill only missing fields.
+const OWN_TAX_ID = String(process.env.COMPANY_NIT || '901189721').replace(/\D/g, '').slice(0, 9);
+
+function recoverSiigoPurchaseOrderHeaders(body, text) {
+  const raw = String(text || '');
+  if (!/^Orden de compra$/imu.test(raw) || !/^No\.\s*\S+\s*$/mu.test(raw)) return body;
+  const source = body?.params && typeof body.params === 'object' ? body.params : body;
+  const found = {};
+  const reference = raw.match(/^No\.\s*(\S+)\s*$/mu);
+  if (reference) found.referencia_documento = reference[1];
+  const date = raw.match(/^Fecha\s+(\d{4}-\d{2}-\d{2})\s*$/mu);
+  if (date) found.fecha_documento = date[1];
+  const taxIds = [...raw.matchAll(/Nit\s+([\d.]{6,}-?\d?)/gu)].map((m) => m[1])
+    .filter((value) => value.replace(/\D/g, '').slice(0, 9) !== OWN_TAX_ID);
+  if (new Set(taxIds).size === 1) found.proveedor_nit = taxIds[0];
+  const recovered = {};
+  for (const [field, value] of Object.entries(found)) {
+    if (!String(source?.[field] ?? '').trim()) recovered[field] = value;
+  }
+  if (!source?.tipo_documento) recovered.tipo_documento = 'ORDEN_COMPRA';
+  if (!Object.keys(recovered).length) return body;
+  const result = { ...source, ...recovered };
+  return body?.params ? { ...body, params: result } : result;
+}
+
+module.exports = { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders };

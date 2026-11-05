@@ -51,6 +51,17 @@ function untraceableSkus(items, text) {
 }
 
 async function callGroq(text, documentType, catalog = []) {
+  try {
+    return await callGroqOnce(text, documentType, catalog);
+  } catch (error) {
+    // Free tier often answers 429/5xx or times out; one retry covers most cases.
+    console.error('[document-ai-extractor] retry', error.message);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return callGroqOnce(text, documentType, catalog);
+  }
+}
+
+async function callGroqOnce(text, documentType, catalog = []) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {

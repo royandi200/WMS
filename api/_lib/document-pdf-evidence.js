@@ -1,7 +1,25 @@
 const {
   extractPdfTextLayer, deriveCatalogItemsFromPdfTokens, preferNativeItems, unmatchedTableRowCodes,
 } = require('./pdf-text-layer');
-const { recoverWarehousePdfHeaders } = require('./document-pdf-headers');
+const { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders } = require('./document-pdf-headers');
+
+// SIIGO OC PDFs interleave buyer and supplier names; take the name from terceros by NIT.
+async function supplierNameByTaxId(db, body, text = '') {
+  const target = body?.params && typeof body.params === 'object' ? body.params : body;
+  if (!target?.proveedor_nit || String(target.proveedor_nombre ?? '').trim()) return body;
+  const digits = String(target.proveedor_nit).replace(/\D/g, '').slice(0, 9);
+  if (digits.length < 6) return body;
+  const [rows] = await db.execute(
+    `SELECT COALESCE(NULLIF(nombre_comercial, ''), nombre) AS nombre FROM terceros
+      WHERE activo = 1 AND REPLACE(REPLACE(identification, '.', ''), '-', '') LIKE ?`,
+    [`${digits}%`]
+  );
+  const printed = String(text).match(/^([^\n\t]{3,120})\nPara\s*$/mu)?.[1]?.trim();
+  const name = rows.length === 1 && rows[0].nombre ? rows[0].nombre : printed;
+  if (!name) return body;
+  const updated = { ...target, proveedor_nombre: name };
+  return body.params && typeof body.params === 'object' ? { ...body, params: updated } : updated;
+}
 
 function safePdfFailure(error) {
   const message = String(error?.message || '');
@@ -39,7 +57,11 @@ async function nativePdfEvidence(db, document, body) {
     const used = recoveredBody !== body;
     diagnostics.native_rows = nativeItems.length;
     diagnostics.status = used ? 'NATIVE_APPLIED' : 'MODEL_FALLBACK';
-    let finalBody = recoverWarehousePdfHeaders(recoveredBody, extracted.text);
+    let finalBody = recoverWarehousePdfHeaders(
+      recoverSiigoPurchaseOrderHeaders(recoveredBody, extracted.text), extracted.text
+    );
+    stage = 'SUPPLIER_LOOKUP_FAILED';
+    finalBody = await supplierNameByTaxId(db, finalBody, extracted.text);
     const unmatched = unmatchedTableRowCodes(extracted.text, products);
     if (unmatched.length) {
       const target = finalBody.params && typeof finalBody.params === 'object' ? finalBody.params : finalBody;
