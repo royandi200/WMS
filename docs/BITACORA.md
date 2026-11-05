@@ -76,6 +76,10 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Productos: el catálogo NO se sincroniza solo desde SIIGO (se cargó del Excel del cliente).
   Botón «Traer productos nuevos de SIIGO» (admin, Catálogos > Productos): solo agrega
   productos faltantes; no toca los existentes (la sync completa sobrescribe activo/stock).
+- Hallazgo: las OC de SIIGO usan texto libre, no productos (OC-1-354 «goma creatina/FOS/
+  probióticos» no existe en SIIGO; 58398789001/5839878900 son Creagums vit. D3). Las filas sin
+  equivalente quedan «por asignar» en el borrador y se eligen en Revisar; sin SKU no se crea la OC.
+  Sugerir a contabilidad usar productos de SIIGO en las OC.
 - Manual de validación para la persona de SIIGO (Claude Docs): parte A de lectura, posible hoy;
   parte B venta→despacho, tras activar la integración.
 - Rosa aclaró `527667` (FE 17775, PriceSmart): fueron 4.536 tarros de Ashwagandha x120 →

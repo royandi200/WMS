@@ -140,3 +140,18 @@ test('SIIGO OC row picks the catalog product with the same printed name', () => 
   ]);
   assert.equal(items[0].sku, '58398789001');
 });
+
+test('purchase order rows without an equivalent product are kept as por asignar', () => {
+  const { normalizePurchaseOrderDocumentInput } = require('../api/_lib/purchase-order-document-intake');
+  const evidence = 'ORDEN DE COMPRA\nNo. OC-1-353\nFecha\t2026-10-14\nTAMPOGRAFIA SEGUN DISEÑO\t10,000.00\n';
+  const result = normalizePurchaseOrderDocumentInput({
+    tipo_documento: 'ORDEN_COMPRA', referencia_documento: 'OC-1-353', fecha_documento: '2026-10-14',
+    proveedor_nombre: 'Proveedor', items: [{ sku: '', por_asignar: true, descripcion: 'TAMPOGRAFIA SEGUN DISEÑO', cantidad: 10000 }],
+  }, { evidenceText: evidence });
+  assert.equal(result.items[0].sku, '');
+  assert.equal(result.items[0].pending, true);
+  assert.throws(() => normalizePurchaseOrderDocumentInput({
+    tipo_documento: 'ORDEN_COMPRA', referencia_documento: 'OC-1-353', fecha_documento: '2026-10-14',
+    proveedor_nombre: 'Proveedor', items: [{ sku: '', descripcion: 'X', cantidad: 1 }],
+  }), /requiere SKU/);
+});

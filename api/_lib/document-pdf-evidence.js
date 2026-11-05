@@ -18,11 +18,13 @@ function withSiigoFallbackItems(body, tokens, products) {
   }
   const unmatched = rows.filter((row) => !row.sku);
   if (unmatched.length) {
-    warnings.push(`Filas sin producto equivalente en el WMS (no se cargaron): ${unmatched.map((row) => `«${row.descripcion}» x ${row.cantidad}${row.candidatos?.length ? ` (posibles: ${row.candidatos.join(', ')})` : ''}`).join('; ')}. Crea o sincroniza el producto en el WMS si se debe recibir en bodega.`);
+    warnings.push(`Producto por asignar (el PDF no trae codigo y no hay equivalente claro), elige el SKU al revisar: ${unmatched.map((row) => `«${row.descripcion}» x ${row.cantidad}${row.candidatos?.length ? ` (posibles: ${row.candidatos.join(', ')})` : ''}`).join('; ')}.`);
   }
   const updated = {
     ...target,
-    items: matched.map(({ alternativas, ...row }) => ({ ...row, sku_por_descripcion: true })),
+    items: rows.map(({ alternativas, candidatos, ...row }) => (row.sku
+      ? { ...row, sku_por_descripcion: true }
+      : { ...row, sku: '', por_asignar: true })),
     advertencias: [...(Array.isArray(target.advertencias) ? target.advertencias : []), ...warnings],
   };
   return body.params && typeof body.params === 'object' ? { ...body, params: updated } : updated;
