@@ -184,6 +184,10 @@ function nameWords(value) {
 }
 
 function matchCatalog(description, products) {
+  // SIIGO prints the product's own name on the OC: an exact name wins outright.
+  const exactKey = nameWords(description).join(' ');
+  const exact = products.filter((product) => nameWords(product.nombre).join(' ') === exactKey);
+  if (exact.length === 1) return { sku: String(exact[0].siigo_code), alternativas: [] };
   const wanted = nameWords(description);
   const wantedType = wanted.find((word) => TYPE_WORDS.has(word)) || null;
   const scored = products.map((product) => {
@@ -194,6 +198,12 @@ function matchCatalog(description, products) {
     return shared.length ? { sku: String(product.siigo_code), score: shared.length, extra: words.length - shared.length } : null;
   }).filter(Boolean).sort((a, b) => b.score - a.score || a.extra - b.extra);
   if (!scored.length) return {};
+  // A product whose name contains every descriptive word of the row beats partial matches.
+  const descriptive = wanted.filter((word) => !TYPE_WORDS.has(word)).length;
+  const complete = scored.filter((entry) => entry.score === descriptive);
+  if (descriptive >= 2 && complete.length === 1) {
+    return { sku: complete[0].sku, alternativas: scored.filter((e) => e !== complete[0]).slice(0, 2).map((e) => e.sku) };
+  }
   const top = scored.filter((entry) => entry.score === scored[0].score);
   // Without a type word, demand two shared words; never pick among 3+ equals.
   if ((!wantedType && scored[0].score < 2) || top.length > 2) return { candidatos: top.slice(0, 4).map((e) => e.sku) };

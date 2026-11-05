@@ -128,3 +128,15 @@ test('SIIGO purchase order rows are read without AI and matched only when clear'
     [1000, undefined, 'FUNDA NAPS VINAGRE'],
   ]);
 });
+
+test('SIIGO OC row picks the catalog product with the same printed name', () => {
+  const { siigoPurchaseOrderItems } = require('../api/_lib/document-pdf-headers');
+  const tokens = ['Vr. Total', '1', 'GOMA DE GELATINA - CREATINA, FOS Y', 'PROBIOTICOS', '90,000.00', '193.00', 'Observaciones:'];
+  const items = siigoPurchaseOrderItems(tokens, [
+    { siigo_code: '00052-MPCG', nombre: 'GOMAS CREAGUMS - CREATINA CREAPURE' },
+    { siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' },
+    { siigo_code: '58398789001', nombre: 'GOMA DE GELATINA - CREATINA, FOS Y PROBIOTICOS' },
+    { siigo_code: '5839878900', nombre: 'GOMA DE GELATINA - CREATINA' },
+  ]);
+  assert.equal(items[0].sku, '58398789001');
+});
