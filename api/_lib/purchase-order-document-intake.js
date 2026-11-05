@@ -24,7 +24,10 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '', rec
   if (!reference) throw inputError('La orden de compra requiere un numero o referencia visible');
   if (!documentDate) throw inputError('La orden de compra requiere una fecha visible');
   if (!supplierName) throw inputError('La orden de compra requiere un proveedor visible');
-  if (!rawItems.length) throw inputError('La orden de compra debe incluir al menos un item');
+  if (!rawItems.length) {
+    const reasons = normalizeWarnings(source.advertencias || source.warnings).join(' ');
+    throw inputError(`La orden de compra debe incluir al menos un item${reasons ? `. ${reasons}` : '. No se pudo leer la tabla de productos (la lectura con IA no respondio); intenta de nuevo en un minuto.'}`);
+  }
   if (rawItems.length > MAX_DOCUMENT_ITEMS) throw inputError(`La orden supera ${MAX_DOCUMENT_ITEMS} items`);
 
   const evidence = cleanEvidenceText(evidenceText);

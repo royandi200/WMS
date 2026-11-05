@@ -25,7 +25,8 @@ function systemPrompt(documentType, hasCatalog) {
     'Copia SKU, lote y fechas literalmente. cantidad es un numero; no sumes unidades distintas.',
     ...(hasCatalog ? [
       'Si una fila no trae codigo de producto (las OC de SIIGO solo traen descripcion), elige del CATALOGO el SKU cuyo nombre',
-      'corresponda a la descripcion y marca "sku_por_descripcion": true. Si ninguno corresponde con claridad, omite sku pero deja descripcion y cantidad.',
+      'mas se parezca a la descripcion y marca "sku_por_descripcion": true. Si dudas entre varios, elige el mas probable y pon los otros SKU en "alternativas" (lista).',
+      'Solo omite sku si ningun producto del catalogo tiene relacion con la descripcion.',
     ] : []),
     'Omite un campo si no aparece en el documento. Nunca inventes datos, no uses null ni texto fuera del JSON.',
   ].join('\n');
@@ -40,7 +41,10 @@ function cleanItem(item) {
   }
   const quantity = Number(String(item.cantidad ?? '').replace(',', '.'));
   if (Number.isFinite(quantity) && quantity > 0) out.cantidad = quantity;
-  if (out.sku && item.sku_por_descripcion === true) out.sku_por_descripcion = true;
+  if (out.sku && item.sku_por_descripcion === true) {
+    out.sku_por_descripcion = true;
+    if (Array.isArray(item.alternativas)) out.alternativas = item.alternativas.map(String).filter(Boolean).slice(0, 3);
+  }
   return (out.sku || out.descripcion) && out.cantidad ? out : null;
 }
 
@@ -104,7 +108,7 @@ async function aiDocumentBody(document, documentType, body = {}, catalog = []) {
     const rows = (Array.isArray(extracted.items) ? extracted.items : []).map(cleanItem).filter(Boolean);
     const withoutSku = rows.filter((item) => !item.sku || (item.sku_por_descripcion && !known.has(item.sku.toUpperCase())));
     const byDescription = rows.filter((item) => item.sku_por_descripcion && known.has(item.sku.toUpperCase()));
-    const items = rows.filter((item) => !withoutSku.includes(item)).map(({ sku_por_descripcion, ...item }) => item);
+    const items = rows.filter((item) => !withoutSku.includes(item)).map(({ sku_por_descripcion, alternativas, ...item }) => item);
     const result = { ...body, tipo_documento: documentType };
     for (const key of ['referencia_documento', 'fecha_documento', 'proveedor_nombre', 'proveedor_nit', 'moneda', 'nombre_cliente']) {
       const value = String(extracted[key] ?? '').trim();
@@ -115,7 +119,7 @@ async function aiDocumentBody(document, documentType, body = {}, catalog = []) {
     const warnings = [];
     if (byDescription.length) {
       warnings.push(`SKU asignado por descripcion (el PDF no trae codigo), confirmalo antes de crear la OC: ${byDescription
-        .map((item) => `«${item.descripcion || '?'}» → ${item.sku}`).join('; ')}.`);
+        .map((item) => `«${item.descripcion || '?'}» → ${item.sku}${item.alternativas?.length ? ` (otras opciones: ${item.alternativas.join(', ')})` : ''}`).join('; ')}.`);
     }
     if (withoutSku.length) {
       warnings.push(`Filas sin SKU reconocible en el catalogo: ${withoutSku.map((item) => `«${item.descripcion || item.sku}» (${item.cantidad})`).join('; ')}. Crea o sincroniza el producto, o indica el SKU.`);

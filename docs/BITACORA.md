@@ -65,6 +65,8 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Segundo intento: «requiere número visible». El encabezado de SIIGO («No. OC-1-354»,
   «Fecha», dos «Nit» entrelazados) ahora se lee sin IA; el proveedor sale de terceros por
   NIT. Groq se reintenta una vez si falla (sin acceso a logs de Vercel: 403).
+- Tercer intento: «al menos un ítem». La IA debe elegir siempre el SKU más probable y listar
+  alternativas en el aviso; el error sin ítems ahora muestra el motivo.
 - Manual de validación para la persona de SIIGO (Claude Docs): parte A de lectura, posible hoy;
   parte B venta→despacho, tras activar la integración.
 - Rosa aclaró `527667` (FE 17775, PriceSmart): fueron 4.536 tarros de Ashwagandha x120 →
