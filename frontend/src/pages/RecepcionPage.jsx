@@ -154,7 +154,8 @@ export default function RecepcionPage() {
 
   const showToast = (msg, ok) => {
     setToast({ msg, ok })
-    setTimeout(() => setToast(null), 4000)
+    // Errors stay until the user closes them; confirmations fade out.
+    if (ok) setTimeout(() => setToast((current) => (current?.msg === msg ? null : current)), 4000)
   }
 
   return (
@@ -171,9 +172,13 @@ export default function RecepcionPage() {
       </div>
 
       {toast && (
-        <div className={`mb-4 px-4 py-3 rounded-lg border text-sm ${
+        <div role={toast.ok ? 'status' : 'alert'} className={`mb-4 flex items-start gap-3 px-4 py-3 rounded-lg border text-sm ${
           toast.ok ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-danger/10 border-danger/30 text-danger'
-        }`}>{toast.msg}</div>
+        }`}>
+          <span className="flex-1 whitespace-pre-line">{toast.msg}</span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Cerrar mensaje"
+            className="shrink-0 px-2 leading-none text-lg opacity-70 hover:opacity-100">×</button>
+        </div>
       )}
 
       {tab === 'orders' && (
