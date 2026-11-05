@@ -1,9 +1,33 @@
 const {
   extractPdfTextLayer, deriveCatalogItemsFromPdfTokens, preferNativeItems, unmatchedTableRowCodes,
 } = require('./pdf-text-layer');
-const { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders } = require('./document-pdf-headers');
+const { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders, siigoPurchaseOrderItems } = require('./document-pdf-headers');
 
 // SIIGO OC PDFs interleave buyer and supplier names; take the name from terceros by NIT.
+// When neither the AI nor the SKU-code reader found rows, read SIIGO's own table.
+function withSiigoFallbackItems(body, text, products) {
+  const target = body?.params && typeof body.params === 'object' ? body.params : body;
+  if (Array.isArray(target?.items) && target.items.length) return body;
+  const rows = siigoPurchaseOrderItems(text, products);
+  if (!rows.length) return body;
+  const matched = rows.filter((row) => row.sku);
+  const warnings = [];
+  if (matched.length) {
+    warnings.push(`SKU asignado por descripcion (el PDF no trae codigo), confirmalo antes de crear la OC: ${matched
+      .map((row) => `«${row.descripcion}» → ${row.sku}${row.alternativas.length ? ` (otras opciones: ${row.alternativas.join(', ')})` : ''}`).join('; ')}.`);
+  }
+  const unmatched = rows.filter((row) => !row.sku);
+  if (unmatched.length) {
+    warnings.push(`Filas sin SKU reconocible en el catalogo: ${unmatched.map((row) => `«${row.descripcion}» (${row.cantidad})`).join('; ')}.`);
+  }
+  const updated = {
+    ...target,
+    items: matched.map(({ alternativas, ...row }) => ({ ...row, sku_por_descripcion: true })),
+    advertencias: [...(Array.isArray(target.advertencias) ? target.advertencias : []), ...warnings],
+  };
+  return body.params && typeof body.params === 'object' ? { ...body, params: updated } : updated;
+}
+
 async function supplierNameByTaxId(db, body, text = '') {
   const target = body?.params && typeof body.params === 'object' ? body.params : body;
   if (!target?.proveedor_nit || String(target.proveedor_nombre ?? '').trim()) return body;
@@ -60,6 +84,7 @@ async function nativePdfEvidence(db, document, body) {
     let finalBody = recoverWarehousePdfHeaders(
       recoverSiigoPurchaseOrderHeaders(recoveredBody, extracted.text), extracted.text
     );
+    finalBody = withSiigoFallbackItems(finalBody, extracted.text, products);
     stage = 'SUPPLIER_LOOKUP_FAILED';
     finalBody = await supplierNameByTaxId(db, finalBody, extracted.text);
     const unmatched = unmatchedTableRowCodes(extracted.text, products);

@@ -58,7 +58,7 @@ test('description-only rows (SIIGO OC) get a catalog SKU flagged for confirmatio
   const catalog = [{ siigo_code: '00052-MPCG', nombre: 'GOMAS CREAGUMS - CREATINA CREAPURE' }];
   const result = await aiDocumentBody(pdfDocument(), 'ORDEN_COMPRA', {}, catalog);
   assert.match(sentPrompt, /00052-MPCG \| GOMAS CREAGUMS/);
-  assert.deepEqual(result.items, [{ sku: '00052-MPCG', descripcion: 'GOMA DE GELATINA - CREATINA', cantidad: 90000 }]);
+  assert.deepEqual(result.items, [{ sku: '00052-MPCG', descripcion: 'GOMA DE GELATINA - CREATINA', cantidad: 90000, sku_por_descripcion: true }]);
   assert.match(result.advertencias.join(' '), /asignado por descripcion.*00052-MPCG/);
   assert.match(result.advertencias.join(' '), /PRODUCTO RARO/);
   assert.doesNotMatch(result.advertencias.join(' '), /no aparecen en el PDF/);

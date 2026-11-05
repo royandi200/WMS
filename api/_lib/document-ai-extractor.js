@@ -108,7 +108,7 @@ async function aiDocumentBody(document, documentType, body = {}, catalog = []) {
     const rows = (Array.isArray(extracted.items) ? extracted.items : []).map(cleanItem).filter(Boolean);
     const withoutSku = rows.filter((item) => !item.sku || (item.sku_por_descripcion && !known.has(item.sku.toUpperCase())));
     const byDescription = rows.filter((item) => item.sku_por_descripcion && known.has(item.sku.toUpperCase()));
-    const items = rows.filter((item) => !withoutSku.includes(item)).map(({ sku_por_descripcion, alternativas, ...item }) => item);
+    const items = rows.filter((item) => !withoutSku.includes(item)).map(({ alternativas, ...item }) => item);
     const result = { ...body, tipo_documento: documentType };
     for (const key of ['referencia_documento', 'fecha_documento', 'proveedor_nombre', 'proveedor_nit', 'moneda', 'nombre_cliente']) {
       const value = String(extracted[key] ?? '').trim();

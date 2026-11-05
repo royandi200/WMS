@@ -67,6 +67,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
   NIT. Groq se reintenta una vez si falla (sin acceso a logs de Vercel: 403).
 - Tercer intento: «al menos un ítem». La IA debe elegir siempre el SKU más probable y listar
   alternativas en el aviso; el error sin ítems ahora muestra el motivo.
+- Cuarto intento confirmó que **Groq no responde en producción** (revisar clave/cuota en
+  Vercel). Se agregó lector propio de la tabla de OC SIIGO (descripción + cantidad, SKU por
+  palabras del nombre con alternativas) y la validación acepta SKU asignado por descripción.
 - Manual de validación para la persona de SIIGO (Claude Docs): parte A de lectura, posible hoy;
   parte B venta→despacho, tras activar la integración.
 - Rosa aclaró `527667` (FE 17775, PriceSmart): fueron 4.536 tarros de Ashwagandha x120 →

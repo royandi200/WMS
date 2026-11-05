@@ -40,8 +40,15 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '', rec
   const warnings = sourceWarnings
     .filter((warning) => !isModelDerivedValidationWarning(warning));
   const normalizedItems = rawItems.map((item, index) => normalizeItem(item, index));
+  // SIIGO OCs print no product code: the SKU was matched by description and the
+  // review warning asks the user to confirm it; the description must be in the PDF.
+  const byDescription = new Set(rawItems
+    .filter((item) => item && item.sku_por_descripcion === true)
+    .map((item) => String(item.sku).trim().toUpperCase()));
   const items = (recoverFields ? enrichItemsFromLineEvidence(normalizedItems, evidenceText) : normalizedItems).map((normalized) => {
-    if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
+    const describedInPdf = byDescription.has(normalized.sku)
+      && evidenceIncludes(evidence, String(normalized.description).split(/\s+/).slice(0, 3).join(' '));
+    if (evidence && !describedInPdf && !evidenceIncludes(evidence, normalized.sku)) {
       throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
     }
     if (evidence && !evidenceIncludesQuantity(evidence, normalized.quantity)) {

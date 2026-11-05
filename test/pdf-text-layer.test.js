@@ -110,3 +110,18 @@ test('SIIGO purchase order headers are recovered from the printed layout', () =>
   assert.equal(result.fecha_documento, '2026-10-16');
   assert.equal(result.proveedor_nit, '901.600.946-5');
 });
+
+test('SIIGO purchase order rows are read without AI and matched by name', () => {
+  const { siigoPurchaseOrderItems } = require('../api/_lib/document-pdf-headers');
+  const text = 'Ítem\tDescripción\tCantidad\tVr. Total\nUnitario\tdesc.\tCargo\tRete.\nGOMA DE GELATINA - CREATINA, FOS Y\t90,000.00\t19 %\t2,5 %\n193.00\t0.00\t20,236,050.00\n1\nPROBIOTICOS\nTotal Bruto\t17,370,000.00\n';
+  const items = siigoPurchaseOrderItems(text, [
+    { siigo_code: '00052-MPCG', nombre: 'GOMAS CREAGUMS - CREATINA CREAPURE' },
+    { siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' },
+    { siigo_code: '00001-TPBI', nombre: 'TAPA BLANCA' },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].descripcion, 'GOMA DE GELATINA - CREATINA, FOS Y PROBIOTICOS');
+  assert.equal(items[0].cantidad, 90000);
+  assert.ok(['00052-MPCG', '00050-MPRO'].includes(items[0].sku));
+  assert.equal(items[0].alternativas.length, 1);
+});
