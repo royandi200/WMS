@@ -58,6 +58,25 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Solo lectura: muestra que cantidad reporta SIIGO para unos productos (?stock=COD1,COD2).
+    if (req.query?.stock) {
+      const codes = String(req.query.stock).split(',').map(c => c.trim()).filter(Boolean).slice(0, 5);
+      const data = [];
+      for (const code of codes) {
+        const found = await siigoGet('/v1/products', { params: { code }, entidad: 'health-check' });
+        const product = (Array.isArray(found) ? found : (found?.results || []))[0];
+        data.push(product ? {
+          code: product.code,
+          name: product.name,
+          stock_control: product.stock_control,
+          available_quantity: product.available_quantity,
+          warehouses: product.warehouses,
+          campos: Object.keys(product),
+        } : { code, encontrado: false });
+      }
+      return res.status(200).json({ ok: true, data });
+    }
+
     // 1. Verificar / obtener token
     const token = await getValidToken();
 

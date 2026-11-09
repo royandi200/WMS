@@ -58,6 +58,13 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Registro (más reciente primero)
 
+### 2026-11-09
+- Inventario WMS↔SIIGO: verificado en la documentación de la API de SIIGO que no existe
+  endpoint de ajuste de stock; el inventario de SIIGO solo cambia con documentos (compras,
+  facturas, notas). Por eso el WMS no escribe en SIIGO y el saldo inicial se carga en ambos.
+- Chequeo de SIIGO: `GET /api/v1/siigo/health?stock=COD1,COD2` (solo lectura) muestra la
+  cantidad y los campos que SIIGO devuelve por producto, para confirmar el reporte de comparación.
+
 ### 2026-11-05
 - Prueba con Rosa: la OC real de SIIGO (OC-1-354) quedaba sin ítems porque SIIGO no imprime
   código de producto. La lectura con IA recibe el catálogo y propone el SKU por descripción
