@@ -59,6 +59,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 ## Registro (más reciente primero)
 
 ### 2026-11-09
+- Inventario > «Comparar con SIIGO» (Admin/Supervisor): saldo WMS vs saldo SIIGO por producto,
+  descontando lo facturado sin despachar; marca bodegas de SIIGO en negativo. Solo lee SIIGO.
+  Cron diario 11:00 UTC (6 a. m. Colombia) guarda el resultado en `siigo_stock_comparaciones`.
 - Inventario WMS↔SIIGO: verificado en la documentación de la API de SIIGO que no existe
   endpoint de ajuste de stock; el inventario de SIIGO solo cambia con documentos (compras,
   facturas, notas). Por eso el WMS no escribe en SIIGO y el saldo inicial se carga en ambos.

@@ -1,11 +1,13 @@
 import MapaBodega from '../components/MapaBodega'
+import ComparacionSiigo from '../components/ComparacionSiigo'
+import { useAuthStore } from '../store/authStore'
 import { useEffect, useRef, useState } from 'react'
 import { useInventoryStore } from '../store/inventoryStore'
 import AutocompleteInput from '../components/AutocompleteInput'
 import { SortableTh, useSortableRows } from '../components/SortableTh'
 import { searchProducts } from '../utils/lookups'
 
-const TABS = ['Resumen', 'Stock Bajo', 'Permanencia', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
+const BASE_TABS = ['Resumen', 'Stock Bajo', 'Permanencia', 'Buscar Producto', 'Buscar Lote', 'Mapa Bodega']
 
 export default function InventarioPage() {
   const [tab, setTab] = useState(0)
@@ -13,6 +15,9 @@ export default function InventarioPage() {
   const [result, setResult] = useState(null)
   const [searched, setSearched] = useState(false)
   const requestVersion = useRef(0)
+  const roles = useAuthStore((state) => state.user?.roles || [state.user?.rol].filter(Boolean))
+  const canCompare = roles.some((role) => ['admin', 'supervisor'].includes(String(role).toLowerCase()))
+  const TABS = canCompare ? [...BASE_TABS, 'Comparar con SIIGO'] : BASE_TABS
 
   const {
     summary, lowStock, aging, loading, loadingAging, error,
@@ -164,6 +169,8 @@ export default function InventarioPage() {
       {tab === 5 && (
         <MapaBodega />
       )}
+
+      {tab === 6 && canCompare && <ComparacionSiigo />}
     </div>
   )
 }
