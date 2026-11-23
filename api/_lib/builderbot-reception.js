@@ -593,10 +593,13 @@ function explicitConfirmation(rawText, order, params = {}) {
 function directReceptionConfirmationReference(rawText) {
   if (/[¿?]/u.test(rawText || '')) return null;
   const text = normalizeCommandText(rawText).toUpperCase().replace(/[ \t]+/gu, ' ');
-  return text.match(/^(?:SI[,.:]?\s+)?CONFIRM(?:O|AMOS)\s+(?:LA\s+)?RECEPCION\s+(?:DE\s+(?:LA\s+)?)?([^\r\n]+?)\s*[.!]*$/u)?.[1] || null;
+  const command = text.match(/^«([^«»\r\n]+)»$/u)?.[1]?.trim() || text;
+  return command.match(/^(?:SI[,.:]?\s+)?CONFIRM(?:O|AMOS)\s+(?:LA\s+)?RECEPCION\s+(?:DE\s+(?:LA\s+)?)?([^\r\n]+?)\s*[.!]*$/u)?.[1] || null;
 }
 
 function standalonePurchaseOrderReference(reference, order) {
+  // WhatsApp can copy the emphasis markers added around the displayed ID.
+  reference = reference.replace(/^(\*{1,2})([^*\r\n]+)\1$/u, '$2').trim();
   const number = normalizeCommandText(order?.numero || (typeof order === 'string' ? order : '')).toUpperCase();
   if (number && reference === number) return true;
   const directReference = /^(?:O[ .]*C|I[ .]*O|ORDEN DE COMPRA|IN *(?:&|AND|Y) *OUT) *(?:ID|NUMERO|NRO|#)? *#? *\d+$/u;

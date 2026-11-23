@@ -6,6 +6,11 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Estado actual (2026-10-13)
 
+- 2026-11-23, recepción WhatsApp: la negrita que añade el WMS podía impedir
+  confirmar al copiar su propia instrucción. La validación acepta los asteriscos
+  balanceados alrededor de la referencia sin cambiar el ID, el tipo ni los
+  requisitos de la vista previa. Se cubre también el reintento sin movimientos.
+
 - Prueba de publicación GitHub → Vercel iniciada el 03/11 con un cambio cosmético en el pie del menú.
 - En producción (`wms-seven-ebon.vercel.app`) desde el 05/10. Agente WhatsApp operativo.
 - **Integración SIIGO de ventas: NO está pasando ninguna factura real al WMS.** El
