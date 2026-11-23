@@ -6,6 +6,11 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Estado actual (2026-10-13)
 
+- 2026-11-23, correcciones de OP: la prueba de WhatsApp confirmó que el LLM
+  seleccionó el SKU correcto, pero el intérprete del borrador incluyó «correcta es»
+  como parte del producto. Se corrigió la extracción y se cubrió la edición sin
+  liberar la OP. Queda por validar el reintento en WhatsApp.
+
 - 2026-11-23, recepción WhatsApp: la negrita que añade el WMS podía impedir
   confirmar al copiar su propia instrucción. La validación acepta los asteriscos
   balanceados alrededor de la referencia sin cambiar el ID, el tipo ni los

@@ -12,6 +12,7 @@ function harness({ operationError, role = 'admin' } = {}) {
   const baseReads = [];
   const logged = [];
   const guideTexts = [];
+  const productReads = [];
   const errors = [];
   let inboxId = 1;
   let packagingDraft = null;
@@ -36,6 +37,7 @@ function harness({ operationError, role = 'admin' } = {}) {
       if (sql.includes('FROM webhook_logs')) return [logged.length ? [logged.at(-1)] : []];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
         const sku = String(args[1] || '').toUpperCase();
+        productReads.push(sku);
         const probiotic = sku.includes('PROBIOT') || sku.includes('00201');
         return [[{ id: probiotic ? 201 : sku.includes('120') ? 120 : 60,
           siigo_code: probiotic ? '00201-PTPBS120' : sku.includes('120') ? '00110-PTASH120' : '00102-PTASH60',
@@ -168,7 +170,7 @@ function harness({ operationError, role = 'admin' } = {}) {
     module, exports: module.exports, require: name => mocks[name] || nativeRequire(name),
     process: { env: {} }, console: { log() {}, warn() {}, error(...args) { errors.push(args.map(String).join(' ')); } }, Buffer,
   }, { filename });
-  return { calls, baseReads, guideTexts, errors, seedLog(action, text, message) {
+  return { calls, baseReads, guideTexts, productReads, errors, seedLog(action, text, message) {
     logged.push({ action, status: 'PROCESSED',
       payload: JSON.stringify({ from: 'QA-ACTOR', info: { '@ction': action, body: text, text, query: text, params: {} } }),
       response: JSON.stringify({ ok: true, message, mensaje: message, context: {} }) });
@@ -245,6 +247,21 @@ test('stock OP is previewed, corrected in two messages and released only after c
   assert.equal(h.calls.length, 1);
   assert.deepEqual([h.calls[0].product, h.calls[0].quantity, h.calls[0].originType],
     ['00201-PTPBS120', 12, 'STOCK_SEGURIDAD']);
+});
+
+test('declarative reference correction preserves the quantity and does not release the stock OP', async () => {
+  const h = harness();
+  const before = await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Vamos a producir cuatro tarros de probióticos 120 para stock de seguridad', {});
+  assert.equal(before.context.stock_production_draft.sku, '00201-PTPBS120');
+  const corrected = await h.send('LIBERAR_ORDEN_PRODUCCION', 'La referencia correcta es Ashwagandha x60.',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 4, origen_tipo: 'STOCK_SEGURIDAD' });
+  assert.equal(corrected.ok, true, corrected.mensaje);
+  assert.equal(corrected.context.stock_production_draft.sku, '00102-PTASH60');
+  assert.equal(corrected.context.stock_production_draft.quantity, 4);
+  assert.equal(corrected.context.inventory_changed, false);
+  assert.equal(h.productReads.at(-1), 'ASHWAGANDHA X60');
+  assert.equal(h.calls.length, 0);
 });
 
 test('translated English quantity corrects the active stock draft without a clarification loop', async () => {

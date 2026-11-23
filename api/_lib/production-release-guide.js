@@ -78,7 +78,7 @@ function correctionFields(text) {
     || raw.match(/^(?:the\s+)?(?:quantity|amount)\s+(?:will\s+be|should\s+be|is|to|:)\s*(\d+)\s*(?:units?|pcs?)\b/u)
     || raw.match(new RegExp(`^(?:(?:correccion|corrijo|mejor|cambia|corrige|modifica)\\s*[:,]?\\s*(?:a\\s+)?)?${NUMBER}\\s*(?:und|unidades?|tarros?|frascos?|units?|pcs?)\\b`, 'u'));
   const quantity = subjectQuantity(raw) ?? (quantityMatch ? positiveQuantity(quantityMatch[1]) : null);
-  let product = raw.match(/\b(?:producto|referencia|sku)\s*(?:es|sera|a|por|:|debe\s+ser)\s+(.+)$/u)?.[1]
+  let product = raw.match(/\b(?:producto|referencia|sku)(?:\s+(?:correct[oa]|nuev[oa]))?\s*(?:es|sera|a|por|:|debe\s+ser)\s+(.+)$/u)?.[1]
     || raw.match(/\b(?:producto|referencia|sku)\s+([a-z0-9][a-z0-9 -]+)$/u)?.[1]
     || raw.match(/^(?:cambia|cambio|corrige|modifica|mejor)\s+(?:a|por)\s+([a-z0-9][a-z0-9 -]+)$/u)?.[1]
     || null;
