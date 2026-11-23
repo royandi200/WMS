@@ -82,7 +82,7 @@ function guidedDb({ singleSku = null, batchProducts = false } = {}) {
         { producto_id: 60, prioridad: 1, tipo_asignacion: 'PRIMARIA',
           ubicacion_id: 16, ubicacion: 'B16' },
       ]];
-      if (/SELECT id FROM recepciones WHERE id = \? FOR UPDATE/u.test(sql)) return [[{ id: 101 }]];
+      if (/SELECT id FROM recepciones WHERE id = \?.*FOR UPDATE/u.test(sql)) return [[{ id: 101 }]];
       if (/FROM recepcion_confirmacion_borradores d/u.test(sql)) {
         return [[...state.extraDrafts, ...(state.draft ? [{ ...state.draft, recepcion_id: 101,
           orden_compra_id: 37, reception_number: 'REC-OC-37-001' }] : [])]
@@ -590,6 +590,54 @@ test('guided OC reception can correct its own preview without confirming invento
   assert.equal(preview.requires_confirmation, true);
   assert.match(preview.message, /00001-TPBI[^\n]*\n  Recibido: 1 und/u);
   assert.equal(JSON.parse(state.draft.payload_json).version, 1);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('structured receipt correction uses the active review and preserves its other data', async () => {
+  const { db, state } = guidedDb({ singleSku: '00001-TPBI' });
+  const user = { id: 5 };
+  const from = '573150000059';
+  const send = (rawText, params) => advanceGuidedReception({ db, user, from, rawText, params });
+  await send('OC ID 37', { avance: { producto: 'tapa', cantidad: 2,
+    condicion: 'DISPONIBLE', ubicacion: 'A8' } });
+  const preview = await send('sí', { avance: {} });
+  assert.equal(preview.requires_confirmation, true);
+  const original = state.draft.payload_json;
+  state.recentLog = [{ action: 'AVANZAR_RECEPCION_GUIADA_OC', response: { context: { reception: preview } } }];
+
+  const rawText = 'Al final dejemos esas en B16';
+  const change = { editar_borrador: true, correccion: true, evidencia: rawText, avance: { ubicacion: 'B16' } };
+  await assert.rejects(send(rawText, { ...change, orden_compra_id: 99 }), /referencia no coincide/u);
+  await assert.rejects(send(rawText, { ...change, evidencia: 'datos del historial' }), /dato quieres registrar/u);
+  await assert.rejects(send(rawText, { ...change, avance: { partida: 2, ubicacion: 'B16' } }), /partidas del resumen/u);
+  await assert.rejects(send(rawText, { ...change, avance: { unidad: 'g', cantidad: 2 } }), /registra en und/u);
+  assert.equal(state.draft.payload_json, original);
+
+  const edited = await send(rawText, change);
+  assert.match(edited.message, /Ubicación registrada: B16/u);
+  assert.equal(edited.sku_review, true);
+  assert.equal(edited.requires_confirmation, undefined);
+  const entry = JSON.parse(state.draft.payload_json).entries['00001-TPBI'];
+  assert.equal(entry.cantidad, 2);
+  assert.equal(entry.condicion, 'DISPONIBLE');
+  assert.equal(entry.verified, false);
+  assert.equal(state.inventoryWrites, 0);
+});
+
+test('a structured receipt change asks for the SKU before discarding a final preview', async () => {
+  const { db, state } = guidedDb();
+  const user = { id: 5 };
+  const send = (rawText, params) => advanceGuidedReception({ db, user, rawText, params });
+  await send('OC ID 37', { avance: { producto: 'tapa', cantidad: 2, condicion: 'DISPONIBLE', ubicacion: 'A8' } });
+  await send('sí', { avance: {} });
+  await send('Gomas, cien disponibles en B16',
+    { avance: { producto: 'gomas', cantidad: 100, condicion: 'DISPONIBLE', ubicacion: 'B16' } });
+  await send('sí', { avance: {} });
+  const original = state.draft.payload_json;
+  const rawText = 'Para la OC ID 37 mejor en C1';
+  await assert.rejects(send(rawText, { editar_borrador: true, correccion: true,
+    evidencia: rawText, avance: { ubicacion: 'C1' } }), /De qué producto/u);
+  assert.equal(state.draft.payload_json, original);
   assert.equal(state.inventoryWrites, 0);
 });
 

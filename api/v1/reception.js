@@ -1,5 +1,6 @@
 // GET/POST /api/v1/reception
 const crypto = require('crypto');
+const { isDeepStrictEqual } = require('node:util');
 const { createConnection, query } = require('../_lib/db');
 const { cors, requireCapability } = require('../_lib/auth');
 const { CAPABILITIES, hasCapability } = require('../_lib/capabilities');
@@ -19,6 +20,7 @@ const {
 } = require('../_lib/outsourcing-workflow');
 const { preparePurchaseOrderReception } = require('../_lib/purchase-order-reception');
 const { generatedReceptionLot } = require('../_lib/reception-auto-lot');
+const { loadReceptionDraft } = require('../_lib/builderbot-reception');
 
 const SHARED_SANDBOX_USERNAME = 'sandbox@siigoapi.com';
 const DEFAULT_TEST_PREFIX = 'WMSQA260721';
@@ -402,7 +404,7 @@ async function processDistributedItem(conn, { item, input, reception, user, rece
   };
 }
 
-async function confirmReceptionForUser({ body = {}, user }) {
+async function confirmReceptionForUser({ body = {}, user, draftSnapshot }) {
   if (!user?.id) throw httpError(401, 'Usuario requerido para confirmar la recepcion');
   const receptionId = Number(body.reception_id || body.recepcion_id || 0);
   if (!Number.isInteger(receptionId) || receptionId <= 0) {
@@ -431,6 +433,14 @@ async function confirmReceptionForUser({ body = {}, user }) {
     }
     if (!['borrador', 'en_proceso'].includes(reception.estado)) {
       throw httpError(409, `La recepcion esta ${reception.estado} y no puede completarse`);
+    }
+    if (draftSnapshot) {
+      const current = await loadReceptionDraft(conn, {
+        orderId: reception.orden_compra_id, receptionId, userId: user.id, lock: true,
+      });
+      if (!isDeepStrictEqual(current, draftSnapshot)) {
+        throw httpError(409, 'El borrador de recepción cambió. Revisa el último resumen y vuelve a confirmar.');
+      }
     }
 
     const confirmationKey = String(body.confirmation_key || body.confirmacion_clave || '').trim() || null;

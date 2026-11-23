@@ -55,6 +55,18 @@ test('final reception confirmation accepts one active OC preview, not a differen
     { id: 40, tipo_recepcion: 'IN_OUT' }), true);
 });
 
+test('a model final flag cannot turn a combined correction or a question into receipt confirmation', () => {
+  const order = { id: 40, numero: 'OC-PROV-40', tipo_recepcion: 'INSUMOS_MP' };
+  for (const text of ['Confirmo la recepción OC ID 40 y las tapas van en A8',
+    'Las tapas van en A8 y confirmo la recepción OC ID 40',
+    'No confirmo la recepción OC ID 40', '¿Confirmo la recepción OC ID 40?']) {
+    assert.equal(explicitConfirmation(text, order, { confirmacion_final: true }), false);
+    assert.equal(contextualReceptionConfirmation(text, order), false);
+  }
+  assert.equal(explicitConfirmation('Sí, confirmo la recepción de la OC ID 40.', order,
+    { confirmacion_final: true }), true);
+});
+
 test('a vague confirmation uses only the last final preview shown to this operator', async () => {
   const payload = { version: 1, orderId: 60, receptionId: 160,
     items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 25 }] }] };

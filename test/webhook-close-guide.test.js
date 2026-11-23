@@ -62,6 +62,9 @@ require.cache[dbPath] = {
           cantidad_planeada: params[0] === 101 ? '3.000' : '2.000', producto_id: 74,
           sku: '00102-PTASH60', producto: 'ASHWAGANDHA X 60',
         }]];
+        if (/FROM ordenes_produccion op\s+LEFT JOIN usuarios/u.test(sql)) return [[{
+          id: params[0], codigo_orden: 'OP-20260924-000101', estado: 'EN_PROCESO',
+        }]];
         if (/FROM ubicaciones u JOIN bodegas b/u.test(sql)) return [[{ codigo: String(params[0]).toUpperCase() }]];
         if (/FROM produccion_materiales pm JOIN productos/u.test(sql)) return [[{
           producto_id: 6, unidad: 'und', sku: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
@@ -149,6 +152,60 @@ test('una corrección PT respaldada por el audio vuelve al borrador aunque BBC d
     assert.match(res.body.mensaje, /Ubicación del conforme: C1/u);
     assert.equal(JSON.parse(closeDraft).location, 'C1');
     assert.ok(!writes.some(entry => /UPDATE stock|UPDATE lots|UPDATE ordenes_produccion/u.test(entry.sql)));
+  } finally {
+    closeDraft = null;
+  }
+});
+
+test('una edición estructurada actualiza el cierre y vuelve a mostrar el resumen sin cerrar', async () => {
+  writes.length = 0;
+  lastWorkflowAction = 'CERRAR_ORDEN_PRODUCCION';
+  closeDraft = JSON.stringify({ orderId: 101, conforming: 2, waste: 1,
+    wasteClassified: true, reason: 'empaque roto', location: 'C2', materials: [],
+    materialsAnswered: true, materialPending: null, reviewShown: true });
+  try {
+    const phrase = 'Al final me quedaron tres buenas, las dejo en C1 y confirmo';
+    const edited = await invoke('CERRAR_ORDEN_PRODUCCION', phrase, {
+      editar_borrador: true, evidencia: phrase, avance_cierre: { conformes: 3, ubicacion_pt: 'C1' },
+    });
+    assert.equal(edited.body.ok, true);
+    assert.match(edited.body.mensaje, /Producto terminado conforme: 3 und/u);
+    assert.match(edited.body.mensaje, /no conforme: 1 und \| Causa: empaque roto/u);
+    assert.match(edited.body.mensaje, /Ubicación del conforme: C1/u);
+    assert.match(edited.body.mensaje, /Revisa el resumen/u);
+    assert.equal(edited.body.context.inventory_changed, false);
+
+    const saved = closeDraft;
+    const question = await invoke('CERRAR_ORDEN_PRODUCCION', 'Esas van en B12', {
+      editar_borrador: true, evidencia: 'Esas van en B12', aclarar: 'ubicacion',
+    });
+    assert.match(question.body.mensaje, /terminado conforme o para una partida/u);
+    assert.equal(closeDraft, saved);
+
+    const wrongOrder = await invoke('CERRAR_ORDEN_PRODUCCION', 'Para OP ID 97 dos buenas', {
+      editar_borrador: true, evidencia: 'dos buenas', avance_cierre: { conformes: 2 },
+    });
+    assert.equal(wrongOrder.body.ok, false);
+    assert.equal(closeDraft, saved);
+    assert.ok(!writes.some(entry => /INSERT INTO (?:stock|lots|kardex|mermas)|UPDATE (?:stock|lots|ordenes_produccion)/u.test(entry.sql)));
+  } finally {
+    lastWorkflowAction = null;
+    closeDraft = null;
+  }
+});
+
+test('confirmar una versión anterior del cierre se rechaza antes de mover inventario', async () => {
+  const { closeProductionOrder } = require('../api/_lib/production-close');
+  const firstReview = { orderId: 101, conforming: 2, waste: 0, location: 'C2',
+    materials: [], materialsAnswered: true, reviewShown: true };
+  closeDraft = JSON.stringify({ ...firstReview, location: 'C1' });
+  writes.length = 0;
+  try {
+    await assert.rejects(closeProductionOrder({ orderId: 101, qtyReal: 2, qtyWaste: 0,
+      locationCode: 'C2', materialsReplaced: [], userId: user.id, draftSnapshot: firstReview }),
+    /borrador de cierre cambió/u);
+    assert.ok(writes.some(entry => /FROM produccion_cierre_borradores[\s\S]*FOR UPDATE/u.test(entry.sql)));
+    assert.ok(!writes.some(entry => /^\s*(?:INSERT|UPDATE)/u.test(entry.sql)));
   } finally {
     closeDraft = null;
   }

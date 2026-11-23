@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 
 const dbPath = path.resolve(__dirname, '../api/_lib/db.js');
 const guidedPath = path.resolve(__dirname, '../api/_lib/builderbot-guided-reception.js');
@@ -14,6 +15,7 @@ let recentFinalPreview = null;
 let activeFinalPreview = null;
 let interceptConfirmation = false;
 let interceptedConfirmation = null;
+let storedConfirmationDraft = null;
 
 require.cache[dbPath] = {
   id: dbPath, filename: dbPath, loaded: true,
@@ -25,6 +27,10 @@ require.cache[dbPath] = {
         rol_nombre: 'admin', email: 'qa@wms.co',
       }]];
       if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
+      if (storedConfirmationDraft && /SELECT \* FROM recepciones WHERE id = \? LIMIT 1 FOR UPDATE/u.test(sql)) {
+        return [[{ id: 145, orden_compra_id: 45, estado: 'borrador' }]];
+      }
+      if (storedConfirmationDraft && /FROM recepcion_confirmacion_borradores/u.test(sql)) return [[storedConfirmationDraft]];
       if (/^\s*INSERT/iu.test(sql)) return [{ insertId: 1 }];
       return [[]];
     },
@@ -69,6 +75,26 @@ require.cache[receptionPath] = {
 process.env.BUILDERBOT_WEBHOOK_SECRET = 'qa-webhook-secret';
 process.env.DISABLE_OUTBOUND_NOTIFICATIONS = 'true';
 const handler = require('../api/v1/webhook/builderbot');
+
+test('receipt confirmation rejects a changed physical review before writing inventory', async () => {
+  const { confirmReceptionForUser } = require('../api/v1/reception');
+  const preview = { version: 1, orderId: 45, receptionId: 145,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 2, ubicacion: 'A8' }] }] };
+  const revised = { ...preview,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 2, ubicacion: 'A2' }] }] };
+  const payloadJson = reception.canonicalJson(revised);
+  storedConfirmationDraft = { usuario_id: 5, payload_json: payloadJson,
+    payload_hash: createHash('sha256').update(payloadJson).digest('hex') };
+  executed.length = 0;
+  try {
+    await assert.rejects(confirmReceptionForUser({ user: { id: 5 }, body: { recepcion_id: 145 },
+      draftSnapshot: preview }), /borrador de recepción cambió/u);
+    assert.ok(executed.some(sql => /FROM recepcion_confirmacion_borradores[\s\S]*FOR UPDATE/u.test(sql)));
+    assert.ok(!executed.some(sql => /^\s*(?:INSERT|UPDATE)/u.test(sql)));
+  } finally {
+    storedConfirmationDraft = null;
+  }
+});
 
 test('a misclassified production correction follows the last reception preview', async () => {
   recentReception = true;

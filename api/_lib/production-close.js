@@ -1,9 +1,11 @@
 const crypto = require('crypto');
+const { isDeepStrictEqual } = require('node:util');
 const { createConnection } = require('./db');
 const { normalizeExpiryDate } = require('./production-close-input');
 const { notifyRoles } = require('./builderbot-notifications');
 const { consumeCloseMaterials, normalizeCloseMaterials } = require('./production-close-materials');
 const { assignedFinishedLot } = require('./production-lot');
+const { pendingCloseDraft } = require('./production-close-guide');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -87,7 +89,8 @@ function deriveProductionExpiry(materialLots = []) {
   };
 }
 
-async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode, materialsReplaced, userId }) {
+async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, locationId, locationCode,
+  materialsReplaced, userId, draftSnapshot }) {
   const conforming = Number(qtyReal);
   const waste = Number(qtyWaste);
   const locationReference = locationId || locationCode || null;
@@ -130,6 +133,12 @@ async function closeProductionOrder({ orderId, qtyReal, qtyWaste, wasteReason, l
       };
     }
     if (order.estado !== 'EN_PROCESO') throw httpError(409, `La orden esta ${order.estado} y debe estar EN_PROCESO`);
+    if (draftSnapshot) {
+      const current = await pendingCloseDraft(conn, userId, { lock: true });
+      if (!isDeepStrictEqual(current, draftSnapshot)) {
+        throw httpError(409, 'El borrador de cierre cambió. Revisa el último resumen y vuelve a confirmar.');
+      }
+    }
     const replacementLines = normalizeCloseMaterials(materialsReplaced);
     const [pendingReplenishments] = await conn.execute(
       `SELECT codigo FROM produccion_reposiciones

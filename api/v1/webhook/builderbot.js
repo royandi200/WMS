@@ -87,6 +87,7 @@ const { advanceProductionReleaseGuide, correctionFields,
   productionReleaseAffirmation, productionReleaseFollowup } = require('../../_lib/production-release-guide');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
+const { assertDraftEvidence, checkDraftFields, clarifyDraft, draftInputError } = require('../../_lib/builderbot-draft-input');
 const {
   assertOperationalIntent, assertWasteReasonEvidence, isGenericWasteReason,
   publicOperationalError,
@@ -667,6 +668,21 @@ async function lastProcessedWorkflowAction(db, from) {
       ORDER BY id DESC LIMIT 1`, [from]
   );
   return rows[0]?.action || null;
+}
+
+function guidedReceptionContext(result) {
+  return {
+    guided: true,
+    reception_id: result.reception_id,
+    purchase_order_id: result.purchase_order_id,
+    reception_number: result.reception_number,
+    review_sku: result.review_sku,
+    selected_sku: result.selected_sku,
+    sku_review: Boolean(result.sku_review),
+    inventory_changed: false,
+    requires_confirmation: Boolean(result.requires_confirmation),
+    item_count: result.item_count || 0,
+  };
 }
 
 function sanitizeWebhookLogPayload(payload, action) {
@@ -1651,6 +1667,39 @@ module.exports = async (req, res) => {
       return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
+    if (Object.hasOwn(params, 'editar_borrador')) {
+      const receptionEdit = action === 'AVANZAR_RECEPCION_GUIADA_OC';
+      if (params.editar_borrador !== true || (!receptionEdit && action !== 'CERRAR_ORDEN_PRODUCCION')) {
+        throw draftInputError('Elige el borrador de recepción o de cierre que quieres corregir.');
+      }
+      const roles = user.roles || [user.rol_nombre].filter(Boolean);
+      if (!hasCapability(roles, capabilityForAction(action))) {
+        const msg = 'No tienes permiso para editar este borrador.';
+        await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
+        return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED' });
+      }
+      const userText = currentText(rawBody, info);
+      if (Object.hasOwn(params, 'aclarar')) {
+        checkDraftFields(params, ['editar_borrador', 'evidencia', 'aclarar'],
+          'Resuelve la duda antes de editar el borrador.');
+        assertDraftEvidence(userText, params.evidencia);
+        const msg = clarifyDraft(action, params.aclarar);
+        const body = { ok: true, message: msg, mensaje: msg, context: { inventory_changed: false } };
+        // A clarification is not the active workflow's new review.
+        await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'REJECTED' });
+        return await finalizeHandledResponse(body);
+      }
+      const result = receptionEdit
+        ? await advanceGuidedReception({ db, params, rawText: userText, user, from })
+        : await advanceCloseGuide({ db, userId: user.id, rawText: userText, params,
+          implicitContext: await lastProcessedWorkflowAction(db, from) === action });
+      if (!result.message) throw draftInputError('Revisa el borrador y envía la confirmación por separado.');
+      const context = receptionEdit ? { reception: guidedReceptionContext(result) } : { inventory_changed: false };
+      const body = { ok: true, message: result.message, mensaje: result.message, context };
+      await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
+      return await finalizeHandledResponse(body);
+    }
+
     const recoveredDocument = await recoverRejectedDocumentAction({
       db,
       rawBody,
@@ -2045,6 +2094,7 @@ module.exports = async (req, res) => {
     }
 
     let guidedCloseDraft = null;
+    let closeConfirmationSnapshot = null;
     if (action === 'CERRAR_ORDEN_PRODUCCION') {
       const closeText = currentText(rawBody, info);
       const guided = await advanceCloseGuide({ db, userId: user.id, from,
@@ -2058,6 +2108,7 @@ module.exports = async (req, res) => {
       }
       params = guided.params;
       guidedCloseDraft = guided.draft;
+      closeConfirmationSnapshot = guided.confirmationSnapshot;
     }
 
     switch (action) {
@@ -2234,18 +2285,7 @@ module.exports = async (req, res) => {
       case 'AVANZAR_RECEPCION_GUIADA_OC': {
         const result = await advanceGuidedReception({ db, params, rawText, user, from });
         mensaje = result.message;
-        responseContext.reception = {
-          guided: true,
-          reception_id: result.reception_id,
-          purchase_order_id: result.purchase_order_id,
-          reception_number: result.reception_number,
-          review_sku: result.review_sku,
-          selected_sku: result.selected_sku,
-          sku_review: Boolean(result.sku_review),
-          inventory_changed: false,
-          requires_confirmation: Boolean(result.requires_confirmation),
-          item_count: result.item_count || 0,
-        };
+        responseContext.reception = guidedReceptionContext(result);
         break;
       }
 
@@ -3553,6 +3593,7 @@ module.exports = async (req, res) => {
           locationCode: params.ubicacion,
           materialsReplaced: params.materiales_repuestos,
           userId: user.id,
+          draftSnapshot: closeConfirmationSnapshot,
         });
         if (guidedCloseDraft) await finishCloseDraft(db, user.id, guidedCloseDraft).catch(error => {
           console.error('[webhook] La OP se cerró, pero no se pudo cerrar su borrador:', error.message);

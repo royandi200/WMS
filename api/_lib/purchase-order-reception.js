@@ -160,7 +160,7 @@ async function loadPreparedReception(conn, preparationKey) {
   return { ...reception, items, duplicate: true };
 }
 
-async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) {
+async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId, preparedOnly = false }) {
   const orderId = Number(purchaseOrderId);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     throw httpError(400, 'orden_compra_id es obligatorio');
@@ -180,6 +180,7 @@ async function preparePurchaseOrderReception(conn, { purchaseOrderId, userId }) 
 
   const prepared = await loadPreparedReception(conn, preparationKey);
   if (prepared) return prepared;
+  if (preparedOnly) throw httpError(409, 'Prepara primero la recepción de la OC o IO indicada.');
 
   const [orderedItems] = await conn.execute(
     `SELECT oci.producto_id, p.siigo_code AS sku, p.nombre AS producto,
