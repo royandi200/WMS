@@ -477,13 +477,19 @@ async function findRecentProductionCloseReason(db, from, orderId) {
   return null;
 }
 
-async function findRecentReceptionPreparationQuestion(db, from, rawText) {
+async function findContextualReceptionPreparationReference(db, from, rawText, { action, params } = {}) {
   if (!from) return null;
   const shortYes = /^(?:SI|SÍ|CORRECTO|EXACTO|ASÍ ES)[.!]?$/iu
     .test(String(rawText || '').trim());
-  if (!shortYes && !preparationClarificationCandidate(rawText)) return null;
+  const shortReference = String(rawText || '').trim().replace(/^(?:la|el)\s+/iu, '');
+  const candidate = preparationClarificationCandidate(shortReference);
+  const isPrep = ['PREPARAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA'].includes(action);
+  const inputId = action === 'PREPARAR_RECEPCION_MAQUILA' ? params?.orden_maquila_id : params?.orden_compra_id;
+  const modelId = isPrep ? Number(inputId) : 0;
+  const hasModelId = Number.isSafeInteger(modelId) && modelId > 0;
+  if (!shortYes && !candidate && !hasModelId) return null;
   const [rows] = await db.execute(
-    `SELECT payload, response
+    `SELECT payload, response, action
        FROM webhook_logs
       WHERE from_phone = ? AND status = 'PROCESSED'
         AND created_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
@@ -492,8 +498,48 @@ async function findRecentReceptionPreparationQuestion(db, from, rawText) {
   );
   const prior = rows[0];
   if (!prior) return null;
-  const payload = asObject(prior.payload);
   const response = asObject(prior.response);
+  if (prior.action === 'CONSULTAR_RECEPCIONES_PENDIENTES') {
+    const { available_receptions: purchases, available_outsourcing_receptions: outsourcing } = response.context || {};
+    const visible = [
+      ...(Array.isArray(purchases) ? purchases : []).flatMap(row => {
+        const kind = row?.reception_type === 'IN_OUT' ? 'IO'
+          : row?.reception_type === 'INSUMOS_MP' ? 'OC' : null;
+        return kind ? [{ kind, id: Number(row.purchase_order_id) }] : [];
+      }),
+      ...(Array.isArray(outsourcing) ? outsourcing : [])
+        .map(row => ({ kind: 'MQ', id: Number(row?.outsourcing_order_id) })),
+    ];
+    if (candidate) {
+      const positive = /^(?:O[\s.]*C|I[\s.]*O|M[\s.]*Q)/iu.test(shortReference);
+      if (!positive && hasModelId) throw draftInputError('¿Cuál de las recepciones de la lista quieres abrir?');
+      return positive && visible.some(row => row.kind === candidate.kind && row.id === candidate.id)
+        ? candidate : null;
+    }
+    if (!hasModelId) return null;
+    if (/^\s*[¿¡]?\s*no\b/iu.test(rawText)) {
+      throw draftInputError('¿Cuál de las recepciones de la lista quieres abrir?');
+    }
+    const statedIds = String(rawText || '').match(/\d+/gu) || [];
+    if (statedIds.length && (statedIds.length !== 1 || Number(statedIds[0]) !== modelId)) return null;
+    const selection = params?.seleccion_recepcion;
+    if (!statedIds.length && !selection) return null;
+    if (selection) {
+      checkDraftFields(selection, ['id', 'evidencia'], 'Indica solo el ID que quieres seleccionar.');
+      if (selection.id !== modelId) return null;
+      assertDraftEvidence(rawText, selection.evidencia);
+    }
+    const explicit = typedReceptionReferences(rawText);
+    if (explicit.length > 1 || (explicit.length === 1 && explicit[0].id !== modelId)) return null;
+    const matches = visible.filter(row => row.id === modelId && (!explicit.length || row.kind === explicit[0].kind));
+    if (matches.length > 1) {
+      throw draftInputError(`¿Te refieres a ${matches.map(row => `${row.kind} ID ${row.id}`).join(' o ')}?`);
+    }
+    const selected = matches[0];
+    if (selected && (selected.kind === 'MQ') === (action === 'PREPARAR_RECEPCION_MAQUILA')) return selected;
+    return null;
+  }
+  const payload = asObject(prior.payload);
   const previousUserText = getUserText(payload, parseBuilderBotInfo(payload));
   const previousBotMessage = response.message || response.mensaje;
   return confirmedPreparationReference(rawText, previousUserText, previousBotMessage)
@@ -1824,7 +1870,7 @@ module.exports = async (req, res) => {
       });
       confirmedReceptionReference = receptionIntent
         ? null
-        : await findRecentReceptionPreparationQuestion(db, from, rawText);
+        : await findContextualReceptionPreparationReference(db, from, rawText, { action, params });
       const selected = receptionIntent || confirmedReceptionReference;
       if (selected) {
         selectedPreparationReference = selected;
