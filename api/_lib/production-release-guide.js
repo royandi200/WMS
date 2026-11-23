@@ -39,10 +39,15 @@ function productionReleaseAffirmation(text) {
   return /^(?:si|yes|correcto|asi\s+es|de\s+acuerdo)[.!]?$/u.test(normalized(text));
 }
 
+function productionDraftReview(text) {
+  return /^(?:revisa|revisar|muestra|muestrame)\s+(?:el|mi|este)\s+borrador\s+de\s+(?:esta|la)\s+op[.!]?$/u
+    .test(normalized(text));
+}
+
 function productionReleaseFollowup(text) {
   const raw = normalized(text);
   return productionReleaseConfirmation(raw) || productionReleaseCancellation(raw)
-    || productionReleaseAffirmation(raw)
+    || productionReleaseAffirmation(raw) || productionDraftReview(raw)
     || /^(?:no|todavia\s+no)\s+confirmo\b/u.test(raw)
     || /^(?:no\s*[,;]?\s*)?(?:(?:corrige|correccion|corrijo|cambia|cambio|modifica|mejor|perdon)\s*[,;:-]?\s*)?(?:la\s+|el\s+)?(?:cantidad|producto|sku|referencia)\b/u.test(raw)
     || new RegExp(`^(?:no\\s*[,;]?\\s*)?(?:son|seran|eran|quedan|fueron)\\s+${NUMBER}\\b`, 'u').test(raw)
@@ -98,7 +103,9 @@ function productionReleaseSummary(draft) {
     'Destino: stock de seguridad',
     '',
     'Si necesitas corregir, di «serán [cantidad] unidades» o «cambia el producto a [nombre o SKU]». Puedes cambiar ambos datos antes de confirmar; te mostraré el resumen actualizado.',
-    'Si está correcto, di *confirmo crear OP para stock de seguridad*, *confirmo esta OP* o *crea esta orden*. Para descartarla, di *cancela esta orden* (también puedes decir *cancela esta OP*).',
+    draft.renewal_required
+      ? 'La revisión anterior venció. Escribe «Revisa el borrador de esta OP» o corrige un dato para renovar el resumen. Para descartarlo, di *cancela esta OP*.'
+      : 'Si está correcto, di *confirmo crear OP para stock de seguridad*, *confirmo esta OP* o *crea esta orden*. Para descartarla, di *cancela esta orden* (también puedes decir *cancela esta OP*).',
     '',
     'Aún no se creó la OP, no se reservaron materiales y no se avisó al alistador.',
   ].join('\n');
@@ -106,6 +113,11 @@ function productionReleaseSummary(draft) {
 
 async function advanceProductionReleaseGuide({ db, rawText, draft, request }) {
   if (!request && !draft) return null;
+  if (!request && productionDraftReview(rawText)) {
+    const { status, sku, name, quantity } = draft;
+    const reviewed = { status, sku, name, quantity };
+    return { status, draft: reviewed, message: productionReleaseSummary(reviewed) };
+  }
   if (!request && productionReleaseAffirmation(rawText)) {
     return { status: 'PENDING', draft,
       message: `El borrador sigue pendiente. Revisa los datos y, para crear la OP, di «confirmo esta OP» o «crea esta orden».\n\n${productionReleaseSummary(draft)}` };

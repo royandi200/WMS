@@ -6,6 +6,11 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Estado actual (2026-10-13)
 
+- 2026-11-23, continuidad de borradores de OP: una corrección posterior a la
+  ventana de 45 minutos perdía cantidad, producto y destino aunque el JSON
+  fuera correcto. El WMS permite retomar el último borrador hasta 24 horas;
+  una confirmación sobre revisión vencida exige renovar el resumen primero.
+
 - 2026-11-23, correcciones de OP: la prueba de WhatsApp confirmó que el LLM
   seleccionó el SKU correcto, pero el intérprete del borrador incluyó «correcta es»
   como parte del producto. Se corrigió la extracción y se cubrió la edición sin

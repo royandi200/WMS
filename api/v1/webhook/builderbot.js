@@ -84,7 +84,8 @@ const { currentUserText } = require('../../_lib/builderbot-user-text');
 const { productionRequestIntent, productionDestinationReply,
   contextualProductionReply } = require('../../_lib/stock-production-intent');
 const { advanceProductionReleaseGuide, correctionFields,
-  productionReleaseAffirmation, productionReleaseFollowup } = require('../../_lib/production-release-guide');
+  productionReleaseAffirmation, productionReleaseConfirmation, productionReleaseFollowup,
+  productionReleaseSummary } = require('../../_lib/production-release-guide');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
 const { assertDraftEvidence, checkDraftFields, clarifyDraft, draftInputError } = require('../../_lib/builderbot-draft-input');
@@ -568,22 +569,19 @@ async function findRecentProductionDestinationQuestion(db, from, rawText) {
 async function pendingStockProductionDraft(db, from) {
   if (!from) return null;
   const [rows] = await db.execute(
-    `SELECT action, response FROM webhook_logs
+    `SELECT action, response, created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE) AS revision_vigente
+       FROM webhook_logs
       WHERE from_phone = ? AND status = 'PROCESSED'
-        AND created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE)
-      ORDER BY id DESC LIMIT 16`, [from]
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        AND (action NOT IN ('MODO_CHARLA', 'UNKNOWN')
+          OR JSON_EXTRACT(response, '$.context.stock_production_draft.status') IS NOT NULL)
+      ORDER BY id DESC LIMIT 1`, [from]
   );
-  for (const row of rows) {
-    const state = asObject(asObject(asObject(row.response).context).stock_production_draft);
-    if (state.status === 'CANCELLED' || state.status === 'COMPLETED') return null;
-    if (row.action === 'LIBERAR_ORDEN_PRODUCCION') {
-      return state.status === 'PENDING' && state.sku && state.quantity ? state : null;
-    }
-    // Un turno de charla entre el resumen y la confirmación no descarta el
-    // borrador. Otra operación sí corta el contexto para no revivir una OP vieja.
-    if (row.action !== 'MODO_CHARLA' && row.action !== 'UNKNOWN') return null;
-  }
-  return null;
+  const row = rows[0];
+  if (!row || row.action !== 'LIBERAR_ORDEN_PRODUCCION') return null;
+  const draft = asObject(asObject(asObject(row.response).context).stock_production_draft);
+  if (draft.status !== 'PENDING' || !draft.sku || !draft.quantity) return null;
+  return { draft, needsReview: draft.renewal_required === true || Number(row.revision_vigente) !== 1 };
 }
 
 function stockQuantityClarification(message) {
@@ -1792,7 +1790,7 @@ module.exports = async (req, res) => {
       activeStockProductionDraft = await pendingStockProductionDraft(db, from);
       if (productionReleaseAffirmation(contractUserText)) {
         const acknowledged = await acknowledgedStockQuantity(db, from, contractUserText);
-        activeStockProductionDraft = acknowledged?.draft || activeStockProductionDraft;
+        if (acknowledged) activeStockProductionDraft = { draft: acknowledged.draft, needsReview: false };
         acknowledgedStockCorrection = acknowledged?.quantity || null;
       }
       if (activeStockProductionDraft) {
@@ -3483,16 +3481,26 @@ module.exports = async (req, res) => {
       case 'LIBERAR_ORDEN_PRODUCCION': {
         let releaseParams = { ...params };
         let confirmedStockRelease = null;
-        const stockDraft = activeStockProductionDraft
-          || (params.confirmar_nueva_orden === true ? null : await pendingStockProductionDraft(db, from));
-        if (!stockDraft && !productionRequest && params.confirmar_nueva_orden !== true
-          && productionReleaseFollowup(contractUserText)
-          && !(params.id_producto_final || params.id_item || params.sku)) {
+        const additionalOrder = params.confirmar_nueva_orden === true && Boolean(params.id_orden_existente);
+        const stockContext = activeStockProductionDraft
+          || (additionalOrder ? null : await pendingStockProductionDraft(db, from));
+        const stockDraft = stockContext?.needsReview
+          ? { ...stockContext.draft, renewal_required: true } : stockContext?.draft;
+        const missingAdditionalBase = info.params?.confirmar_nueva_orden === true && !info.params.id_orden_existente;
+        if (!stockDraft && !productionRequest && !additionalOrder
+          && productionReleaseFollowup(contractUserText)) {
           mensaje = 'No hay un resumen de OP de stock de seguridad pendiente para confirmar o corregir. Indica producto, cantidad y destino para preparar uno nuevo. No se creó ninguna orden.';
           responseContext.inventory_changed = false;
           break;
         }
         if (stockDraft && !productionRequest && productionReleaseFollowup(contractUserText)) {
+          if (stockContext.needsReview && productionReleaseConfirmation(contractUserText)) {
+            mensaje = 'Recuperé tu borrador; no se creó la OP.\n\n'
+              + productionReleaseSummary(stockDraft);
+            responseContext.stock_production_draft = stockDraft;
+            responseContext.inventory_changed = false;
+            break;
+          }
           const review = await advanceProductionReleaseGuide({
             db, rawText: acknowledgedStockCorrection
               ? `son ${acknowledgedStockCorrection} unidades` : contractUserText,
@@ -3507,7 +3515,18 @@ module.exports = async (req, res) => {
           confirmedStockRelease = review.release;
           responseContext.stock_production_draft = { status: 'COMPLETED' };
         }
-        if (params.confirmar_nueva_orden === true && params.id_orden_existente) {
+        if (!confirmedStockRelease && !productionRequest && missingAdditionalBase) {
+          mensaje = stockDraft
+            ? (stockContext.needsReview
+              ? 'No pude validar la confirmación. Recuperé tu borrador sin crear la OP.\n\n'
+              : 'No pude validar la confirmación. Tu borrador sigue abierto. Revisa el resumen y confirma por escrito si está correcto.\n\n')
+              + productionReleaseSummary(stockDraft)
+            : 'No pude identificar la orden base. Indica su OP ID si vas a pedir una orden adicional. No se creó ninguna orden.';
+          if (stockDraft) responseContext.stock_production_draft = stockDraft;
+          responseContext.inventory_changed = false;
+          break;
+        }
+        if (additionalOrder) {
           const existingOrderId = String(params.id_orden_existente).trim();
           const [existingOrders] = await db.execute(
             `SELECT o.id, o.codigo_orden, o.cantidad_planeada, o.origen_tipo,
