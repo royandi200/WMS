@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildPurchaseOrderPdf } = require('../scripts/qa/demo-pdf');
-const { aiDocumentBody } = require('../api/_lib/document-ai-extractor');
+const { aiDocumentBody, relevantCatalog } = require('../api/_lib/document-ai-extractor');
 
 function pdfDocument() {
   return {
@@ -62,4 +62,26 @@ test('description-only rows (SIIGO OC) get a catalog SKU flagged for confirmatio
   assert.match(result.advertencias.join(' '), /asignado por descripcion.*00052-MPCG/);
   assert.match(result.advertencias.join(' '), /PRODUCTO RARO/);
   assert.doesNotMatch(result.advertencias.join(' '), /no aparecen en el PDF/);
+});
+
+test('a large catalog is reduced to the products related to the document', () => {
+  const filler = Array.from({ length: 490 }, (_, i) => ({ siigo_code: `X-${i}`, nombre: `GOMAS RELLENO ${i}` }));
+  const catalog = [...filler, { siigo_code: '00052-MPCG', nombre: 'GOMAS CREAGUMS - CREATINA CREAPURE' }];
+  const reduced = relevantCatalog(catalog, 'GOMA DE GELATINA - CREATINA, FOS');
+  assert.equal(reduced.length, 80);
+  assert.equal(reduced[0].siigo_code, '00052-MPCG');
+});
+
+test('a 413 is retried with a smaller catalog', async (t) => {
+  process.env.GROQ_API_KEY = 'test-key';
+  t.after(() => { delete process.env.GROQ_API_KEY; });
+  const sizes = [];
+  t.mock.method(global, 'fetch', async (_url, init) => {
+    sizes.push(init.body.length);
+    return sizes.length === 1 ? { ok: false, status: 413 }
+      : { ok: true, json: async () => ({ choices: [{ message: { content: '{"items":[]}' } }] }) };
+  });
+  const catalog = Array.from({ length: 300 }, (_, i) => ({ siigo_code: `T-${i}`, nombre: `TAPA BLANCA ${i}` }));
+  await aiDocumentBody(pdfDocument(), 'ORDEN_COMPRA', {}, catalog);
+  assert.ok(sizes[1] < sizes[0]);
 });

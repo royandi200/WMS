@@ -10,6 +10,35 @@ const FIELDS_BY_TYPE = {
   ORDEN_COMPRA_CLIENTE: 'referencia_documento (numero de OC o pedido), fecha_documento (YYYY-MM-DD), nombre_cliente (cliente final)',
 };
 
+// El catálogo completo supera el límite de tamaño de Groq (413): se envían solo
+// los productos que comparten palabras o código con el documento.
+const MAX_CATALOG = 80;
+
+function words(value) {
+  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/gu, '').toLowerCase()
+    .split(/[^a-z0-9]+/u).filter((word) => word.length > 2).map((word) => word.replace(/s$/u, ''));
+}
+
+function relevantCatalog(catalog, text, limit = MAX_CATALOG) {
+  if (catalog.length <= limit) return catalog;
+  const wanted = new Set(words(text));
+  const upper = String(text).toUpperCase();
+  const frequency = new Map();
+  const entries = catalog.map((product) => ({ product, tokens: [...new Set(words(product.nombre))] }));
+  for (const { tokens } of entries) for (const token of tokens) frequency.set(token, (frequency.get(token) || 0) + 1);
+  return entries
+    .map(({ product, tokens }) => ({
+      product,
+      // Una palabra rara («creatina») pesa más que una común («goma»).
+      score: (upper.includes(String(product.siigo_code).toUpperCase()) ? 1000 : 0)
+        + tokens.reduce((sum, token) => sum + (wanted.has(token) ? Math.log(1 + catalog.length / frequency.get(token)) : 0), 0),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .map((entry) => entry.product);
+}
+
 function catalogBlock(catalog) {
   if (!catalog.length) return '';
   return `\nCATALOGO (SKU | nombre):\n${catalog.map((p) => `${p.siigo_code} | ${p.nombre}`).join('\n')}`;
@@ -61,7 +90,8 @@ async function callGroq(text, documentType, catalog = []) {
     // Free tier often answers 429/5xx or times out; one retry covers most cases.
     console.error('[document-ai-extractor] retry', error.message);
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    return callGroqOnce(text, documentType, catalog);
+    // Repetir el mismo pedido tras un 413 siempre falla: se reduce el catálogo.
+    return callGroqOnce(text, documentType, error.status === 413 ? relevantCatalog(catalog, text, 25) : catalog);
   }
 }
 
@@ -86,7 +116,7 @@ async function callGroqOnce(text, documentType, catalog = []) {
         ],
       }),
     });
-    if (!response.ok) throw new Error(`Groq respondio ${response.status}`);
+    if (!response.ok) throw Object.assign(new Error(`Groq respondio ${response.status}`), { status: response.status });
     const payload = await response.json();
     return JSON.parse(payload?.choices?.[0]?.message?.content || '{}');
   } finally {
@@ -103,7 +133,7 @@ async function aiDocumentBody(document, documentType, body = {}, catalog = []) {
   try {
     const { text } = await extractPdfTextLayer(document.content);
     if (!text.trim()) return body;
-    const extracted = await callGroq(text, documentType, catalog);
+    const extracted = await callGroq(text, documentType, relevantCatalog(catalog, text));
     const known = new Set(catalog.map((p) => String(p.siigo_code).toUpperCase()));
     const rows = (Array.isArray(extracted.items) ? extracted.items : []).map(cleanItem).filter(Boolean);
     const withoutSku = rows.filter((item) => !item.sku || (item.sku_por_descripcion && !known.has(item.sku.toUpperCase())));
@@ -137,4 +167,4 @@ async function aiDocumentBody(document, documentType, body = {}, catalog = []) {
   }
 }
 
-module.exports = { aiDocumentBody, untraceableSkus };
+module.exports = { aiDocumentBody, relevantCatalog, untraceableSkus };
