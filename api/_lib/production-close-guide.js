@@ -2,6 +2,7 @@ const { explicitReferences, referenceKey } = require('./production-order-referen
 const { recentOrderContext } = require('./production-waste-guide');
 const { resolveProductReference } = require('./product-references');
 const { groundedCloseCorrection } = require('./production-close-correction');
+const { assertDraftEvidence, checkDraftFields } = require('./builderbot-draft-input');
 
 const NUMBER_WORDS = Object.freeze({ cero: 0, ninguna: 0, ninguno: 0,
   una: 1, un: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
@@ -63,8 +64,10 @@ function contextualOrderCandidate(text, hasDraft) {
 }
 
 function fieldMatch(text, before, after) {
-  const value = text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1]
-    || text.match(new RegExp(`${before}\\s*(?:de|a|es|era|eran|fue|son|fueron|quedan|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1];
+  // «ubicación C2\nNo conforme 0» no significa «2 no conformes».
+  // La cifra que sigue al nombre del campo prevalece sobre una cifra previa.
+  const value = text.match(new RegExp(`${before}\\s*(?:de|a|es|era|eran|fue|son|fueron|quedan|quedaron|:)?\\s*${NUMBER}`, 'u'))?.[1]
+    || text.match(new RegExp(`${NUMBER}\\s*(?:und|unidad(?:es)?|uds?)?\\s*(?:de\\s+)?${after}`, 'u'))?.[1];
   return quantity(value);
 }
 
@@ -219,6 +222,35 @@ function parseMaterialSegments(text, options = {}) {
     return { producto: productTerm || null, cantidad: quantityMatch ? quantity(quantityMatch[1]) : null,
       lote: lot, motivo: cause, ubicacion: location?.toUpperCase() || null };
   }).filter(item => item.producto || item.cantidad != null || item.lote || item.motivo);
+}
+
+async function expandNamedMaterialList(db, materials, spoken) {
+  if (spoken.length !== 1) return null;
+  const item = spoken[0];
+  // Solo descomponer una enumeración de nombres. No atribuir a todos los
+  // insumos una cantidad, lote, causa o ubicación que el operario no precisó.
+  if (!item.producto || item.cantidad != null || item.lote || item.motivo || item.ubicacion) return null;
+  if (materials.some(row => normalize(row.nombre) === normalize(item.producto)
+    || normalize(row.sku) === normalize(item.producto))) return null;
+  const names = item.producto.split(/\s*,\s*|\s+y\s+/iu).map(name => name.trim()).filter(Boolean);
+  if (names.length < 2) return null;
+  const productIds = materials.map(row => row.producto_id);
+  const distinct = new Set();
+  for (const name of names) {
+    let product;
+    try {
+      product = await resolveProductReference(db, name, {
+        productIds, allowContextualPartial: true, allowScopedApproximate: true,
+      });
+    } catch (error) {
+      if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND' || error.code === 'PRODUCT_REFERENCE_AMBIGUOUS') return null;
+      throw error;
+    }
+    if (!materials.some(row => Number(row.producto_id) === Number(product.id))
+      || distinct.has(Number(product.id))) return null;
+    distinct.add(Number(product.id));
+  }
+  return names.map(producto => ({ producto, cantidad: null, lote: null, motivo: null, ubicacion: null }));
 }
 
 function changedMaterialCandidate(text) {
@@ -927,7 +959,7 @@ async function applyMaterialReport(db, draft, order, text, params) {
   const changedMaterial = changedMaterialCandidate(text);
   const segmentOptions = { allowImplicit: readyForMaterials && !draft.materialPending };
   const spokenSegments = materialTextSegments(text, segmentOptions);
-  const spoken = parseMaterialSegments(text, segmentOptions);
+  let spoken = parseMaterialSegments(text, segmentOptions);
   if (!spoken.length && changedMaterial) spoken.push(changedMaterial);
   if (MATERIAL_START.test(String(text || '')) && !spoken.length && !draft.materialPending) {
     draft.materialPending = { sku: null, producto: null, cantidad: null, lote: null,
@@ -935,11 +967,14 @@ async function applyMaterialReport(db, draft, order, text, params) {
     draft.materialsAnswered = false;
     return;
   }
+  const materials = spoken.length ? await orderMaterials(db, order.id) : [];
+  const expandedList = !changedMaterial && await expandNamedMaterialList(db, materials, spoken);
+  if (expandedList) spoken = expandedList;
   const hasNewMaterial = spoken.length > 0;
   const interpreted = Array.isArray(advance.items) && advance.items.length
     ? advance.items : Array.isArray(params.materiales_repuestos) && params.materiales_repuestos.length
       ? params.materiales_repuestos : [];
-  const incoming = hasNewMaterial && !changedMaterial && interpreted.length === spoken.length
+  const incoming = !expandedList && hasNewMaterial && !changedMaterial && interpreted.length === spoken.length
     ? spoken.map((said, index) => ({ ...interpreted[index],
       producto: said.producto || interpreted[index].producto || interpreted[index].sku,
       cantidad: said.cantidad ?? interpreted[index].cantidad,
@@ -953,7 +988,6 @@ async function applyMaterialReport(db, draft, order, text, params) {
       })(),
       ubicacion: said.ubicacion || groundedLocationHint(spokenSegments[index] || '', interpreted[index].ubicacion),
     })) : spoken;
-  const materials = incoming.length ? await orderMaterials(db, order.id) : [];
   const pendingBeforeMessage = draft.materialPending;
   for (const item of incoming) {
     const productTerm = String(item.producto || item.sku || item.id_item || '').trim();
@@ -1026,7 +1060,9 @@ async function applyMaterialReport(db, draft, order, text, params) {
   }
   if (!incoming.length && draft.materialPending) {
     const followup = materialFollowup(text);
-    const standaloneQuantity = quantity(text);
+    const standaloneQuantity = quantity(text)
+      ?? quantity(new RegExp(`^${NUMBER}\\s*(?:und|unidad(?:es)?|uds?|g|gramos?)\\.?$`, 'u')
+        .exec(normalize(text))?.[1]);
     if (standaloneQuantity != null && draft.materialPending.cantidad == null) {
       if (standaloneQuantity <= 0) throw guideError('La cantidad de material repuesto debe ser mayor que cero.');
       if (Math.abs(standaloneQuantity * 1000 - Math.round(standaloneQuantity * 1000)) > 0.000001
@@ -1097,12 +1133,12 @@ function jsonObject(value) {
   try { return JSON.parse(value || '{}') || {}; } catch { return {}; }
 }
 
-async function pendingCloseDraft(db, userId) {
+async function pendingCloseDraft(db, userId, { lock = false } = {}) {
   const [rows] = await db.execute(
     `SELECT payload_json FROM produccion_cierre_borradores
       WHERE usuario_id = ? AND estado = 'PENDIENTE'
         AND (expira_en > NOW() OR actualizado_en > DATE_SUB(NOW(), INTERVAL 8 HOUR))
-      LIMIT 1`, [userId]
+      LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [userId]
   );
   return rows.length ? jsonObject(rows[0].payload_json) : null;
 }
@@ -1135,12 +1171,12 @@ function isCloseFollowup(text, draft) {
   return false;
 }
 
-async function loadOrder(db, orderId) {
+async function loadOrder(db, orderId, { lock = false } = {}) {
   const [rows] = await db.execute(
     `SELECT op.id, op.codigo_orden, op.estado, op.cantidad_planeada, op.producto_id,
             p.siigo_code AS sku, p.nombre AS producto
        FROM ordenes_produccion op JOIN productos p ON p.id = op.producto_id
-      WHERE op.id = ? LIMIT 1`, [orderId]
+      WHERE op.id = ? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [orderId]
   );
   const order = rows[0];
   if (!order) throw guideError(`No existe la OP ID ${orderId}`, 404);
@@ -1329,9 +1365,188 @@ function guideSummary(order, draft, locationHint) {
   return lines.join('\n');
 }
 
-async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
-  rawText = closeUtterance(rawText);
+function completeCloseDraft(draft) {
+  return draft.conforming != null && draft.waste != null
+    && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
+    && (draft.conforming === 0 || !!draft.location)
+    && draft.materialsAnswered && !draft.materialIssue
+    && !draft.materialPending && !draft.materialQueue?.length
+    && !draft.materialChoice && !draft.unclassifiedWaste
+    && draft.materials.every(item => !!item.lote);
+}
+
+async function validateCloseFields(db, order, draft) {
+  if (draft.conforming != null && (!Number.isInteger(draft.conforming) || draft.conforming < 0
+      || draft.conforming > Number(order.cantidad_planeada))) {
+    throw guideError(`Los conformes deben ser unidades enteras entre 0 y ${Number(order.cantidad_planeada)}.`);
+  }
+  if (draft.waste != null && (!Number.isInteger(draft.waste) || draft.waste < 0)) {
+    throw guideError('La merma debe ser cero o un número entero de unidades.');
+  }
+  if (draft.location) {
+    const [locations] = await db.execute(
+      `SELECT u.codigo FROM ubicaciones u JOIN bodegas b ON b.id = u.bodega_id
+        WHERE UPPER(u.codigo) = UPPER(?) AND u.activa = 1 AND b.activa = 1 LIMIT 1`,
+      [draft.location]
+    );
+    if (!locations.length) throw guideError(`La ubicación ${draft.location} no existe o no está activa. Indica otra.`);
+    draft.location = locations[0].codigo;
+  }
+}
+
+function draftFieldText(value, maxLength, label) {
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > maxLength) {
+    throw guideError(`Indica un valor válido para ${label}.`);
+  }
+  return value.trim();
+}
+
+function structuredQuantity(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw guideError(`Indica una cantidad entera de cero o más para ${label}.`);
+  }
+  return value;
+}
+
+async function editCloseMaterial(db, order, draft, edit) {
+  const fields = ['cantidad', 'lote', 'ubicacion', 'motivo'];
+  checkDraftFields(edit, ['producto', 'partida', ...fields], 'Indica el material o partida y el dato nuevo.');
+  if (!fields.some(field => Object.hasOwn(edit, field))) throw guideError('¿Qué dato quieres cambiar de ese material?');
+  const lines = draft.materials || [];
+  let candidates = lines;
+  if (Object.hasOwn(edit, 'partida')) {
+    if (!Number.isSafeInteger(edit.partida) || edit.partida < 1 || !lines[edit.partida - 1]) {
+      throw guideError('Indica el número de una partida que aparece en el resumen.');
+    }
+    candidates = [lines[edit.partida - 1]];
+  }
+  if (Object.hasOwn(edit, 'producto')) {
+    const term = draftFieldText(edit.producto, 255, 'el producto');
+    const allowed = await orderMaterials(db, order.id);
+    const product = await resolveProductReference(db, term, {
+      productIds: allowed.map(row => row.producto_id), allowContextualPartial: true,
+    });
+    candidates = candidates.filter(line => line.sku === product.siigo_code);
+    if (!Object.hasOwn(edit, 'partida') && draft.materialPending?.sku === product.siigo_code) {
+      throw guideError('Hay un insumo en curso con ese mismo SKU. Indica el número de la partida del resumen.');
+    }
+  }
+  if (candidates.length !== 1 || (draft.materialPending && edit.partida == null && edit.producto == null)) {
+    throw guideError('¿Qué partida de insumo repuesto quieres cambiar? Indica su nombre o número del resumen.');
+  }
+  const [line] = candidates;
+  const choice = draft.materialChoice;
+  const choosingThisLot = choice?.target === 'existing' && lines[choice.index] === line;
+  if (choosingThisLot && !Object.hasOwn(edit, 'lote')
+    && (Object.hasOwn(edit, 'cantidad') || Object.hasOwn(edit, 'ubicacion'))) {
+    throw guideError('Indica también el lote correcto de esta partida para revisar su disponibilidad.');
+  }
+  if (Object.hasOwn(edit, 'cantidad')) {
+    const amount = edit.cantidad;
+    const grams = ['g', 'gr', 'gramo', 'gramos'].includes(String(line.unidad || '').toLowerCase());
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 999999999
+      || (grams ? Number(amount.toFixed(3)) !== amount : !Number.isSafeInteger(amount))) {
+      throw guideError(`Indica una cantidad positiva en ${line.unidad || 'und'} para ese material.`);
+    }
+    line.cantidad = amount;
+  }
+  if (Object.hasOwn(edit, 'lote')) {
+    const lot = draftFieldText(edit.lote, 80, 'el lote').toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9_-]*$/u.test(lot)) throw guideError('Indica un código de lote válido.');
+    line.lote = lot;
+  }
+  if (Object.hasOwn(edit, 'ubicacion')) line.ubicacion = draftFieldText(edit.ubicacion, 80, 'la ubicación');
+  if (Object.hasOwn(edit, 'motivo')) {
+    const cause = draftFieldText(edit.motivo, 255, 'la causa');
+    if (/^(?:merma|perdida|reposicion|material)$/iu.test(normalize(cause))) {
+      throw guideError('¿Cuál fue la causa concreta del daño de ese material?');
+    }
+    line.motivo = cleanMaterialCause(cause);
+  }
+  if (lines.some(other => other !== line && other.sku === line.sku && other.lote
+    && normalize(other.lote) === normalize(line.lote)
+    && normalize(other.ubicacion) === normalize(line.ubicacion))) {
+    throw guideError('Ese SKU ya tiene una partida para el mismo lote y ubicación. Indica el total en una sola.');
+  }
+  if (choosingThisLot && Object.hasOwn(edit, 'lote')) draft.materialChoice = null;
+}
+
+async function editCloseDraft({ db, userId, rawText, params, implicitContext }) {
+  checkDraftFields(params, ['editar_borrador', 'evidencia', 'id_orden', 'avance_cierre'],
+    'Envía únicamente los campos del borrador de cierre.');
+  assertDraftEvidence(rawText, params.evidencia);
+  if (confirmationAttempt(rawText) || rejected(rawText)) {
+    throw guideError('Indica los datos que quieres cambiar. La confirmación se responde por separado.');
+  }
+  const edit = params.avance_cierre;
+  checkDraftFields(edit, ['conformes', 'merma_pt', 'motivo_merma_pt', 'ubicacion_pt', 'material'],
+    'Indica la cantidad, merma, ubicación o partida de insumo que quieres corregir.');
+  const spokenOrderId = closeOrderReference(rawText, params);
   const prior = await pendingCloseDraft(db, userId);
+  if (!prior?.orderId || (!spokenOrderId && !implicitContext)) {
+    throw guideError('Retoma el borrador de cierre con su OP ID antes de registrar ese cambio.');
+  }
+  if ((spokenOrderId && spokenOrderId !== prior.orderId)
+    || (params.id_orden != null && referenceKey(params.id_orden) !== prior.orderId)) {
+    throw guideError(`Tu borrador activo corresponde a OP ID ${prior.orderId}. ¿Qué orden quieres corregir?`);
+  }
+  await db.beginTransaction();
+  try {
+    // The final close takes the same locks in this order.
+    const order = await loadOrder(db, prior.orderId, { lock: true });
+    if (order.estado !== 'EN_PROCESO') {
+      throw guideError(`La OP ID ${order.id} está ${order.estado}. Solo se puede editar un cierre en proceso.`);
+    }
+    const current = await pendingCloseDraft(db, userId, { lock: true });
+    if (!current || current.orderId !== prior.orderId) {
+      throw guideError('Cambió el borrador de cierre. Revisa el resumen antes de corregirlo.');
+    }
+    const draft = structuredClone(current);
+    if (Object.hasOwn(edit, 'conformes')) {
+      draft.conforming = structuredQuantity(edit.conformes, 'conformes');
+      draft.conformingClarification = null;
+    }
+    if (Object.hasOwn(edit, 'merma_pt')) {
+      if (draft.wasteClassified !== true) draft.reason = null;
+      draft.waste = structuredQuantity(edit.merma_pt, 'producto terminado no conforme');
+      draft.wasteClassified = true;
+      draft.unclassifiedWaste = null;
+    }
+    if (Object.hasOwn(edit, 'motivo_merma_pt')) {
+      if (!(draft.waste > 0) || draft.wasteClassified !== true) {
+        throw guideError('¿Cuántas unidades de producto terminado no conformes corresponden a esa causa?');
+      }
+      draft.reason = draftFieldText(edit.motivo_merma_pt, 255, 'la causa de la merma');
+    }
+    if (draft.waste === 0) draft.reason = null;
+    if (Object.hasOwn(edit, 'ubicacion_pt')) {
+      if (draft.conforming === 0) throw guideError('El borrador tiene cero conformes. ¿Qué cantidad o partida estás corrigiendo?');
+      draft.location = draftFieldText(edit.ubicacion_pt, 80, 'la ubicación del producto terminado')
+        .toUpperCase().replace(/^([A-Z])\s+(\d+)$/u, '$1$2');
+    }
+    if (draft.conforming === 0) draft.location = null;
+    await validateCloseFields(db, order, draft);
+    if (Object.hasOwn(edit, 'material')) {
+      await editCloseMaterial(db, order, draft, edit.material);
+      await validateDraftReplacementLots(db, draft, order);
+      if (draft.lotValidationMessage) throw guideError(draft.lotValidationMessage);
+    }
+    draft.reviewShown = completeCloseDraft(draft);
+    await saveDraft(db, userId, draft);
+    await db.commit();
+    const summary = guideSummary(order, draft, draft.suggestedLocation);
+    return { message: summary, draft };
+  } catch (error) {
+    await db.rollback().catch(() => {});
+    throw error;
+  }
+}
+
+async function advanceCloseGuide({ db, userId, from, rawText, params = {}, implicitContext = false }) {
+  rawText = closeUtterance(rawText);
+  if (params.editar_borrador === true) return editCloseDraft({ db, userId, rawText, params, implicitContext });
+  const prior = await pendingCloseDraft(db, userId);
+  const confirmationSnapshot = prior?.reviewShown && confirmed(rawText) ? structuredClone(prior) : null;
   let spokenOrderId;
   try {
     spokenOrderId = closeOrderReference(rawText, params);
@@ -1491,22 +1706,7 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     const standalone = normalize(rawText).match(/^([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$/u);
     if (standalone && /\d/u.test(standalone[1])) draft.location = standalone[1].toUpperCase();
   }
-  if (draft.conforming != null && (!Number.isInteger(draft.conforming) || draft.conforming < 0
-      || draft.conforming > Number(order.cantidad_planeada))) {
-    throw guideError(`Los conformes deben ser unidades enteras entre 0 y ${Number(order.cantidad_planeada)}.`);
-  }
-  if (draft.waste != null && (!Number.isInteger(draft.waste) || draft.waste < 0)) {
-    throw guideError('La merma debe ser cero o un número entero de unidades.');
-  }
-  if (draft.location) {
-    const [locations] = await db.execute(
-      `SELECT u.codigo FROM ubicaciones u JOIN bodegas b ON b.id = u.bodega_id
-        WHERE UPPER(u.codigo) = UPPER(?) AND u.activa = 1 AND b.activa = 1 LIMIT 1`,
-      [draft.location]
-    );
-    if (!locations.length) throw guideError(`La ubicación ${draft.location} no existe o no está activa. Indica otra.`);
-    draft.location = locations[0].codigo;
-  }
+  await validateCloseFields(db, order, draft);
   await validateDraftReplacementLots(db, draft, order);
   if (wantsLotChange) await requestLotChange(db, draft, order, rawText);
   else if (!draft.materialChoice && draft.materialPending?.sku
@@ -1518,19 +1718,13 @@ async function advanceCloseGuide({ db, userId, from, rawText, params = {} }) {
     await startLotChoice(db, draft, order, 'existing', draft.materials.findIndex(item => !item.lote));
   }
   if (choiceWarning) draft.lotValidationMessage = choiceWarning;
-  const complete = draft.conforming != null && draft.waste != null
-    && draft.conforming + draft.waste > 0 && (draft.waste === 0 || !!draft.reason)
-    && (draft.conforming === 0 || !!draft.location)
-    && draft.materialsAnswered && !draft.materialIssue && !materialWarning
-    && !draft.materialPending && !draft.materialQueue?.length
-    && !draft.materialChoice && !draft.unclassifiedWaste
-    && draft.materials.every(item => !!item.lote);
-  if (confirmed(rawText) && complete && draft.reviewShown) {
+  const complete = completeCloseDraft(draft) && !materialWarning;
+  if (confirmationSnapshot && complete && draft.reviewShown) {
     return { params: { id_orden: draft.orderId, cantidad_real: draft.conforming,
       merma: draft.waste, motivo_merma: draft.reason, ubicacion: draft.location,
       materiales_repuestos: draft.materials.map(item => ({ sku: item.sku,
         cantidad: item.cantidad, lote: item.lote, motivo: item.motivo,
-        ubicacion: item.ubicacion || undefined })) }, draft };
+        ubicacion: item.ubicacion || undefined })) }, draft, confirmationSnapshot };
   }
   if (confirmationAttempt(rawText) && complete && draft.reviewShown) {
     return { message: confirmationHelp(order.id), draft };

@@ -71,12 +71,19 @@ function replayDb({ active = [], completed = true } = {}) {
     throw new Error('Unexpected query');
   } };
 }
-const replay = db => confirmReceptionFromWhatsApp({ db, params: { orden_compra_id: 6, confirmacion_final: true },
-  rawText: 'Confirmo la recepcion OC ID 6', user: { id: 5 } });
+const replay = (db, rawText = 'Confirmo la recepcion OC ID 6') => confirmReceptionFromWhatsApp({
+  db, params: { orden_compra_id: 6, confirmacion_final: true }, rawText, user: { id: 5 },
+});
 
 test('explicit confirmation of partial OC without active reception reports completed using read-only queries', async () => {
   const conn = replayDb();
   const result = await replay(conn);
+  assert.equal(result.already_completed, true);
+  assert.equal(result.numero, 'REC-OC-6-001');
+});
+
+test('pasted WhatsApp formatting preserves read-only retry of a completed reception', async () => {
+  const result = await replay(replayDb(), 'Confirmo la recepción *OC ID 6*');
   assert.equal(result.already_completed, true);
   assert.equal(result.numero, 'REC-OC-6-001');
 });

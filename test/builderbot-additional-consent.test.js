@@ -11,7 +11,12 @@ function harness({ operationError, role = 'admin' } = {}) {
   const calls = [];
   const baseReads = [];
   const logged = [];
+  const guideTexts = [];
+  const productReads = [];
+  const errors = [];
   let inboxId = 1;
+  let nowMinutes = 0;
+  let packagingDraft = null;
   const filename = path.resolve(__dirname, '../api/v1/webhook/builderbot.js');
   const nativeRequire = createRequire(filename);
   const db = {
@@ -20,9 +25,16 @@ function harness({ operationError, role = 'admin' } = {}) {
       if (sql.includes('INSERT INTO webhook_ingress_inbox')) return [{ insertId: inboxId++ }];
       if (sql.includes('UPDATE webhook_ingress_inbox')) return [{ affectedRows: 1 }];
       if (sql.includes('INSERT INTO webhook_logs')) {
-        if (args[5] !== 'RECEIVED') logged.push({ action: args[1], payload: args[3], response: args[4],
-          status: args[5] });
+        if (args[5] !== 'RECEIVED') logged.push({ actor: args[0], action: args[1],
+          payload: args[3], response: args[4], status: args[5], atMinute: nowMinutes });
         return [{ affectedRows: 1 }];
+      }
+      if (sql.includes('AS revision_vigente')) {
+        const row = logged.findLast(entry => entry.actor === args[0] && entry.status === 'PROCESSED'
+          && nowMinutes - entry.atMinute <= 24 * 60
+          && (!['MODO_CHARLA', 'UNKNOWN'].includes(entry.action)
+            || JSON.parse(entry.response)?.context?.stock_production_draft?.status));
+        return [row ? [{ ...row, revision_vigente: Number(nowMinutes - row.atMinute <= 45) }] : []];
       }
       if (sql.includes('SELECT action, response FROM webhook_logs')) {
         return [logged.filter(row => row.status === 'PROCESSED').slice(-16).reverse()];
@@ -33,6 +45,7 @@ function harness({ operationError, role = 'admin' } = {}) {
       if (sql.includes('FROM webhook_logs')) return [logged.length ? [logged.at(-1)] : []];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
         const sku = String(args[1] || '').toUpperCase();
+        productReads.push(sku);
         const probiotic = sku.includes('PROBIOT') || sku.includes('00201');
         return [[{ id: probiotic ? 201 : sku.includes('120') ? 120 : 60,
           siigo_code: probiotic ? '00201-PTPBS120' : sku.includes('120') ? '00110-PTASH120' : '00102-PTASH60',
@@ -74,6 +87,28 @@ function harness({ operationError, role = 'admin' } = {}) {
     },
   };
   const mocks = {
+    '../../_lib/dispatch-packaging-guide': {
+      pendingDispatchPackagingDraft: async () => packagingDraft,
+      clearDispatchPackagingDraft: async () => { packagingDraft = null; },
+      advanceDispatchPackaging: async ({ rawText, params }) => {
+        guideTexts.push(rawText);
+        if (!packagingDraft) {
+          const typed = rawText.match(/ID\s+(3Q-)?(\d+)/iu);
+          packagingDraft = { type: typed?.[1] ? 'MAQUILA_3Q' : 'SIIGO',
+            referenceId: Number(typed?.[2] || params.id_despacho),
+            expectedQuantity: params.expectedQuantity ?? null, reviewed: false };
+          return { message: 'Indica cajas y tapas usadas.' };
+        }
+        if (/0 cajas y 0 tapas/iu.test(rawText)) {
+          packagingDraft.reviewed = true;
+          return { message: 'Revisa el embalaje; confirmo despacho ID.' };
+        }
+        if (!packagingDraft.reviewed) return { message: 'Indica cajas y tapas usadas.' };
+        return { type: packagingDraft.type, referenceId: packagingDraft.referenceId,
+          expectedQuantity: packagingDraft.expectedQuantity,
+          packaging: { boxesDeclared: true, lidsDeclared: true, lines: [] } };
+      },
+    },
     '../../_lib/builderbot-guided-reception': {
       ...nativeRequire('../../_lib/builderbot-guided-reception'),
       advanceGuidedReception: async input => {
@@ -141,10 +176,11 @@ function harness({ operationError, role = 'admin' } = {}) {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
     module, exports: module.exports, require: name => mocks[name] || nativeRequire(name),
-    process: { env: {} }, console: { log() {}, warn() {}, error() {} }, Buffer,
+    process: { env: {} }, console: { log() {}, warn() {}, error(...args) { errors.push(args.map(String).join(' ')); } }, Buffer,
   }, { filename });
-  return { calls, baseReads, seedLog(action, text, message) {
-    logged.push({ action, status: 'PROCESSED',
+  return { calls, baseReads, guideTexts, productReads, errors,
+    advanceMinutes: minutes => { nowMinutes += minutes; }, seedLog(action, text, message) {
+    logged.push({ actor: 'QA-ACTOR', action, status: 'PROCESSED', atMinute: nowMinutes,
       payload: JSON.stringify({ from: 'QA-ACTOR', info: { '@ction': action, body: text, text, query: text, params: {} } }),
       response: JSON.stringify({ ok: true, message, mensaje: message, context: {} }) });
   }, async send(action, text, params, outer = {}) {
@@ -165,9 +201,14 @@ test('N1-05 real webhook: partial intent never reaches dispatch; complete confir
   assert.equal(h.calls.length, 0);
   const complete = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60.', { id_despacho: 60 });
   assert.equal(complete.ok, true, complete.mensaje);
-  assert.equal(h.calls.length, 1);
-  await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 60 con 2 unidades.', { id_despacho: 60 });
-  assert.equal(h.calls[1].expectedQuantity, 2);
+  assert.match(complete.mensaje, /Indica cajas y tapas/u);
+  assert.equal(h.calls.length, 0);
+  const packaging = await h.send('MODO_CHARLA', '0 cajas y 0 tapas', {});
+  assert.match(packaging.mensaje, /Revisa el embalaje/u, JSON.stringify({ packaging, guideTexts: h.guideTexts, errors: h.errors }));
+  const finalized = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'confirmo despacho ID 60', {});
+  assert.equal(finalized.ok, true, finalized.mensaje);
+  assert.equal(h.calls.length, 1, JSON.stringify(h.guideTexts));
+  assert.equal(h.calls[0].packaging.boxesDeclared, true);
 });
 
 test('production destination reply carries only the latest asked product and quantity', async () => {
@@ -217,6 +258,21 @@ test('stock OP is previewed, corrected in two messages and released only after c
     ['00201-PTPBS120', 12, 'STOCK_SEGURIDAD']);
 });
 
+test('declarative reference correction preserves the quantity and does not release the stock OP', async () => {
+  const h = harness();
+  const before = await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Vamos a producir cuatro tarros de probióticos 120 para stock de seguridad', {});
+  assert.equal(before.context.stock_production_draft.sku, '00201-PTPBS120');
+  const corrected = await h.send('LIBERAR_ORDEN_PRODUCCION', 'La referencia correcta es Ashwagandha x60.',
+    { id_producto_final: '00102-PTASH60', cantidad_planificada: 4, origen_tipo: 'STOCK_SEGURIDAD' });
+  assert.equal(corrected.ok, true, corrected.mensaje);
+  assert.equal(corrected.context.stock_production_draft.sku, '00102-PTASH60');
+  assert.equal(corrected.context.stock_production_draft.quantity, 4);
+  assert.equal(corrected.context.inventory_changed, false);
+  assert.equal(h.productReads.at(-1), 'ASHWAGANDHA X60');
+  assert.equal(h.calls.length, 0);
+});
+
 test('translated English quantity corrects the active stock draft without a clarification loop', async () => {
   const h = harness();
   await h.send('LIBERAR_ORDEN_PRODUCCION',
@@ -229,6 +285,75 @@ test('translated English quantity corrects the active stock draft without a clar
   assert.match(yes.mensaje, /Cantidad planeada: 8 und/u);
   assert.match(yes.mensaje, /confirmo esta OP/u);
   assert.equal(h.calls.length, 0);
+});
+
+test('quantity-only correction restores an older stock draft without asking for its destination', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Vamos a producir cuatro tarros de Ashwagandha x60 para stock de seguridad', {});
+  h.advanceMinutes(49);
+  for (let index = 0; index < 18; index++) h.seedLog('MODO_CHARLA', 'Gracias', 'De nada');
+  const corrected = await h.send('LIBERAR_ORDEN_PRODUCCION', 'serán 3 tarros, no 4', {
+    origen_tipo: 'STOCK_SEGURIDAD', id_producto_final: '00102-PTASH60', cantidad_planificada: 3,
+  });
+  assert.equal(corrected.ok, true, corrected.mensaje);
+  assert.equal(corrected.context.stock_production_draft.sku, '00102-PTASH60');
+  assert.equal(corrected.context.stock_production_draft.quantity, 3);
+  assert.match(corrected.mensaje, /Destino: stock de seguridad/u);
+  assert.equal(corrected.context.inventory_changed, false);
+  assert.equal(h.calls.length, 0);
+});
+
+test('a stale stock confirmation refreshes the review before a new confirmation can release', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Vamos a producir tres tarros de Ashwagandha x60 para stock de seguridad', {});
+  h.advanceMinutes(49);
+  const refresh = await h.send('MODO_CHARLA', 'Confirmo esta OP', {});
+  assert.match(refresh.mensaje, /Recuperé tu borrador/u);
+  assert.equal(refresh.context.stock_production_draft.quantity, 3);
+  assert.equal(h.calls.length, 0);
+  await h.send('MODO_CHARLA', 'Confirmo esta OP', {});
+  assert.equal(h.calls.length, 0);
+  const review = await h.send('MODO_CHARLA', 'Revisa el borrador de esta OP', {});
+  assert.equal(review.context.stock_production_draft.renewal_required, undefined);
+  assert.equal(h.calls.length, 0);
+  await h.send('MODO_CHARLA', 'Confirmo esta OP', {});
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].quantity, 3);
+  await h.send('MODO_CHARLA', 'Confirmo esta OP', {});
+  assert.equal(h.calls.length, 1);
+});
+
+test('an unclear additional order request keeps the known preview for a written stock confirmation', async () => {
+  const h = harness();
+  await h.send('LIBERAR_ORDEN_PRODUCCION',
+    'Vamos a producir cuatro tarros de Ashwagandha x60 para stock de seguridad', {});
+  const malformed = await h.send('LIBERAR_ORDEN_PRODUCCION', 'Confinimul creare sta ordine',
+    { confirmar_nueva_orden: true, id_orden_existente: null });
+  assert.match(malformed.mensaje, /confirma por escrito/u);
+  assert.equal(malformed.context.stock_production_draft.quantity, 4);
+  assert.equal(h.calls.length, 0);
+  const correction = await h.send('MODO_CHARLA', 'serán 3 tarros, no 4', {});
+  assert.equal(correction.context.stock_production_draft.quantity, 3);
+  assert.equal(h.calls.length, 0);
+});
+
+test('stock context does not reuse expired, cancelled, unrelated, or another actor’s draft', async () => {
+  for (const scenario of ['expired', 'cancelled', 'unrelated', 'other actor']) {
+    const h = harness();
+    await h.send('LIBERAR_ORDEN_PRODUCCION',
+      'Vamos a producir cuatro tarros de Ashwagandha x60 para stock de seguridad', {});
+    if (scenario === 'expired') h.advanceMinutes(24 * 60 + 1);
+    if (scenario === 'cancelled') await h.send('MODO_CHARLA', 'Cancela esta OP', {});
+    if (scenario === 'unrelated') h.seedLog('CONSULTAR_ESTADO_PRODUCCION', 'OP pendientes', 'Resumen de OP');
+    const correction = await h.send('LIBERAR_ORDEN_PRODUCCION', 'serán 3 tarros, no 4',
+      { origen_tipo: 'STOCK_SEGURIDAD', id_producto_final: '00102-PTASH60', cantidad_planificada: 3 },
+      scenario === 'other actor' ? { from: 'QA-OTHER' } : {});
+    assert.match(correction.mensaje, /No hay un resumen/u, scenario);
+    assert.equal(correction.context.stock_production_draft, undefined, scenario);
+    assert.equal(h.calls.length, 0, scenario);
+  }
 });
 
 test('translated and natural confirmations release only the active reviewed stock OP', async () => {
@@ -354,7 +479,11 @@ test('WhatsApp lists and confirms a pending 3Q dispatch through its typed ID', a
   assert.match(pending.mensaje, /\*Siguiente paso\*\n\nEscribe: confirma el despacho \*ID 3Q-17\*\./u);
   assert.equal(h.calls.length, 0);
 
-  const confirmed = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 3Q-17.', { id_despacho: 17 });
+  const prepared = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'Confirma el despacho ID 3Q-17.', { id_despacho: 17 });
+  assert.match(prepared.mensaje, /Indica cajas y tapas/u);
+  const packaging = await h.send('MODO_CHARLA', '0 cajas y 0 tapas', {});
+  assert.match(packaging.mensaje, /Revisa el embalaje/u, JSON.stringify({ packaging, guideTexts: h.guideTexts, errors: h.errors }));
+  const confirmed = await h.send('CONFIRMAR_DESPACHO_SIIGO', 'confirmo despacho ID 3Q-17', {});
   assert.equal(confirmed.ok, true, confirmed.mensaje);
   assert.match(confirmed.mensaje, /Salida a maquila 3Q confirmada/u);
   assert.match(confirmed.mensaje, /Despacho: \*DSP ID 3Q-17\* \| REM-3Q-20260910-000017/u);

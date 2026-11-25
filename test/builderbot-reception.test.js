@@ -55,6 +55,42 @@ test('final reception confirmation accepts one active OC preview, not a differen
     { id: 40, tipo_recepcion: 'IN_OUT' }), true);
 });
 
+test('a model final flag cannot turn a combined correction or a question into receipt confirmation', () => {
+  const order = { id: 40, numero: 'OC-PROV-40', tipo_recepcion: 'INSUMOS_MP' };
+  for (const text of ['Confirmo la recepción OC ID 40 y las tapas van en A8',
+    'Las tapas van en A8 y confirmo la recepción OC ID 40',
+    'No confirmo la recepción OC ID 40', '¿Confirmo la recepción OC ID 40?']) {
+    assert.equal(explicitConfirmation(text, order, { confirmacion_final: true }), false);
+    assert.equal(contextualReceptionConfirmation(text, order), false);
+  }
+  assert.equal(explicitConfirmation('Sí, confirmo la recepción de la OC ID 40.', order,
+    { confirmacion_final: true }), true);
+});
+
+test('copying the WhatsApp confirmation exactly preserves the typed receipt identity', () => {
+  const order = { id: 70, numero: 'OC-QA-70', tipo_recepcion: 'INSUMOS_MP' };
+  const formatted = formatWhatsAppMessage('Si todo coincide, escribe: Confirmo la recepción OC ID 70');
+  const copied = formatted.split('escribe: ')[1];
+  const final = { confirmacion_final: true };
+  assert.equal(copied, 'Confirmo la recepción *OC ID 70*');
+  assert.equal(explicitConfirmation(copied, order, final), true);
+  assert.equal(explicitConfirmation(`«${copied}»`, order, final), true);
+  assert.equal(explicitConfirmation(copied, order, { confirmacion_final: false }), false);
+  assert.equal(explicitConfirmation('Confirmo la recepción *IO ID 70*',
+    { ...order, tipo_recepcion: 'IN_OUT' }, final), true);
+  for (const text of [
+    'Confirmo la recepción *OC ID 71*',
+    'Confirmo la recepción *IO ID 70*',
+    'Confirmo la recepción *70*',
+    'Confirmo la recepción *OC ID 70',
+    'Confirmo la recepción *OC ID 70**',
+    'Confirmo la recepción *OC ID 70* o *OC ID 71*',
+    'Confirmo la recepción *OC ID 70* pero cambia el lote',
+    'No confirmo la recepción *OC ID 70*',
+    '¿Confirmo la recepción *OC ID 70*?',
+  ]) assert.equal(explicitConfirmation(text, order, final), false, text);
+});
+
 test('a vague confirmation uses only the last final preview shown to this operator', async () => {
   const payload = { version: 1, orderId: 60, receptionId: 160,
     items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 25 }] }] };

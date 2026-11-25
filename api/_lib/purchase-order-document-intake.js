@@ -24,7 +24,10 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '', rec
   if (!reference) throw inputError('La orden de compra requiere un numero o referencia visible');
   if (!documentDate) throw inputError('La orden de compra requiere una fecha visible');
   if (!supplierName) throw inputError('La orden de compra requiere un proveedor visible');
-  if (!rawItems.length) throw inputError('La orden de compra debe incluir al menos un item');
+  if (!rawItems.length) {
+    const reasons = normalizeWarnings(source.advertencias || source.warnings).join(' ');
+    throw inputError(`La orden de compra debe incluir al menos un item${reasons ? `. ${reasons}` : '. No se pudo leer la tabla de productos (la lectura con IA no respondio); intenta de nuevo en un minuto.'}`);
+  }
   if (rawItems.length > MAX_DOCUMENT_ITEMS) throw inputError(`La orden supera ${MAX_DOCUMENT_ITEMS} items`);
 
   const evidence = cleanEvidenceText(evidenceText);
@@ -37,12 +40,19 @@ function normalizePurchaseOrderDocumentInput(body = {}, { evidenceText = '', rec
   const warnings = sourceWarnings
     .filter((warning) => !isModelDerivedValidationWarning(warning));
   const normalizedItems = rawItems.map((item, index) => normalizeItem(item, index));
+  // SIIGO OCs print no product code: the SKU was matched by description and the
+  // review warning asks the user to confirm it; the description must be in the PDF.
+  const byDescription = new Set(rawItems
+    .filter((item) => item && item.sku_por_descripcion === true)
+    .map((item) => String(item.sku).trim().toUpperCase()));
   const items = (recoverFields ? enrichItemsFromLineEvidence(normalizedItems, evidenceText) : normalizedItems).map((normalized) => {
-    if (evidence && !evidenceIncludes(evidence, normalized.sku)) {
+    const describedInPdf = byDescription.has(normalized.sku)
+      && evidenceIncludes(evidence, String(normalized.description).split(/\s+/).slice(0, 3).join(' '));
+    if (evidence && !normalized.pending && !describedInPdf && !evidenceIncludes(evidence, normalized.sku)) {
       throw inputError(`El SKU ${normalized.sku} no aparece literalmente en el documento`);
     }
     if (evidence && !evidenceIncludesQuantity(evidence, normalized.quantity)) {
-      throw inputError(`La cantidad ${normalized.quantity} de ${normalized.sku} no aparece en el documento`);
+      throw inputError(`La cantidad ${normalized.quantity} de ${normalized.sku || normalized.description} no aparece en el documento`);
     }
     if (evidence && normalized.lot && !evidenceIncludes(evidence, normalized.lot)) {
       warnings.push(`El lote propuesto para ${normalized.sku} no aparece literalmente en el documento; se dejo pendiente`);
@@ -241,6 +251,7 @@ async function registerPurchaseOrderDocumentDraft({
     if (!supplier) input.warnings.push('Proveedor no encontrado de forma inequivoca en el catalogo sincronizado');
     const resolved = [];
     for (const item of input.items) {
+      if (item.pending) { resolved.push({ ...item, product: null }); continue; }
       const [products] = await db.execute(
         `SELECT id, siigo_code, nombre FROM productos
           WHERE UPPER(siigo_code) = ? AND activo = 1 LIMIT 1`,
@@ -354,9 +365,11 @@ function normalizeItem(item = {}, index) {
   const quantity = Number(source.cantidad ?? source.quantity);
   const unitPriceRaw = source.precio_unitario ?? source.unit_price;
   const unitPrice = unitPriceRaw == null || unitPriceRaw === '' ? null : Number(unitPriceRaw);
-  if (!sku) throw inputError(`El item ${index + 1} requiere SKU exacto`);
+  // por_asignar: SIIGO row with no equivalent product; the reviewer picks the SKU.
+  const pending = source.por_asignar === true && !sku;
+  if (!sku && !pending) throw inputError(`El item ${index + 1} requiere SKU exacto`);
   if (!description) throw inputError(`El item ${index + 1} requiere descripcion`);
-  if (!Number.isFinite(quantity) || quantity <= 0) throw inputError(`La cantidad de ${sku} debe ser positiva`);
+  if (!Number.isFinite(quantity) || quantity <= 0) throw inputError(`La cantidad de ${sku || description} debe ser positiva`);
   if (unitPrice != null && (!Number.isFinite(unitPrice) || unitPrice < 0)) throw inputError(`El precio de ${sku} no es valido`);
   return {
     sku,
@@ -366,6 +379,7 @@ function normalizeItem(item = {}, index) {
     unitPrice: unitPrice == null ? null : Number(unitPrice.toFixed(6)),
     expiryDate: normalizeDate(source.fecha_vencimiento || source.expiry_date),
     lot: optionalText(source.lote || source.lot, 100),
+    ...(pending ? { pending: true } : {}),
   };
 }
 
@@ -413,6 +427,8 @@ function evidenceIncludesQuantity(evidence, quantity) {
     String(number).replace('.', ','),
     number.toLocaleString('en-US', { maximumFractionDigits: 4 }),
     number.toLocaleString('es-CO', { maximumFractionDigits: 4 }),
+    // SIIGO prints quantities with two decimals: 3,000.00
+    number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }),
   ]);
   return [...forms].some((form) => {
     const escaped = escapeRegExp(form.toUpperCase());

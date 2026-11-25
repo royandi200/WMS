@@ -19,6 +19,13 @@ const { detectDocumentTypeMarkers } = require('../_lib/document-type-markers');
 const { registerPurchaseOrderDocumentDraft } = require('../_lib/purchase-order-document-intake');
 const { aiDocumentBody } = require('../_lib/document-ai-extractor');
 
+async function activeCatalog(conn) {
+  const [rows] = await conn.execute(
+    `SELECT siigo_code, nombre FROM productos WHERE activo = 1 AND siigo_code IS NOT NULL AND siigo_code <> ''`, []
+  );
+  return rows;
+}
+
 async function handleGet(req, res) {
   if (req.query?.inspect_pdf != null) {
     await requireRole(req, ['admin', 'administrador']);
@@ -144,7 +151,7 @@ async function handlePost(req, res) {
     if (purchaseOrder) {
       // Mismo lector y mismo borrador que WhatsApp: no crea la OC ni toca inventario.
       const uploadedDocument = normalizePurchaseOrderPdf(req.body || {});
-      const aiBody = await aiDocumentBody(uploadedDocument, 'ORDEN_COMPRA', req.body || {});
+      const aiBody = await aiDocumentBody(uploadedDocument, 'ORDEN_COMPRA', req.body || {}, await activeCatalog(conn));
       const precomputedEvidence = await nativePdfEvidence(conn, uploadedDocument, aiBody);
       const markers = detectDocumentTypeMarkers(precomputedEvidence.text);
       if (markers.customerPurchaseOrder || markers.outsourcingExit || markers.outsourcingReceipt) {
@@ -165,7 +172,7 @@ async function handlePost(req, res) {
     }
     if (customerOrder) {
       const uploadedDocument = normalizePurchaseOrderPdf(req.body || {});
-      const aiBody = await aiDocumentBody(uploadedDocument, 'ORDEN_COMPRA_CLIENTE', req.body || {});
+      const aiBody = await aiDocumentBody(uploadedDocument, 'ORDEN_COMPRA_CLIENTE', req.body || {}, await activeCatalog(conn));
       const precomputedEvidence = await nativePdfEvidence(conn, uploadedDocument, aiBody);
       if (!detectDocumentTypeMarkers(precomputedEvidence.text).customerPurchaseOrder) {
         return res.status(400).json({ ok: false, error: 'El PDF debe decir ORDEN DE COMPRA DEL CLIENTE' });

@@ -57,7 +57,7 @@ export default function Sidebar({ open, mobile = false, onClose }) {
           </div>
         })}
       </nav>
-      {(open || mobile) && <div className="px-4 py-3 border-t border-border"><p className="text-[10px] text-muted">WMS v1.0 - Kainotomia</p></div>}
+      {(open || mobile) && <div className="px-4 py-3 border-t border-border"><p className="text-[10px] text-muted">WMS v1.0 · Kainotomia</p></div>}
     </aside>
   )
 }

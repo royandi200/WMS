@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { useProductsStore } from '../store/productsStore'
 import { useAuthStore } from '../store/authStore'
 import AlertSettingsPage from './AlertSettingsPage'
+import { syncNewProductsFromSiigo } from '../api/products.api'
 import { SortableTh, useSortableRows } from '../components/SortableTh'
 
 const PAGE_SIZE = 50
@@ -152,6 +153,20 @@ export default function ProductosPage() {
     }
   }
 
+  const [syncing, setSyncing] = useState(false)
+  const handleSiigoSync = async () => {
+    setSyncing(true)
+    try {
+      const { data } = await syncNewProductsFromSiigo()
+      showToast(`SIIGO: ${data.creados} producto(s) nuevo(s) agregado(s); ${data.omitidos} ya existían o no son productos${data.errores ? `; ${data.errores} con error` : ''}.`, !data.errores)
+      fetchList({ search, page: 1, limit: PAGE_SIZE })
+    } catch (err) {
+      showToast(err?.response?.data?.error || 'No se pudo sincronizar con SIIGO', false)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const handleToggle = async (p) => {
     const res = await toggle(p.id)
     if (!res.ok) showToast(res.message, false)
@@ -161,6 +176,13 @@ export default function ProductosPage() {
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4 md:mb-6">
         <h1 className="text-lg md:text-xl font-semibold text-foreground">Productos</h1>
+        {isAdmin && (
+          <button type="button" onClick={handleSiigoSync} disabled={syncing}
+            title="Agrega los productos de SIIGO que faltan en el WMS. No modifica los que ya existen."
+            className="text-sm px-3 py-1.5 rounded-lg border border-border text-foreground hover:bg-surface-2 disabled:opacity-60">
+            {syncing ? 'Trayendo de SIIGO...' : 'Traer productos nuevos de SIIGO'}
+          </button>
+        )}
         <span className="text-sm text-muted">
           {typeF
             ? <>{filtered.length} de {list.length} en esta pagina ({total} en total)</>

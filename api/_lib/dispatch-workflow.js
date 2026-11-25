@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { createConnection } = require('./db');
 const { workflowFlags } = require('./feature-flags');
 const { assertDispatchQuantity } = require('./dispatch-confirmation-input');
+const { consumeDispatchPackaging } = require('./dispatch-packaging');
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -31,7 +32,7 @@ function buildDispatchLookup({ dispatchId, invoiceId }) {
   throw httpError(400, 'despacho_id o id_factura es obligatorio');
 }
 
-async function confirmImportedDispatch({ dispatchId, invoiceId, userId, expectedQuantity }) {
+async function confirmImportedDispatch({ dispatchId, invoiceId, userId, expectedQuantity, packaging }) {
   const lookup = buildDispatchLookup({ dispatchId, invoiceId });
   const conn = await createConnection();
   try {
@@ -126,6 +127,8 @@ async function confirmImportedDispatch({ dispatchId, invoiceId, userId, expected
       );
       dispatched.push({ sku: item.siigo_code, lote: item.lote, cantidad: quantity, saldo_lote: balance });
     }
+    const packagingConsumed = packaging
+      ? await consumeDispatchPackaging(conn, { type: 'SIIGO', referenceId: dispatch.id, userId, packaging }) : [];
     await conn.execute(`UPDATE despachos SET estado = 'despachado', despachado_en = NOW() WHERE id = ?`, [dispatch.id]);
     await conn.execute(
       `UPDATE despacho_demanda_items
@@ -142,6 +145,7 @@ async function confirmImportedDispatch({ dispatchId, invoiceId, userId, expected
       siigo_invoice_id: dispatch.siigo_invoice_id,
       siigo_invoice_name: dispatch.siigo_invoice_name,
       lotes: dispatched,
+      embalaje: packagingConsumed,
       mensaje: `Despacho ${dispatch.numero} confirmado para factura ${dispatch.siigo_invoice_name}`,
     };
   } catch (error) {

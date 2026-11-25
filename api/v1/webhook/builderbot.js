@@ -84,9 +84,11 @@ const { currentUserText } = require('../../_lib/builderbot-user-text');
 const { productionRequestIntent, productionDestinationReply,
   contextualProductionReply } = require('../../_lib/stock-production-intent');
 const { advanceProductionReleaseGuide, correctionFields,
-  productionReleaseAffirmation, productionReleaseFollowup } = require('../../_lib/production-release-guide');
+  productionReleaseAffirmation, productionReleaseConfirmation, productionReleaseFollowup,
+  productionReleaseSummary } = require('../../_lib/production-release-guide');
 const { materialConfirmationInput } = require('../../_lib/material-confirmation-input');
 const { additionalOperationInput, currentText } = require('../../_lib/additional-operation-input');
+const { assertDraftEvidence, checkDraftFields, clarifyDraft, draftInputError } = require('../../_lib/builderbot-draft-input');
 const {
   assertOperationalIntent, assertWasteReasonEvidence, isGenericWasteReason,
   publicOperationalError,
@@ -98,6 +100,8 @@ const { CAPABILITIES, capabilityForAction, hasCapability } = require('../../_lib
 const { loadUserRolesFromConnection } = require('../../_lib/user-roles');
 const { confirmImportedDispatch } = require('../../_lib/dispatch-workflow');
 const { confirmOutsourcingShipment } = require('../../_lib/outsourcing-workflow');
+const { advanceDispatchPackaging, pendingDispatchPackagingDraft,
+  clearDispatchPackagingDraft } = require('../../_lib/dispatch-packaging-guide');
 const { createCustomerReturn, parseCustomerReturnReferences } = require('../../_lib/returns-workflow');
 const { assertDocumentHasSameMessageInstruction } = require('../../_lib/document-message-policy');
 const { assertApprovalActionSupported } = require('../../_lib/approval-policy');
@@ -474,13 +478,19 @@ async function findRecentProductionCloseReason(db, from, orderId) {
   return null;
 }
 
-async function findRecentReceptionPreparationQuestion(db, from, rawText) {
+async function findContextualReceptionPreparationReference(db, from, rawText, { action, params } = {}) {
   if (!from) return null;
   const shortYes = /^(?:SI|SÍ|CORRECTO|EXACTO|ASÍ ES)[.!]?$/iu
     .test(String(rawText || '').trim());
-  if (!shortYes && !preparationClarificationCandidate(rawText)) return null;
+  const shortReference = String(rawText || '').trim().replace(/^(?:la|el)\s+/iu, '');
+  const candidate = preparationClarificationCandidate(shortReference);
+  const isPrep = ['PREPARAR_RECEPCION_OC', 'PREPARAR_RECEPCION_MAQUILA'].includes(action);
+  const inputId = action === 'PREPARAR_RECEPCION_MAQUILA' ? params?.orden_maquila_id : params?.orden_compra_id;
+  const modelId = isPrep ? Number(inputId) : 0;
+  const hasModelId = Number.isSafeInteger(modelId) && modelId > 0;
+  if (!shortYes && !candidate && !hasModelId) return null;
   const [rows] = await db.execute(
-    `SELECT payload, response
+    `SELECT payload, response, action
        FROM webhook_logs
       WHERE from_phone = ? AND status = 'PROCESSED'
         AND created_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
@@ -489,8 +499,48 @@ async function findRecentReceptionPreparationQuestion(db, from, rawText) {
   );
   const prior = rows[0];
   if (!prior) return null;
-  const payload = asObject(prior.payload);
   const response = asObject(prior.response);
+  if (prior.action === 'CONSULTAR_RECEPCIONES_PENDIENTES') {
+    const { available_receptions: purchases, available_outsourcing_receptions: outsourcing } = response.context || {};
+    const visible = [
+      ...(Array.isArray(purchases) ? purchases : []).flatMap(row => {
+        const kind = row?.reception_type === 'IN_OUT' ? 'IO'
+          : row?.reception_type === 'INSUMOS_MP' ? 'OC' : null;
+        return kind ? [{ kind, id: Number(row.purchase_order_id) }] : [];
+      }),
+      ...(Array.isArray(outsourcing) ? outsourcing : [])
+        .map(row => ({ kind: 'MQ', id: Number(row?.outsourcing_order_id) })),
+    ];
+    if (candidate) {
+      const positive = /^(?:O[\s.]*C|I[\s.]*O|M[\s.]*Q)/iu.test(shortReference);
+      if (!positive && hasModelId) throw draftInputError('¿Cuál de las recepciones de la lista quieres abrir?');
+      return positive && visible.some(row => row.kind === candidate.kind && row.id === candidate.id)
+        ? candidate : null;
+    }
+    if (!hasModelId) return null;
+    if (/^\s*[¿¡]?\s*no\b/iu.test(rawText)) {
+      throw draftInputError('¿Cuál de las recepciones de la lista quieres abrir?');
+    }
+    const statedIds = String(rawText || '').match(/\d+/gu) || [];
+    if (statedIds.length && (statedIds.length !== 1 || Number(statedIds[0]) !== modelId)) return null;
+    const selection = params?.seleccion_recepcion;
+    if (!statedIds.length && !selection) return null;
+    if (selection) {
+      checkDraftFields(selection, ['id', 'evidencia'], 'Indica solo el ID que quieres seleccionar.');
+      if (selection.id !== modelId) return null;
+      assertDraftEvidence(rawText, selection.evidencia);
+    }
+    const explicit = typedReceptionReferences(rawText);
+    if (explicit.length > 1 || (explicit.length === 1 && explicit[0].id !== modelId)) return null;
+    const matches = visible.filter(row => row.id === modelId && (!explicit.length || row.kind === explicit[0].kind));
+    if (matches.length > 1) {
+      throw draftInputError(`¿Te refieres a ${matches.map(row => `${row.kind} ID ${row.id}`).join(' o ')}?`);
+    }
+    const selected = matches[0];
+    if (selected && (selected.kind === 'MQ') === (action === 'PREPARAR_RECEPCION_MAQUILA')) return selected;
+    return null;
+  }
+  const payload = asObject(prior.payload);
   const previousUserText = getUserText(payload, parseBuilderBotInfo(payload));
   const previousBotMessage = response.message || response.mensaje;
   return confirmedPreparationReference(rawText, previousUserText, previousBotMessage)
@@ -519,22 +569,19 @@ async function findRecentProductionDestinationQuestion(db, from, rawText) {
 async function pendingStockProductionDraft(db, from) {
   if (!from) return null;
   const [rows] = await db.execute(
-    `SELECT action, response FROM webhook_logs
+    `SELECT action, response, created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE) AS revision_vigente
+       FROM webhook_logs
       WHERE from_phone = ? AND status = 'PROCESSED'
-        AND created_at >= DATE_SUB(NOW(), INTERVAL 45 MINUTE)
-      ORDER BY id DESC LIMIT 16`, [from]
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        AND (action NOT IN ('MODO_CHARLA', 'UNKNOWN')
+          OR JSON_EXTRACT(response, '$.context.stock_production_draft.status') IS NOT NULL)
+      ORDER BY id DESC LIMIT 1`, [from]
   );
-  for (const row of rows) {
-    const state = asObject(asObject(asObject(row.response).context).stock_production_draft);
-    if (state.status === 'CANCELLED' || state.status === 'COMPLETED') return null;
-    if (row.action === 'LIBERAR_ORDEN_PRODUCCION') {
-      return state.status === 'PENDING' && state.sku && state.quantity ? state : null;
-    }
-    // Un turno de charla entre el resumen y la confirmación no descarta el
-    // borrador. Otra operación sí corta el contexto para no revivir una OP vieja.
-    if (row.action !== 'MODO_CHARLA' && row.action !== 'UNKNOWN') return null;
-  }
-  return null;
+  const row = rows[0];
+  if (!row || row.action !== 'LIBERAR_ORDEN_PRODUCCION') return null;
+  const draft = asObject(asObject(asObject(row.response).context).stock_production_draft);
+  if (draft.status !== 'PENDING' || !draft.sku || !draft.quantity) return null;
+  return { draft, needsReview: draft.renewal_required === true || Number(row.revision_vigente) !== 1 };
 }
 
 function stockQuantityClarification(message) {
@@ -665,6 +712,21 @@ async function lastProcessedWorkflowAction(db, from) {
       ORDER BY id DESC LIMIT 1`, [from]
   );
   return rows[0]?.action || null;
+}
+
+function guidedReceptionContext(result) {
+  return {
+    guided: true,
+    reception_id: result.reception_id,
+    purchase_order_id: result.purchase_order_id,
+    reception_number: result.reception_number,
+    review_sku: result.review_sku,
+    selected_sku: result.selected_sku,
+    sku_review: Boolean(result.sku_review),
+    inventory_changed: false,
+    requires_confirmation: Boolean(result.requires_confirmation),
+    item_count: result.item_count || 0,
+  };
 }
 
 function sanitizeWebhookLogPayload(payload, action) {
@@ -1649,6 +1711,39 @@ module.exports = async (req, res) => {
       return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
+    if (Object.hasOwn(params, 'editar_borrador')) {
+      const receptionEdit = action === 'AVANZAR_RECEPCION_GUIADA_OC';
+      if (params.editar_borrador !== true || (!receptionEdit && action !== 'CERRAR_ORDEN_PRODUCCION')) {
+        throw draftInputError('Elige el borrador de recepción o de cierre que quieres corregir.');
+      }
+      const roles = user.roles || [user.rol_nombre].filter(Boolean);
+      if (!hasCapability(roles, capabilityForAction(action))) {
+        const msg = 'No tienes permiso para editar este borrador.';
+        await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
+        return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED' });
+      }
+      const userText = currentText(rawBody, info);
+      if (Object.hasOwn(params, 'aclarar')) {
+        checkDraftFields(params, ['editar_borrador', 'evidencia', 'aclarar'],
+          'Resuelve la duda antes de editar el borrador.');
+        assertDraftEvidence(userText, params.evidencia);
+        const msg = clarifyDraft(action, params.aclarar);
+        const body = { ok: true, message: msg, mensaje: msg, context: { inventory_changed: false } };
+        // A clarification is not the active workflow's new review.
+        await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'REJECTED' });
+        return await finalizeHandledResponse(body);
+      }
+      const result = receptionEdit
+        ? await advanceGuidedReception({ db, params, rawText: userText, user, from })
+        : await advanceCloseGuide({ db, userId: user.id, rawText: userText, params,
+          implicitContext: await lastProcessedWorkflowAction(db, from) === action });
+      if (!result.message) throw draftInputError('Revisa el borrador y envía la confirmación por separado.');
+      const context = receptionEdit ? { reception: guidedReceptionContext(result) } : { inventory_changed: false };
+      const body = { ok: true, message: result.message, mensaje: result.message, context };
+      await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
+      return await finalizeHandledResponse(body);
+    }
+
     const recoveredDocument = await recoverRejectedDocumentAction({
       db,
       rawBody,
@@ -1670,6 +1765,18 @@ module.exports = async (req, res) => {
       }
     }
 
+    // Un borrador de despacho pendiente tiene prioridad sobre los extractores
+    // genéricos de producción: «0 cajas y 0 tapas» pertenece al embalaje.
+    if (rawText && hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.DISPATCH_CONFIRM)
+      && ['UNKNOWN', 'MODO_CHARLA', 'CONFIRMAR_DESPACHO_SIIGO',
+        'CERRAR_ORDEN_PRODUCCION', 'REPORTE_MERMA'].includes(action)) {
+      const packagingDraft = await pendingDispatchPackagingDraft(db, user.id);
+      if (packagingDraft && /\b(?:cajas?|tapas?|opci[oó]n|embalaje|despacho|borrador)\b|^\s*\d+\s*$/iu.test(rawText)) {
+        action = 'CONFIRMAR_DESPACHO_SIIGO';
+        params = {};
+      }
+    }
+
     // El mensaje inicial puede omitir el destino. Guardamos la solicitud en el
     // log de la pregunta; una respuesta corta solo retoma la pregunta más
     // reciente del mismo remitente, nunca una OP ni un destino por defecto.
@@ -1683,7 +1790,7 @@ module.exports = async (req, res) => {
       activeStockProductionDraft = await pendingStockProductionDraft(db, from);
       if (productionReleaseAffirmation(contractUserText)) {
         const acknowledged = await acknowledgedStockQuantity(db, from, contractUserText);
-        activeStockProductionDraft = acknowledged?.draft || activeStockProductionDraft;
+        if (acknowledged) activeStockProductionDraft = { draft: acknowledged.draft, needsReview: false };
         acknowledgedStockCorrection = acknowledged?.quantity || null;
       }
       if (activeStockProductionDraft) {
@@ -1761,7 +1868,7 @@ module.exports = async (req, res) => {
       });
       confirmedReceptionReference = receptionIntent
         ? null
-        : await findRecentReceptionPreparationQuestion(db, from, rawText);
+        : await findContextualReceptionPreparationReference(db, from, rawText, { action, params });
       const selected = receptionIntent || confirmedReceptionReference;
       if (selected) {
         selectedPreparationReference = selected;
@@ -1772,7 +1879,8 @@ module.exports = async (req, res) => {
       }
     }
     if (!selectedPreparationReference && skuReviewReply(rawText)
-      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC'].includes(action)
+      && ['UNKNOWN', 'MODO_CHARLA', 'PREPARAR_RECEPCION_OC', 'CONFIRMAR_RECEPCION_OC',
+        'CERRAR_ORDEN_PRODUCCION', 'CONFIRMAR_MATERIALES_PRODUCCION', 'REPORTE_MERMA'].includes(action)
       && await hasPendingSkuReview(db, user.id, from)
       && await hasRecentReceptionContext(db, user.id, from)) {
       action = 'AVANZAR_RECEPCION_GUIADA_OC';
@@ -2030,6 +2138,7 @@ module.exports = async (req, res) => {
     }
 
     let guidedCloseDraft = null;
+    let closeConfirmationSnapshot = null;
     if (action === 'CERRAR_ORDEN_PRODUCCION') {
       const closeText = currentText(rawBody, info);
       const guided = await advanceCloseGuide({ db, userId: user.id, from,
@@ -2043,6 +2152,7 @@ module.exports = async (req, res) => {
       }
       params = guided.params;
       guidedCloseDraft = guided.draft;
+      closeConfirmationSnapshot = guided.confirmationSnapshot;
     }
 
     switch (action) {
@@ -2219,18 +2329,7 @@ module.exports = async (req, res) => {
       case 'AVANZAR_RECEPCION_GUIADA_OC': {
         const result = await advanceGuidedReception({ db, params, rawText, user, from });
         mensaje = result.message;
-        responseContext.reception = {
-          guided: true,
-          reception_id: result.reception_id,
-          purchase_order_id: result.purchase_order_id,
-          reception_number: result.reception_number,
-          review_sku: result.review_sku,
-          selected_sku: result.selected_sku,
-          sku_review: Boolean(result.sku_review),
-          inventory_changed: false,
-          requires_confirmation: Boolean(result.requires_confirmation),
-          item_count: result.item_count || 0,
-        };
+        responseContext.reception = guidedReceptionContext(result);
         break;
       }
 
@@ -3382,16 +3481,26 @@ module.exports = async (req, res) => {
       case 'LIBERAR_ORDEN_PRODUCCION': {
         let releaseParams = { ...params };
         let confirmedStockRelease = null;
-        const stockDraft = activeStockProductionDraft
-          || (params.confirmar_nueva_orden === true ? null : await pendingStockProductionDraft(db, from));
-        if (!stockDraft && !productionRequest && params.confirmar_nueva_orden !== true
-          && productionReleaseFollowup(contractUserText)
-          && !(params.id_producto_final || params.id_item || params.sku)) {
+        const additionalOrder = params.confirmar_nueva_orden === true && Boolean(params.id_orden_existente);
+        const stockContext = activeStockProductionDraft
+          || (additionalOrder ? null : await pendingStockProductionDraft(db, from));
+        const stockDraft = stockContext?.needsReview
+          ? { ...stockContext.draft, renewal_required: true } : stockContext?.draft;
+        const missingAdditionalBase = info.params?.confirmar_nueva_orden === true && !info.params.id_orden_existente;
+        if (!stockDraft && !productionRequest && !additionalOrder
+          && productionReleaseFollowup(contractUserText)) {
           mensaje = 'No hay un resumen de OP de stock de seguridad pendiente para confirmar o corregir. Indica producto, cantidad y destino para preparar uno nuevo. No se creó ninguna orden.';
           responseContext.inventory_changed = false;
           break;
         }
         if (stockDraft && !productionRequest && productionReleaseFollowup(contractUserText)) {
+          if (stockContext.needsReview && productionReleaseConfirmation(contractUserText)) {
+            mensaje = 'Recuperé tu borrador; no se creó la OP.\n\n'
+              + productionReleaseSummary(stockDraft);
+            responseContext.stock_production_draft = stockDraft;
+            responseContext.inventory_changed = false;
+            break;
+          }
           const review = await advanceProductionReleaseGuide({
             db, rawText: acknowledgedStockCorrection
               ? `son ${acknowledgedStockCorrection} unidades` : contractUserText,
@@ -3406,7 +3515,18 @@ module.exports = async (req, res) => {
           confirmedStockRelease = review.release;
           responseContext.stock_production_draft = { status: 'COMPLETED' };
         }
-        if (params.confirmar_nueva_orden === true && params.id_orden_existente) {
+        if (!confirmedStockRelease && !productionRequest && missingAdditionalBase) {
+          mensaje = stockDraft
+            ? (stockContext.needsReview
+              ? 'No pude validar la confirmación. Recuperé tu borrador sin crear la OP.\n\n'
+              : 'No pude validar la confirmación. Tu borrador sigue abierto. Revisa el resumen y confirma por escrito si está correcto.\n\n')
+              + productionReleaseSummary(stockDraft)
+            : 'No pude identificar la orden base. Indica su OP ID si vas a pedir una orden adicional. No se creó ninguna orden.';
+          if (stockDraft) responseContext.stock_production_draft = stockDraft;
+          responseContext.inventory_changed = false;
+          break;
+        }
+        if (additionalOrder) {
           const existingOrderId = String(params.id_orden_existente).trim();
           const [existingOrders] = await db.execute(
             `SELECT o.id, o.codigo_orden, o.cantidad_planeada, o.origen_tipo,
@@ -3538,6 +3658,7 @@ module.exports = async (req, res) => {
           locationCode: params.ubicacion,
           materialsReplaced: params.materiales_repuestos,
           userId: user.id,
+          draftSnapshot: closeConfirmationSnapshot,
         });
         if (guidedCloseDraft) await finishCloseDraft(db, user.id, guidedCloseDraft).catch(error => {
           console.error('[webhook] La OP se cerró, pero no se pudo cerrar su borrador:', error.message);
@@ -3571,22 +3692,30 @@ module.exports = async (req, res) => {
 
       case 'CONFIRMAR_DESPACHO_SIIGO': {
         const dispatchText = currentText(rawBody, info);
-        const dispatchInput = dispatchConfirmationInput(dispatchText, params);
-        const typedOutsourcing = dispatchText.match(/\b(?:DSP\s+)?ID\s+3Q-(\d+)\b/i);
-        const parameterReference = String(params.despacho_id || params.id_despacho || '').trim();
-        const parameterOutsourcing = parameterReference.match(/^(?:DSP\s+ID\s+)?3Q-(\d+)$/i);
-        if (typedOutsourcing && parameterOutsourcing
-            && Number(typedOutsourcing[1]) !== Number(parameterOutsourcing[1])) {
-          throw { status: 409, message: 'La referencia del despacho 3Q no coincide con el mensaje. No se modificó inventario.' };
-        }
-        const outsourcingShipmentId = typedOutsourcing?.[1] || parameterOutsourcing?.[1];
-        if (outsourcingShipmentId) {
-          if (dispatchInput.expectedQuantity != null) {
-            throw { status: 409, message: 'Confirma el despacho 3Q completo usando solo su ID, sin indicar cantidades. No se modifico inventario.' };
+        const existingPackaging = await pendingDispatchPackagingDraft(db, user.id);
+        if (!existingPackaging) {
+          const dispatchInput = dispatchConfirmationInput(dispatchText, params);
+          if (/\bID\s+3Q-\d+\b/iu.test(dispatchText) && dispatchInput.expectedQuantity != null) {
+            throw { status: 409, message: 'La salida 3Q debe confirmarse completa, sin modificar la cantidad de materiales enviados.' };
           }
+          params = { ...params, ...dispatchInput };
+        }
+        const guided = await advanceDispatchPackaging({ db, userId: user.id,
+          rawText: dispatchText, params });
+        if (guided.message) {
+          mensaje = guided.message;
+          break;
+        }
+        dispatchConfirmationInput(dispatchText, {});
+        if (guided.type === 'MAQUILA_3Q') {
+          const outsourcingShipmentId = guided.referenceId;
           const shipment = await confirmOutsourcingShipment({
-            shipmentId: Number(outsourcingShipmentId),
+            shipmentId: outsourcingShipmentId,
             userId: user.id,
+            packaging: guided.packaging,
+          });
+          await clearDispatchPackagingDraft(db, user.id).catch(error => {
+            console.error(`[webhook] Despacho 3Q confirmado; no se pudo limpiar borrador de embalaje: ${error.message}`);
           });
           mensaje = shipment.already_confirmed
             ? [
@@ -3610,15 +3739,22 @@ module.exports = async (req, res) => {
                   `   Lote: ${item.lote}`,
                   `   Ubicación de origen: ${item.ubicacion_origen}`,
                 ]),
+                '', '*Embalaje consumido*',
+                ...(shipment.embalaje?.length
+                  ? shipment.embalaje.map(item => `• ${item.nombre} (${item.sku}): ${item.cantidad} und | lote ${item.lote}`)
+                  : ['• Sin cajas ni tapas']),
               ].join('\n');
           responseContext.dispatch = { ...shipment, dispatch_id: `3Q-${outsourcingShipmentId}` };
           break;
         }
         const dispatchResult = await confirmImportedDispatch({
-          dispatchId: params.despacho_id || params.id_despacho,
-          invoiceId: params.siigo_invoice_id || params.id_factura,
+          dispatchId: guided.referenceId,
           userId: user.id,
-          ...dispatchInput,
+          expectedQuantity: guided.expectedQuantity,
+          packaging: guided.packaging,
+        });
+        await clearDispatchPackagingDraft(db, user.id).catch(error => {
+          console.error(`[webhook] Despacho Siigo confirmado; no se pudo limpiar borrador de embalaje: ${error.message}`);
         });
         const lots = (dispatchResult.lotes || []).flatMap((item, index) => [
           `${index + 1}. *${item.sku}*`,
@@ -3641,6 +3777,10 @@ module.exports = async (req, res) => {
               '',
               '*Productos despachados*',
               ...lots,
+              '', '*Embalaje consumido*',
+              ...(dispatchResult.embalaje?.length
+                ? dispatchResult.embalaje.map(item => `• ${item.nombre} (${item.sku}): ${item.cantidad} und | lote ${item.lote}`)
+                : ['• Sin cajas ni tapas']),
             ].join('\n');
         responseContext.dispatch = dispatchResult;
         break;

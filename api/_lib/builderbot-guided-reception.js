@@ -1,6 +1,7 @@
 const { createHash } = require('crypto');
 const { resolveProductReference } = require('./product-references');
 const { singleTypedReceptionReference } = require('./typed-reception-reference');
+const { assertDraftEvidence, checkDraftFields } = require('./builderbot-draft-input');
 const {
   assertPurchaseOrderTextReference,
   buildConfirmationItems,
@@ -31,11 +32,17 @@ function currentMessageText(rawText) {
 }
 
 function skuReviewReply(rawText) {
-  const text = currentMessageText(rawText).trim().normalize('NFD')
+  const utterance = currentMessageText(rawText).trim();
+  const text = utterance.normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '').toUpperCase()
     .replace(/[.!?]+$/u, '').replace(/[,;]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  if (/^(?:SIM|SI+(?: ESTA BIEN| TODO ESTA BIEN| CORRECTO| ASI ES)?|CORRECTO|EXACTO|ASI ES|ESTA BIEN|TODO BIEN|TODO ESTA BIEN|ESTA CORRECTO|TODO CORRECTO|PERFECTO|ESTA PERFECTO|DE ACUERDO|OK|OKAY)$/u.test(text)) return 'YES';
-  if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO ES CORRECTO|ESTA MAL)$/u.test(text)) return 'NO';
+  // A question or a compound correction is not approval of the entire SKU.
+  if (/[¿?]/u.test(utterance)) return null;
+  const affirmative = /^(?:SIM|SI+|CLARO|CORRECTO|EXACTO|PERFECTO|DE ACUERDO|OK|OKAY)$/u;
+  const clearStatement = /^(?:CORRECTO|EXACTO|PERFECTO|ASI ES|ESTA BIEN ASI|TODO (?:CORRECTO|BIEN|PERFECTO)|(?:ES|ESTA) (?:CORRECT[OA]|BIEN|PERFECT[OA])|(?:ESO|ESTO|TODO|ASI) (?:ES|ESTA) (?:CORRECT[OA]|BIEN|PERFECT[OA])|LOS DATOS (?:ESTAN|SON) (?:CORRECTOS|BIEN)|(?:EL SKU|EL PRODUCTO|LO REGISTRADO) (?:ES|ESTA) (?:CORRECTO|BIEN)|(?:LA INFORMACION|LA RECEPCION) (?:ES|ESTA) (?:CORRECTA|BIEN)|REVISADO Y CORRECTO)$/u;
+  const withoutAffirmation = text.replace(/^(?:SIM|SI+|CLARO|DE ACUERDO|OK|OKAY)\s+/u, '');
+  if (affirmative.test(text) || clearStatement.test(withoutAffirmation)) return 'YES';
+  if (/^(?:NO|INCORRECTO|NO ESTA BIEN|NO (?:ES|ESTA) CORRECT[OA]|ESTA MAL)$/u.test(text)) return 'NO';
   return null;
 }
 
@@ -349,7 +356,7 @@ function cleanAdvance(params = {}) {
   }
   const allowed = new Set(['producto', 'sku', 'cantidad', 'condicion', 'ubicacion',
     'lote', 'fecha_vencimiento', 'motivo', 'motivo_diferencia',
-    'partidas', 'partida', 'cantidad_total', 'correccion']);
+    'partidas', 'partida', 'cantidad_total', 'correccion', 'unidad']);
   if (Object.keys(advance).some(key => !allowed.has(key))) {
     throw inputError('El avance de recepción contiene campos no válidos');
   }
@@ -381,7 +388,24 @@ function cleanBatchAdvances(params) {
   });
 }
 
-async function captureBatch({ db, advances, payload, preparedItems, order, reception, user }) {
+function validateDraftAdvance(advance, entry, prepared, correctionRequested) {
+  const unit = String(prepared.unidad || 'und').toLowerCase();
+  const expected = ['g', 'gr', 'gramo', 'gramos'].includes(unit) ? 'g' : unit;
+  if (Object.hasOwn(advance, 'unidad') && advance.unidad !== expected) {
+    throw inputError(`Este producto se registra en ${unit}. ¿Cuál es la cantidad en esa unidad?`, 409);
+  }
+  if (Object.hasOwn(advance, 'partida') && Object.hasOwn(advance, 'partidas')) {
+    throw inputError('Indica una partida o una distribución completa, sin mezclar las dos.');
+  }
+  if (correctionRequested && Object.hasOwn(advance, 'partida')
+    && (!Number.isSafeInteger(advance.partida) || advance.partida < 1
+      || advance.partida > (entry.partidas?.length || (entry.cantidad ? 1 : 0)))) {
+    throw inputError('¿Cuál de las partidas del resumen quieres corregir? Indica su número.', 409);
+  }
+}
+
+async function captureBatch({ db, advances, payload, preparedItems, order, reception, user,
+  structured, correctionRequested }) {
   const captured = [];
   const seen = new Set();
   for (const advance of advances) {
@@ -398,6 +422,7 @@ async function captureBatch({ db, advances, payload, preparedItems, order, recep
     }
     seen.add(prepared.sku);
     const entry = payload.entries[prepared.sku] || { sku: prepared.sku };
+    if (structured) validateDraftAdvance(advance, entry, prepared, correctionRequested);
     applyMixedFields(entry, advance, prepared);
     if (!entry.partidas && entry.cantidad
       && Math.abs(Number(entry.cantidad) - Number(prepared.cantidad_pendiente)) < 0.0001) {
@@ -704,7 +729,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
         part.motivo ? `Motivo: ${part.motivo}.` : null,
       ]),
       entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-      '¿Están correctas las partidas de este SKU? Responde «sí», «correcto» o «perfecto» para continuar. Si hay un error, di por ejemplo «corrección, cantidad de la partida 2 es 4»; el total se recalculará. Verifica también el motivo de cada partida bloqueada y el de la diferencia frente a la OC.',
+      '¿Están correctas las partidas de este SKU? Puedes responder de forma natural, por ejemplo «sí» o «es correcto». Si hay un error, di por ejemplo «corrección, cantidad de la partida 2 es 4»; el total se recalculará. Verifica también el motivo de cada partida bloqueada y el de la diferencia frente a la OC.',
       'Este paso no confirma la recepción ni modifica inventario.',
     ].filter(Boolean).join('\n');
   }
@@ -725,7 +750,7 @@ function skuReviewMessage(order, reception, prepared, entry) {
     `Vencimiento: ${entry.fecha_vencimiento || prepared.fecha_vencimiento_documento}${expiryFromPdf ? ' (propuesto por PDF; coteja con la etiqueta)' : ''}.`,
     entry.motivo ? `Motivo de condición: ${entry.motivo}.` : null,
     entry.motivo_diferencia ? `Motivo de diferencia: ${entry.motivo_diferencia}.` : null,
-    '¿Está correcto este SKU? Responde «sí», «correcto» o «perfecto» para continuar, o dime qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
+    '¿Está correcto este SKU? Puedes responder de forma natural, por ejemplo «sí» o «es correcto», o decirme qué dato debo corregir. Puedes cambiar el lote o el vencimiento si no coinciden con la etiqueta.',
     'Este paso no confirma la recepción ni modifica inventario.',
   ].filter(Boolean).join('\n');
 }
@@ -792,14 +817,30 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   if (params.confirmacion_final === true || params.confirmacion_final === 'true') {
     throw inputError('Los avances no confirman inventario; revisa primero el resumen');
   }
-  const contextual = contextualFieldsFromText(rawText);
-  const correctionRequested = params.correccion === true || isReceptionCorrectionRequest(rawText)
-    || Object.keys(contextual.fields).length > 0;
+  const structured = params.editar_borrador === true;
+  if (structured) {
+    checkDraftFields(params, ['editar_borrador', 'evidencia', 'correccion', 'orden_compra_id',
+      'numero_oc', 'avance', 'avances'], 'Envía solo los campos de captura o corrección del borrador.');
+    assertDraftEvidence(rawText, params.evidencia);
+    if ((Object.hasOwn(params, 'correccion') && typeof params.correccion !== 'boolean')
+      || skuReviewReply(rawText) || (!params.avance && !params.avances)) {
+      throw inputError('Indica el dato nuevo del borrador. Para validar, responde al resumen por separado.', 409);
+    }
+  }
+  const contextual = structured ? { fields: {} } : contextualFieldsFromText(rawText);
+  const correctionRequested = params.correccion === true || (!structured
+    && (isReceptionCorrectionRequest(rawText) || Object.keys(contextual.fields).length > 0));
   const batch = cleanBatchAdvances(params);
-  const advance = batch ? {} : { ...cleanAdvance(params), ...contextual.fields,
+  const legacyFields = structured || batch ? {} : { ...contextual.fields,
     ...mixedPartsFromText(rawText),
     ...indexedPartFieldsFromText(rawText), ...correctionFieldsFromText(rawText) };
+  const advance = batch ? {} : { ...cleanAdvance(params), ...legacyFields };
+  if (structured && (batch || [advance]).some(entry =>
+    !Object.keys(entry).some(key => !['producto', 'sku', 'partida', 'unidad'].includes(key)))) {
+    throw inputError('Indica qué dato quieres cambiar y su valor.', 409);
+  }
   const explicitId = typedOrderId(rawText);
+  let session;
   let order;
   if (explicitId) {
     order = await findPurchaseOrder(db, { orden_compra_id: explicitId });
@@ -810,24 +851,39 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   } else {
     // Resolve multiple drafts from the last WMS reply to this chat, not from
     // model-supplied IDs or the draft's last-update timestamp.
-    const session = correctionRequested
-      ? await activeUserSession(db, user.id, { allowPreview: true, from })
-        || await recentlyPreparedSession(db, from)
-      : await recentlyPreparedSession(db, from)
-        || await activeUserSession(db, user.id, { allowPreview: true, from });
+    if (structured) {
+      session = await recentlyPreparedSession(db, from);
+      if (!session) {
+        const active = await activeUserSession(db, user.id, { allowPreview: true, from });
+        if (active) session = await recentlyPreparedSession(db, from, { sessions: [active] });
+      }
+    } else {
+      session = correctionRequested
+        ? await activeUserSession(db, user.id, { allowPreview: true, from })
+          || await recentlyPreparedSession(db, from)
+        : await recentlyPreparedSession(db, from)
+          || await activeUserSession(db, user.id, { allowPreview: true, from });
+    }
     if (!session) {
       throw inputError('Para empezar, indica OC ID N o IO ID N de la recepción preparada', 409);
     }
     order = await findPurchaseOrder(db, { orden_compra_id: session.orden_compra_id });
   }
+  if (structured && ((params.orden_compra_id != null && Number(params.orden_compra_id) !== Number(order.id))
+    || (params.numero_oc && String(params.numero_oc).toUpperCase() !== String(order.numero).toUpperCase()))) {
+    throw inputError('La referencia no coincide con la recepción actual. Indica su OC ID o IO ID.', 409);
+  }
   const prepared = await prepareReceptionFromPurchaseOrder({
-    db, params: { orden_compra_id: order.id }, userId: user.id,
+    db, params: { orden_compra_id: order.id }, userId: user.id, preparedOnly: structured,
   });
   if (prepared.alreadyCompleted) {
     return { message: `${purchaseOrderReceptionIdentifier(order)} ya fue recibida. No se modificó inventario.`,
       inventory_changed: false, already_completed: true };
   }
   const reception = prepared.reception;
+  if (structured && session && Number(session.recepcion_id) !== Number(reception.id)) {
+    throw inputError('Cambió la recepción preparada. Vuelve a abrirla para revisar el borrador.', 409);
+  }
   const preparedItems = reception.items;
   let currentPayload;
   const respond = result => ({ ...result,
@@ -837,7 +893,12 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
   });
   await db.beginTransaction();
   try {
-    await db.execute('SELECT id FROM recepciones WHERE id = ? FOR UPDATE', [reception.id]);
+    const [locked] = await db.execute(structured
+      ? "SELECT id FROM recepciones WHERE id = ? AND estado IN ('borrador', 'en_proceso') FOR UPDATE"
+      : 'SELECT id FROM recepciones WHERE id = ? FOR UPDATE', [reception.id]);
+    if (structured && !locked.length) {
+      throw inputError('Esta recepción ya no está en borrador. Consulta su estado.', 409);
+    }
     const [rows] = await db.execute(
       `SELECT usuario_id, payload_json, payload_hash
          FROM recepcion_confirmacion_borradores
@@ -858,7 +919,8 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     currentPayload = payload;
     if (existing?.version === 1 && correctionRequested) payload.editingSummary = true;
     if (batch) {
-      const result = await captureBatch({ db, advances: batch, payload, preparedItems, order, reception, user });
+      const result = await captureBatch({ db, advances: batch, payload, preparedItems, order, reception,
+        user, structured, correctionRequested });
       await db.commit();
       return respond(result);
     }
@@ -868,6 +930,7 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     }
     if (payload.editingSummary && !payload.selectedSku && !payload.reviewSku
       && !String(advance.producto || advance.sku || '').trim()) {
+      if (structured) throw inputError('¿De qué producto de la recepción hablas? Indica su nombre o SKU.', 409);
       await saveGuidedDraft(db, order, reception, user.id, payload);
       await db.commit();
       return respond({ message: [
@@ -899,9 +962,9 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     const reviewSku = payload.reviewSku;
     const reviewItem = preparedItems.find(item => item.sku === reviewSku);
     if (reviewSku && !reviewItem) throw inputError('El SKU en revisión ya no pertenece a esta recepción', 409);
-    const reviewReply = skuReviewReply(rawText);
+    const reviewReply = structured ? null : skuReviewReply(rawText);
     const mismatches = documentMismatch(rawText);
-    const hasFields = Object.keys(advance).some(key => !['producto', 'sku'].includes(key))
+    const hasFields = Object.keys(advance).some(key => !['producto', 'sku', 'unidad'].includes(key))
       || mismatches.lote || mismatches.fecha_vencimiento;
     const reference = String(advance.producto || advance.sku || '').trim();
     let confirmedSku = null;
@@ -955,6 +1018,7 @@ async function advanceGuidedReception({ db, params = {}, rawText, user, from }) 
     }
     if (selected && hasFields) {
       const safeAdvance = { ...advance };
+      if (structured) validateDraftAdvance(advance, payload.entries[selected.sku], selected, correctionRequested);
       if (contextual.unit && Object.hasOwn(safeAdvance, 'cantidad')) {
         const grams = ['g', 'gr', 'gramo', 'gramos'].includes(String(selected.unidad).toLowerCase());
         const spokenGrams = /^(?:g|gramos?)$/u.test(contextual.unit);

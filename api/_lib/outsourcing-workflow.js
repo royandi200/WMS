@@ -786,7 +786,7 @@ async function cancelOutsourcingShipment({ shipmentId, userId }) {
   }
 }
 
-async function confirmOutsourcingShipment({ shipmentId, userId }) {
+async function confirmOutsourcingShipment({ shipmentId, userId, packaging }) {
   const shipmentReference = String(shipmentId || '').trim();
   if (!shipmentReference) throw httpError(400, 'envio_id es obligatorio');
   const conn = await createConnection();
@@ -890,6 +890,9 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
       );
       dispatched.push({ sku: item.sku, cantidad: quantity, lote: item.lote, ubicacion_origen: item.ubicacion, adicional: Boolean(item.es_adicional) });
     }
+    const packagingConsumed = packaging
+      ? await require('./dispatch-packaging').consumeDispatchPackaging(conn,
+        { type: 'MAQUILA_3Q', referenceId: shipment.id, userId, packaging }) : [];
     await conn.execute(
       `UPDATE maquila_envios
           SET estado = 'CONFIRMADO', confirmado_por = ?, confirmado_en = NOW()
@@ -918,6 +921,7 @@ async function confirmOutsourcingShipment({ shipmentId, userId }) {
       order_state: shipment.orden_compra_id ? 'EN_3Q' : 'EN_3Q_PENDIENTE_OC',
       external_custody: '3Q',
       dispatched,
+      embalaje: packagingConsumed,
     };
   } catch (error) {
     await conn.rollback().catch(() => {});

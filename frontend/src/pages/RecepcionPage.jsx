@@ -154,7 +154,8 @@ export default function RecepcionPage() {
 
   const showToast = (msg, ok) => {
     setToast({ msg, ok })
-    setTimeout(() => setToast(null), 4000)
+    // Errors stay until the user closes them; confirmations fade out.
+    if (ok) setTimeout(() => setToast((current) => (current?.msg === msg ? null : current)), 4000)
   }
 
   return (
@@ -171,9 +172,13 @@ export default function RecepcionPage() {
       </div>
 
       {toast && (
-        <div className={`mb-4 px-4 py-3 rounded-lg border text-sm ${
+        <div role={toast.ok ? 'status' : 'alert'} className={`mb-4 flex items-start gap-3 px-4 py-3 rounded-lg border text-sm ${
           toast.ok ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-danger/10 border-danger/30 text-danger'
-        }`}>{toast.msg}</div>
+        }`}>
+          <span className="flex-1 whitespace-pre-line">{toast.msg}</span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Cerrar mensaje"
+            className="shrink-0 px-2 leading-none text-lg opacity-70 hover:opacity-100">×</button>
+        </div>
       )}
 
       {tab === 'orders' && (
@@ -552,6 +557,8 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
       documento_pdf: null,
       items: (draft.items || []).map((item) => ({
         sku: item.sku_extraido || '',
+        descripcion_documento: item.descripcion_extraida || '',
+        por_asignar: !item.sku_extraido,
         cantidad: Number(item.cantidad),
         unidad: item.unidad || '',
         lote_documento: item.lote || '',
@@ -723,13 +730,18 @@ function PurchaseOrdersPanel({ rows, drafts, suppliers, loading, canCancel, canD
             {form.items.map((item, index) => (
               <div key={index} className="space-y-1">
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_120px_100px_36px] gap-2">
-                  <AutocompleteInput value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} fetchOptions={searchProducts} minChars={2} placeholder="SKU" pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, números, punto, guion, guion bajo o &amp;" required />
+                  <AutocompleteInput value={item.sku} onChange={(event) => setItem(index, 'sku', event.target.value)} fetchOptions={searchProducts} minChars={2} placeholder={item.por_asignar ? 'Busca y elige el producto' : 'SKU'} pattern="[A-Za-z0-9._&amp;-]+" title="Usa solo letras, números, punto, guion, guion bajo o &amp;" required />
                   <input type="number" min="0.0001" step="any" value={item.cantidad} onChange={(event) => setItem(index, 'cantidad', event.target.value)} placeholder="Cantidad" className="input-field" required />
                   <input value={item.unidad} onChange={(event) => setItem(index, 'unidad', event.target.value)} placeholder="Unidad" className="input-field" />
                   <button type="button" onClick={() => removeItem(index)} disabled={form.items.length === 1} title="Eliminar ítem" className="h-10 w-9 inline-flex items-center justify-center text-muted hover:text-danger disabled:opacity-30">
                     <Trash2 size={16} />
                   </button>
                 </div>
+                {item.descripcion_documento && (
+                  <p className={`px-1 text-xs ${item.por_asignar && !item.sku ? 'text-amber-400' : 'text-muted'}`}>
+                    {item.por_asignar && !item.sku ? 'Por asignar — ' : ''}PDF: {item.descripcion_documento}
+                  </p>
+                )}
                 {(item.lote_documento || item.fecha_vencimiento_documento) && (
                   <p className="px-1 text-xs text-muted">
                     PDF: {item.lote_documento ? `lote ${item.lote_documento}` : 'sin lote'}

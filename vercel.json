@@ -15,6 +15,10 @@
     {
       "path": "/api/v1/siigo/import-invoices",
       "schedule": "1-59/2 * * * *"
+    },
+    {
+      "path": "/api/v1/siigo/stock-comparison",
+      "schedule": "0 11 * * *"
     }
   ],
   "rewrites": [

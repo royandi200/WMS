@@ -57,6 +57,18 @@ test('numeric SKU is not misread as a new quantity', () => {
     { product: null, quantity: 7 });
 });
 
+test('declarative product corrections extract the reference, not the qualifier', () => {
+  for (const [phrase, product] of [
+    ['La referencia correcta es Ashwagandha x60.', 'ashwagandha x60'],
+    ['El producto correcto es Ashwagandha por 60', 'ashwagandha por 60'],
+    ['El SKU nuevo es 00102-PTASH60', '00102-ptash60'],
+  ]) {
+    assert.equal(productionReleaseFollowup(phrase), true, phrase);
+    assert.deepEqual(correctionFields(phrase), { product, quantity: null });
+    assert.equal(productionReleaseConfirmation(phrase), false);
+  }
+});
+
 test('a negated or quoted confirmation cannot authorize release', () => {
   for (const text of ['no confirmo crear OP', 'ayer dije: confirmo crear OP',
     '¿confirmo crear OP?', 'confirmo crear OP pero cambia a 10 unidades',

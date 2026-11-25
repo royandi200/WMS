@@ -101,3 +101,57 @@ test('table rows with SKUs outside the catalog are reported, not silently droppe
   const extracted = await extractPdfTextLayer(pdf);
   assert.deepEqual(unmatchedTableRowCodes(extracted.text, PRODUCTS), ['99999-NOEXISTE']);
 });
+
+test('SIIGO purchase order headers are recovered from the printed layout', () => {
+  const { recoverSiigoPurchaseOrderHeaders } = require('../api/_lib/document-pdf-headers');
+  const text = 'Orden de compra\nNo. OC-1-354\nALNATURE NUTRITION LAB\nPara\nINFINITY BRANDS SAS\tSAS\nNit 901.189.721-2\nNit\t901.600.946-5\nFecha\t2026-10-16\n';
+  const result = recoverSiigoPurchaseOrderHeaders({ tipo_documento: 'ORDEN_COMPRA' }, text);
+  assert.equal(result.referencia_documento, 'OC-1-354');
+  assert.equal(result.fecha_documento, '2026-10-16');
+  assert.equal(result.proveedor_nit, '901.600.946-5');
+});
+
+test('SIIGO purchase order rows are read without AI and matched only when clear', () => {
+  const { siigoPurchaseOrderItems } = require('../api/_lib/document-pdf-headers');
+  const tokens = ['Ítem', 'Descripción', 'Vr. Total',
+    '1', 'ETIQUETA ASHWAGANDHA LB X80', '3,000.00', '458.00', '0.00', '19 %', '2,5 %', '1,600,710.00',
+    '2', 'FUNDA NAPS', 'VINAGRE', '1,000.00', '990.00', '0.00', '19 %', '2,5 %', '1,153,350.00',
+    'Observaciones:', 'Total Bruto'];
+  const items = siigoPurchaseOrderItems(tokens, [
+    { siigo_code: '00031-ETLBASH', nombre: 'ETIQUETA AZUL ASHWAGANDHA LINEA BLANCA x 60' },
+    { siigo_code: '00017-ETASH60', nombre: 'ETIQUETA ASHWAGANDHA x 60' },
+    { siigo_code: '00009-ETVM60', nombre: 'ETIQUETA VINAGRE DE MANZANA x 60' },
+    { siigo_code: '000-34FLB', nombre: 'FUNDAS LINEA BLANCA' },
+  ]);
+  assert.deepEqual(items.map((item) => [item.cantidad, item.sku, item.descripcion]), [
+    [3000, '00031-ETLBASH', 'ETIQUETA ASHWAGANDHA LB X80'],
+    [1000, undefined, 'FUNDA NAPS VINAGRE'],
+  ]);
+});
+
+test('SIIGO OC row picks the catalog product with the same printed name', () => {
+  const { siigoPurchaseOrderItems } = require('../api/_lib/document-pdf-headers');
+  const tokens = ['Vr. Total', '1', 'GOMA DE GELATINA - CREATINA, FOS Y', 'PROBIOTICOS', '90,000.00', '193.00', 'Observaciones:'];
+  const items = siigoPurchaseOrderItems(tokens, [
+    { siigo_code: '00052-MPCG', nombre: 'GOMAS CREAGUMS - CREATINA CREAPURE' },
+    { siigo_code: '00050-MPRO', nombre: 'GOMAS PROBIOTICOS' },
+    { siigo_code: '58398789001', nombre: 'GOMA DE GELATINA - CREATINA, FOS Y PROBIOTICOS' },
+    { siigo_code: '5839878900', nombre: 'GOMA DE GELATINA - CREATINA' },
+  ]);
+  assert.equal(items[0].sku, '58398789001');
+});
+
+test('purchase order rows without an equivalent product are kept as por asignar', () => {
+  const { normalizePurchaseOrderDocumentInput } = require('../api/_lib/purchase-order-document-intake');
+  const evidence = 'ORDEN DE COMPRA\nNo. OC-1-353\nFecha\t2026-10-14\nTAMPOGRAFIA SEGUN DISEÑO\t10,000.00\n';
+  const result = normalizePurchaseOrderDocumentInput({
+    tipo_documento: 'ORDEN_COMPRA', referencia_documento: 'OC-1-353', fecha_documento: '2026-10-14',
+    proveedor_nombre: 'Proveedor', items: [{ sku: '', por_asignar: true, descripcion: 'TAMPOGRAFIA SEGUN DISEÑO', cantidad: 10000 }],
+  }, { evidenceText: evidence });
+  assert.equal(result.items[0].sku, '');
+  assert.equal(result.items[0].pending, true);
+  assert.throws(() => normalizePurchaseOrderDocumentInput({
+    tipo_documento: 'ORDEN_COMPRA', referencia_documento: 'OC-1-353', fecha_documento: '2026-10-14',
+    proveedor_nombre: 'Proveedor', items: [{ sku: '', descripcion: 'X', cantidad: 1 }],
+  }), /requiere SKU/);
+});

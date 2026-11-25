@@ -138,4 +138,96 @@ function parseCustomerOrderDate(value) {
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== candidate ? null : candidate;
 }
 
-module.exports = { recoverWarehousePdfHeaders };
+// SIIGO prints its purchase orders as "No. OC-1-354", "Fecha<TAB>2026-10-16" and two
+// "Nit" lines (buyer and supplier) whose columns interleave. Fill only missing fields.
+const OWN_TAX_ID = String(process.env.COMPANY_NIT || '901189721').replace(/\D/g, '').slice(0, 9);
+
+function recoverSiigoPurchaseOrderHeaders(body, text) {
+  const raw = String(text || '');
+  if (!/^Orden de compra$/imu.test(raw) || !/^No\.\s*\S+\s*$/mu.test(raw)) return body;
+  const source = body?.params && typeof body.params === 'object' ? body.params : body;
+  const found = {};
+  const reference = raw.match(/^No\.\s*(\S+)\s*$/mu);
+  if (reference) found.referencia_documento = reference[1];
+  const date = raw.match(/^Fecha\s+(\d{4}-\d{2}-\d{2})\s*$/mu);
+  if (date) found.fecha_documento = date[1];
+  const taxIds = [...raw.matchAll(/Nit\s+([\d.]{6,}-?\d?)/gu)].map((m) => m[1])
+    .filter((value) => value.replace(/\D/g, '').slice(0, 9) !== OWN_TAX_ID);
+  if (new Set(taxIds).size === 1) found.proveedor_nit = taxIds[0];
+  const recovered = {};
+  for (const [field, value] of Object.entries(found)) {
+    if (!String(source?.[field] ?? '').trim()) recovered[field] = value;
+  }
+  if (!source?.tipo_documento) recovered.tipo_documento = 'ORDEN_COMPRA';
+  if (!Object.keys(recovered).length) return body;
+  const result = { ...source, ...recovered };
+  return body?.params ? { ...body, params: result } : result;
+}
+
+module.exports = { recoverWarehousePdfHeaders, recoverSiigoPurchaseOrderHeaders };
+
+// Deterministic reader for SIIGO OC item tables (no AI). PDF.js returns the
+// table cells in reading order: index, description (1+ cells), quantity,
+// unit price, discount, tax %, withholding %, total. A SKU is proposed only when
+// the product type matches (FUNDA, ETIQUETA, TAPA...) and the match is clear.
+const STOP_WORDS = new Set(['DE', 'Y', 'LA', 'EL', 'CON', 'X', 'POR', 'PARA', 'UND', 'UNIDADES', 'SEGUN', 'A', 'UNA']);
+const TYPE_WORDS = new Set(['GOMA', 'FUNDA', 'ETIQUETA', 'TAPA', 'CAJA', 'TARRO', 'LINER', 'FRASCO', 'BOLSA', 'PRODUCTO']);
+
+function nameWords(value) {
+  const text = normalizeMarkerText(value)
+    .replace(/\bLB\b/gu, 'LINEA BLANCA')
+    .replace(/\bMATERIA PRIMA\b/gu, 'GOMAS')
+    .replace(/\bX\s*(\d+)/gu, 'X$1');
+  return text.split(/[^A-Z0-9]+/u)
+    .filter((word) => word.length > 1 && !STOP_WORDS.has(word))
+    .map((word) => (word.length > 3 && !/\d/u.test(word) ? word.replace(/S$/u, '') : word));
+}
+
+function matchCatalog(description, products) {
+  // SIIGO prints the product's own name on the OC: an exact name wins outright.
+  const exactKey = nameWords(description).join(' ');
+  const exact = products.filter((product) => nameWords(product.nombre).join(' ') === exactKey);
+  if (exact.length === 1) return { sku: String(exact[0].siigo_code), alternativas: [] };
+  const wanted = nameWords(description);
+  const wantedType = wanted.find((word) => TYPE_WORDS.has(word)) || null;
+  const scored = products.map((product) => {
+    const words = nameWords(product.nombre);
+    const type = words.find((word) => TYPE_WORDS.has(word)) || null;
+    if (wantedType && type !== wantedType) return null;
+    const shared = wanted.filter((word) => !TYPE_WORDS.has(word) && words.includes(word));
+    return shared.length ? { sku: String(product.siigo_code), score: shared.length, extra: words.length - shared.length } : null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score || a.extra - b.extra);
+  if (!scored.length) return {};
+  // A product whose name contains every descriptive word of the row beats partial matches.
+  const descriptive = wanted.filter((word) => !TYPE_WORDS.has(word)).length;
+  const complete = scored.filter((entry) => entry.score === descriptive);
+  if (descriptive >= 2 && complete.length === 1) {
+    return { sku: complete[0].sku, alternativas: scored.filter((e) => e !== complete[0]).slice(0, 2).map((e) => e.sku) };
+  }
+  const top = scored.filter((entry) => entry.score === scored[0].score);
+  // Without a type word, demand two shared words; never pick among 3+ equals.
+  if ((!wantedType && scored[0].score < 2) || top.length > 2) return { candidatos: top.slice(0, 4).map((e) => e.sku) };
+  return { sku: top[0].sku, alternativas: scored.slice(1, 3).map((entry) => entry.sku) };
+}
+
+function siigoPurchaseOrderItems(tokens = [], products = []) {
+  const cells = tokens.map((token) => String(typeof token === 'object' && token ? token.text : token).trim()).filter(Boolean);
+  const start = cells.findIndex((cell) => cell === 'Vr. Total');
+  if (start < 0) return [];
+  const isNumber = (cell) => /^-?\d[\d.,]*$/u.test(cell);
+  const rows = [];
+  let i = start + 1;
+  while (i < cells.length && /^\d{1,3}$/u.test(cells[i])) {
+    const description = [];
+    i += 1;
+    while (i < cells.length && !isNumber(cells[i])) description.push(cells[i++]);
+    const quantity = Number(String(cells[i] || '').replace(/,/gu, ''));
+    if (!description.length || !Number.isFinite(quantity) || quantity <= 0) break;
+    rows.push({ descripcion: description.join(' '), cantidad: quantity });
+    i += 1;
+    while (i < cells.length && !/^\d{1,3}$/u.test(cells[i]) && (isNumber(cells[i]) || /%$/u.test(cells[i]))) i += 1;
+  }
+  return rows.map((row) => ({ ...row, ...matchCatalog(row.descripcion, products) }));
+}
+
+module.exports.siigoPurchaseOrderItems = siigoPurchaseOrderItems;

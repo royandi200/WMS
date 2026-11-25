@@ -432,6 +432,7 @@ async function prepareReceptionFromPurchaseOrder({
   rawText,
   requireExplicitTextReference = false,
   confirmedReference = null,
+  preparedOnly = false,
 }) {
   const order = await findPurchaseOrder(db, params);
   if (requireExplicitTextReference) {
@@ -454,6 +455,7 @@ async function prepareReceptionFromPurchaseOrder({
     const reception = await preparePurchaseOrderReception(db, {
       purchaseOrderId: order.id,
       userId,
+      preparedOnly,
     });
     await db.commit();
     return { order, reception, alreadyCompleted: false };
@@ -584,9 +586,24 @@ async function prepareReceptionFromOutsourcing({
 
 function explicitConfirmation(rawText, order, params = {}) {
   if (params.confirmacion_final !== true && params.confirmacion_final !== 'true') return false;
-  const text = normalizeCommandText(rawText);
-  return /\bconfirm(?:o|amos)\s+(?:la\s+)?recepcion\b/iu.test(text)
-    && purchaseOrderTextReference(text, order);
+  const reference = directReceptionConfirmationReference(rawText);
+  return Boolean(reference && standalonePurchaseOrderReference(reference, order));
+}
+
+function directReceptionConfirmationReference(rawText) {
+  if (/[¿?]/u.test(rawText || '')) return null;
+  const text = normalizeCommandText(rawText).toUpperCase().replace(/[ \t]+/gu, ' ');
+  const command = text.match(/^«([^«»\r\n]+)»$/u)?.[1]?.trim() || text;
+  return command.match(/^(?:SI[,.:]?\s+)?CONFIRM(?:O|AMOS)\s+(?:LA\s+)?RECEPCION\s+(?:DE\s+(?:LA\s+)?)?([^\r\n]+?)\s*[.!]*$/u)?.[1] || null;
+}
+
+function standalonePurchaseOrderReference(reference, order) {
+  // WhatsApp can copy the emphasis markers added around the displayed ID.
+  reference = reference.replace(/^(\*{1,2})([^*\r\n]+)\1$/u, '$2').trim();
+  const number = normalizeCommandText(order?.numero || (typeof order === 'string' ? order : '')).toUpperCase();
+  if (number && reference === number) return true;
+  const directReference = /^(?:O[ .]*C|I[ .]*O|ORDEN DE COMPRA|IN *(?:&|AND|Y) *OUT) *(?:ID|NUMERO|NRO|#)? *#? *\d+$/u;
+  return directReference.test(reference) && purchaseOrderTextReference(reference, order);
 }
 
 function contextualReceptionConfirmation(rawText, order) {
@@ -596,21 +613,11 @@ function contextualReceptionConfirmation(rawText, order) {
     const kind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
     return spokenReference.kind === kind && spokenReference.id === Number(order.id);
   }
-  const match = text.match(/^(?:SI[,.:]?\s+)?CONFIRMO\s+(?:LA\s+)?RECEPCION(?:\s+(.+))?$/u);
-  if (!match) return false;
-  const rest = String(match[1] || '').replace(/[.!?]+$/gu, '').trim();
-  if (!rest) return false;
-  if (/\b(?:NO|PERO|EXCEPTO|SALVO|CAMBIA|CAMBIAR|CORRIGE|CORREGIR|PENDIENTE)\b/u.test(rest)) {
-    return false;
-  }
-  const kind = purchaseOrderReceptionType(order) === 'IN_OUT' ? 'IO' : 'OC';
-  const typed = typedReceptionReferences(rest);
-  if (typed.length) return typed.length === 1 && typed[0].kind === kind
-    && typed[0].id === Number(order.id);
-  if (/\b(?:IO|MQ|MAQUILA|IN\s*(?:AND|Y|&)\s*OUT)\b/u.test(rest)) return false;
-  const numbers = [...rest.matchAll(/\d+/gu)].map(result => Number(result[0]));
-  return numbers.length === 1 && numbers[0] === Number(order.id)
-    && rest.length <= 60 && /^[A-Z0-9\s,.:#/-]+$/u.test(rest);
+  const reference = directReceptionConfirmationReference(rawText);
+  if (!reference) return false;
+  const bareReference = /^(?:(?:ID|O\s*I\s*[DBPV]|OCE\s+Y\s+DE)\s*#?\s*|#)?\d+$/u.test(reference);
+  return standalonePurchaseOrderReference(reference, order)
+    || (bareReference && Number(reference.match(/\d+/u)[0]) === Number(order.id));
 }
 
 function explicitOutsourcingConfirmation(rawText, order, params = {}) {
@@ -1026,13 +1033,13 @@ async function saveReceptionDraft(db, { order, reception, items, userId }) {
   return payload;
 }
 
-async function loadReceptionDraft(db, { orderId, receptionId, userId }) {
+async function loadReceptionDraft(db, { orderId, receptionId, userId, lock = false }) {
   const [rows] = await db.execute(
     `SELECT usuario_id, payload_json, payload_hash
        FROM recepcion_confirmacion_borradores
       WHERE recepcion_id = ? AND orden_compra_id = ?
         AND estado = 'PENDIENTE' AND expira_en > NOW()
-      LIMIT 1`,
+      LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
     [receptionId, orderId]
   );
   return parseReceptionDraft(rows[0], { orderId, receptionId, userId });
@@ -1236,6 +1243,7 @@ async function confirmReceptionFromWhatsApp({ db, params, rawText, user }) {
   const { confirmReceptionForUser } = require('../v1/reception');
   const result = await confirmReceptionForUser({
     user: { id: user.id, rol: user.rol_nombre || user.rol },
+    draftSnapshot: draft,
     body: {
       recepcion_id: prepared.reception.id,
       orden_compra_id: prepared.order.id,

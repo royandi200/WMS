@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 
 const dbPath = path.resolve(__dirname, '../api/_lib/db.js');
 const guidedPath = path.resolve(__dirname, '../api/_lib/builderbot-guided-reception.js');
@@ -14,6 +15,9 @@ let recentFinalPreview = null;
 let activeFinalPreview = null;
 let interceptConfirmation = false;
 let interceptedConfirmation = null;
+let storedConfirmationDraft = null;
+let latestReceptionList = null;
+let preparedSelection = null;
 
 require.cache[dbPath] = {
   id: dbPath, filename: dbPath, loaded: true,
@@ -25,6 +29,14 @@ require.cache[dbPath] = {
         rol_nombre: 'admin', email: 'qa@wms.co',
       }]];
       if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
+      if (latestReceptionList && /SELECT payload, response, action\s+FROM webhook_logs/u.test(sql)) {
+        assert.deepEqual(params, ['573150000059']);
+        return [[latestReceptionList]];
+      }
+      if (storedConfirmationDraft && /SELECT \* FROM recepciones WHERE id = \? LIMIT 1 FOR UPDATE/u.test(sql)) {
+        return [[{ id: 145, orden_compra_id: 45, estado: 'borrador' }]];
+      }
+      if (storedConfirmationDraft && /FROM recepcion_confirmacion_borradores/u.test(sql)) return [[storedConfirmationDraft]];
       if (/^\s*INSERT/iu.test(sql)) return [{ insertId: 1 }];
       return [[]];
     },
@@ -56,6 +68,14 @@ require.cache[receptionPath] = {
         ? activeFinalPreview : null,
     findPurchaseOrder: async (_db, params) => ({ id: Number(params.orden_compra_id),
       numero: 'OC-PROV-20260930-014', tipo_recepcion: 'INSUMOS_MP' }),
+    prepareReceptionFromPurchaseOrder: async input => {
+      if (!input.confirmedReference) return reception.prepareReceptionFromPurchaseOrder(input);
+      preparedSelection = input;
+      return {
+        order: { id: input.params.orden_compra_id, tipo_recepcion: 'INSUMOS_MP', numero: 'OC-QA-20261123-01' },
+        reception: { id: 170, numero: 'REC-OC-70-001', items: [] },
+      };
+    },
     confirmReceptionFromWhatsApp: async input => {
       if (!interceptConfirmation) return reception.confirmReceptionFromWhatsApp(input);
       interceptedConfirmation = input;
@@ -69,6 +89,87 @@ require.cache[receptionPath] = {
 process.env.BUILDERBOT_WEBHOOK_SECRET = 'qa-webhook-secret';
 process.env.DISABLE_OUTBOUND_NOTIFICATIONS = 'true';
 const handler = require('../api/v1/webhook/builderbot');
+
+test('spoken and model-classified selections prepare only a matching recent pending reception', async () => {
+  latestReceptionList = { action: 'CONSULTAR_RECEPCIONES_PENDIENTES', response: {
+    context: { available_receptions: [{ purchase_order_id: 70, reception_type: 'INSUMOS_MP' }] },
+  } };
+  executed.length = 0;
+  const send = async (text, action = 'MODO_CHARLA', params = { orden_compra_id: 999 }) => {
+    preparedSelection = null;
+    const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
+      body: { from: '573150000059', body: text,
+        info: { '@ction': action, body: text, params } } };
+    const res = { statusCode: 200, setHeader() {}, status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; }, end() { return this; } };
+    await handler(req, res);
+    return res.body;
+  };
+  try {
+    const selected = await send('OC IB 70', 'PREPARAR_RECEPCION_OC');
+    assert.equal(selected.ok, true);
+    assert.equal(selected.context.reception.purchase_order_id, 70);
+    assert.equal(selected.context.reception.inventory_changed, false);
+    assert.deepEqual(preparedSelection.confirmedReference, { kind: 'OC', id: 70 });
+    for (const [phrase, evidence] of [
+      ['La 70, por favor', null],
+      ['Muéstrame la setenta', 'la setenta'],
+    ]) {
+      const opened = await send(phrase, 'PREPARAR_RECEPCION_OC', {
+        orden_compra_id: 70,
+        ...(evidence ? { seleccion_recepcion: { id: 70, evidencia: evidence } } : {}),
+      });
+      assert.equal(opened.context.reception.purchase_order_id, 70);
+      assert.equal(opened.context.reception.inventory_changed, false);
+    }
+    const stale = await send('Muéstrame la siguiente', 'PREPARAR_RECEPCION_OC', {
+      orden_compra_id: 70, seleccion_recepcion: { id: 70, evidencia: 'la setenta' },
+    });
+    assert.equal(stale.ok, false);
+    assert.equal(preparedSelection, null);
+    for (const forbidden of ['No la 70', 'Muéstrame IO ID 70', 'La 71', 'La 70 o la 71']) {
+      await send(forbidden, 'PREPARAR_RECEPCION_OC', { orden_compra_id: 70 });
+      assert.equal(preparedSelection, null, forbidden);
+    }
+    for (const forbidden of ['IO IB 70', 'OC IB 99', '70', 'No es OC IB 70', 'OC IB 70 o OC IB 71']) {
+      await send(forbidden);
+      assert.equal(preparedSelection, null, forbidden);
+    }
+    latestReceptionList.response.context.available_outsourcing_receptions = [{ outsourcing_order_id: 70 }];
+    const ambiguous = await send('Quiero ver la 70', 'PREPARAR_RECEPCION_OC', { orden_compra_id: 70 });
+    assert.match(ambiguous.message.replace(/\*/gu, ''), /OC ID 70 o MQ ID 70/u);
+    assert.equal(preparedSelection, null);
+    const resolved = await send('La OC IB 70', 'PREPARAR_RECEPCION_OC', { orden_compra_id: 70 });
+    assert.equal(resolved.context.reception.purchase_order_id, 70);
+    latestReceptionList = null;
+    await send('La 70', 'PREPARAR_RECEPCION_OC', { orden_compra_id: 70 });
+    assert.equal(preparedSelection, null);
+    assert.doesNotMatch(executed.join('\n'), /(?:INSERT INTO kardex|UPDATE stock)/u);
+  } finally {
+    latestReceptionList = null;
+    preparedSelection = null;
+  }
+});
+
+test('receipt confirmation rejects a changed physical review before writing inventory', async () => {
+  const { confirmReceptionForUser } = require('../api/v1/reception');
+  const preview = { version: 1, orderId: 45, receptionId: 145,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 2, ubicacion: 'A8' }] }] };
+  const revised = { ...preview,
+    items: [{ sku: '00001-TPBI', distributions: [{ cantidad: 2, ubicacion: 'A2' }] }] };
+  const payloadJson = reception.canonicalJson(revised);
+  storedConfirmationDraft = { usuario_id: 5, payload_json: payloadJson,
+    payload_hash: createHash('sha256').update(payloadJson).digest('hex') };
+  executed.length = 0;
+  try {
+    await assert.rejects(confirmReceptionForUser({ user: { id: 5 }, body: { recepcion_id: 145 },
+      draftSnapshot: preview }), /borrador de recepción cambió/u);
+    assert.ok(executed.some(sql => /FROM recepcion_confirmacion_borradores[\s\S]*FOR UPDATE/u.test(sql)));
+    assert.ok(!executed.some(sql => /^\s*(?:INSERT|UPDATE)/u.test(sql)));
+  } finally {
+    storedConfirmationDraft = null;
+  }
+});
 
 test('a misclassified production correction follows the last reception preview', async () => {
   recentReception = true;
@@ -136,13 +237,19 @@ test('an explicit OC correction recovers after the last reply was about producti
   assert.equal(routed.params.id_orden, undefined);
 });
 
-test('perfecto resumes only the most recent SKU review', async () => {
-  for (const [recent, shouldResume] of [[true, true], [false, false]]) {
+test('clear natural affirmations resume only the most recent SKU review', async () => {
+  for (const [text, action, recent, shouldResume] of [
+    ['perfecto', 'MODO_CHARLA', true, true],
+    ['es correcto', 'MODO_CHARLA', true, true],
+    ['sí, es correcto', 'CERRAR_ORDEN_PRODUCCION', true, true],
+    ['es correcto, pero cambia el lote', 'MODO_CHARLA', true, false],
+    ['es correcto', 'MODO_CHARLA', false, false],
+  ]) {
     recentReception = recent;
     routed = null;
     const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
-      body: { from: '573150000059', body: 'perfecto',
-        info: { '@ction': 'MODO_CHARLA', body: 'perfecto', params: {} } } };
+      body: { from: '573150000059', body: text,
+        info: { '@ction': action, body: text, params: {} } } };
     const res = { statusCode: 200, body: null, setHeader() {},
       status(code) { this.statusCode = code; return this; },
       json(body) { this.body = body; return this; }, end() { return this; } };

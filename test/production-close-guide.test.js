@@ -919,6 +919,39 @@ test('un mensaje compuesto conserva el PT y tres reposiciones sin causa ni lote 
   assert.equal(lidCause.params, undefined);
 });
 
+test('una lista de insumos sin cantidades conserva cero no conformes junto a ubicación C2', async () => {
+  const message = 'Cantidad conforme 3\nVan a la ubicación c 2\nNo conforme 0\nRepuse tapas, tarros y liner';
+  assert.deepEqual(closeFields(message), { conforming: 3, waste: 0, reason: null, location: 'C2' });
+  for (const params of [{}, { avance_materiales: { items: [
+    { producto: 'tapas', cantidad: null },
+    { producto: 'tarros', cantidad: null },
+    { producto: 'liner', cantidad: null },
+  ] } }]) {
+    const db = fakeDb({ orderId: 120, planned: 3, withTarros: true });
+    const base = { db, userId: 120 };
+    await advanceCloseGuide({ ...base, rawText: 'Cerramos producción OP ID 120' });
+    const result = await advanceCloseGuide({ ...base, rawText: message, params });
+    assert.equal(result.draft.conforming, 3);
+    assert.equal(result.draft.waste, 0);
+    assert.equal(result.draft.location, 'C2');
+    assert.equal(result.draft.materialPending.sku, '00001-TPBI');
+    assert.equal(result.draft.materialPending.cantidad, null);
+    assert.deepEqual(result.draft.materialQueue.map(item => [item.sku, item.cantidad]), [
+      ['00006-TRP', null], ['00035-LNTP60', null],
+    ]);
+    assert.match(result.message, /¿Cuánto TAPA TARRO CUADRADO BLANCO repusiste/u);
+    assert.equal(result.params, undefined);
+    const amount = await advanceCloseGuide({ ...base, rawText: '2 unidades' });
+    assert.match(amount.message, /Lotes disponibles para TAPA/u);
+    const lot = await advanceCloseGuide({ ...base, rawText: 'opción 1' });
+    assert.match(lot.message, /causa concreta/u);
+    const cause = await advanceCloseGuide({ ...base, rawText: 'ruptura' });
+    assert.equal(cause.draft.materials[0].sku, '00001-TPBI');
+    assert.equal(cause.draft.materialPending.sku, '00006-TRP');
+    assert.deepEqual(cause.draft.materialQueue.map(item => item.sku), ['00035-LNTP60']);
+  }
+});
+
 test('la interpretación de una causa de PT no se copia a materiales sin motivo propio', async () => {
   const db = fakeDb({ orderId: 117, planned: 4 });
   const base = { db, userId: 117 };
