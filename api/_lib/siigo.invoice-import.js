@@ -3,6 +3,7 @@ const { workflowFlags } = require('./feature-flags');
 const { notifyRoles } = require('./builderbot-notifications');
 const { resolvePrimaryWarehouse } = require('./warehouses');
 const { createHash } = require('crypto');
+const { inventoryLines } = require('./siigo.invoice-lines');
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -44,7 +45,7 @@ function normalizeInvoice(invoice) {
     stampStatus: ['Draft', 'Accepted', 'Rejected'].includes(String(invoice?.stamp?.status || '').trim())
       ? String(invoice.stamp.status).trim()
       : null,
-    items: Array.isArray(invoice?.items) ? invoice.items : [],
+    items: inventoryLines(invoice?.items),
   };
 }
 

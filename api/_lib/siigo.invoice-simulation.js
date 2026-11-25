@@ -6,6 +6,7 @@
 // SIIGO y no envía notificaciones: no llama a importInvoice.
 const { query } = require('./db');
 const { siigoGet } = require('./siigo.service');
+const { inventoryLines } = require('./siigo.invoice-lines');
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 5;
@@ -55,7 +56,7 @@ async function fetchInvoices({ dateStart, dateEnd }) {
 }
 
 async function loadContext(invoices) {
-  const codes = [...new Set(invoices.flatMap(invoice => (invoice.items || [])
+  const codes = [...new Set(invoices.flatMap(invoice => inventoryLines(invoice.items)
     .map(item => String(item.code || '').trim()).filter(Boolean)))];
   const products = new Map();
   if (codes.length) {
@@ -136,7 +137,7 @@ async function simulateInvoices({ dateStart, dateEnd, importStart }) {
     if (invoice.annulled === true) add('ANULADA');
     if (existing) add('YA_IMPORTADA', { detalle: `${existing.numero} (${existing.estado})` });
     if (importStart && date && date < importStart) add('ANTES_DEL_INICIO');
-    if (!(invoice.items || []).length) add('SIN_ITEMS');
+    if (!inventoryLines(invoice.items).length) add('SIN_ITEMS');
     if (!await customerExists(invoice.customer)) {
       add('CLIENTE_NO_SINCRONIZADO', { detalle: String(invoice.customer?.identification || invoice.customer?.id || '') });
     }
@@ -145,7 +146,7 @@ async function simulateInvoices({ dateStart, dateEnd, importStart }) {
     const missing = [];
     const services = [];
     const shortages = [];
-    for (const item of invoice.items || []) {
+    for (const item of inventoryLines(invoice.items)) {
       const code = String(item.code || '').trim();
       const quantity = Number(item.quantity || 0);
       const warehouse = Number(item.warehouse?.id ?? item.warehouse ?? 0) || null;

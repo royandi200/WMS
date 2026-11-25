@@ -13,6 +13,7 @@ const {
   recordInvoiceIssue,
   resolveInvoiceIssue,
 } = require('../../_lib/siigo.invoice-issues');
+const { inventoryLines } = require('../../_lib/siigo.invoice-lines');
 const { ensureInvoiceCustomer } = require('../../_lib/siigo.terceros');
 
 async function syncCustomer(invoice) {
@@ -178,14 +179,25 @@ async function cronUser(req) {
   return users[0];
 }
 
-async function reconcilePending(user, excludedIds = new Set()) {
-  const pending = await query(
+// Revisa los pendientes por turnos: cada corrida sigue donde quedó la anterior
+// y vuelve al inicio, para que ninguno quede siempre fuera del límite.
+async function nextPendingBatch(afterId) {
+  return query(
     `SELECT id, siigo_invoice_id, siigo_invoice_name
      FROM despachos
-     WHERE estado IN ('picking', 'borrador') AND siigo_invoice_id IS NOT NULL
-     ORDER BY creado_en ASC
-     LIMIT 20`
+     WHERE estado IN ('picking', 'borrador') AND siigo_invoice_id IS NOT NULL AND id > ?
+     ORDER BY id ASC
+     LIMIT 20`,
+    [afterId]
   );
+}
+
+async function reconcilePending(user, excludedIds = new Set()) {
+  const afterId = Number(await getConfigValue('invoices_pending_reconcile_after_id')) || 0;
+  let pending = await nextPendingBatch(afterId);
+  if (!pending.length && afterId) pending = await nextPendingBatch(0);
+  const lastId = pending.length ? pending[pending.length - 1].id : 0;
+  if (lastId !== afterId) await setConfigValue('invoices_pending_reconcile_after_id', String(lastId));
   const results = [];
   for (const dispatch of pending) {
     if (excludedIds.has(String(dispatch.siigo_invoice_id))) continue;
@@ -311,7 +323,7 @@ async function reconcileCompleted(user, invoiceIds = [], cachedInvoices = new Ma
         [dispatch.id]
       );
       const local = invoiceSignature(localItems);
-      const remote = invoiceSignature(invoice.items || []);
+      const remote = invoiceSignature(inventoryLines(invoice.items));
       if (JSON.stringify(local) !== JSON.stringify(remote)) {
         const created = await addCompletedIssue(
           dispatch,
