@@ -81,7 +81,14 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Rama `siigo-importacion-por-fecha` (sin fusionar): al día con `main`, ignora `env-1`
   (`SIIGO_IGNORED_CODES`) y revisa pendientes por turnos de 20. El corte se fija con
   `SIIGO_IMPORT_START_DATE`, que ya existía.
-- Sin acceso local a la base de producción: el inventario de datos QA y el respaldo siguen pendientes.
+- Revisión en producción (solo lectura, API con la sesión del dashboard): Groq responde 200; lo que
+  falla es el tamaño del pedido (413, último 23/11), probablemente por el catálogo completo (494 productos).
+- Simulador 05/10–25/11: 250 facturas (tope del simulador, hay más), 0 pasarían. 39 códigos sin inventario
+  o sin producto. Clientes sin sincronizar en las 250 (la rama SIIGO los trae al importar).
+- Datos actuales: 20 productos con stock, 47 lotes, 33 OP (6 en proceso, 2 aprobadas), 43 OC, 48
+  recepciones, 10 despachos. Varios lotes y los despachos son demo; falta clasificarlos.
+- 11 códigos del Excel no salen en el listado de productos (p. ej. `000292- ETLBASH` vs `000292-ETLBASH`).
+- El cron de importación y la comparación de stock tienen timeouts de SIIGO (20 s) ocasionales.
 
 ### 2026-11-09
 - Inventario > «Comparar con SIIGO» (Admin/Supervisor): saldo WMS vs saldo SIIGO por producto,
