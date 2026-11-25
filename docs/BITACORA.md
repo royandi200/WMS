@@ -4,7 +4,7 @@ Registro corto del avance trabajado con Claude. Se lee al empezar cada sesión y
 actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado vive en
 `docs/PROJECT_CHANGELOG.md` y `docs/bitacora-pruebas-manuales-2026-09.md`.
 
-## Estado actual (2026-10-13)
+## Estado actual (2026-11-25)
 
 - 2026-11-23, continuidad de borradores de OP: una corrección posterior a la
   ventana de 45 minutos perdía cantidad, producto y destino aunque el JSON
@@ -23,9 +23,9 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 - Prueba de publicación GitHub → Vercel iniciada el 03/11 con un cambio cosmético en el pie del menú.
 - En producción (`wms-seven-ebon.vercel.app`) desde el 05/10. Agente WhatsApp operativo.
-- **Integración SIIGO de ventas: NO está pasando ninguna factura real al WMS.** El
-  simulador (Despachos > Novedades SIIGO) encontró 24 facturas del 05 al 13/10: 0
-  importadas, 0 pasarían. Tres causas (ver Pendientes 1–3).
+- **Ventas SIIGO: importación en `main`, apagada.** Simulador 05/10–25/11: 567 facturas, 0 pasarían
+  (equivalencias, inventario y clientes; ver Pendientes 1–3). No se ha importado ninguna factura real.
+- En preparación para salir de pruebas (ver «Plan de salida» en Pendientes).
 - Compras: OC por PDF (web y WhatsApp) probadas y ajustadas el 07/10; recepción guiada OK.
 - Producción (liberar, alistar, cerrar con reposición) probada por WhatsApp el 05 y 08/10.
 
@@ -43,9 +43,19 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - No hacer facturas de prueba en SIIGO: la cuenta es real y cada factura va a la DIAN.
   Validar con el simulador (solo lectura).
 
+- Usuario (25/11): todo va a `main`, sin ramas abiertas; lo riesgoso se sube apagado. El trabajo se hace
+  aquí y a Juan (socio) se le informa, sin asignarle tareas; él avisa antes de subir.
+- Usuario (25/11): sin pantalla de carga de saldos; script de un solo uso, carga todo o nada, probado
+  antes en una copia de la base.
+
 ## Pendientes (en orden)
 
-0. Confirmar que el cambio cosmético de prueba llega a `main` y aparece en el despliegue de Vercel.
+**Plan de salida:** a) probar por WhatsApp los cambios del 23/11 (número y datos QA) → b) respaldo de la
+base (falta definir acceso a MySQL; por el dashboard solo hay listados) → c) limpiar datos QA, con lista
+aprobada por el usuario → d) cargar saldos y lotes de Sofi → e) programar equivalencias y encender ventas.
+Esperando: Sofi (corte, conteo, lotes, códigos) y Rosa (tabla, SKU de OC-1-354, facturas sin despachar y
+OC por recibir al corte, frecuencia y destinatario del reporte). Groq: probar con un PDF real.
+
 1. **Códigos SIIGO ≠ SKU del WMS.** Las facturas usan códigos de SIIGO/Shopify
    (`7709771394853XX1`, `S00974`, `127` plan 2 tarros, `env-1` envío…) que nunca han tenido
    lotes; el inventario está en los SKU internos (`00102-PTASH60`…). Falta tabla de
@@ -59,7 +69,7 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 3. Equivalencias y combos SIIGO → SKU: programarlos cuando Rosa valide la tabla (parte del punto 1).
 4. (Hecho 25/11) Ignora `env-1` y revisa pendientes por turnos.
 5. Alertas de factura cambiada después de despachar: sin pantalla.
-6. Reporte stock WMS vs SIIGO (Etapa 1).
+6. Reporte stock WMS vs SIIGO (Etapa 1): comparación hecha el 09/11; falta frecuencia y destinatario.
 7. Guía operativa v2 (frases cambiadas: «confirmo cierre OP ID n», «Revisa materiales OP ID n»).
 8. Hallazgos menores: cuarentena en misma ubicación que disponible; lote interno de
    cuarentena ilegible; lote demo `DEMO-MAPA-*` como disponible; artículos de suscripción
@@ -76,18 +86,19 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 - Sofi aclara que el «Stock actual» del Excel es conteo físico. Propuesta (sin confirmar): usarlo
   como saldo inicial sin movimientos, con corte el 27/11, 13 reconteos y lotes actualizados.
 - `scripts/saldos/validar_saldos.py`: valida el Excel sin escribir en la base. Hoy rechaza 49
-  puntos: 44 productos sin lotes, 3 con stock sin código y 2 sin stock. Falta el cargador.
+  puntos: 44 productos sin lotes, 3 con stock sin código y 2 sin stock.
 - `siigo-importacion-por-fecha` fusionada en `main` con la importación apagada (pedido del usuario: sin
-  ramas abiertas). Ignora `env-1` (`SIIGO_IGNORED_CODES`) y revisa pendientes por turnos de 20.
+  ramas abiertas; rama borrada). Verificado en producción `7ec8c5a`: corre y trae 0. Ignora `env-1` (`SIIGO_IGNORED_CODES`) y revisa pendientes por turnos de 20.
 - Revisión en producción (solo lectura, API con la sesión del dashboard): Groq responde 200; lo que
   falla es el tamaño del pedido (413, último 23/11), probablemente por el catálogo completo (494 productos).
-- SIIGO excluye el día de `date_end`: corregido en el simulador (main) y la importación (rama SIIGO).
+- SIIGO excluye el día de `date_end`: corregido en el simulador (main) y la importación.
 - Simulador 05/10–25/11 completo: 567 facturas, 0 pasarían (1 anulada). Tabla de 65 códigos para
-  Rosa en `docs/WMS_Equivalencias_SIIGO_2026-11-25.xlsx` (propuestas sin validar).
+  Rosa en `docs/WMS_Equivalencias_SIIGO_2026-11-25.xlsx`; enviada por el usuario (propuestas sin validar).
 - Groq: se envían como máximo 80 productos relacionados con el PDF; ante 413 reintenta con 25.
 - Datos actuales: 20 productos con stock, 47 lotes, 33 OP (6 en proceso, 2 aprobadas), 43 OC, 48
   recepciones, 10 despachos. Varios lotes y los despachos son demo; falta clasificarlos.
 - 11 códigos del Excel no salen en el listado de productos (p. ej. `000292- ETLBASH` vs `000292-ETLBASH`).
+- La fecha de corte también fija `SIIGO_IMPORT_START_DATE`, para no descontar ventas anteriores al conteo.
 - El cron de importación y la comparación de stock tienen timeouts de SIIGO (20 s) ocasionales.
 
 ### 2026-11-09
