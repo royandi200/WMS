@@ -95,7 +95,8 @@ async function fetchIncremental(since) {
   }
   const windowStart = localDate(sinceMs - 2 * 24 * 60 * 60 * 1000);
   const dateStart = windowStart < IMPORT_START_DATE ? IMPORT_START_DATE : windowStart;
-  const dateEnd = localDate(Date.now());
+  // SIIGO excluye el día de date_end: sin sumar uno no entrarían las de hoy.
+  const dateEnd = localDate(Date.now() + 24 * 60 * 60 * 1000);
   const imported = new Set((await query(
     `SELECT siigo_invoice_id FROM despachos
       WHERE siigo_invoice_id IS NOT NULL AND creado_en >= DATE_SUB(NOW(), INTERVAL 45 DAY)`
