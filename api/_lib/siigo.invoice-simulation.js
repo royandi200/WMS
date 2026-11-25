@@ -29,10 +29,12 @@ function acceptedWarehouses() {
 }
 
 async function fetchInvoices({ dateStart, dateEnd }) {
+  // SIIGO excluye el día de date_end: se pide uno más y el filtro de abajo lo recorta.
+  const dateEndExclusive = new Date(Date.parse(`${dateEnd}T00:00:00Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const invoices = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const response = await siigoGet('/v1/invoices', {
-      params: { date_start: dateStart, date_end: dateEnd, page, page_size: PAGE_SIZE },
+      params: { date_start: dateStart, date_end: dateEndExclusive, page, page_size: PAGE_SIZE },
       entidad: 'factura_simulada',
       logResponse: false,
     });

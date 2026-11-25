@@ -9,6 +9,7 @@ const mock = (file, exports) => {
 };
 
 const writes = [];
+const requested = [];
 mock('api/_lib/db.js', {
   query: async (sql, params = []) => {
     if (!/^\s*SELECT/iu.test(sql)) { writes.push(sql); return { affectedRows: 0 }; }
@@ -27,7 +28,7 @@ mock('api/_lib/db.js', {
 });
 const invoice = (id, extra) => ({ id, name: `FV-${id}`, date: '2026-10-06', customer: { identification: '900' }, ...extra });
 mock('api/_lib/siigo.service.js', {
-  siigoGet: async () => ({ results: [
+  siigoGet: async (_path, { params } = {}) => (requested.push(params), { results: [
     invoice('ok', { items: [{ code: '00102-PTASH60', quantity: 2, warehouse: { id: 1 } }] }),
     invoice('short', { date: '2026-10-07', items: [{ code: '00102-PTASH60', quantity: 2, warehouse: { id: 1 } }] }),
     invoice('client', { customer: { identification: '111' }, items: [{ code: '00102-PTASH60', quantity: 0.5, warehouse: { id: 1 } }] }),
@@ -54,5 +55,6 @@ test('el simulador clasifica cada factura real sin escribir nada', async () => {
   assert.ok(codes('bod').includes('BODEGA_NO_HABILITADA'));
   assert.equal(byId['inv-old'].veredicto, 'YA_IMPORTADA');
   assert.equal(byId.nula.veredicto, 'IGNORADA');
+  assert.equal(requested[0].date_end, '2026-10-14', 'SIIGO excluye el día final');
   assert.equal(writes.length, 0, 'no ejecuta INSERT/UPDATE/DELETE');
 });
