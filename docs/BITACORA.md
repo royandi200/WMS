@@ -83,8 +83,10 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
   `SIIGO_IMPORT_START_DATE`, que ya existía.
 - Revisión en producción (solo lectura, API con la sesión del dashboard): Groq responde 200; lo que
   falla es el tamaño del pedido (413, último 23/11), probablemente por el catálogo completo (494 productos).
-- Simulador 05/10–25/11: 250 facturas (tope del simulador, hay más), 0 pasarían. 39 códigos sin inventario
-  o sin producto. Clientes sin sincronizar en las 250 (la rama SIIGO los trae al importar).
+- SIIGO excluye el día de `date_end`: corregido en el simulador (main) y la importación (rama SIIGO).
+- Simulador 05/10–25/11 completo: 567 facturas, 0 pasarían (1 anulada). Tabla de 65 códigos para
+  Rosa en `docs/WMS_Equivalencias_SIIGO_2026-11-25.xlsx` (propuestas sin validar).
+- Groq: se envían como máximo 80 productos relacionados con el PDF; ante 413 reintenta con 25.
 - Datos actuales: 20 productos con stock, 47 lotes, 33 OP (6 en proceso, 2 aprobadas), 43 OC, 48
   recepciones, 10 despachos. Varios lotes y los despachos son demo; falta clasificarlos.
 - 11 códigos del Excel no salen en el listado de productos (p. ej. `000292- ETLBASH` vs `000292-ETLBASH`).
