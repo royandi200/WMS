@@ -43,6 +43,7 @@ mock('api/_lib/siigo.invoice-issues.js', {
 });
 
 process.env.CRON_SECRET = 'secreto-cron';
+process.env.SIIGO_IMPORT_ENABLED = 'true';
 process.env.SIIGO_USERNAME = 'cliente@empresa.com';
 const handler = require('../api/v1/siigo/import-invoices');
 
@@ -85,4 +86,15 @@ test('los errores se clasifican en tipos legibles con los códigos faltantes', (
   assert.equal(classify('Factura FV-1 usa multiples bodegas; requiere despachos separados').tipo, 'BODEGAS_MULTIPLES');
   assert.equal(classify('Bodega SIIGO 2 no esta mapeada a BG-PPAL en WMS').tipo, 'BODEGA_NO_MAPEADA');
   assert.equal(classify('algo inesperado').tipo, 'OTRO');
+});
+
+test('apagada, la importación no trae facturas ni mueve el cursor', async (t) => {
+  t.after(() => { process.env.SIIGO_IMPORT_ENABLED = 'true'; });
+  delete process.env.SIIGO_IMPORT_ENABLED;
+  Object.assign(state, { recordResult: true, cursorWrites: [], recorded: [] });
+  const res = await run();
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.data.enabled, false);
+  assert.equal(res.body.data.fetched, 0);
+  assert.equal(state.recorded.length + state.cursorWrites.length, 0);
 });

@@ -33,6 +33,12 @@ const COMPLETED_RECONCILE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // Real operation starts on this date; earlier invoices never become dispatches.
 const IMPORT_START_DATE = String(process.env.SIIGO_IMPORT_START_DATE || '2026-10-05').trim();
 
+// Apagada salvo SIIGO_IMPORT_ENABLED=true: sin inventario ni equivalencias la
+// importación crearía despachos de todas las facturas. Apagada no mueve el cursor.
+function importEnabled() {
+  return String(process.env.SIIGO_IMPORT_ENABLED || '').trim().toLowerCase() === 'true';
+}
+
 function importStartIso() {
   return new Date(`${IMPORT_START_DATE}T00:00:00${process.env.SIIGO_TIMEZONE_OFFSET || '-05:00'}`).toISOString();
 }
@@ -419,7 +425,8 @@ module.exports = async (req, res) => {
     const requestedSince = String(req.body?.updated_start || req.query?.updated_start || await getCursor());
     const startIso = importStartIso();
     const since = Date.parse(requestedSince) < Date.parse(startIso) ? startIso : requestedSince;
-    const invoices = ids.length ? await fetchByIds(ids) : await fetchIncremental(since);
+    const enabled = importEnabled();
+    const invoices = ids.length ? await fetchByIds(ids) : (enabled ? await fetchIncremental(since) : []);
     const results = [];
 
     for (const invoice of invoices) {
@@ -430,7 +437,7 @@ module.exports = async (req, res) => {
     // Las facturas con novedad abierta se reintentan solas cada pocos minutos:
     // al sincronizar el producto faltante, la factura pasa sin intervención.
     const retried = [];
-    for (const invoiceId of await issuesDueForRetry(processedIds).catch(() => [])) {
+    for (const invoiceId of (enabled ? await issuesDueForRetry(processedIds).catch(() => []) : [])) {
       processedIds.add(invoiceId);
       retried.push(await retryInvoiceById(invoiceId, user));
     }
@@ -454,7 +461,7 @@ module.exports = async (req, res) => {
     // Una factura con error ya no frena a las demás: queda registrada como
     // novedad (visible y reintentable), así que el cursor puede avanzar. Solo
     // se retiene si un error no pudo registrarse, para no perder la factura.
-    if (!ids.length && !importResults.some(result => result.status === 'error' && !result.tracked)) {
+    if (enabled && !ids.length && !importResults.some(result => result.status === 'error' && !result.tracked)) {
       await setCursor(startedAt.toISOString());
     }
     const errors = results.filter(result => result.status === 'error').length
@@ -469,6 +476,7 @@ module.exports = async (req, res) => {
     return res.status(errors ? 207 : 200).json({
       ok: errors === 0,
       data: {
+        enabled,
         mode: ids.length ? 'targeted' : 'incremental',
         since: ids.length ? null : since,
         fetched: invoices.length,

@@ -53,12 +53,11 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
    Borrador enviado a validar el 13/10 (20 códigos: 16 con SKU propuesto, planes 127/128/129
    por definir, `env-1` ignorar). Además, casi todos los PT del WMS tienen stock 0: falta
    cargar inventario inicial de producto terminado o las facturas quedarán PENDIENTE_STOCK.
-2. **La importación trae 0 facturas**: usa `updated_start`, que SIIGO ignora. Corrección
-   lista en la rama `siigo-importacion-por-fecha` (consulta por fecha de factura, salta las ya
-   importadas). **Fusionar a main solo cuando 1 esté validado**: al activarla entran de golpe
-   las ventas desde el 05/10.
-3. Ignorar líneas de envío/servicio en la importación.
-4. La revisión de cambios de facturas pendientes solo toma 20 despachos por corrida.
+2. **Importación de ventas en `main`, apagada** (`SIIGO_IMPORT_ENABLED` sin definir). Encender solo con
+   inventario cargado y equivalencias aplicadas (aún sin programar), fijando antes
+   `SIIGO_IMPORT_START_DATE` en la fecha de corte. No encender por error: entran todas las ventas desde esa fecha.
+3. Equivalencias y combos SIIGO → SKU: programarlos cuando Rosa valide la tabla (parte del punto 1).
+4. (Hecho 25/11) Ignora `env-1` y revisa pendientes por turnos.
 5. Alertas de factura cambiada después de despachar: sin pantalla.
 6. Reporte stock WMS vs SIIGO (Etapa 1).
 7. Guía operativa v2 (frases cambiadas: «confirmo cierre OP ID n», «Revisa materiales OP ID n»).
@@ -78,9 +77,8 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
   como saldo inicial sin movimientos, con corte el 27/11, 13 reconteos y lotes actualizados.
 - `scripts/saldos/validar_saldos.py`: valida el Excel sin escribir en la base. Hoy rechaza 49
   puntos: 44 productos sin lotes, 3 con stock sin código y 2 sin stock. Falta el cargador.
-- Rama `siigo-importacion-por-fecha` (sin fusionar): al día con `main`, ignora `env-1`
-  (`SIIGO_IGNORED_CODES`) y revisa pendientes por turnos de 20. El corte se fija con
-  `SIIGO_IMPORT_START_DATE`, que ya existía.
+- `siigo-importacion-por-fecha` fusionada en `main` con la importación apagada (pedido del usuario: sin
+  ramas abiertas). Ignora `env-1` (`SIIGO_IGNORED_CODES`) y revisa pendientes por turnos de 20.
 - Revisión en producción (solo lectura, API con la sesión del dashboard): Groq responde 200; lo que
   falla es el tamaño del pedido (413, último 23/11), probablemente por el catálogo completo (494 productos).
 - SIIGO excluye el día de `date_end`: corregido en el simulador (main) y la importación (rama SIIGO).
