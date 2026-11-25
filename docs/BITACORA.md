@@ -73,6 +73,16 @@ actualiza al cerrar cada bloque de trabajo (junto con el commit). Lo detallado v
 
 ## Registro (más reciente primero)
 
+### 2026-11-25
+- Sofi aclara que el «Stock actual» del Excel es conteo físico. Propuesta (sin confirmar): usarlo
+  como saldo inicial sin movimientos, con corte el 27/11, 13 reconteos y lotes actualizados.
+- `scripts/saldos/validar_saldos.py`: valida el Excel sin escribir en la base. Hoy rechaza 49
+  puntos: 44 productos sin lotes, 3 con stock sin código y 2 sin stock. Falta el cargador.
+- Rama `siigo-importacion-por-fecha` (sin fusionar): al día con `main`, ignora `env-1`
+  (`SIIGO_IGNORED_CODES`) y revisa pendientes por turnos de 20. El corte se fija con
+  `SIIGO_IMPORT_START_DATE`, que ya existía.
+- Sin acceso local a la base de producción: el inventario de datos QA y el respaldo siguen pendientes.
+
 ### 2026-11-09
 - Inventario > «Comparar con SIIGO» (Admin/Supervisor): saldo WMS vs saldo SIIGO por producto,
   descontando lo facturado sin despachar; marca bodegas de SIIGO en negativo. Solo lee SIIGO.
