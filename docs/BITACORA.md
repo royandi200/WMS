@@ -83,6 +83,11 @@ OC por recibir al corte, frecuencia y destinatario del reporte). Groq: probar co
 ## Registro (más reciente primero)
 
 ### 2026-11-25
+- Pruebas WhatsApp (agente +57 317 3292904, tras reiniciar el bot en BBC: no respondía): selección natural
+  de recepción («la segunda») OK; confirmación con negrita OK; corrección de producto en OP de stock OK;
+  «cancela esta orden» descarta sin crear. Pendiente probar borrador vencido (>45 min).
+- «cancelar» en recepción no confirma la cancelación (vuelve a pedir OC). Borrador REC-OC-65-002 sin confirmar.
+- Usuario QA (id 24) quedó con admin temporal para probar OP: quitarlo al terminar.
 - Sofi aclara que el «Stock actual» del Excel es conteo físico. Propuesta (sin confirmar): usarlo
   como saldo inicial sin movimientos, con corte el 27/11, 13 reconteos y lotes actualizados.
 - `scripts/saldos/validar_saldos.py`: valida el Excel sin escribir en la base. Hoy rechaza 49
