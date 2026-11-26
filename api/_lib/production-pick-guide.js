@@ -133,7 +133,7 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
       `   Lote: ${row.lote} | ubicación: ${row.ubicacion || 'sin ubicación'}`,
     ]),
     '', note || 'Verifica físicamente cada partida antes de iniciar la producción.',
-    '', 'Para corregir, puedes decir el producto o SKU si identifica una sola partida: «el tarro va para la A10» o «cambiar lote de las etiquetas». También puedes decir «partida 1 va para la A10».',
+    '', 'Para corregir, puedes decir el producto o SKU si identifica una sola partida: «corrijo la ubicación del tarro a A10» o «cambiar lote de las etiquetas». También puedes decir «corrijo la partida 1: ubicación A10». Esa ubicación es de donde recoges el material; no indica un traslado.',
     'Si el mismo producto tiene varias partidas, indica su número o el lote y ubicación actuales para distinguirla.',
     'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
     choicePending

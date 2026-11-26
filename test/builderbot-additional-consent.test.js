@@ -7,7 +7,7 @@ const { createRequire } = require('node:module');
 const { additionalOperationInput } = require('../api/_lib/additional-operation-input');
 
 // Exercise the real webhook dispatch without DB, network or inventory writes.
-function harness({ operationError, role = 'admin', pickingNotices } = {}) {
+function harness({ operationError, role = 'admin', pickingNotices, pickingReview } = {}) {
   const calls = [];
   const baseReads = [];
   const logged = [];
@@ -43,6 +43,11 @@ function harness({ operationError, role = 'admin', pickingNotices } = {}) {
       if (sql.includes('SELECT action, payload, response FROM webhook_logs')) {
         return [logged.filter(row => row.status === 'PROCESSED').slice(-8).reverse()];
       }
+      if (sql.includes('SELECT action FROM webhook_logs') && sql.includes('AND action IN')) {
+        const row = logged.findLast(entry => entry.actor === args[0] && entry.status === 'PROCESSED'
+          && nowMinutes - entry.atMinute <= 120 && sql.includes(`'${entry.action}'`));
+        return [row ? [{ action: row.action }] : []];
+      }
       if (sql.includes('FROM webhook_logs')) return [logged.length ? [logged.at(-1)] : []];
       if (sql.includes('FROM productos p') && sql.includes('LEFT JOIN skus')) {
         const sku = String(args[1] || '').toUpperCase();
@@ -63,7 +68,9 @@ function harness({ operationError, role = 'admin', pickingNotices } = {}) {
       }
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM usuario_roles ur')) return [[{ rol: role }]];
-      if (pickingNotices && sql.includes('FROM produccion_alistamiento_revisiones')) return [[]];
+      if (pickingNotices && sql.includes('FROM produccion_alistamiento_revisiones')) {
+        return [pickingReview && args[0] === 5 ? [pickingReview] : []];
+      }
       if (pickingNotices && sql.includes('FROM recepcion_confirmacion_borradores')) return [[]];
       if (pickingNotices && sql.includes('FROM notificaciones_salida')
         && sql.includes('production_released:')) return [pickingNotices.map(id => ({ evento: `production_released:${id}` }))];
@@ -235,6 +242,32 @@ test('picking recovery does not reroute a real close, invented correction, or am
     assert.equal(result.error, 'RBAC_DENIED', scenario.text);
     assert.equal(h.pickCalls.length, 0, scenario.text);
     assert.equal(h.calls.length, 0, scenario.text);
+  }
+});
+
+test('a numbered reply to the active picking review bypasses a misclassified close edit, not its permissions', async () => {
+  const phrase = 'opción 1';
+  const misclassified = { editar_borrador: true, evidencia: phrase, aclarar: 'lote' };
+  const pickingReview = { order_id: 121, choice_json: JSON.stringify({
+    kind: 'lot', options: [{ lot: 'LOT-A18' }], expiresAt: Date.now() + 60_000,
+  }) };
+  for (const scenario of [
+    { review: pickingReview, last: 'CONFIRMAR_MATERIALES_PRODUCCION', routed: true },
+    { review: { ...pickingReview, choice_json: null }, last: 'CONFIRMAR_MATERIALES_PRODUCCION', routed: true },
+    { review: pickingReview, last: 'AVANZAR_RECEPCION_GUIADA_OC' },
+    { review: pickingReview, last: 'CERRAR_ORDEN_PRODUCCION' },
+    { review: pickingReview, last: 'CONFIRMAR_MATERIALES_PRODUCCION', role: 'consulta' },
+    { review: pickingReview, last: 'CONFIRMAR_MATERIALES_PRODUCCION', outer: 'Hola' },
+    { review: null, last: 'CONFIRMAR_MATERIALES_PRODUCCION' },
+  ]) {
+    const h = harness({ role: scenario.role || 'alistador', pickingNotices: [121], pickingReview: scenario.review });
+    h.seedLog(scenario.last, '', 'Resumen QA');
+    const result = await h.send('CERRAR_ORDEN_PRODUCCION', phrase, misclassified,
+      { body: scenario.outer || phrase });
+    assert.equal(result.ok, Boolean(scenario.routed), JSON.stringify({ scenario, result, errors: h.errors }));
+    if (!scenario.routed) assert.equal(result.error, 'RBAC_DENIED');
+    assert.deepEqual(h.pickCalls, scenario.routed ? [{ rawText: phrase, userId: 5 }] : []);
+    assert.equal(h.calls.length, 0);
   }
 });
 

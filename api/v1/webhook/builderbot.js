@@ -1718,13 +1718,20 @@ module.exports = async (req, res) => {
       && !hasCapability(userRoles, CAPABILITIES.PRODUCTION_CLOSE);
     const pickEvidence = possibleMisroutedPick ? currentText(rawBody, info).trim() : '';
     // Recover a picking correction before checking permissions for the wrong workflow.
-    if (pickEvidence && pickEvidence === rawText.trim()
-      && isPickCorrection(pickEvidence) && !isPickReviewIntent(pickEvidence)
-      && !hasProductionCloseIntent(pickEvidence)
-      && (await pendingPickReview(db, user.id) || await recentPickNotificationReference(db, from))
-      && !await hasRecentReceptionContext(db, user.id, from)) {
-      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
-      params = {};
+    if (pickEvidence && pickEvidence === rawText.trim()) {
+      const pickOptionReply = pickOptionNumber(pickEvidence) !== null;
+      const pickCorrection = isPickCorrection(pickEvidence) && !isPickReviewIntent(pickEvidence)
+        && !hasProductionCloseIntent(pickEvidence);
+      if (pickOptionReply || pickCorrection) {
+        const pickingReview = await pendingPickReview(db, user.id);
+        const matchingContext = pickOptionReply
+          ? Boolean(pickingReview && await lastProcessedWorkflowAction(db, from) === 'CONFIRMAR_MATERIALES_PRODUCCION')
+          : pickingReview || await recentPickNotificationReference(db, from);
+        if (matchingContext && !await hasRecentReceptionContext(db, user.id, from)) {
+          action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+          params = {};
+        }
+      }
     }
 
     if (Object.hasOwn(params, 'editar_borrador')) {

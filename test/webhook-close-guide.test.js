@@ -273,18 +273,26 @@ test('el webhook mantiene OP y partida entre el resumen y la corrección de alis
   try {
     const preview = await invoke('MODO_CHARLA', 'Revisa materiales OP ID 110');
     assert.match(preview.body.mensaje, /Revisa el alistamiento de OP ID 110/u);
+    assert.match(preview.body.mensaje, /de donde recoges el material/u);
     assert.equal(pickReview.orderId, 110);
     lastWorkflowAction = 'CONFIRMAR_MATERIALES_PRODUCCION';
     const correction = await invoke('MODO_CHARLA', 'corrección: partida 1, ubicación A10');
     assert.match(correction.body.mensaje, /elige el lote/u);
     assert.equal(pickAllocations[0].stock_id, 11);
-    const choice = await invoke('MODO_CHARLA', 'opción 2');
+    user.rol_nombre = 'alistador';
+    user.roles = ['alistador'];
+    const choice = await invoke('CERRAR_ORDEN_PRODUCCION', 'opción 2', {
+      editar_borrador: true, evidencia: 'opción 2', aclarar: 'lote',
+    });
     assert.match(choice.body.mensaje, /Corrección aplicada a la partida 1/u);
     assert.match(choice.body.mensaje, /ubicación: A10/u);
     assert.match(choice.body.mensaje, /Lote: R7-260927-TRP/u);
     assert.equal(pickAllocations[0].stock_id, 13);
+    assert.ok(!writes.some(entry => /INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
     assert.ok(!writes.some(entry => /UPDATE stock\s+SET cantidad = cantidad -|UPDATE ordenes_produccion\s+SET fase/u.test(entry.sql)));
   } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
     pickReview = null;
     pickAllocations = null;
     lastWorkflowAction = null;
