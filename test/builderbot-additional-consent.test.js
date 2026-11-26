@@ -7,11 +7,12 @@ const { createRequire } = require('node:module');
 const { additionalOperationInput } = require('../api/_lib/additional-operation-input');
 
 // Exercise the real webhook dispatch without DB, network or inventory writes.
-function harness({ operationError, role = 'admin' } = {}) {
+function harness({ operationError, role = 'admin', pickingNotices } = {}) {
   const calls = [];
   const baseReads = [];
   const logged = [];
   const guideTexts = [];
+  const pickCalls = [];
   const productReads = [];
   const errors = [];
   let inboxId = 1;
@@ -62,6 +63,10 @@ function harness({ operationError, role = 'admin' } = {}) {
       }
       if (sql.includes('FROM usuarios u')) return [[{ id: 5, rol_nombre: role }]];
       if (sql.includes('FROM usuario_roles ur')) return [[{ rol: role }]];
+      if (pickingNotices && sql.includes('FROM produccion_alistamiento_revisiones')) return [[]];
+      if (pickingNotices && sql.includes('FROM recepcion_confirmacion_borradores')) return [[]];
+      if (pickingNotices && sql.includes('FROM notificaciones_salida')
+        && sql.includes('production_released:')) return [pickingNotices.map(id => ({ evento: `production_released:${id}` }))];
       if (sql.includes('FROM bodegas')) return [[{ id: 1 }]];
       if (sql.includes('FROM despachos d')) return [[]];
       if (sql.includes('FROM maquila_envios me')) return [[{
@@ -163,6 +168,15 @@ function harness({ operationError, role = 'admin' } = {}) {
       return { order_id: 79, order_code: 'OP-79', already_released: true,
         requires_confirmation: !input.confirmNew };
     } },
+    ...(pickingNotices ? {
+      '../../_lib/production-pick-guide': {
+        ...nativeRequire('../../_lib/production-pick-guide'),
+        advanceProductionPick: async ({ rawText, userId }) => {
+          pickCalls.push({ rawText, userId });
+          return { message: 'Las tapas tienen dos partidas. Indica cuál quieres corregir.' };
+        },
+      },
+    } : {}),
     '../../_lib/returns-workflow': {
       ...nativeRequire('../../_lib/returns-workflow'),
       createCustomerReturn: async input => {
@@ -178,7 +192,7 @@ function harness({ operationError, role = 'admin' } = {}) {
     module, exports: module.exports, require: name => mocks[name] || nativeRequire(name),
     process: { env: {} }, console: { log() {}, warn() {}, error(...args) { errors.push(args.map(String).join(' ')); } }, Buffer,
   }, { filename });
-  return { calls, baseReads, guideTexts, productReads, errors,
+  return { calls, baseReads, guideTexts, pickCalls, productReads, errors,
     advanceMinutes: minutes => { nowMinutes += minutes; }, seedLog(action, text, message) {
     logged.push({ actor: 'QA-ACTOR', action, status: 'PROCESSED', atMinute: nowMinutes,
       payload: JSON.stringify({ from: 'QA-ACTOR', info: { '@ction': action, body: text, text, query: text, params: {} } }),
@@ -192,6 +206,37 @@ function harness({ operationError, role = 'admin' } = {}) {
     return body;
   } };
 }
+
+test('a misclassified close draft correction reaches picking after a unique release notice', async () => {
+  const h = harness({ role: 'alistador', pickingNotices: [121] });
+  const phrase = 'Cambia la ubicación de las tapas a A18';
+  const result = await h.send('CERRAR_ORDEN_PRODUCCION', phrase, {
+    editar_borrador: true, evidencia: phrase, aclarar: '¿Qué partida quieres corregir?',
+  }, { body: phrase });
+  assert.equal(result.ok, true, result.mensaje);
+  assert.match(result.mensaje, /dos partidas/u);
+  assert.deepEqual(h.pickCalls, [{ rawText: phrase, userId: 5 }]);
+  assert.equal(h.calls.length, 0);
+});
+
+test('picking recovery does not reroute a real close, invented correction, or ambiguous pair of notices', async () => {
+  const phrase = 'Cambia la ubicación de las tapas a A18';
+  for (const scenario of [
+    { text: 'Corrige la ubicación del terminado en el cierre de la OP ID 121', notices: [121] },
+    { text: phrase, outer: 'Hola', notices: [121] },
+    { text: phrase, notices: [] },
+    { text: phrase, notices: [121, 122] },
+    { text: phrase, notices: [121], role: 'consulta' },
+  ]) {
+    const h = harness({ role: scenario.role || 'alistador', pickingNotices: scenario.notices });
+    const result = await h.send('CERRAR_ORDEN_PRODUCCION', scenario.text, {
+      editar_borrador: true, evidencia: phrase, aclarar: '¿Qué partida quieres corregir?',
+    }, { body: scenario.outer || scenario.text });
+    assert.equal(result.error, 'RBAC_DENIED', scenario.text);
+    assert.equal(h.pickCalls.length, 0, scenario.text);
+    assert.equal(h.calls.length, 0, scenario.text);
+  }
+});
 
 test('N1-05 real webhook: partial intent never reaches dispatch; complete confirmation still works', async () => {
   const h = harness();

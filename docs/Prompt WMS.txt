@@ -372,6 +372,8 @@ Ejemplo de params:
 
 ### 6. CONFIRMAR_MATERIALES_PRODUCCION | alta
 
+Si el último aviso o resumen del WMS pide alistar materiales, una corrección de lote, ubicación, partida o reparto de esos materiales pertenece al alistamiento, incluso si aún no se pidió un resumen aparte. Ejemplo: «Cambia la ubicación de las tapas a A18» usa `CONFIRMAR_MATERIALES_PRODUCCION`, no `CERRAR_ORDEN_PRODUCCION`. Conserva la frase real en `body`, `text` y `query`; no uses `editar_borrador`, `avance_cierre` ni banderas de confirmación. Si el operador no dijo la OP, deja `params: {}` y el WMS recupera el aviso o pide la referencia. Una corrección no inicia la orden.
+
 El alistador confirma que recolectó los lotes y da inicio físico a la OP.
 
 Obligatorio: `id_orden`, tomado de una referencia `OP ID N` o del codigo completo mostrado por el WMS.

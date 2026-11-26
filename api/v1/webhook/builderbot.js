@@ -1711,13 +1711,28 @@ module.exports = async (req, res) => {
       return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'UNREGISTERED_PHONE' });
     }
 
+    const userRoles = user.roles || [user.rol_nombre].filter(Boolean);
+    const possibleMisroutedPick = action === 'CERRAR_ORDEN_PRODUCCION'
+      && params.editar_borrador === true
+      && hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK)
+      && !hasCapability(userRoles, CAPABILITIES.PRODUCTION_CLOSE);
+    const pickEvidence = possibleMisroutedPick ? currentText(rawBody, info).trim() : '';
+    // Recover a picking correction before checking permissions for the wrong workflow.
+    if (pickEvidence && pickEvidence === rawText.trim()
+      && isPickCorrection(pickEvidence) && !isPickReviewIntent(pickEvidence)
+      && !hasProductionCloseIntent(pickEvidence)
+      && (await pendingPickReview(db, user.id) || await recentPickNotificationReference(db, from))
+      && !await hasRecentReceptionContext(db, user.id, from)) {
+      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+      params = {};
+    }
+
     if (Object.hasOwn(params, 'editar_borrador')) {
       const receptionEdit = action === 'AVANZAR_RECEPCION_GUIADA_OC';
       if (params.editar_borrador !== true || (!receptionEdit && action !== 'CERRAR_ORDEN_PRODUCCION')) {
         throw draftInputError('Elige el borrador de recepción o de cierre que quieres corregir.');
       }
-      const roles = user.roles || [user.rol_nombre].filter(Boolean);
-      if (!hasCapability(roles, capabilityForAction(action))) {
+      if (!hasCapability(userRoles, capabilityForAction(action))) {
         const msg = 'No tienes permiso para editar este borrador.';
         await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
         return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED' });
