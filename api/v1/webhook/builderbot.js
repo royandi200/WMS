@@ -109,7 +109,7 @@ const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow
 const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
   parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
-const { advanceProductionPick, isPickCorrection, isPickReviewIntent, pickOptionNumber,
+const { advanceProductionPick, isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber,
   pendingPickReview, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
@@ -1712,19 +1712,21 @@ module.exports = async (req, res) => {
     }
 
     const userRoles = user.roles || [user.rol_nombre].filter(Boolean);
-    const possibleMisroutedPick = action === 'CERRAR_ORDEN_PRODUCCION'
-      && params.editar_borrador === true
-      && hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK)
+    const pickOnlyOperator = hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK)
       && !hasCapability(userRoles, CAPABILITIES.PRODUCTION_CLOSE);
-    const pickEvidence = possibleMisroutedPick ? currentText(rawBody, info).trim() : '';
+    const possibleMisroutedPick = action === 'CERRAR_ORDEN_PRODUCCION'
+      && params.editar_borrador === true;
+    const possiblePickFollowup = ['UNKNOWN', 'MODO_CHARLA', 'CERRAR_ORDEN_PRODUCCION',
+      'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action) && isPickDialogueReply(rawText);
+    const pickEvidence = pickOnlyOperator && (possibleMisroutedPick || possiblePickFollowup)
+      ? currentText(rawBody, info).trim() : '';
     // Recover a picking correction before checking permissions for the wrong workflow.
-    if (pickEvidence && pickEvidence === rawText.trim()) {
-      const pickOptionReply = pickOptionNumber(pickEvidence) !== null;
-      const pickCorrection = isPickCorrection(pickEvidence) && !isPickReviewIntent(pickEvidence)
-        && !hasProductionCloseIntent(pickEvidence);
-      if (pickOptionReply || pickCorrection) {
+    if (pickEvidence && pickEvidence === rawText.trim() && !hasProductionCloseIntent(pickEvidence)
+      && !isPickReviewIntent(pickEvidence)) {
+      const needsReview = possiblePickFollowup || pickOptionNumber(pickEvidence) !== null;
+      if (needsReview || isPickCorrection(pickEvidence)) {
         const pickingReview = await pendingPickReview(db, user.id);
-        const matchingContext = pickOptionReply
+        const matchingContext = needsReview
           ? Boolean(pickingReview && await lastProcessedWorkflowAction(db, from) === 'CONFIRMAR_MATERIALES_PRODUCCION')
           : pickingReview || await recentPickNotificationReference(db, from);
         if (matchingContext && !await hasRecentReceptionContext(db, user.id, from)) {
@@ -1844,8 +1846,6 @@ module.exports = async (req, res) => {
       ? (await pendingPickReview(db, user.id))?.choice : null;
     const lastWorkflowAction = contextualPickCorrection
       ? await lastProcessedWorkflowAction(db, from) : null;
-    const pickOnlyOperator = hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_PICK)
-      && !hasCapability(user.roles || [user.rol_nombre], CAPABILITIES.PRODUCTION_CLOSE);
     // La respuesta libre de BBC no debe desplazar una corrección inequívoca del
     // último alistamiento. Exigimos además un resumen activo del mismo usuario.
     const activePickCorrection = contextualPickCorrection

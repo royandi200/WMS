@@ -271,6 +271,35 @@ test('a numbered reply to the active picking review bypasses a misclassified clo
   }
 });
 
+test('natural picking dialogue recovers a misclassified close edit only in the correct workflow', async () => {
+  const pickingReview = { order_id: 121, choice_json: null };
+  const phrases = [
+    'No encontré las etiquetas donde me mandaste. ¿De dónde más las puedo sacar?',
+    'Los liners sí están ahí, pero no encuentro ese lote. ¿Qué otro lote puedo usar?',
+    'En ese sitio no encuentro las gomas. ¿Hay otro lugar para sacar lo que falta?',
+    'Todavía no sé cuál es, no me cambies nada',
+    'Las dos tapas que tengo que recoger juntas',
+    'Cámbiame eso por lo otro',
+  ];
+  for (const phrase of phrases) {
+    const h = harness({ role: 'alistador', pickingNotices: [121], pickingReview });
+    h.seedLog('CONFIRMAR_MATERIALES_PRODUCCION', '', 'Resumen QA');
+    const result = await h.send('CERRAR_ORDEN_PRODUCCION', phrase, { editar_borrador: true }, { body: phrase });
+    assert.equal(result.ok, true, phrase);
+    assert.deepEqual(h.pickCalls, [{ rawText: phrase, userId: 5 }]);
+    assert.equal(h.calls.length, 0);
+  }
+  for (const [role, lastWorkflow] of [['alistador', 'AVANZAR_RECEPCION_GUIADA_OC'], ['consulta', 'CONFIRMAR_MATERIALES_PRODUCCION']]) {
+    const h = harness({ role, pickingNotices: [121], pickingReview });
+    h.seedLog(lastWorkflow, '', 'Resumen QA');
+    const text = 'Las dos tapas que tengo que recoger juntas';
+    const rejected = await h.send('CERRAR_ORDEN_PRODUCCION', text, { editar_borrador: true }, { body: text });
+    assert.equal(rejected.error, 'RBAC_DENIED');
+    assert.equal(h.pickCalls.length, 0);
+    assert.equal(h.calls.length, 0);
+  }
+});
+
 test('N1-05 real webhook: partial intent never reaches dispatch; complete confirmation still works', async () => {
   const h = harness();
   const result = await h.send('CONFIRMAR_DESPACHO_SIIGO',

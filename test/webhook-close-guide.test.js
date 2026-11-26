@@ -325,6 +325,48 @@ test('MODO_CHARLA no impone partida si «cambiar lote de tarros» identifica una
   }
 });
 
+test('el webhook conserva la aclaración, muestra un lote único y descarta el número tras cancelar', async () => {
+  writes.length = 0;
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  closeDraft = null;
+  pickReview = null;
+  pickAllocations = [
+    { id: 501, produccion_material_id: 10, stock_id: 11, lote: 'R5-260923-TRP', ubicacion_id: 1,
+      cantidad_reservada: 1, producto_id: 6, unidad: 'und', bodega_id: 1, sku: '00006-TRP',
+      producto: 'TARRO CUADRADO x 60', ubicacion: 'A11' },
+    { id: 502, produccion_material_id: 10, stock_id: 12, lote: 'R5-260923-TRP', ubicacion_id: 2,
+      cantidad_reservada: 2, producto_id: 6, unidad: 'und', bodega_id: 1, sku: '00006-TRP',
+      producto: 'TARRO CUADRADO x 60', ubicacion: 'A10' },
+  ];
+  try {
+    await invoke('CONFIRMAR_MATERIALES_PRODUCCION', 'Revisa materiales OP ID 121');
+    lastWorkflowAction = 'CONFIRMAR_MATERIALES_PRODUCCION';
+    const reply = text => invoke('CERRAR_ORDEN_PRODUCCION', text, { editar_borrador: true, evidencia: text });
+    const unclear = await reply('Los tarros no están donde dice. ¿De dónde más saco?');
+    assert.match(unclear.body.mensaje, /tiene 2 partidas/u);
+    const locations = await reply('Los dos tarros que tengo que recoger juntos');
+    assert.match(locations.body.mensaje, /Partida 2: TARRO CUADRADO/u);
+    assert.match(locations.body.mensaje, /1\. Ubicación A11 \| 1 lote apto/u);
+    const lot = await reply('1');
+    assert.match(lot.body.mensaje, /1\. Lote R8-260928-TRP/u);
+    assert.match(lot.body.mensaje, /Aún no cambié la reserva/u);
+    const cancel = await reply('Todavía no sé cuál es, no me cambies nada');
+    assert.match(cancel.body.mensaje, /No cambié nada/u);
+    assert.equal(pickReview.choice, null);
+    const stale = await reply('opción 1');
+    assert.match(stale.body.mensaje, /No hay una selección vigente/u);
+    assert.equal(pickAllocations[1].stock_id, 12);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
+  } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
+});
+
 test('alistador con audio parcial de ubicación permanece en OP 111, no entra al cierre', async () => {
   writes.length = 0;
   user.rol_nombre = 'alistador';

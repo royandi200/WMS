@@ -281,7 +281,7 @@ test('otra formulación inequívoca permite cambiar de lote sin dictarlo', async
   assert.match(alternative.message, /1\. Lote R8-260928-TRP/u);
 });
 
-test('cambiar ubicación sin saber el código ofrece destinos y aplica el único lote apto', async () => {
+test('elegir ubicación sin saber el código muestra el lote único antes de reservarlo', async () => {
   const db = fakeDb();
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const offered = await advanceProductionPick({ db, userId: 7,
@@ -294,11 +294,71 @@ test('cambiar ubicación sin saber el código ofrece destinos y aplica el único
     rawText: 'Confirmo materiales OP ID 110' });
   assert.equal(blocked.confirm, undefined);
   assert.match(blocked.message, /Falta elegir la ubicación/u);
-  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
+  const shown = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
+  assert.match(shown.message, /Para la ubicación A10, elige el lote que verificaste físicamente/u);
+  assert.match(shown.message, /1\. Lote R5-260923-TRP/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+  assert.equal(db.stocks.get(11).reservada, 7);
+  assert.equal(db.stocks.get(12).reservada, 0);
+  const awaitingLot = await advanceProductionPick({ db, userId: 7, rawText: 'Confirmo materiales OP ID 110' });
+  assert.equal(awaitingLot.confirm, undefined);
+  assert.match(awaitingLot.message, /Falta elegir el lote/u);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 1' });
   assert.match(chosen.message, /Materiales reservados/u);
   assert.match(chosen.message, /Lote: R5-260923-TRP \| ubicación: A10/u);
   assert.equal(db.allocations[0].stock_id, 12);
   assert.equal(db.review.choice, null);
+});
+
+test('frases de bodega ofrecen ubicación o lote sin pedir códigos ni cambiar la reserva', async () => {
+  for (const [phrase, expected] of [
+    ['No encontré las etiquetas donde me mandaste. ¿De dónde más las puedo sacar?', /No hay otra ubicación registrada.*ETIQUETA ASHWAGANDHA/u],
+    ['Las etiquetas sí están ahí, pero no encuentro ese lote. ¿Qué otro lote puedo usar?', /1\. Lote R6-260925-ETASH/u],
+    ['En ese sitio no encuentro las tapas. ¿Hay otro lugar para sacar lo que falta?', /No hay otra ubicación registrada.*TAPA/u],
+    ['¿De dónde más puedo sacar los tarros?', /Ubicación A10/u],
+    ['¿Hay otro rack para los tarros?', /Ubicación A10/u],
+    ['Necesito otro lote de los tarros', /1\. Lote R8-260928-TRP/u],
+  ]) {
+    const db = fakeDb({ withEtiqueta: true, extraA11Lot: true });
+    const before = allocationFingerprint(db.allocations);
+    await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+    const result = await advanceProductionPick({ db, userId: 7, rawText: phrase });
+    assert.match(result.message, expected, phrase);
+    assert.equal(allocationFingerprint(db.allocations), before, phrase);
+  }
+});
+
+test('la cantidad aclara solo una partida del material preguntado y conserva la intención', async () => {
+  const db = fakeDb({ extraTarroPart: true, extraA10Lot: true });
+  const before = allocationFingerprint(db.allocations);
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const clarify = await advanceProductionPick({ db, userId: 7, rawText: 'Los tarros no están donde dice. ¿De dónde más saco?' });
+  assert.match(clarify.message, /tiene 2 partidas \(1, 3\)/u);
+  assert.match(clarify.message, /3\. TARRO CUADRADO x 60: 2 und/u);
+  for (const reply of ['Las dos tapas que tengo que recoger juntas', 'lote 1', 'Confirmo materiales OP ID 110']) {
+    const blocked = await advanceProductionPick({ db, userId: 7, rawText: reply });
+    assert.equal(blocked.confirm, undefined, reply);
+    assert.match(blocked.message, /Indica cuál corriges/u, reply);
+    assert.equal(allocationFingerprint(db.allocations), before, reply);
+  }
+  const offered = await advanceProductionPick({ db, userId: 7, rawText: 'Los dos tarros que tengo que recoger juntos' });
+  assert.match(offered.message, /Partida 3: TARRO CUADRADO/u);
+  assert.match(offered.message, /Ubicación A10/u);
+  assert.equal(allocationFingerprint(db.allocations), before);
+});
+
+test('cancelar una corrección o hablar sin referente no selecciona alternativas antiguas', async () => {
+  for (const phrase of ['Todavía no sé cuál es, no me cambies nada', 'Cámbiame eso por lo otro']) {
+    const db = fakeDb();
+    await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+    await advanceProductionPick({ db, userId: 7, rawText: '¿De dónde más puedo sacar los tarros?' });
+    const result = await advanceProductionPick({ db, userId: 7, rawText: phrase });
+    assert.match(result.message, /No cambié nada|Qué material quieres corregir/u, phrase);
+    assert.equal(db.review.choice, null, phrase);
+    const staleNumber = await advanceProductionPick({ db, userId: 7, rawText: '1' });
+    assert.match(staleNumber.message, /No hay una selección vigente/u, phrase);
+    assert.equal(db.allocations[0].stock_id, 11, phrase);
+  }
 });
 
 test('al elegir ubicación con varios lotes pide el lote antes de cambiar la reserva', async () => {

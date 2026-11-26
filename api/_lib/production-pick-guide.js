@@ -12,6 +12,46 @@ function normalize(text) {
     .toLowerCase().replace(/\s+/gu, ' ').trim();
 }
 
+function pickDiscovery(text) {
+  const raw = normalize(text);
+  const location = /\b(?:de donde mas|otr[oa] (?:ubicacion|lugar|sitio|rack)|en que otr[oa] (?:parte|ubicacion)|(?:donde|de donde) (?:mas )?(?:las? |los? )?(?:puedo |podemos )?(?:sacar|recoger|alist[ao]r))\b/u.test(raw);
+  const lot = /\b(?:otr[oa] lote|que lote (?:mas )?puedo usar|(?:no encuentro|no encontre) (?:ese|el) lote)\b/u.test(raw);
+  if ((!location && !lot) || pickLocations(raw).length || pickLots(raw).length) return null;
+  const missing = /\bno (?:encontre|encuentro|encontramos|encuentran|veo|hay)\s+(?:los?|las?)\s+([^.!?¿,;]+?)(?=\s+(?:donde|en ese|en esa|ahi)\b|[.!?¿,;]|$)/u.exec(raw);
+  const subject = /^(?:los?|las?)\s+([^.!?¿,;]+?)\s+(?:(?:si|no)\s+)?(?:estan|estaban|(?:no )?las? encuentro|(?:no )?los? encuentro)\b/u.exec(raw);
+  const ofProduct = /\b(?:otr[oa] (?:ubicacion|lugar|sitio|rack|lote)|(?:ubicacion|lote) (?:alternativ[oa]|diferente))\s+(?:para|de)\s+(?:(?:los?|las?)\s+)?([^.!?¿,;]+)/u.exec(raw);
+  const collection = /\b(?:sacar|recoger|alistar)\s+(?:los?|las?)\s+([^.!?¿,;]+?)(?=\s+(?:de otro|para esta)\b|[.!?¿,;]|$)/u.exec(raw);
+  const reference = (missing?.[1] || subject?.[1] || ofProduct?.[1] || collection?.[1] || '').trim();
+  return { kind: location && lot ? 'clarify' : location ? 'location' : 'lot',
+    reference: reference === 'lote' ? null : reference || null };
+}
+
+function cancelsPickEdit(text) {
+  return /\b(?:no (?:me )?(?:cambies|modifiques|ajustes) nada|no hagas cambios|dejalo (?:como esta|asi)|deja todo como esta|cancela (?:el cambio|la correccion)|por ahora no)\b/u.test(normalize(text));
+}
+
+function incompletePickEdit(text) {
+  return /\b(?:cambiame|cambia|corrige|modifica|ajusta)\s+(?:eso|esto|lo de antes|lo otro)\b/u.test(normalize(text));
+}
+
+const PICK_QUANTITIES = { un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
+  seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
+
+function pickAllocationReply(text) {
+  const raw = normalize(text).replace(/[.!?]+$/u, '');
+  const part = /^(?:(?:la|el)\s+)?(?:partida|fila|renglon)\s*#?\s*(\d+)$/u.exec(raw);
+  if (part) return { index: Number(part[1]) - 1 };
+  const quantity = /^(?:son\s+)?(?:los?|las?)\s+(\d+(?:[.,]\d+)?|un[oa]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)(?:\s+([^.!?]+))?$/u.exec(raw);
+  if (!quantity) return null;
+  const reference = (quantity[2] || '').split(/\s+(?:que|de la partida|junt[oa]s?)\b/u)[0].trim();
+  return { quantity: PICK_QUANTITIES[quantity[1]] ?? Number(quantity[1].replace(',', '.')),
+    reference: /^(?:unidades?|und|g|gramos?|junt[oa]s?)$/u.test(reference) ? '' : reference };
+}
+
+function isPickDialogueReply(text) {
+  return cancelsPickEdit(text) || incompletePickEdit(text) || pickAllocationReply(text) !== null;
+}
+
 function explicitPickConfirmation(text) {
   const raw = normalize(text);
   const prefix = /^confirmo\s+(?:los\s+)?materiales(?:\s+e\s+inicio\s+de\s+produccion)?(?:\s+(?:de\s+la\s+orden|para|de|orden))?\s+/u;
@@ -21,7 +61,8 @@ function explicitPickConfirmation(text) {
 
 function isPickCorrection(text) {
   const raw = normalize(text);
-  return /\b(?:correccion|corrijo|corrige|corregir|cambia|cambiar|cambio|modifica|modificar|ajusta|ajustar|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(raw)
+  return Boolean(pickDiscovery(raw))
+    || /\b(?:correccion|corrijo|corrige|corregir|cambia|cambiar|cambio|modifica|modificar|ajusta|ajustar|ajuste|reparte|divide|partir|no\s+estaban?|no\s+estan|en\s+vez\s+de)\b/u.test(raw)
     || /\b[a-z]{1,5}\s*\d{1,3}\s+y\s+no\s+(?:de\s+)?(?:la\s+)?[a-z]{1,5}\s*\d{1,3}\b/u.test(raw)
     || /\b(?:va|van|queda|quedan|lo\s+(?:pongo|dejo|ubico)|las?\s+(?:pongo|dejo|ubico))\s+(?:para|en|a)\s+(?:la\s+)?(?:ubicacion\s+)?[a-z][a-z0-9-]*\d[a-z0-9-]*[.!]?$/u.test(raw);
 }
@@ -37,9 +78,8 @@ function pickOptionNumber(text) {
   // enrutamiento solo lo usa cuando hay una selección de lote pendiente.
   const numbered = /^(?:(?:la|el)\s+)?(?:(?:opcion|alternativa|lote|numero)\s*(?:numero\s*)?#?\s*)?(\d{1,2})$/u.exec(raw);
   if (numbered) return Number(numbered[1]);
-  const words = { uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
   const spoken = /^(?:(?:la|el)\s+)?(?:opcion|alternativa|lote|numero)\s+(uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)$/u.exec(raw);
-  if (spoken) return words[spoken[1]];
+  if (spoken) return PICK_QUANTITIES[spoken[1]];
   const ordinals = { primera: 1, primero: 1, segunda: 2, segundo: 2,
     tercera: 3, tercero: 3, cuarta: 4, cuarto: 4, quinta: 5, quinto: 5 };
   const ordinal = /^(?:la|el)\s+(primera|primero|segunda|segundo|tercera|tercero|cuarta|cuarto|quinta|quinto)(?:\s+opcion|\s+lote)?$/u.exec(raw);
@@ -59,6 +99,12 @@ function displayExpiry(value) {
 }
 
 function choicePrompt(choice, rows) {
+  if (choice.kind === 'allocation') {
+    const candidates = rows.filter(row => choice.allocationIds.includes(Number(row.id)));
+    return [choice.reason, '', ...candidates.map(row =>
+      `${rows.indexOf(row) + 1}. ${row.producto}: ${roundQty(row.cantidad_reservada)} ${row.unidad || 'und'} | ${row.ubicacion || 'sin ubicación'} | lote ${row.lote}`),
+    '', 'Puedes decir la cantidad si distingue una sola partida, o indicar «partida N». No cambié las reservas.'].join('\n');
+  }
   const index = rows.findIndex(row => Number(row.id) === Number(choice.allocationId));
   const selected = rows[index];
   if (!selected) return 'La partida cambió. Pide de nuevo el resumen de alistamiento; no se cambiaron reservas.';
@@ -72,7 +118,10 @@ function choicePrompt(choice, rows) {
     ...choice.options.map((option, number) => choosingLocation
       ? `${number + 1}. Ubicación ${option.location} | ${option.lotCount} ${option.lotCount === 1 ? 'lote apto' : 'lotes aptos'} | saldo máximo en un lote: ${roundQty(option.available)} ${selected.unidad || 'und'}`
       : `${number + 1}. Lote ${option.lot} | disponible ${roundQty(option.available)} ${selected.unidad || 'und'} | vence ${displayExpiry(option.expiry)}`),
-    '', `Responde «opción 1», «opción 2», etc. No necesitas dictar ${choosingLocation ? 'la ubicación' : 'el lote'}. Aún no cambié la reserva ni se inició producción.`,
+    '', choosingLocation
+      ? 'Elige por número. Después verás el lote para cotejarlo antes de cambiar la reserva.'
+      : 'Cuando lo cotejes, elige por número. No necesitas dictar el lote.',
+    'Aún no cambié la reserva ni se inició producción.',
   ].join('\n');
 }
 
@@ -227,12 +276,14 @@ function uniqueProductAllocation(rows, productId, reference, text) {
       && (!sourceLocation || normalize(row.ubicacion) === sourceLocation));
     if ((sourceLot || sourceLocation) && identified.length === 1) return identified[0];
     const numbers = matching.map(row => rows.indexOf(row) + 1).join(', ');
-    throw pickError(`${reference} tiene ${matching.length} partidas (${numbers}). Indica «partida N» o el lote y ubicación actuales para saber cuál corriges. No cambié las reservas.`);
+    const reason = `${reference} tiene ${matching.length} partidas (${numbers}). Indica cuál corriges.`;
+    throw Object.assign(pickError(`${reason} Indica «partida N» o el lote y ubicación actuales. No cambié las reservas.`),
+      { reason, allocationIds: matching.map(row => Number(row.id)) });
   }
   return null;
 }
 
-async function selectedAllocation(db, rows, text) {
+async function selectedAllocation(db, rows, text, naturalReference) {
   const index = /\b(?:partida|fila|renglon|numero)\s*#?\s*(\d+)\b/u.exec(normalize(text));
   if (index) {
     const selected = rows[Number(index[1]) - 1];
@@ -246,7 +297,7 @@ async function selectedAllocation(db, rows, text) {
     return uniqueProductAllocation(rows, mentionedSkus[0].producto_id,
       `${mentionedSkus[0].producto} (${mentionedSkus[0].sku})`, text);
   }
-  const productPhrase = correctionProductReference(text);
+  const productPhrase = naturalReference || correctionProductReference(text);
   if (productPhrase) {
     try {
       const product = await resolveProductReference(db, productPhrase,
@@ -270,6 +321,26 @@ async function selectedAllocation(db, rows, text) {
   }
   if (rows.length === 1) return rows[0];
   throw pickError('No identifiqué una sola partida. Di «corrección: partida N, ubicación A10» usando el número del resumen. No cambié las reservas.');
+}
+
+async function resolveClarifiedAllocation(db, rows, choice, reply) {
+  const candidates = rows.filter(row => choice.allocationIds.includes(Number(row.id)));
+  if (Object.hasOwn(reply, 'index')) {
+    return candidates.find(row => row === rows[reply.index]) || null;
+  }
+  if (reply.reference) {
+    try {
+      const product = await resolveProductReference(db, reply.reference, {
+        productIds: [...new Set(rows.map(row => row.producto_id))], allowContextualPartial: true,
+      });
+      if (!candidates.every(row => Number(row.producto_id) === Number(product.id))) return null;
+    } catch (error) {
+      if (['PRODUCT_REFERENCE_AMBIGUOUS', 'PRODUCT_REFERENCE_NOT_FOUND'].includes(error.code)) return null;
+      throw error;
+    }
+  }
+  const matching = candidates.filter(row => roundQty(row.cantidad_reservada) === reply.quantity);
+  return matching.length === 1 ? matching[0] : null;
 }
 
 async function replacementStock(db, row, segment) {
@@ -322,22 +393,12 @@ async function locationLotChoices(db, row, location) {
     >= Number(row.cantidad_reservada)), partial: available };
 }
 
-async function correctAllocation(db, rows, text) {
-  const selected = await selectedAllocation(db, rows, text);
-  const segments = parseSplit(text, selected.cantidad_reservada);
-  const desired = segments || [{ quantity: roundQty(selected.cantidad_reservada),
-    location: pickLocations(text).at(-1) || null, lot: pickLots(text).at(-1) || null }];
-  const raw = normalize(text);
-  const wantsAnotherLot = /\b(?:otro|diferente|distinto)\s+lote\b|\b(?:elegir|escoger|cambia|cambiar|corrige|corregir|modifica|modificar|ajusta|ajustar)\s+(?:(?:de|un|el)\s+)?(?:otro\s+)?lote\b|\blote\s+(?:no\s+es\s+(?:(?:este|ese|el)\s+)?correcto|no\s+es\s+(?:este|ese)|incorrecto|equivocado|esta\s+mal)\b|\b(?:lotes\s+disponibles|cambio\s+(?:de\s+)?lote)\b/u.test(raw);
-  const wantsAnotherLocation = /\bubicacion\b/u.test(raw)
-    && !desired[0].location && !desired[0].lot;
-  if (!segments && !desired[0].location && !desired[0].lot && !wantsAnotherLot && !wantsAnotherLocation) {
-    throw pickError('Indica el dato nuevo de la partida: ubicación o lote. No cambié las reservas.');
-  }
-  if (!segments && wantsAnotherLocation && wantsAnotherLot) {
-    throw pickError('Mencionaste lote y ubicación sin indicar ninguno de los dos datos nuevos. Pide primero cambiar la ubicación o el lote de esa partida; no cambié las reservas.');
-  }
-  if (!segments && wantsAnotherLocation && !wantsAnotherLot) {
+function newPickChoice(kind, fields) {
+  return { kind, ...fields, expiresAt: Date.now() + 15 * 60 * 1000 };
+}
+
+async function offerPickAlternatives(db, selected, kind, targetLocation) {
+  if (kind === 'location') {
     const found = await locationLotChoices(db, selected, null);
     const byLocation = new Map();
     for (const option of found.eligible) {
@@ -353,23 +414,51 @@ async function correctAllocation(db, rows, text) {
       location, lotCount: lots.length, available,
     })).sort((a, b) => a.location.localeCompare(b.location, 'es', { numeric: true }));
     if (!options.length) throw pickError(`No hay otra ubicación registrada con un lote disponible de ${selected.producto} que cubra ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}. No cambié las reservas.`);
-    return { selected, choice: { kind: 'location', allocationId: selected.id,
-      options, expiresAt: Date.now() + 15 * 60 * 1000 } };
+    return newPickChoice('location', { allocationId: selected.id, options });
   }
-  if (!segments && !desired[0].lot && (wantsAnotherLot
-    || (desired[0].location && desired[0].location !== selected.ubicacion?.toUpperCase()))) {
-    const targetLocation = desired[0].location || selected.ubicacion?.toUpperCase();
-    if (!targetLocation) throw pickError('La partida no tiene ubicación registrada. Indica la nueva ubicación; no cambié las reservas.');
-    const found = await locationLotChoices(db, selected, targetLocation);
-    const options = wantsAnotherLot
-      ? found.eligible.filter(option => option.stockId !== Number(selected.stock_id))
-      : found.eligible;
-    if (!options.length) {
-      const highest = Math.max(0, ...found.partial.map(option => option.available));
-      throw pickError(`No hay ${wantsAnotherLot ? 'otro ' : 'un '}lote disponible de ${selected.producto} en ${targetLocation} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
+  const location = targetLocation || selected.ubicacion?.toUpperCase();
+  if (!location) throw pickError('La partida no tiene ubicación registrada. Indica la nueva ubicación; no cambié las reservas.');
+  const found = await locationLotChoices(db, selected, location);
+  const options = kind === 'lot' ? found.eligible.filter(option => option.stockId !== Number(selected.stock_id))
+    : found.eligible;
+  if (!options.length) {
+    const highest = Math.max(0, ...found.partial.map(option => option.available));
+    throw pickError(`No hay ${kind === 'lot' ? 'otro ' : 'un '}lote disponible de ${selected.producto} en ${location} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
+  }
+  return newPickChoice('lot', { allocationId: selected.id, location, options });
+}
+
+async function correctAllocation(db, rows, text) {
+  const raw = normalize(text);
+  const discovery = pickDiscovery(raw);
+  const location = pickLocations(raw).at(-1) || null;
+  const lot = pickLots(raw).at(-1) || null;
+  const wantsAnotherLot = discovery?.kind === 'lot' || /\b(?:otro|diferente|distinto)\s+lote\b|\b(?:elegir|escoger|cambia|cambiar|corrige|corregir|modifica|modificar|ajusta|ajustar)\s+(?:(?:de|un|el)\s+)?(?:otro\s+)?lote\b|\blote\s+(?:no\s+es\s+(?:(?:este|ese|el)\s+)?correcto|no\s+es\s+(?:este|ese)|incorrecto|equivocado|esta\s+mal)\b|\b(?:lotes\s+disponibles|cambio\s+(?:de\s+)?lote)\b/u.test(raw);
+  const wantsAnotherLocation = !location && !lot && (discovery?.kind === 'location' || /\bubicacion\b/u.test(raw));
+  if (discovery?.kind === 'clarify' || (wantsAnotherLocation && wantsAnotherLot)) {
+    throw pickError('¿Quieres buscar otro lugar para recoger el material, o cambiar el lote en el mismo lugar? No cambié las reservas.');
+  }
+  const kind = wantsAnotherLocation ? 'location' : wantsAnotherLot ? 'lot' : null;
+  let selected;
+  try {
+    selected = await selectedAllocation(db, rows, text, discovery?.reference);
+  } catch (error) {
+    if (!location && !lot && kind && error.allocationIds) {
+      return { choice: newPickChoice('allocation', { kindToOffer: kind, reason: error.reason,
+        allocationIds: error.allocationIds }) };
     }
-    return { selected, choice: { kind: 'lot', allocationId: selected.id, location: targetLocation,
-      options, expiresAt: Date.now() + 15 * 60 * 1000 } };
+    throw error;
+  }
+  const segments = parseSplit(text, selected.cantidad_reservada);
+  const desired = segments || [{ quantity: roundQty(selected.cantidad_reservada), location, lot }];
+  if (!segments && !location && !lot && kind) {
+    return { choice: await offerPickAlternatives(db, selected, kind) };
+  }
+  if (!segments && !lot && location && (wantsAnotherLot || location !== selected.ubicacion?.toUpperCase())) {
+    return { choice: await offerPickAlternatives(db, selected, wantsAnotherLot ? 'lot' : 'location-lots', location) };
+  }
+  if (!segments && !location && !lot) {
+    throw pickError('¿Quieres recoger la partida en otra ubicación o usar otro lote? No cambié las reservas.');
   }
   return applyAllocation(db, selected, desired);
 }
@@ -477,7 +566,23 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
     let pendingChoice = null;
     let correction = null;
     const selectedOption = pickOptionNumber(rawText);
-    if (selectedOption !== null) {
+    if (cancelsPickEdit(rawText)) {
+      note = 'No cambié nada. Conservé las reservas del resumen. Si quieres corregir algo después, dime qué material.';
+    } else if (incompletePickEdit(rawText)) {
+      note = '¿Qué material quieres corregir? Dime si buscas otro lugar para recogerlo u otro lote. No cambié las reservas.';
+    } else if (activeChoice?.kind === 'allocation' && !isPickCorrection(rawText)) {
+      const reply = pickAllocationReply(rawText);
+      const selected = reply ? await resolveClarifiedAllocation(db, rows, activeChoice, reply) : null;
+      if (selected) {
+        pendingChoice = await offerPickAlternatives(db, selected, activeChoice.kindToOffer);
+        note = choicePrompt(pendingChoice, rows);
+      } else {
+        pendingChoice = activeChoice;
+        const lead = selectedOption !== null ? 'Todavía no hay una selección de lotes o ubicaciones.'
+          : 'Falta identificar una sola partida.';
+        note = `${lead}\n\n${choicePrompt(pendingChoice, rows)}`;
+      }
+    } else if (selectedOption !== null) {
       if (!activeChoice) {
         note = 'No hay una selección vigente. Di «corrección: partida N, cambiar ubicación» o «corrección: partida N, cambiar lote» para ver opciones. No se cambiaron reservas.';
       } else if (selectedOption < 1 || selectedOption > activeChoice.options.length) {
@@ -488,17 +593,8 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
         if (!selected) throw pickError('La partida cambió. Pide de nuevo el resumen; no se cambiaron reservas.');
         const option = activeChoice.options[selectedOption - 1];
         if (activeChoice.kind === 'location') {
-          const found = await locationLotChoices(db, selected, option.location);
-          if (!found.eligible.length) throw pickError(`Ya no hay saldo suficiente en ${option.location} para esta partida. No se cambiaron reservas; pide de nuevo las ubicaciones disponibles.`);
-          if (found.eligible.length > 1) {
-            pendingChoice = { kind: 'lot', allocationId: selected.id, location: option.location,
-              options: found.eligible, expiresAt: Date.now() + 15 * 60 * 1000 };
-            note = choicePrompt(pendingChoice, rows);
-          } else {
-            const lot = found.eligible[0];
-            correction = await applyAllocation(db, selected, [{ quantity: roundQty(selected.cantidad_reservada),
-              location: option.location, lot: lot.lot, stockId: lot.stockId }]);
-          }
+          pendingChoice = await offerPickAlternatives(db, selected, 'location-lots', option.location);
+          note = choicePrompt(pendingChoice, rows);
         } else {
           correction = await applyAllocation(db, selected, [{ quantity: roundQty(selected.cantidad_reservada),
             location: activeChoice.location, lot: option.lot, stockId: option.stockId }]);
@@ -550,7 +646,7 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
       : pickSummary(order, current, note), orderId: order.id };
   } catch (error) {
     await db.rollback().catch(() => {});
-    if (error.status === 409 && (isPickCorrection(rawText) || pickOptionNumber(rawText) !== null)
+    if (error.status === 409 && (isPickCorrection(rawText) || isPickDialogueReply(rawText) || pickOptionNumber(rawText) !== null)
       && originalReview) {
       return { message: `⚠️ ${error.message}\n\n${pickSummary(originalReview.order,
         originalReview.rows, 'No se cambiaron las reservas. Corrige la partida indicada y vuelve a revisar el resumen.')}` };
@@ -560,5 +656,5 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
 }
 
 module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation,
-  isPickCorrection, isPickReviewIntent, pickOptionNumber, loadAllocations, pendingPickReview,
+  isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber, loadAllocations, pendingPickReview,
   pickLocations, pickLots, pickSummary, recentPickNotificationReference };
