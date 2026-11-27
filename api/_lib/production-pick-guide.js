@@ -486,7 +486,7 @@ async function offerStructuredPickIntent(db, rows, intent, rawText) {
   } catch (error) {
     if (error.code === 'PRODUCT_REFERENCE_AMBIGUOUS') throw pickError(`${error.message} No cambié las reservas.`);
     if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND') {
-      throw pickError('No encontré ese material entre las partidas de la OP. Dime cómo aparece en el resumen. No cambié las reservas.');
+      throw pickError('¿Qué material quieres revisar? Dime el nombre tal como aparece en el resumen. No cambié las reservas.');
     }
     throw error;
   }

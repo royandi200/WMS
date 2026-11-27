@@ -463,6 +463,20 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   assert.doesNotMatch(partlyUnknown.message, /Mencionaste varios materiales|Materiales reservados|Confirmo materiales/u);
 });
 
+test('una referencia sin material reconocido pregunta directamente cuál revisar', async () => {
+  const db = fakeDb();
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const before = allocationFingerprint(db.allocations);
+  const result = await advanceProductionPick({ db, userId: 7, rawText: '¿De dónde saco eso entonces?',
+    intent: { kind: 'location', reference: 'eso' } });
+  assert.match(result.message, /^¿Qué material quieres revisar\?/u);
+  assert.doesNotMatch(result.message, /No encontré ese material|Materiales reservados|Confirmo materiales/u);
+  assert.equal(result.resolvedKind, 'location');
+  assert.equal(result.confirm, undefined);
+  assert.equal(db.review.choice, null);
+  assert.equal(allocationFingerprint(db.allocations), before);
+});
+
 test('una respuesta corta retoma la búsqueda de la OP sin aplicar reservas ni confirmar', async () => {
   const db = fakeDb();
   const send = (rawText, intent) => advanceProductionPick({ db, userId: 7, rawText, intent });
