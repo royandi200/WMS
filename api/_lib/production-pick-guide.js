@@ -27,11 +27,17 @@ function pickDiscovery(text) {
 }
 
 function cancelsPickEdit(text) {
-  return /\b(?:no (?:me )?(?:cambies|modifiques|ajustes) nada|no hagas cambios|dejalo (?:como esta|asi)|deja todo como esta|cancela (?:el cambio|la correccion)|por ahora no)\b/u.test(normalize(text));
+  const raw = normalize(text);
+  return /^no coincide(?: el lote| la ubicacion)?[.!]?$/u.test(raw)
+    || /\b(?:no (?:me )?(?:cambies|modifiques|ajustes) nada|no hagas cambios|dejalo (?:como esta|asi)|deja todo como esta|cancela (?:el cambio|la correccion)|por ahora no)\b/u.test(raw);
 }
 
 function incompletePickEdit(text) {
   return /\b(?:cambiame|cambia|corrige|modifica|ajusta)\s+(?:eso|esto|lo de antes|lo otro)\b/u.test(normalize(text));
+}
+
+function explicitPickChangeConfirmation(text) {
+  return /^(?:si[, ]+)?confirmo\s+(?:el\s+cambio|la\s+correccion)[.!]?$/u.test(normalize(text));
 }
 
 const PICK_QUANTITIES = { un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5,
@@ -49,7 +55,8 @@ function pickAllocationReply(text) {
 }
 
 function isPickDialogueReply(text) {
-  return cancelsPickEdit(text) || incompletePickEdit(text) || pickAllocationReply(text) !== null;
+  return cancelsPickEdit(text) || incompletePickEdit(text) || explicitPickChangeConfirmation(text)
+    || pickAllocationReply(text) !== null;
 }
 
 function explicitPickConfirmation(text) {
@@ -102,15 +109,23 @@ function choicePrompt(choice, rows) {
   if (choice.kind === 'allocation') {
     const candidates = rows.filter(row => choice.allocationIds.includes(Number(row.id)));
     return [choice.reason, '', ...candidates.map(row =>
-      `${rows.indexOf(row) + 1}. ${row.producto}: ${roundQty(row.cantidad_reservada)} ${row.unidad || 'und'} | ${row.ubicacion || 'sin ubicación'} | lote ${row.lote}`),
+      `Partida ${rows.indexOf(row) + 1}: ${row.producto}: ${roundQty(row.cantidad_reservada)} ${row.unidad || 'und'} | ${row.ubicacion || 'sin ubicación'} | lote ${row.lote}`),
     '', 'Puedes decir la cantidad si distingue una sola partida, o indicar «partida N». No cambié las reservas.'].join('\n');
   }
   const index = rows.findIndex(row => Number(row.id) === Number(choice.allocationId));
   const selected = rows[index];
   if (!selected) return 'La partida cambió. Pide de nuevo el resumen de alistamiento; no se cambiaron reservas.';
+  const partHeader = `🔎 Partida ${index + 1}: ${selected.producto} (${selected.sku}), ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}.`;
+  if (choice.confirmOnly) {
+    const [option] = choice.options;
+    return [partHeader, `Reserva actual: ${selected.ubicacion} | lote ${selected.lote}.`,
+      `Única alternativa: ${choice.location} | lote ${option.lot} | vence ${displayExpiry(option.expiry)}.`,
+      '', 'Verifica la ubicación y el lote. Responde «Confirmo el cambio» si coinciden o «No coincide» si son distintos.',
+      'Aún no cambié la reserva ni se inició producción.'].join('\n');
+  }
   const choosingLocation = choice.kind === 'location';
   return [
-    `🔎 Partida ${index + 1}: ${selected.producto} (${selected.sku}), ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}.`,
+    partHeader,
     `Actual: lote ${selected.lote} | ubicación ${selected.ubicacion || 'sin ubicación'}.`,
     choosingLocation
       ? 'Elige la ubicación donde encontraste esta partida (cada opción tiene al menos un lote con saldo suficiente):'
@@ -404,14 +419,19 @@ async function offerPickAlternatives(db, selected, kind, targetLocation) {
     for (const option of found.eligible) {
       if (option.location === selected.ubicacion) continue;
       const current = byLocation.get(option.location) || {
-        location: option.location, lots: [], available: 0,
+        location: option.location, lots: new Map(), available: 0,
       };
-      if (!current.lots.includes(option.lot)) current.lots.push(option.lot);
+      current.lots.set(option.stockId, option);
       current.available = Math.max(current.available, option.available);
       byLocation.set(option.location, current);
     }
+    if (byLocation.size === 1) {
+      const [{ location, lots }] = byLocation.values();
+      return newPickChoice('lot', { allocationId: selected.id, location, options: [...lots.values()],
+        searchKind: kind, confirmOnly: lots.size === 1 });
+    }
     const options = [...byLocation.values()].map(({ location, lots, available }) => ({
-      location, lotCount: lots.length, available,
+      location, lotCount: lots.size, available,
     })).sort((a, b) => a.location.localeCompare(b.location, 'es', { numeric: true }));
     if (!options.length) throw pickError(`No hay otra ubicación registrada con un lote disponible de ${selected.producto} que cubra ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}. No cambié las reservas.`);
     return newPickChoice('location', { allocationId: selected.id, options });
@@ -425,7 +445,18 @@ async function offerPickAlternatives(db, selected, kind, targetLocation) {
     const highest = Math.max(0, ...found.partial.map(option => option.available));
     throw pickError(`No hay ${kind === 'lot' ? 'otro ' : 'un '}lote disponible de ${selected.producto} en ${location} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
   }
-  return newPickChoice('lot', { allocationId: selected.id, location, options });
+  return newPickChoice('lot', { allocationId: selected.id, location, options, searchKind: kind });
+}
+
+async function refreshPickAlternatives(db, selected, kind, location, rows) {
+  const reason = 'El saldo o la disponibilidad cambió. No cambié la reserva.';
+  try {
+    const choice = await offerPickAlternatives(db, selected, kind, location);
+    return { pendingChoice: choice, note: `${reason} Revisa las alternativas actualizadas.\n\n${choicePrompt(choice, rows)}` };
+  } catch (error) {
+    if (error.status !== 409) throw error;
+    return { pendingChoice: null, note: `${reason}\n${error.message}` };
+  }
 }
 
 async function correctAllocation(db, rows, text) {
@@ -565,11 +596,16 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
       ? 'Antes de confirmar, revisa físicamente todas las partidas de este resumen. No se inició producción.' : '';
     let pendingChoice = null;
     let correction = null;
-    const selectedOption = pickOptionNumber(rawText);
+    const confirmedChange = explicitPickChangeConfirmation(rawText);
+    const selectedOption = confirmedChange && activeChoice?.confirmOnly ? 1 : pickOptionNumber(rawText);
     if (cancelsPickEdit(rawText)) {
       note = 'No cambié nada. Conservé las reservas del resumen. Si quieres corregir algo después, dime qué material.';
     } else if (incompletePickEdit(rawText)) {
       note = '¿Qué material quieres corregir? Dime si buscas otro lugar para recogerlo u otro lote. No cambié las reservas.';
+    } else if (confirmedChange && !activeChoice?.confirmOnly) {
+      pendingChoice = activeChoice;
+      note = activeChoice ? `Primero indica la opción que cotejaste.\n\n${choicePrompt(activeChoice, rows)}`
+        : 'No hay un cambio pendiente de confirmar. No cambié las reservas.';
     } else if (activeChoice?.kind === 'allocation' && !isPickCorrection(rawText)) {
       const reply = pickAllocationReply(rawText);
       const selected = reply ? await resolveClarifiedAllocation(db, rows, activeChoice, reply) : null;
@@ -585,6 +621,9 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
     } else if (selectedOption !== null) {
       if (!activeChoice) {
         note = 'No hay una selección vigente. Di «corrección: partida N, cambiar ubicación» o «corrección: partida N, cambiar lote» para ver opciones. No se cambiaron reservas.';
+      } else if (activeChoice.confirmOnly && !confirmedChange) {
+        pendingChoice = activeChoice;
+        note = choicePrompt(activeChoice, rows);
       } else if (selectedOption < 1 || selectedOption > activeChoice.options.length) {
         pendingChoice = activeChoice;
         note = `La opción ${selectedOption} no existe.\n${choicePrompt(activeChoice, rows)}`;
@@ -593,11 +632,23 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
         if (!selected) throw pickError('La partida cambió. Pide de nuevo el resumen; no se cambiaron reservas.');
         const option = activeChoice.options[selectedOption - 1];
         if (activeChoice.kind === 'location') {
-          pendingChoice = await offerPickAlternatives(db, selected, 'location-lots', option.location);
-          note = choicePrompt(pendingChoice, rows);
+          try {
+            pendingChoice = await offerPickAlternatives(db, selected, 'location-lots', option.location);
+            pendingChoice.searchKind = 'location';
+            note = choicePrompt(pendingChoice, rows);
+          } catch (error) {
+            if (error.status !== 409) throw error;
+            ({ pendingChoice, note } = await refreshPickAlternatives(db, selected, 'location', null, rows));
+          }
         } else {
-          correction = await applyAllocation(db, selected, [{ quantity: roundQty(selected.cantidad_reservada),
-            location: activeChoice.location, lot: option.lot, stockId: option.stockId }]);
+          const { eligible } = await locationLotChoices(db, selected, activeChoice.location);
+          if (eligible.some(row => row.stockId === option.stockId && row.lot === option.lot)) {
+            correction = await applyAllocation(db, selected, [{ quantity: roundQty(selected.cantidad_reservada),
+              location: activeChoice.location, lot: option.lot, stockId: option.stockId }]);
+          } else {
+            const kind = activeChoice.searchKind || 'location-lots';
+            ({ pendingChoice, note } = await refreshPickAlternatives(db, selected, kind, activeChoice.location, rows));
+          }
         }
       }
     } else if (isPickCorrection(rawText)) {
@@ -608,7 +659,9 @@ async function advanceProductionPick({ db, userId, from, rawText }) {
       }
     } else if (activeChoice) {
       pendingChoice = activeChoice;
-      note = `Falta elegir ${activeChoice.kind === 'location' ? 'la ubicación' : 'el lote'} antes de confirmar.\n${choicePrompt(activeChoice, rows)}`;
+      const step = activeChoice.confirmOnly ? 'cotejar el lote y confirmar el cambio'
+        : `elegir ${activeChoice.kind === 'location' ? 'la ubicación' : 'el lote'}`;
+      note = `Falta ${step} antes de iniciar producción.\n${choicePrompt(activeChoice, rows)}`;
     } else if (active?.choice) {
       note = 'La elección venció o cambió el resumen. Di de nuevo qué quieres corregir en la partida; no se inició producción.';
     } else if (!isPickReviewIntent(rawText)) {

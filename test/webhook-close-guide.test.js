@@ -347,15 +347,18 @@ test('el webhook conserva la aclaración, muestra un lote único y descarta el n
     assert.match(unclear.body.mensaje, /tiene 2 partidas/u);
     const locations = await reply('Los dos tarros que tengo que recoger juntos');
     assert.match(locations.body.mensaje, /Partida 2: TARRO CUADRADO/u);
-    assert.match(locations.body.mensaje, /1\. Ubicación A11 \| 1 lote apto/u);
+    assert.match(locations.body.mensaje, /Única alternativa: A11 \| lote R8-260928-TRP/u);
+    assert.match(locations.body.mensaje, /«Confirmo el cambio»/u);
     const lot = await reply('1');
-    assert.match(lot.body.mensaje, /1\. Lote R8-260928-TRP/u);
+    assert.match(lot.body.mensaje, /Única alternativa: A11 \| lote R8-260928-TRP/u);
     assert.match(lot.body.mensaje, /Aún no cambié la reserva/u);
     const cancel = await reply('Todavía no sé cuál es, no me cambies nada');
     assert.match(cancel.body.mensaje, /No cambié nada/u);
     assert.equal(pickReview.choice, null);
     const stale = await reply('opción 1');
     assert.match(stale.body.mensaje, /No hay una selección vigente/u);
+    const staleChange = await reply('Confirmo el cambio');
+    assert.match(staleChange.body.mensaje, /No hay un cambio pendiente/u);
     assert.equal(pickAllocations[1].stock_id, 12);
     assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
   } finally {
