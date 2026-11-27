@@ -131,12 +131,15 @@ function displayExpiry(value) {
   return date;
 }
 
+function allocationCandidates(rows, allocationIds) {
+  return rows.filter(row => allocationIds.includes(Number(row.id))).map(row =>
+    `Partida ${rows.indexOf(row) + 1}: ${row.producto}: ${roundQty(row.cantidad_reservada)} ${row.unidad || 'und'} | ${row.ubicacion || 'sin ubicación'} | lote ${row.lote}`);
+}
+
 function choicePrompt(choice, rows) {
   if (choice.kind === 'allocation') {
-    const candidates = rows.filter(row => choice.allocationIds.includes(Number(row.id)));
-    return [choice.reason, '', ...candidates.map(row =>
-      `Partida ${rows.indexOf(row) + 1}: ${row.producto}: ${roundQty(row.cantidad_reservada)} ${row.unidad || 'und'} | ${row.ubicacion || 'sin ubicación'} | lote ${row.lote}`),
-    '', 'Puedes decir la cantidad si distingue una sola partida, o indicar «partida N». No cambié las reservas.'].join('\n');
+    return [choice.reason, '', ...allocationCandidates(rows, choice.allocationIds),
+      '', 'Puedes decir la cantidad si distingue una sola partida, o indicar «partida N». No cambié las reservas.'].join('\n');
   }
   const index = rows.findIndex(row => Number(row.id) === Number(choice.allocationId));
   const selected = rows[index];
@@ -144,18 +147,19 @@ function choicePrompt(choice, rows) {
   const partHeader = `🔎 Partida ${index + 1}: ${selected.producto} (${selected.sku}), ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}.`;
   if (choice.confirmOnly) {
     const [option] = choice.options;
-    return [partHeader, `Reserva actual: ${selected.ubicacion} | lote ${selected.lote}.`,
-      `Única alternativa: ${choice.location} | lote ${option.lot} | vence ${displayExpiry(option.expiry)}.`,
+    return [`Única alternativa: ${choice.location} | lote ${option.lot} | vence ${displayExpiry(option.expiry)}.`,
+      '', partHeader, `Reserva actual: ${selected.ubicacion} | lote ${selected.lote}.`,
       '', 'Verifica la ubicación y el lote. Responde «Confirmo el cambio» si coinciden o «No coincide» si son distintos.',
       'Aún no cambié la reserva ni se inició producción.'].join('\n');
   }
   const choosingLocation = choice.kind === 'location';
   return [
-    partHeader,
-    `Actual: lote ${selected.lote} | ubicación ${selected.ubicacion || 'sin ubicación'}.`,
     choosingLocation
       ? 'Elige la ubicación donde encontraste esta partida (cada opción tiene al menos un lote con saldo suficiente):'
       : `Para la ubicación ${choice.location}, elige el lote que verificaste físicamente:`,
+    '', partHeader,
+    `Actual: lote ${selected.lote} | ubicación ${selected.ubicacion || 'sin ubicación'}.`,
+    '',
     ...choice.options.map((option, number) => choosingLocation
       ? `${number + 1}. Ubicación ${option.location} | ${option.lotCount} ${option.lotCount === 1 ? 'lote apto' : 'lotes aptos'} | saldo máximo en un lote: ${roundQty(option.available)} ${selected.unidad || 'und'}`
       : `${number + 1}. Lote ${option.lot} | disponible ${roundQty(option.available)} ${selected.unidad || 'und'} | vence ${displayExpiry(option.expiry)}`),
@@ -215,6 +219,7 @@ async function loadAllocations(db, orderId, lock = false) {
 
 function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
   const lines = [
+    ...(note ? [note, ''] : []),
     `🏭 *Revisa el alistamiento de OP ID ${order.id} | ${order.codigo_orden}*`,
     `Producto terminado: ${order.producto_nombre} (${order.producto_sku}).`,
     '', '*Materiales reservados*',
@@ -222,16 +227,17 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
       `${index + 1}. *${row.producto}* (${row.sku}): ${roundQty(row.cantidad_reservada)} ${row.unidad || 'und'}`,
       `   Lote: ${row.lote} | ubicación: ${row.ubicacion || 'sin ubicación'}`,
     ]),
-    '', note || 'Verifica físicamente cada partida antes de iniciar la producción.',
-    '', 'Para corregir, puedes decir el producto o SKU si identifica una sola partida: «corrijo la ubicación del tarro a A10» o «cambiar lote de las etiquetas». También puedes decir «corrijo la partida 1: ubicación A10». Esa ubicación es de donde recoges el material; no indica un traslado.',
-    'Si el mismo producto tiene varias partidas, indica su número o el lote y ubicación actuales para distinguirla.',
-    'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
+    '', 'Verifica físicamente cada partida. Para corregir, indica el material o «partida N». La ubicación es de donde recoges el material; no indica un traslado.',
     choicePending
       ? 'Hay una corrección pendiente. Resuelve esa propuesta o cancélala antes de confirmar materiales.'
       : `Si *todo el resumen* está correcto, responde exactamente: *Confirmo materiales OP ID ${order.id}*.`,
     'Hasta esa confirmación no se consumen materiales ni se inicia la OP.',
   ];
   return lines.join('\n');
+}
+
+function pickFeedback(order, note) {
+  return `${note}\n\n*OP ID ${order.id} | ${order.codigo_orden}*`;
 }
 
 function mentionedOrderId(text) {
@@ -747,7 +753,7 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
         resolvedKind = 'clarify-material';
         note = 'Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.';
       } else if (intent.kind === 'clarify') {
-        note = '¿Qué material quieres corregir y necesitas otro lugar para recogerlo u otro lote? No cambié las reservas.';
+        note = '¿Qué material quieres corregir? Si ya lo sabes, indica si buscas otra ubicación u otro lote. No cambié las reservas.';
       } else {
         try {
           pendingChoice = await offerStructuredPickIntent(db, rows, intent, rawText);
@@ -840,15 +846,19 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
         pendingChoice ? JSON.stringify(pendingChoice) : null]
     );
     await db.commit();
-    return { message: pendingChoice && !reviewRequested
-      ? `🏭 OP ID ${order.id} | ${order.codigo_orden} - corrección de alistamiento\n\n${note}`
-      : pickSummary(order, current, note, { choicePending: Boolean(pendingChoice) }), orderId: order.id, resolvedKind };
+    const showSummary = reviewRequested || (confirmationRequested && !pendingChoice) || correction?.resolved || !note;
+    return { message: showSummary
+      ? pickSummary(order, current, note, { choicePending: Boolean(pendingChoice) })
+      : pickFeedback(order, note), orderId: order.id, resolvedKind };
   } catch (error) {
     await db.rollback().catch(() => {});
     if (error.status === 409 && (isPickCorrection(rawText) || isPickDialogueReply(rawText) || pickOptionNumber(rawText) !== null)
       && originalReview) {
-      return { message: `⚠️ ${error.message}\n\n${pickSummary(originalReview.order,
-        originalReview.rows, 'No se cambiaron las reservas. Corrige la partida indicada y vuelve a revisar el resumen.')}` };
+      const { order, rows } = originalReview;
+      const context = error.allocationIds
+        ? allocationCandidates(rows, error.allocationIds).join('\n')
+        : `Para ver todas las partidas, pide «Revisa materiales OP ID ${order.id}».`;
+      return { message: pickFeedback(order, `${error.message}\n\n${context}`) };
     }
     throw error;
   }

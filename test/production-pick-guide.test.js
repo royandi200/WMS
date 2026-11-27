@@ -143,8 +143,10 @@ test('una orden de confirmar primero muestra las partidas; solo una frase explí
   const first = await advanceProductionPick({ db, userId: 7,
     rawText: 'confirmo materiales OP ID 110' });
   assert.equal(first.confirm, undefined);
+  assert.match(first.message, /^Antes de confirmar/u);
   assert.match(first.message, /Revisa el alistamiento de OP ID 110/u);
   assert.match(first.message, /1\. \*TARRO CUADRADO/u);
+  assert.match(first.message, /responde exactamente: \*Confirmo materiales OP ID 110\*/u);
   assert.equal(db.review.hash, allocationFingerprint(db.allocations));
   const second = await advanceProductionPick({ db, userId: 7,
     rawText: 'Confirmo materiales OP ID 110' });
@@ -215,6 +217,7 @@ test('cambiar ubicación ofrece los lotes del SKU y opción 2 aplica solo el ele
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const offered = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección: partida 1, ubicación A10' });
+  assert.match(offered.message, /^Para la ubicación A10, elige el lote/u);
   assert.match(offered.message, /1\. Lote R5-260923-TRP/u);
   assert.match(offered.message, /2\. Lote R7-260927-TRP/u);
   assert.match(offered.message, /Partida 1: TARRO CUADRADO x 60/u);
@@ -228,7 +231,7 @@ test('cambiar ubicación ofrece los lotes del SKU y opción 2 aplica solo el ele
   assert.match(blocked.message, /Falta elegir el lote/u);
   assert.doesNotMatch(blocked.message, /Materiales reservados|TAPA TARRO CUADRADO BLANCO/u);
   const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'opción 2' });
-  assert.match(chosen.message, /Corrección aplicada a la partida 1/u);
+  assert.match(chosen.message, /^Corrección aplicada a la partida 1/u);
   assert.match(chosen.message, /Lote: R7-260927-TRP \| ubicación: A10/u);
   assert.match(chosen.message, /Materiales reservados/u);
   assert.equal(db.allocations[0].stock_id, 14);
@@ -420,7 +423,9 @@ test('ver las reservas no abre otra aclaración ni descarta la propuesta vigente
   const rawText = 'Enséñame qué quedó reservado para la OP 110';
   const mistaken = structuredPickIntent({ intencion_alistamiento: { tipo: 'ACLARAR', evidencia: rawText } }, rawText);
   const first = await advanceProductionPick({ db, userId: 7, rawText, intent: mistaken });
-  assert.match(first.message, /Este es el resumen de las reservas/u);
+  assert.match(first.message, /^Este es el resumen de las reservas/u);
+  assert.match(first.message, /Materiales reservados/u);
+  assert.match(first.message, /responde exactamente:/u);
   assert.doesNotMatch(first.message, /Qué material quieres corregir/u);
   assert.equal(first.resolvedKind, 'review');
   await advanceProductionPick({ db, userId: 7, rawText: '¿De dónde más puedo sacar los tarros?' });
@@ -441,7 +446,9 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   for (const intent of [{ kind: 'location', reference: 'tapas' },
     { kind: 'location', reference: 'tarros' }, { kind: 'clarify' }]) {
     const result = await advanceProductionPick({ db, userId: 7, rawText, intent });
-    assert.match(result.message, /Mencionaste varios materiales\. ¿Cuál quieres revisar primero\?/u);
+    assert.match(result.message, /^Mencionaste varios materiales\. ¿Cuál quieres revisar primero\?/u);
+    assert.doesNotMatch(result.message, /Materiales reservados|Confirmo materiales/u);
+    assert.match(result.message, /OP ID 110/u);
     assert.equal(result.resolvedKind, 'clarify-material');
     assert.equal(db.review.choice, null);
     assert.equal(allocationFingerprint(db.allocations), before);
@@ -452,7 +459,8 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   const partlyUnknown = await advanceProductionPick({ db, userId: 7,
     rawText: 'No encuentro las tapas ni las bolsitas', intent: { kind: 'clarify' } });
   assert.equal(partlyUnknown.resolvedKind, 'clarify');
-  assert.doesNotMatch(partlyUnknown.message, /Mencionaste varios materiales/u);
+  assert.match(partlyUnknown.message, /^¿Qué material quieres corregir\?/u);
+  assert.doesNotMatch(partlyUnknown.message, /Mencionaste varios materiales|Materiales reservados|Confirmo materiales/u);
 });
 
 test('las dos retoma la partida preguntada y No coincide cancela la lista resultante', async () => {
@@ -485,8 +493,8 @@ test('el saldo informado para otro lote no incluye el que ya está reservado', a
   assert.match((await advanceProductionPick(request)).message, /el mayor saldo por lote es 2/u);
   db.stocks.get(15).cantidad = 0;
   const none = await advanceProductionPick(request);
-  assert.match(none.message, /No hay otro lote disponible/u);
-  assert.doesNotMatch(none.message, /mayor saldo por lote|Si hay saldos parciales/u);
+  assert.match(none.message, /^No hay otro lote disponible/u);
+  assert.doesNotMatch(none.message, /mayor saldo por lote|Si hay saldos parciales|Materiales reservados|Confirmo materiales/u);
   assert.equal(db.allocations[0].stock_id, 11);
 });
 
@@ -720,7 +728,8 @@ test('si hay dos partidas del mismo SKU, un nombre sin número no cambia ninguna
   const reply = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección: los tarros estaban en A10' });
   assert.match(reply.message, /partida N/u);
-  assert.match(reply.message, /Materiales reservados/u);
+  assert.match(reply.message, /Partida 1: TARRO CUADRADO[\s\S]+Partida 3: TARRO CUADRADO/u);
+  assert.doesNotMatch(reply.message, /Materiales reservados|TAPA TARRO|Confirmo materiales/u);
   assert.equal(db.allocations[0].stock_id, 11);
   assert.equal(db.stocks.get(11).reservada, 7);
 });
@@ -731,7 +740,7 @@ test('una ubicación sin saldo suficiente revierte la corrección y el resumen p
   const reply = await advanceProductionPick({ db, userId: 7,
     rawText: 'corrección: partida 1, ubicación A10' });
   assert.match(reply.message, /mayor saldo por lote es 3/u);
-  assert.match(reply.message, /No se cambiaron las reservas/u);
+  assert.match(reply.message, /No cambié las reservas/u);
   assert.equal(db.stocks.get(11).reservada, 7);
   assert.equal(db.stocks.get(12).reservada, 0);
   db.allocations[0].cantidad_reservada = 6;

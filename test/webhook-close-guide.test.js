@@ -395,6 +395,11 @@ test('el webhook toma la intención estructurada de BBC solo con rol, texto y re
     assert.equal(summary.body.context.picking_intent.kind, 'clarify');
     assert.equal(summary.body.context.picking_intent.resolved_kind, 'review');
     lastWorkflowAction = action;
+    const askMaterial = '¿De dónde saco eso entonces?';
+    const clarification = await invoke(action, askMaterial,
+      { intencion_alistamiento: { tipo: 'ACLARAR', evidencia: askMaterial } });
+    assert.match(clarification.body.mensaje.split('\n')[0], /¿Qué material quieres corregir\?/u);
+    assert.doesNotMatch(clarification.body.mensaje, /Materiales reservados|Confirmo materiales/u);
     const wrongAction = await invoke('CERRAR_ORDEN_PRODUCCION', text, opts);
     assert.equal(wrongAction.body.ok, false);
     const invented = await invoke(action, text, { intencion_alistamiento: { ...intent, producto: 'tapas' } });
