@@ -137,6 +137,10 @@ function allocationCandidates(rows, allocationIds) {
 }
 
 function choicePrompt(choice, rows) {
+  if (choice.kind === 'material') {
+    const labels = choice.materials.map(material => `«${material.label}»`);
+    return `¿Qué material quieres revisar primero: ${labels.join(' o ')}?\nResponde solo con el nombre. No cambié las reservas.`;
+  }
   if (choice.kind === 'allocation') {
     return [choice.reason, '', ...allocationCandidates(rows, choice.allocationIds),
       '', 'Puedes decir la cantidad si distingue una sola partida, o indicar «partida N». No cambié las reservas.'].join('\n');
@@ -236,8 +240,8 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
   return lines.join('\n');
 }
 
-function pickFeedback(order, note) {
-  return `${note}\n\n*OP ID ${order.id} | ${order.codigo_orden}*`;
+function pickFeedback(order, note, short = false) {
+  return `${note}\n\n*${short ? `OP ${order.id}` : `OP ID ${order.id} | ${order.codigo_orden}`}*`;
 }
 
 function mentionedOrderId(text) {
@@ -466,6 +470,14 @@ function otherCoordinatedReferences(text, chosen) {
   return [...peers].slice(0, 4);
 }
 
+function pickedMaterial(choice, text) {
+  if (choice?.kind !== 'material') return null;
+  const bareName = value => normalize(value).replace(/^[¿¡]+|[.!?]+$/gu, '').replace(/^(?:los?|las?)\s+/u, '');
+  const reply = bareName(text);
+  const matches = choice.materials.filter(material => bareName(material.label) === reply);
+  return matches.length === 1 ? matches[0] : null;
+}
+
 async function offerStructuredPickIntent(db, rows, intent, rawText) {
   const lookup = { productIds: [...new Set(rows.map(row => row.producto_id))], allowContextualPartial: true };
   let product;
@@ -480,6 +492,7 @@ async function offerStructuredPickIntent(db, rows, intent, rawText) {
   }
   const chooseMaterial = () => Object.assign(pickError('Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.'),
     { resolvedKind: 'clarify-material' });
+  const materials = new Map([[Number(product.id), { productId: Number(product.id), label: intent.reference }]]);
   for (const reference of otherCoordinatedReferences(rawText, intent.reference)) {
     let other;
     try {
@@ -489,39 +502,43 @@ async function offerStructuredPickIntent(db, rows, intent, rawText) {
       if (error.code !== 'PRODUCT_REFERENCE_AMBIGUOUS') throw error;
       throw chooseMaterial();
     }
-    if (Number(other.id) !== Number(product.id)) {
-      throw chooseMaterial();
-    }
+    if (!materials.has(Number(other.id))) materials.set(Number(other.id), { productId: Number(other.id), label: reference });
   }
+  if (materials.size > 1) return newPickChoice('material', { materials: [...materials.values()], kindToOffer: intent.kind });
+  return offerProductPick(db, rows, product, intent.kind);
+}
+
+async function offerProductPick(db, rows, product, kind) {
   let selected;
   try {
     selected = uniqueProductAllocation(rows, product.id, `${product.nombre} (${product.siigo_code})`, '');
   } catch (error) {
-    if (error.allocationIds) return allocationClarification(error, intent.kind);
+    if (error.allocationIds) return allocationClarification(error, kind);
     throw error;
   }
   if (!selected) throw pickError('Ese material no pertenece a la revisión actual. No cambié las reservas.');
-  return offerPickAlternatives(db, selected, intent.kind);
+  return offerPickAlternatives(db, selected, kind);
 }
 
-async function namesMultipleMissingMaterials(db, rows, text) {
+async function missingMaterialChoice(db, rows, text) {
   const clause = /\bno (?:encontre|encuentro|encontramos|veo)\s+([^.!?¿;]+)/u.exec(normalize(text));
   const mentions = clause?.[1].split(/\s+(?:ni|y|o)\s+/u) || [];
-  if (mentions.length < 2 || mentions.length > 5) return false;
+  if (mentions.length < 2 || mentions.length > 5) return null;
   const lookup = { productIds: [...new Set(rows.map(row => row.producto_id))], allowContextualPartial: true };
-  const productIds = new Set();
+  const materials = new Map();
   for (const mention of mentions) {
     const reference = mention.trim().replace(/^(?:los?|las?)\s+/u, '').split(/\s+(?:en|donde)\b/u)[0];
     if (!reference || reference.length > 120) continue;
     try {
       const product = await resolveProductReference(db, reference, lookup);
-      productIds.add(Number(product.id));
-      if (productIds.size === 2) return true;
+      if (!materials.has(Number(product.id))) materials.set(Number(product.id), { productId: Number(product.id), label: reference });
     } catch (error) {
       if (!['PRODUCT_REFERENCE_NOT_FOUND', 'PRODUCT_REFERENCE_AMBIGUOUS'].includes(error.code)) throw error;
     }
   }
-  return false;
+  if (materials.size < 2) return null;
+  const kind = pickDiscovery(text)?.kind ?? (/\bdonde mas (?:puedo |podemos )?(?:mirar|buscar|encontrar)\b/u.test(normalize(text)) ? 'location' : null);
+  return newPickChoice('material', { materials: [...materials.values()], kindToOffer: kind === 'clarify' ? null : kind });
 }
 
 async function offerPickAlternatives(db, selected, kind, targetLocation) {
@@ -663,6 +680,7 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
   const explicitId = mentionedOrderId(rawText);
   const active = await pendingPickReview(db, userId);
   const confirmedChange = !intent && explicitPickChangeConfirmation(rawText);
+  const materialReply = intent?.kind === 'material-reply';
   const reviewRequested = intent?.kind === 'review' || isPlainPickReview(rawText);
   if (confirmedChange && !active?.choice) {
     return { message: 'No hay un cambio pendiente de confirmar. No cambié las reservas.' };
@@ -670,7 +688,7 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
   if (intent && !reviewRequested && (!active || (explicitId && Number(active.order_id) !== explicitId))) {
     return { message: 'Revisa primero los materiales de la OP que quieres alistar. No cambié las reservas.' };
   }
-  const notifiedId = !explicitId && (reviewRequested || intent || isPickCorrection(rawText) || isPickReviewIntent(rawText))
+  const notifiedId = !materialReply && !explicitId && (reviewRequested || intent || isPickCorrection(rawText) || isPickReviewIntent(rawText))
     ? await recentPickNotificationReference(db, from) : null;
   if (!explicitId && active && notifiedId && Number(active.order_id) !== notifiedId) {
     return { message: `Hay un alistamiento revisado de OP ID ${active.order_id} y un aviso de OP ID ${notifiedId}. Indica cuál vas a corregir, por ejemplo «Revisa materiales OP ID ${notifiedId}». No se cambiaron reservas ni se inició producción.` };
@@ -699,13 +717,16 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
     const rows = await loadAllocations(db, order.id, true);
     if (!rows.length) throw pickError('La OP no tiene partidas reservadas; no se inició producción.');
     originalReview = { order, rows };
-    if (confirmedChange) {
+    if (confirmedChange || materialReply) {
       const current = await pendingPickReview(db, userId, { lock: true });
       // Do not apply a confirmation to a proposal replaced while waiting for the lock.
-      if (!current || Number(current.order_id) !== Number(active.order_id)
-        || current.huella !== active.huella || JSON.stringify(current.choice) !== JSON.stringify(active.choice)) {
+      const expected = materialReply && intent.review ? intent.review : active;
+      if (!current || Number(current.order_id) !== Number(expected.order_id)
+        || current.huella !== expected.huella || JSON.stringify(current.choice) !== JSON.stringify(expected.choice)) {
         await db.commit();
-        return { message: 'La propuesta cambió. Revisa la alternativa vigente antes de confirmar. No cambié las reservas.' };
+        return { message: materialReply
+          ? 'La selección cambió. Vuelve a indicar qué materiales buscas. No cambié las reservas.'
+          : 'La propuesta cambió. Revisa la alternativa vigente antes de confirmar. No cambié las reservas.' };
       }
     }
     const reviewedFingerprint = allocationFingerprint(rows);
@@ -735,6 +756,23 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
       pendingChoice = activeChoice;
       resolvedKind = 'review';
       note = 'Este es el resumen de las reservas. No cambié nada.';
+    } else if (materialReply) {
+      const material = pickedMaterial(activeChoice, rawText);
+      const row = material && rows.find(item => Number(item.producto_id) === material.productId);
+      const kind = activeChoice?.kindToOffer;
+      if (!row) {
+        note = 'Esa selección ya no está vigente. Vuelve a indicar qué materiales buscas. No cambié las reservas.';
+      } else if (kind !== 'location' && kind !== 'lot') {
+        note = `Para «${material.label}», ¿buscas otra ubicación u otro lote? No cambié las reservas.`;
+      } else {
+        try {
+          pendingChoice = await offerProductPick(db, rows, { id: row.producto_id, nombre: row.producto, siigo_code: row.sku }, kind);
+          note = choicePrompt(pendingChoice, rows);
+        } catch (error) {
+          if (error.status !== 409) throw error;
+          note = error.message;
+        }
+      }
     } else if (activeChoice?.kind === 'allocation' && (allocationReply || (!intent && !isPickCorrection(rawText)))) {
       const selected = allocationReply ? await resolveClarifiedAllocation(db, rows, activeChoice, allocationReply) : null;
       if (selected) {
@@ -748,15 +786,23 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
         note = `${lead}\n\n${choicePrompt(pendingChoice, rows)}`;
       }
     } else if (intent) {
-      if (intent.kind === 'clarify-material' || (intent.kind === 'clarify'
-        && await namesMultipleMissingMaterials(db, rows, rawText))) {
+      if (['clarify', 'clarify-material', 'legacy-clarify-material'].includes(intent.kind)) {
+        pendingChoice = await missingMaterialChoice(db, rows, rawText);
+      }
+      if (pendingChoice?.kind === 'material' || intent.kind === 'clarify-material') {
         resolvedKind = 'clarify-material';
-        note = 'Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.';
+        note = pendingChoice ? choicePrompt(pendingChoice, rows)
+          : 'Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.';
+      } else if (intent.kind === 'legacy-clarify-material') {
+        await db.commit();
+        return { message: '¿Qué material quieres revisar primero? Dime el nombre tal como aparece en el resumen. No cambié las reservas.',
+          resolvedKind: 'clarify-material' };
       } else if (intent.kind === 'clarify') {
         note = '¿Qué material quieres corregir? Si ya lo sabes, indica si buscas otra ubicación u otro lote. No cambié las reservas.';
       } else {
         try {
           pendingChoice = await offerStructuredPickIntent(db, rows, intent, rawText);
+          if (pendingChoice.kind === 'material') resolvedKind = 'clarify-material';
           note = choicePrompt(pendingChoice, rows);
         } catch (error) {
           if (error.status !== 409) throw error;
@@ -770,6 +816,9 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
       pendingChoice = activeChoice;
       note = activeChoice ? `Primero indica la opción que cotejaste.\n\n${choicePrompt(activeChoice, rows)}`
         : 'No hay un cambio pendiente de confirmar. No cambié las reservas.';
+    } else if (activeChoice?.kind === 'material' && (selectedOption !== null || confirmationRequested)) {
+      pendingChoice = activeChoice;
+      note = choicePrompt(activeChoice, rows);
     } else if (selectedOption !== null) {
       if (!activeChoice) {
         note = 'No hay una selección vigente. Di «corrección: partida N, cambiar ubicación» o «corrección: partida N, cambiar lote» para ver opciones. No se cambiaron reservas.';
@@ -849,7 +898,7 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
     const showSummary = reviewRequested || (confirmationRequested && !pendingChoice) || correction?.resolved || !note;
     return { message: showSummary
       ? pickSummary(order, current, note, { choicePending: Boolean(pendingChoice) })
-      : pickFeedback(order, note), orderId: order.id, resolvedKind };
+      : pickFeedback(order, note, pendingChoice?.kind === 'material'), orderId: order.id, resolvedKind };
   } catch (error) {
     await db.rollback().catch(() => {});
     if (error.status === 409 && (isPickCorrection(rawText) || isPickDialogueReply(rawText) || pickOptionNumber(rawText) !== null)
@@ -866,4 +915,4 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
 
 module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation, explicitPickChangeConfirmation, structuredPickIntent,
   isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, pickOptionNumber, loadAllocations, pendingPickReview,
-  pickLocations, pickLots, pickSummary, recentPickNotificationReference };
+  pickLocations, pickLots, pickedMaterial, pickSummary, recentPickNotificationReference };

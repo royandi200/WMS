@@ -446,11 +446,11 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   for (const intent of [{ kind: 'location', reference: 'tapas' },
     { kind: 'location', reference: 'tarros' }, { kind: 'clarify' }]) {
     const result = await advanceProductionPick({ db, userId: 7, rawText, intent });
-    assert.match(result.message, /^Mencionaste varios materiales\. ¿Cuál quieres revisar primero\?/u);
+    assert.match(result.message, /^¿Qué material quieres revisar primero: «(?:tapas» o «tarros|tarros» o «tapas)»\?/u);
     assert.doesNotMatch(result.message, /Materiales reservados|Confirmo materiales/u);
-    assert.match(result.message, /OP ID 110/u);
+    assert.match(result.message, /\*OP 110\*$/u);
     assert.equal(result.resolvedKind, 'clarify-material');
-    assert.equal(db.review.choice, null);
+    assert.equal(JSON.parse(db.review.choice).kind, 'material');
     assert.equal(allocationFingerprint(db.allocations), before);
   }
   const single = await advanceProductionPick({ db, userId: 7,
@@ -461,6 +461,38 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   assert.equal(partlyUnknown.resolvedKind, 'clarify');
   assert.match(partlyUnknown.message, /^¿Qué material quieres corregir\?/u);
   assert.doesNotMatch(partlyUnknown.message, /Mencionaste varios materiales|Materiales reservados|Confirmo materiales/u);
+});
+
+test('una respuesta corta retoma la búsqueda de la OP sin aplicar reservas ni confirmar', async () => {
+  const db = fakeDb();
+  const send = (rawText, intent) => advanceProductionPick({ db, userId: 7, rawText, intent });
+  await send('Revisa materiales OP ID 110');
+  const before = allocationFingerprint(db.allocations);
+  const question = 'No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?';
+  await send(question, { kind: 'clarify' });
+  assert.match((await send('1')).message, /Responde solo con el nombre/u);
+  assert.equal((await send('Confirmo materiales OP ID 110')).confirm, undefined);
+  assert.equal(JSON.parse(db.review.choice).kind, 'material');
+  const tarros = await send('tarros', { kind: 'material-reply' });
+  assert.match(tarros.message, /Ubicación A10/u);
+  assert.equal(tarros.orderId, 110);
+  assert.equal(tarros.confirm, undefined);
+  await send(question, { kind: 'legacy-clarify-material' });
+  const tapas = await send('Las tapas.', { kind: 'material-reply' });
+  assert.match(tapas.message, /^No hay otra ubicación registrada con un lote disponible de TAPA/u);
+  assert.equal(tapas.orderId, 110);
+  assert.equal(tapas.confirm, undefined);
+  assert.equal(allocationFingerprint(db.allocations), before);
+});
+
+test('una respuesta corta no usa una selección reemplazada concurrentemente', async () => {
+  const db = fakeDb();
+  const send = (rawText, intent) => advanceProductionPick({ db, userId: 7, rawText, intent });
+  await send('Revisa materiales OP ID 110');
+  await send('No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?', { kind: 'clarify' });
+  db.cancelOnNextReviewLock();
+  assert.match((await send('tarros', { kind: 'material-reply' })).message, /^La selección cambió/u);
+  assert.equal(db.review.choice, null);
 });
 
 test('las dos retoma la partida preguntada y No coincide cancela la lista resultante', async () => {

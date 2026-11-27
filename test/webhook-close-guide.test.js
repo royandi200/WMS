@@ -74,6 +74,10 @@ require.cache[dbPath] = {
             id: 6, siigo_code: '00006-TRP', nombre: 'TARRO CUADRADO x 60',
             unit_label: 'und', alias: 'tarros',
           }]];
+        if (pickAllocations && /FROM producto_aliases pa/u.test(sql) && params[0] === 'tapas'
+          && pickAllocations.some(row => row.producto_id === 1)) return [[{
+          id: 1, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO', unit_label: 'und', alias: 'tapas',
+        }]];
         if (/FROM producto_aliases pa/u.test(sql)) return [[{
           id: 6, siigo_code: '00001-TPBI', nombre: 'TAPA TARRO CUADRADO BLANCO',
           unit_label: 'und', alias: 'tapa',
@@ -431,6 +435,9 @@ test('la aclaración de BBC con campos de otro borrador conserva el alistamiento
   const text = 'No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?';
   const params = { editar_borrador: true, aclarar: 'valor' };
   lastWorkflowAction = action;
+  pickAllocations = [{ id: 501, produccion_material_id: 10, stock_id: 11, lote: 'R5-260923-TRP',
+    ubicacion_id: 1, cantidad_reservada: 2, producto_id: 6, unidad: 'und', bodega_id: 1,
+    sku: '00006-TRP', producto: 'TARRO CUADRADO x 60', ubicacion: 'A11' }];
   pickReview = { userId: user.id, orderId: 121, hash: 'review-121',
     choice: JSON.stringify({ kind: 'lot', expiresAt: Date.now() + 60000 }) };
   const original = pickReview;
@@ -455,6 +462,54 @@ test('la aclaración de BBC con campos de otro borrador conserva el alistamiento
     user.rol_nombre = 'admin';
     delete user.roles;
     pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
+});
+
+test('el webhook retoma las opciones nombradas aunque BBC clasifique la respuesta corta como charla o stock', async () => {
+  writes.length = 0;
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  pickReview = null;
+  pickAllocations = [{ id: 501, produccion_material_id: 10, stock_id: 11, lote: 'R5-260923-TRP',
+    ubicacion_id: 1, cantidad_reservada: 2, producto_id: 6, unidad: 'und', bodega_id: 1,
+    sku: '00006-TRP', producto: 'TARRO CUADRADO x 60', ubicacion: 'A11' },
+  { id: 502, produccion_material_id: 11, stock_id: 21, lote: 'L-TAPA', ubicacion_id: 3,
+    cantidad_reservada: 2, producto_id: 1, unidad: 'und', bodega_id: 1, sku: '00001-TPBI',
+    producto: 'TAPA TARRO CUADRADO BLANCO', ubicacion: 'A8' }];
+  const action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+  const text = 'No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?';
+  const open = () => invoke(action, text, { editar_borrador: true, aclarar: 'valor' });
+  try {
+    await invoke(action, 'Revisa materiales OP ID 121');
+    lastWorkflowAction = action;
+    const question = await open();
+    assert.match(question.body.mensaje.split('\n')[0], /«tapas» o «tarros»/u);
+    assert.doesNotMatch(question.body.mensaje, /OP-\d|Materiales reservados|Confirmo materiales/u);
+    lastWorkflowAction = 'AVANZAR_RECEPCION_GUIADA_OC';
+    assert.notEqual((await invoke('MODO_CHARLA', 'tarros')).body.context?.picking_intent?.kind, 'material-reply');
+    lastWorkflowAction = action;
+    const tarros = await invoke('MODO_CHARLA', 'tarros');
+    assert.equal(tarros.body.context.picking_intent.kind, 'material-reply');
+    assert.match(tarros.body.mensaje, /TARRO CUADRADO x 60/u);
+    assert.match(tarros.body.mensaje, /OP ID 121/u);
+    await open();
+    const tapas = await invoke('CONSULTAR_STOCK_MATERIA_PRIMA', 'tapas');
+    assert.equal(tapas.body.context.picking_intent.kind, 'material-reply');
+    assert.match(tapas.body.mensaje, /TAPA TARRO CUADRADO BLANCO/u);
+    assert.match(tapas.body.mensaje, /OP ID 121/u);
+    await open();
+    pickReview.choice = JSON.stringify({ ...JSON.parse(pickReview.choice), expiresAt: Date.now() - 1 });
+    const expired = await invoke('MODO_CHARLA', 'tarros');
+    assert.match(expired.body.mensaje, /Esa selección ya no está vigente/u);
+    assert.doesNotMatch(expired.body.mensaje, /Ubicación A10/u);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO kardex/u.test(entry.sql)));
+  } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    pickReview = null;
+    pickAllocations = null;
     lastWorkflowAction = null;
   }
 });

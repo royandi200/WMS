@@ -111,7 +111,7 @@ const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const { advanceProductionPick, structuredPickIntent, explicitPickChangeConfirmation,
   isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, pickOptionNumber,
-  pendingPickReview, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
+  pendingPickReview, pickedMaterial, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
   resolveProductionOrigin,
@@ -1714,16 +1714,34 @@ module.exports = async (req, res) => {
     }
 
     const userRoles = user.roles || [user.rol_nombre].filter(Boolean);
+    const canPick = hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK);
+    const nativeText = currentText(rawBody, {}).trim();
+    const materialReview = canPick && nativeText && nativeText === rawText.trim() && nativeText.length <= 120
+      && ['MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION', 'CERRAR_ORDEN_PRODUCCION',
+        'CONSULTAR_STOCK_MATERIA_PRIMA', 'CONSULTAR_STOCK_PRODUCTO_TERMINADO'].includes(action)
+      ? await pendingPickReview(db, user.id) : null;
+    if (pickedMaterial(materialReview?.choice, nativeText)
+      && await lastProcessedWorkflowAction(db, from) === 'CONFIRMAR_MATERIALES_PRODUCCION'
+      && !await hasRecentReceptionContext(db, user.id, from)) {
+      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+      const result = await advanceProductionPick({ db, userId: user.id, from, rawText: nativeText,
+        intent: { kind: 'material-reply', review: materialReview } });
+      const body = { ok: true, message: result.message, mensaje: result.message, context: {
+        picking_intent: { source: 'USER_TEXT', kind: 'material-reply' }, inventory_changed: false,
+      } };
+      await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
+      return await finalizeHandledResponse(body);
+    }
     if (hasStructuredPickIntent) {
       if (action !== 'CONFIRMAR_MATERIALES_PRODUCCION') {
         throw draftInputError('La consulta de alternativas debe hacerse desde el alistamiento. No cambié las reservas.');
       }
-      if (!hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK)) {
+      if (!canPick) {
         const msg = 'No tienes permiso para revisar el alistamiento de producción.';
         await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
         return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED' });
       }
-      const transportText = currentText(rawBody, {}).trim();
+      const transportText = nativeText;
       const confirmedChange = explicitPickChangeConfirmation(transportText);
       const source = confirmedChange ? transportText : currentText(rawBody, info).trim();
       if (!confirmedChange && (!source || source !== rawText.trim())) {
@@ -1747,8 +1765,7 @@ module.exports = async (req, res) => {
       await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
       return await finalizeHandledResponse(body);
     }
-    const pickOnlyOperator = hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK)
-      && !hasCapability(userRoles, CAPABILITIES.PRODUCTION_CLOSE);
+    const pickOnlyOperator = canPick && !hasCapability(userRoles, CAPABILITIES.PRODUCTION_CLOSE);
     if (pickOnlyOperator && action === 'CONFIRMAR_MATERIALES_PRODUCCION'
       && params.editar_borrador === true && params.aclarar === 'valor'
       && rawText.trim() && currentText(rawBody, {}).trim() === rawText.trim()
@@ -1756,7 +1773,8 @@ module.exports = async (req, res) => {
       && await lastProcessedWorkflowAction(db, from) === action
       && !await hasRecentReceptionContext(db, user.id, from)) {
       // BBC asked for clarification with draft fields, not a picking selection.
-      const msg = '¿Qué material quieres revisar primero? Dime el nombre tal como aparece en el resumen. No cambié las reservas.';
+      const { message: msg } = await advanceProductionPick({ db, userId: user.id, from, rawText,
+        intent: { kind: 'legacy-clarify-material' } });
       const body = { ok: true, message: msg, mensaje: msg, context: {
         picking_intent: { source: 'BBC_DRAFT_CLARIFICATION', resolved_kind: 'clarify-material' },
         inventory_changed: false,
