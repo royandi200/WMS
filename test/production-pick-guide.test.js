@@ -9,6 +9,7 @@ function fakeDb({ a9Quantity = 10, a10Quantity = 12, extraA10Lot = false, extraA
   extraTarroPart = false, withEtiqueta = false, notices = [] } = {}) {
   let snapshot = null;
   let review = null;
+  let cancelBeforeReviewLock = false;
   let nextId = withEtiqueta ? 4 : 3;
   let allocations = [
     { id: 1, produccion_material_id: 10, stock_id: 11, lote: 'R5-260923-TRP',
@@ -49,6 +50,7 @@ function fakeDb({ a9Quantity = 10, a10Quantity = 12, extraA10Lot = false, extraA
   ]);
   const db = {
     get review() { return review; },
+    cancelOnNextReviewLock() { cancelBeforeReviewLock = true; },
     get allocations() { return allocations; },
     get stocks() { return stocks; },
     async beginTransaction() {
@@ -66,6 +68,10 @@ function fakeDb({ a9Quantity = 10, a10Quantity = 12, extraA10Lot = false, extraA
     },
     async execute(sql, params = []) {
       if (sql.includes('FROM produccion_alistamiento_revisiones')) {
+        if (cancelBeforeReviewLock && sql.includes('FOR UPDATE')) {
+          cancelBeforeReviewLock = false;
+          review = { ...review, choice: null };
+        }
         return [review ? [{ order_id: review.orderId, huella: review.hash,
           choice_json: review.choice }] : []];
       }
@@ -348,6 +354,20 @@ test('una sola ubicación con varios lotes abre directamente la lista de lotes',
   assert.equal(db.allocations[0].stock_id, 11);
   assert.match((await send('opción 2')).message, /Corrección aplicada/u);
   assert.equal(db.allocations[0].stock_id, 14);
+});
+
+test('confirmar el cambio no reutiliza una propuesta cancelada mientras esperaba el bloqueo', async () => {
+  const db = fakeDb({ a9Quantity: 0 });
+  const send = rawText => advanceProductionPick({ db, userId: 7, rawText });
+  await send('Revisa materiales OP ID 110');
+  await send('¿De dónde más puedo sacar los tarros?');
+  db.cancelOnNextReviewLock();
+  const reply = await send('Confirmo el cambio');
+  assert.match(reply.message, /La propuesta cambió/u);
+  assert.equal(reply.confirm, undefined);
+  assert.equal(db.allocations[0].stock_id, 11);
+  assert.equal(db.stocks.get(12).reservada, 0);
+  assert.equal(db.review.choice, null);
 });
 
 test('la intención de BBC requiere evidencia literal y no admite campos que cambien inventario', () => {

@@ -25,7 +25,7 @@ require.cache[dbPath] = {
         if (/FROM bodegas WHERE activa = 1/u.test(sql)) return [[{ id: 1 }]];
         if (/FROM produccion_cierre_borradores/u.test(sql)) return [closeDraft
           ? [{ payload_json: closeDraft }] : []];
-        if (/FROM produccion_alistamiento_revisiones/u.test(sql)) return [pickReview
+        if (/FROM produccion_alistamiento_revisiones/u.test(sql)) return [pickReview && pickReview.userId === params[0]
           ? [{ order_id: pickReview.orderId, huella: pickReview.hash,
             choice_json: pickReview.choice }] : []];
         if (/SELECT action FROM webhook_logs/u.test(sql)) return [lastWorkflowAction
@@ -87,11 +87,11 @@ require.cache[dbPath] = {
           pickAllocations[0].lote = params[1];
           pickAllocations[0].ubicacion_id = params[2];
           pickAllocations[0].cantidad_reservada = params[3];
-          pickAllocations[0].ubicacion = 'A10';
+          pickAllocations[0].ubicacion = Number(params[2]) === 1 ? 'A11' : 'A10';
           return [{ affectedRows: 1 }];
         }
         if (/INSERT INTO produccion_alistamiento_revisiones/u.test(sql)) {
-          pickReview = { orderId: params[1], hash: params[2], choice: params[3] };
+          pickReview = { userId: params[0], orderId: params[1], hash: params[2], choice: params[3] };
           return [{ affectedRows: 1 }];
         }
         if (/INSERT INTO produccion_cierre_borradores/u.test(sql)) closeDraft = params[2];
@@ -110,9 +110,9 @@ process.env.BUILDERBOT_WEBHOOK_SECRET = 'qa-webhook-secret';
 process.env.DISABLE_OUTBOUND_NOTIFICATIONS = 'true';
 const handler = require('../api/v1/webhook/builderbot');
 
-async function invoke(action, text, params = {}) {
+async function invoke(action, text, params = {}, transportText = text) {
   const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
-    body: { from: user.telefono, body: text,
+    body: { from: user.telefono, body: transportText,
       info: { '@ction': action, body: text, params } } };
   const res = { statusCode: 200, body: null, setHeader() {},
     status(code) { this.statusCode = code; return this; },
@@ -403,6 +403,55 @@ test('el webhook toma la intención estructurada de BBC solo con rol, texto y re
     assert.equal(denied.body.error, 'RBAC_DENIED');
     assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
   } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
+});
+
+test('la confirmación real prevalece sobre la búsqueda de BBC y solo usa la propuesta vigente y propia', async () => {
+  writes.length = 0;
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  pickReview = null;
+  pickAllocations = [{ id: 501, produccion_material_id: 10, stock_id: 12, lote: 'R5-260923-TRP',
+    ubicacion_id: 2, cantidad_reservada: 2, producto_id: 6, unidad: 'und', bodega_id: 1,
+    sku: '00006-TRP', producto: 'TARRO CUADRADO x 60', ubicacion: 'A10' }];
+  const action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+  const search = '¿Dónde consigo otros tarros?';
+  const mistaken = { intencion_alistamiento: { tipo: 'OTRA_UBICACION', producto: 'tarros', evidencia: search } };
+  const reserveWrites = () => writes.filter(entry => /UPDATE stock SET reservada/u.test(entry.sql));
+  const confirm = () => invoke(action, 'Confirmo el cambio', mistaken);
+  try {
+    await invoke(action, 'Revisa materiales OP ID 121');
+    lastWorkflowAction = action;
+    const absent = await confirm();
+    assert.match(absent.body.mensaje, /No hay un cambio pendiente/u);
+    const proposal = await invoke(action, search, mistaken);
+    assert.match(proposal.body.mensaje, /Única alternativa: A11 \| lote R8-260928-TRP/u);
+    const invented = await invoke(action, 'Confirmo el cambio', mistaken, 'Todavía no lo he revisado');
+    assert.equal(invented.body.ok, false);
+    user.id = 8;
+    const notOwn = await confirm();
+    assert.match(notOwn.body.mensaje, /No hay un cambio pendiente/u);
+    user.id = 7;
+    pickReview.choice = JSON.stringify({ ...JSON.parse(pickReview.choice), expiresAt: Date.now() - 1 });
+    const expired = await confirm();
+    assert.match(expired.body.mensaje, /No hay un cambio pendiente/u);
+    assert.equal(reserveWrites().length, 0);
+    await invoke(action, search, mistaken);
+    const applied = await invoke(action, search, mistaken, 'Confirmo el cambio');
+    assert.match(applied.body.mensaje, /Corrección aplicada a la partida 1/u);
+    assert.equal(applied.body.context.picking_confirmation.source, 'USER_TEXT');
+    assert.equal(pickAllocations[0].stock_id, 14);
+    assert.equal(reserveWrites().length, 2);
+    assert.match((await confirm()).body.mensaje, /No hay un cambio pendiente/u);
+    assert.equal(reserveWrites().length, 2);
+    assert.ok(!writes.some(entry => /UPDATE stock\s+SET cantidad\b|UPDATE ordenes_produccion|INSERT INTO kardex/u.test(entry.sql)));
+  } finally {
+    user.id = 7;
     user.rol_nombre = 'admin';
     delete user.roles;
     pickReview = null;

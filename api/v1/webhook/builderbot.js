@@ -109,7 +109,8 @@ const { reportWaste, parseWasteReferences } = require('../../_lib/waste-workflow
 const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
   parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
-const { advanceProductionPick, structuredPickIntent, isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber,
+const { advanceProductionPick, structuredPickIntent, explicitPickChangeConfirmation,
+  isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber,
   pendingPickReview, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
@@ -1722,11 +1723,13 @@ module.exports = async (req, res) => {
         await saveLog(db, { from, action, priority, payload: rawBody, response: { error: 'RBAC_DENIED' }, status: 'REJECTED' });
         return await finalizeHandledResponse({ ok: false, message: msg, mensaje: msg, error: 'RBAC_DENIED' });
       }
-      const source = currentText(rawBody, info).trim();
-      if (!source || source !== rawText.trim()) {
+      const transportText = currentText(rawBody, {}).trim();
+      const confirmedChange = explicitPickChangeConfirmation(transportText);
+      const source = confirmedChange ? transportText : currentText(rawBody, info).trim();
+      if (!confirmedChange && (!source || source !== rawText.trim())) {
         throw draftInputError('No pude comprobar el mensaje original. Dime qué material buscas. No cambié las reservas.');
       }
-      const intent = structuredPickIntent(params, source);
+      const intent = confirmedChange ? null : structuredPickIntent(params, source);
       if (await lastProcessedWorkflowAction(db, from) !== 'CONFIRMAR_MATERIALES_PRODUCCION') {
         const msg = 'Revisa primero los materiales de la OP que quieres alistar. No cambié las reservas.';
         const body = { ok: false, message: msg, mensaje: msg, error: 'PICK_REVIEW_REQUIRED' };
@@ -1735,7 +1738,8 @@ module.exports = async (req, res) => {
       }
       const result = await advanceProductionPick({ db, userId: user.id, from, rawText: source, intent });
       const body = { ok: true, message: result.message, mensaje: result.message,
-        context: { picking_intent: { source: 'BBC_STRUCTURED', kind: intent.kind }, inventory_changed: false } };
+        context: confirmedChange ? { picking_confirmation: { source: 'USER_TEXT' } }
+          : { picking_intent: { source: 'BBC_STRUCTURED', kind: intent.kind }, inventory_changed: false } };
       await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
       return await finalizeHandledResponse(body);
     }

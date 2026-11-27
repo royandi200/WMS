@@ -164,11 +164,11 @@ function allocationFingerprint(rows) {
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
-async function pendingPickReview(db, userId) {
+async function pendingPickReview(db, userId, { lock = false } = {}) {
   const [rows] = await db.execute(
     `SELECT orden_produccion_id AS order_id, huella, seleccion_pendiente AS choice_json
        FROM produccion_alistamiento_revisiones
-      WHERE usuario_id = ? AND expira_en > NOW() LIMIT 1`, [userId]
+      WHERE usuario_id = ? AND expira_en > NOW() LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [userId]
   );
   return rows[0] ? { ...rows[0], choice: parsePendingChoice(rows[0].choice_json) } : null;
 }
@@ -596,6 +596,10 @@ async function applyAllocation(db, selected, desired) {
 async function advanceProductionPick({ db, userId, from, rawText, intent = null }) {
   const explicitId = mentionedOrderId(rawText);
   const active = await pendingPickReview(db, userId);
+  const confirmedChange = !intent && explicitPickChangeConfirmation(rawText);
+  if (confirmedChange && !active?.choice) {
+    return { message: 'No hay un cambio pendiente de confirmar. No cambié las reservas.' };
+  }
   if (intent && (!active || (explicitId && Number(active.order_id) !== explicitId))) {
     return { message: 'Revisa primero los materiales de la OP que quieres alistar. No cambié las reservas.' };
   }
@@ -628,6 +632,15 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
     const rows = await loadAllocations(db, order.id, true);
     if (!rows.length) throw pickError('La OP no tiene partidas reservadas; no se inició producción.');
     originalReview = { order, rows };
+    if (confirmedChange) {
+      const current = await pendingPickReview(db, userId, { lock: true });
+      // Do not apply a confirmation to a proposal replaced while waiting for the lock.
+      if (!current || Number(current.order_id) !== Number(active.order_id)
+        || current.huella !== active.huella || JSON.stringify(current.choice) !== JSON.stringify(active.choice)) {
+        await db.commit();
+        return { message: 'La propuesta cambió. Revisa la alternativa vigente antes de confirmar. No cambié las reservas.' };
+      }
+    }
     const reviewedFingerprint = allocationFingerprint(rows);
     const activeChoice = active?.choice && Number(active.order_id) === Number(order.id)
       && active.huella === reviewedFingerprint
@@ -644,8 +657,9 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
       ? 'Antes de confirmar, revisa físicamente todas las partidas de este resumen. No se inició producción.' : '';
     let pendingChoice = null;
     let correction = null;
-    const confirmedChange = explicitPickChangeConfirmation(rawText);
-    const selectedOption = confirmedChange && activeChoice?.confirmOnly ? 1 : pickOptionNumber(rawText);
+    const singleProposal = activeChoice?.kind === 'lot' && activeChoice.confirmOnly === true
+      && activeChoice.options?.length === 1;
+    const selectedOption = confirmedChange && singleProposal ? 1 : pickOptionNumber(rawText);
     if (cancelsPickEdit(rawText)) {
       note = 'No cambié nada. Conservé las reservas del resumen. Si quieres corregir algo después, dime qué material.';
     } else if (intent) {
@@ -662,7 +676,7 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
       }
     } else if (incompletePickEdit(rawText)) {
       note = '¿Qué material quieres corregir? Dime si buscas otro lugar para recogerlo u otro lote. No cambié las reservas.';
-    } else if (confirmedChange && !activeChoice?.confirmOnly) {
+    } else if (confirmedChange && !singleProposal) {
       pendingChoice = activeChoice;
       note = activeChoice ? `Primero indica la opción que cotejaste.\n\n${choicePrompt(activeChoice, rows)}`
         : 'No hay un cambio pendiente de confirmar. No cambié las reservas.';
@@ -768,6 +782,6 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
   }
 }
 
-module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation, structuredPickIntent,
+module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation, explicitPickChangeConfirmation, structuredPickIntent,
   isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber, loadAllocations, pendingPickReview,
   pickLocations, pickLots, pickSummary, recentPickNotificationReference };
