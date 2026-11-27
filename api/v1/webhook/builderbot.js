@@ -110,7 +110,7 @@ const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
   parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const { advanceProductionPick, structuredPickIntent, explicitPickChangeConfirmation,
-  isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber,
+  isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, pickOptionNumber,
   pendingPickReview, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
@@ -1730,7 +1730,9 @@ module.exports = async (req, res) => {
         throw draftInputError('No pude comprobar el mensaje original. Dime qué material buscas. No cambié las reservas.');
       }
       const intent = confirmedChange ? null : structuredPickIntent(params, source);
-      if (await lastProcessedWorkflowAction(db, from) !== 'CONFIRMAR_MATERIALES_PRODUCCION') {
+      const explicitReview = (intent?.kind === 'review' || isPlainPickReview(source))
+        && explicitReferences(source).length > 0;
+      if (!explicitReview && await lastProcessedWorkflowAction(db, from) !== 'CONFIRMAR_MATERIALES_PRODUCCION') {
         const msg = 'Revisa primero los materiales de la OP que quieres alistar. No cambié las reservas.';
         const body = { ok: false, message: msg, mensaje: msg, error: 'PICK_REVIEW_REQUIRED' };
         await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'REJECTED' });
@@ -1739,7 +1741,9 @@ module.exports = async (req, res) => {
       const result = await advanceProductionPick({ db, userId: user.id, from, rawText: source, intent });
       const body = { ok: true, message: result.message, mensaje: result.message,
         context: confirmedChange ? { picking_confirmation: { source: 'USER_TEXT' } }
-          : { picking_intent: { source: 'BBC_STRUCTURED', kind: intent.kind }, inventory_changed: false } };
+          : { picking_intent: { source: 'BBC_STRUCTURED', kind: intent.kind,
+            ...(result.resolvedKind && result.resolvedKind !== intent.kind ? { resolved_kind: result.resolvedKind } : {}) },
+          inventory_changed: false } };
       await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
       return await finalizeHandledResponse(body);
     }
@@ -1751,8 +1755,14 @@ module.exports = async (req, res) => {
       'CONFIRMAR_MATERIALES_PRODUCCION'].includes(action) && isPickDialogueReply(rawText);
     const pickEvidence = pickOnlyOperator && (possibleMisroutedPick || possiblePickFollowup)
       ? currentText(rawBody, info).trim() : '';
+    const misroutedExplicitReview = possibleMisroutedPick && isPlainPickReview(pickEvidence)
+      && explicitReferences(pickEvidence).length > 0;
     // Recover a picking correction before checking permissions for the wrong workflow.
-    if (pickEvidence && pickEvidence === rawText.trim() && !hasProductionCloseIntent(pickEvidence)
+    if (misroutedExplicitReview && pickEvidence === rawText.trim()
+      && !await hasRecentReceptionContext(db, user.id, from)) {
+      action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+      params = {};
+    } else if (pickEvidence && pickEvidence === rawText.trim() && !hasProductionCloseIntent(pickEvidence)
       && !isPickReviewIntent(pickEvidence)) {
       const needsReview = possiblePickFollowup || pickOptionNumber(pickEvidence) !== null;
       if (needsReview || isPickCorrection(pickEvidence)) {

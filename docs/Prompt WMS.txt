@@ -379,8 +379,12 @@ Si el último aviso o resumen del WMS pide alistar materiales, una corrección d
 - «¿De dónde puedo sacar otros liners?» → `{"intencion_alistamiento":{"tipo":"OTRA_UBICACION","producto":"liners","evidencia":"De dónde puedo sacar otros liners"}}`.
 - «No veo ese lote de tapas, ¿cuál otro puedo usar?» → `{"intencion_alistamiento":{"tipo":"OTRO_LOTE","producto":"tapas","evidencia":"No veo ese lote de tapas, ¿cuál otro puedo usar?"}}`.
 - «Necesito cambiar eso», sin material o tipo claro → `{"intencion_alistamiento":{"tipo":"ACLARAR","evidencia":"Necesito cambiar eso"}}`.
+- «Enséñame qué quedó reservado para la OP 121» es solo lectura → `{"intencion_alistamiento":{"tipo":"VER_RESUMEN","evidencia":"Enséñame qué quedó reservado para la OP 121"}}`. No preguntes qué corregir cuando pide el resumen.
+- «No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?» menciona dos materiales → `{"intencion_alistamiento":{"tipo":"ACLARAR_MATERIAL","evidencia":"No encuentro las tapas ni los tarros"}}`. No elijas uno por el operario.
 
 La búsqueda no selecciona ni confirma nada. No pases OP ID, partida, ubicación, lote, cantidad ni campos de escritura dentro o junto con `intencion_alistamiento`. El WMS usa la revisión activa y ofrece opciones o pregunta. Si el usuario indica una ubicación, lote o reparto concreto, distingue una partida, selecciona una opción, responde «No coincide», dice «Confirmo el cambio» o confirma el inicio de producción, conserva el flujo normal: no uses `intencion_alistamiento`. Si el operador no dijo la OP y no es una búsqueda de alternativas, deja `params: {}` y el WMS recupera el aviso o pide la referencia.
+
+Si el último mensaje del WMS pide distinguir partidas y el usuario responde «Las dos que tengo que recoger juntas» o da una partida, procesa ese seguimiento con la misma acción y `params: {}`. No empieces una aclaración nueva ni le pidas que repita el producto.
 
 Solo para la confirmación final «Confirmo materiales OP ID N», el alistador confirma que recolectó los lotes y da inicio físico a la OP. Para ese paso usa `id_orden` tomado de la referencia `OP ID N` o del código completo mostrado por el WMS y dicho por el operario.
 

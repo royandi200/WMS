@@ -415,6 +415,76 @@ test('la intención de BBC busca alternativas sin depender de una frase reconoci
   assert.equal(db.stocks.get(12).reservada, 7);
 });
 
+test('ver las reservas no abre otra aclaración ni descarta la propuesta vigente', async () => {
+  const db = fakeDb({ a9Quantity: 0 });
+  const rawText = 'Enséñame qué quedó reservado para la OP 110';
+  const mistaken = structuredPickIntent({ intencion_alistamiento: { tipo: 'ACLARAR', evidencia: rawText } }, rawText);
+  const first = await advanceProductionPick({ db, userId: 7, rawText, intent: mistaken });
+  assert.match(first.message, /Este es el resumen de las reservas/u);
+  assert.doesNotMatch(first.message, /Qué material quieres corregir/u);
+  assert.equal(first.resolvedKind, 'review');
+  await advanceProductionPick({ db, userId: 7, rawText: '¿De dónde más puedo sacar los tarros?' });
+  const proposal = db.review.choice;
+  const review = await advanceProductionPick({ db, userId: 7, rawText, intent: mistaken });
+  assert.match(review.message, /Hay una corrección pendiente/u);
+  assert.doesNotMatch(review.message, /Qué material quieres corregir|responde exactamente:/u);
+  assert.equal(review.confirm, undefined);
+  assert.equal(db.review.choice, proposal);
+  assert.equal(db.allocations[0].stock_id, 11);
+});
+
+test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo uno', async () => {
+  const db = fakeDb();
+  const rawText = 'No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?';
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const before = allocationFingerprint(db.allocations);
+  for (const reference of ['tapas', 'tarros']) {
+    const result = await advanceProductionPick({ db, userId: 7, rawText, intent: { kind: 'location', reference } });
+    assert.match(result.message, /Mencionaste varios materiales\. ¿Cuál quieres revisar primero\?/u, reference);
+    assert.equal(result.resolvedKind, 'clarify-material');
+    assert.equal(db.review.choice, null);
+    assert.equal(allocationFingerprint(db.allocations), before);
+  }
+  const single = await advanceProductionPick({ db, userId: 7,
+    rawText: 'Busca otro lugar para los tarros y no las tapas', intent: { kind: 'location', reference: 'tarros' } });
+  assert.match(single.message, /Ubicación A10/u);
+});
+
+test('las dos retoma la partida preguntada y No coincide cancela la lista resultante', async () => {
+  const db = fakeDb({ extraTarroPart: true });
+  db.stocks.set(16, { id: 16, lote: 'OTRO-LOTE-TARRO', ubicacion_id: 4, ubicacion: 'A9',
+    cantidad: 5, reservada: 0, productId: 6, status: 'DISPONIBLE' });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const before = allocationFingerprint(db.allocations);
+  const opened = await advanceProductionPick({ db, userId: 7, rawText: '¿Qué otro lote de los tarros puedo usar?',
+    intent: { kind: 'lot', reference: 'tarros' } });
+  assert.match(opened.message, /tiene 2 partidas/u);
+  const clarified = await advanceProductionPick({ db, userId: 7,
+    rawText: 'Las dos que tengo que recoger juntas', intent: { kind: 'clarify' } });
+  assert.equal(clarified.resolvedKind, 'allocation-followup');
+  assert.match(clarified.message, /Partida 3: TARRO CUADRADO/u);
+  assert.match(clarified.message, /Para la ubicación A9, elige el lote/u);
+  assert.match(clarified.message, /Lote OTRO-LOTE-TARRO/u);
+  assert.equal(JSON.parse(db.review.choice).kind, 'lot');
+  const cancel = await advanceProductionPick({ db, userId: 7, rawText: 'No coincide' });
+  assert.match(cancel.message, /No cambié nada/u);
+  assert.equal(db.review.choice, null);
+  assert.equal(allocationFingerprint(db.allocations), before);
+});
+
+test('el saldo informado para otro lote no incluye el que ya está reservado', async () => {
+  const db = fakeDb({ extraA11Lot: true });
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const request = { db, userId: 7, rawText: 'Cambia el lote de los tarros' };
+  db.stocks.get(15).cantidad = 2;
+  assert.match((await advanceProductionPick(request)).message, /el mayor saldo por lote es 2/u);
+  db.stocks.get(15).cantidad = 0;
+  const none = await advanceProductionPick(request);
+  assert.match(none.message, /No hay otro lote disponible/u);
+  assert.doesNotMatch(none.message, /mayor saldo por lote|Si hay saldos parciales/u);
+  assert.equal(db.allocations[0].stock_id, 11);
+});
+
 test('si se agota el lote propuesto, muestra el nuevo sin aplicar la confirmación al reemplazo', async () => {
   const db = fakeDb({ a9Quantity: 0 });
   const send = rawText => advanceProductionPick({ db, userId: 7, rawText });

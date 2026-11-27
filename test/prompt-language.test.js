@@ -16,4 +16,6 @@ test('WMS classifier prompt separates picking suggestions from confirmation', ()
   assert.match(prompt, /\bintencion_alistamiento\b/u);
   assert.match(prompt, /«¿De dónde puedo sacar otros liners\?»[^\n]*"tipo":"OTRA_UBICACION","producto":"liners"/u);
   assert.match(prompt, /La búsqueda no selecciona ni confirma nada/u);
+  assert.match(prompt, /"tipo":"VER_RESUMEN"/u);
+  assert.match(prompt, /"tipo":"ACLARAR_MATERIAL"/u);
 });

@@ -387,6 +387,13 @@ test('el webhook toma la intención estructurada de BBC solo con rol, texto y re
     lastWorkflowAction = 'CERRAR_ORDEN_PRODUCCION';
     const wrongContext = await invoke(action, text, opts);
     assert.equal(wrongContext.body.error, 'PICK_REVIEW_REQUIRED');
+    const summaryText = 'Enséñame qué quedó reservado para la OP 121';
+    const summary = await invoke(action, summaryText,
+      { intencion_alistamiento: { tipo: 'ACLARAR', evidencia: summaryText } });
+    assert.match(summary.body.mensaje, /Este es el resumen de las reservas/u);
+    assert.doesNotMatch(summary.body.mensaje, /Qué material quieres corregir/u);
+    assert.equal(summary.body.context.picking_intent.kind, 'clarify');
+    assert.equal(summary.body.context.picking_intent.resolved_kind, 'review');
     lastWorkflowAction = action;
     const wrongAction = await invoke('CERRAR_ORDEN_PRODUCCION', text, opts);
     assert.equal(wrongAction.body.ok, false);

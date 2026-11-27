@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 const { explicitReferences, referenceKey } = require('./production-order-reference');
-const { resolveProductReference } = require('./product-references');
+const { normalizeProductReference, resolveProductReference } = require('./product-references');
 const { roundQty } = require('./production-material-availability');
 const { assertDraftEvidence, checkDraftFields, draftInputError } = require('./builderbot-draft-input');
 
@@ -19,7 +19,11 @@ function structuredPickIntent(params, rawText) {
   const intent = params.intencion_alistamiento;
   checkDraftFields(intent, ['tipo', 'producto', 'evidencia'], message);
   assertDraftEvidence(rawText, intent.evidencia);
-  if (intent.tipo === 'ACLARAR' && !Object.hasOwn(intent, 'producto')) return { kind: 'clarify' };
+  if (!Object.hasOwn(intent, 'producto')) {
+    if (intent.tipo === 'VER_RESUMEN') return { kind: 'review' };
+    if (intent.tipo === 'ACLARAR_MATERIAL') return { kind: 'clarify-material' };
+    if (intent.tipo === 'ACLARAR') return { kind: 'clarify' };
+  }
   const kind = intent.tipo === 'OTRA_UBICACION' ? 'location' : intent.tipo === 'OTRO_LOTE' ? 'lot' : null;
   const reference = typeof intent.producto === 'string' ? intent.producto.trim() : '';
   const words = value => normalize(value).replace(/[^\p{L}\p{N}_-]+/gu, ' ').trim();
@@ -66,7 +70,7 @@ function pickAllocationReply(text) {
   if (part) return { index: Number(part[1]) - 1 };
   const quantity = /^(?:son\s+)?(?:los?|las?)\s+(\d+(?:[.,]\d+)?|un[oa]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)(?:\s+([^.!?]+))?$/u.exec(raw);
   if (!quantity) return null;
-  const reference = (quantity[2] || '').split(/\s+(?:que|de la partida|junt[oa]s?)\b/u)[0].trim();
+  const reference = (quantity[2] || '').split(/(?:^|\s+)(?:que|de la partida|junt[oa]s?)\b/u)[0].trim();
   return { quantity: PICK_QUANTITIES[quantity[1]] ?? Number(quantity[1].replace(',', '.')),
     reference: /^(?:unidades?|und|g|gramos?|junt[oa]s?)$/u.test(reference) ? '' : reference };
 }
@@ -94,6 +98,11 @@ function isPickCorrection(text) {
 function isPickReviewIntent(text) {
   return /\b(?:revisa|revisar|confirma|confirmo|confirmar)\s+(?:los\s+)?materiales\b/u.test(normalize(text))
     || /\b(?:alistamiento|materiales)\s+(?:de\s+la\s+)?op\s*(?:id\s*)?\d+/u.test(normalize(text));
+}
+
+function isPlainPickReview(text) {
+  const raw = normalize(text).replace(/^[¿¡]+|[.!?]+$/gu, '').trim();
+  return /^(?:revisa|revisar|muestra|muestrame|ensename|consulta|quiero ver)\s+(?:(?:los|el)\s+)?(?:materiales|alistamiento|resumen|(?:que|lo que)\s+(?:quedo|esta|tengo)\s+reservad[oa]s?)(?:\s+(?:(?:de|para)\s+)?(?:(?:la|esta)\s+)?(?:op(?:\s*(?:id\s*)?\d+|-\d{8}-\d{6})|orden(?:\s+\d+)?|produccion))?$/u.test(raw);
 }
 
 function pickOptionNumber(text) {
@@ -218,7 +227,7 @@ function pickSummary(order, rows, note = '', { choicePending = false } = {}) {
     'Si el mismo producto tiene varias partidas, indica su número o el lote y ubicación actuales para distinguirla.',
     'Para dividir una partida, di «corrección: reparte partida 1: 4 en A10 y 3 en A11». Indica el lote nuevo en cada parte si cambia.',
     choicePending
-      ? 'Primero elige una de las opciones de lote mostradas arriba; todavía no confirmes los materiales.'
+      ? 'Hay una corrección pendiente. Resuelve esa propuesta o cancélala antes de confirmar materiales.'
       : `Si *todo el resumen* está correcto, responde exactamente: *Confirmo materiales OP ID ${order.id}*.`,
     'Hasta esa confirmación no se consumen materiales ni se inicia la OP.',
   ];
@@ -434,18 +443,49 @@ function allocationClarification(error, kind) {
     allocationIds: error.allocationIds });
 }
 
-async function offerStructuredPickIntent(db, rows, intent) {
+function otherCoordinatedReferences(text, chosen) {
+  const named = normalizeProductReference(chosen);
+  const containsChosen = value => (` ${normalizeProductReference(value)} `).includes(` ${named} `);
+  const peers = new Set();
+  for (const sentence of normalize(text).split(/[.!?¿;]+/u)) {
+    const parts = sentence.split(/\s+(?:y|ni|o)\s+/u);
+    if (parts.length < 2 || !parts.some(containsChosen)) continue;
+    for (const part of parts.filter(value => !containsChosen(value))) {
+      if (/^no\s+(?:los?|las?)\s+/u.test(part.trim())) continue;
+      const reference = part.trim().replace(/^.*?\b(?:los?|las?)\s+/u, '')
+        .split(/\s+(?:en|para|porque|donde|que)\b/u)[0].trim();
+      if (reference && reference.length <= 120) peers.add(reference);
+    }
+  }
+  return [...peers].slice(0, 4);
+}
+
+async function offerStructuredPickIntent(db, rows, intent, rawText) {
+  const lookup = { productIds: [...new Set(rows.map(row => row.producto_id))], allowContextualPartial: true };
   let product;
   try {
-    product = await resolveProductReference(db, intent.reference, {
-      productIds: [...new Set(rows.map(row => row.producto_id))], allowContextualPartial: true,
-    });
+    product = await resolveProductReference(db, intent.reference, lookup);
   } catch (error) {
     if (error.code === 'PRODUCT_REFERENCE_AMBIGUOUS') throw pickError(`${error.message} No cambié las reservas.`);
     if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND') {
       throw pickError('No encontré ese material entre las partidas de la OP. Dime cómo aparece en el resumen. No cambié las reservas.');
     }
     throw error;
+  }
+  const chooseMaterial = () => Object.assign(pickError('Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.'),
+    { resolvedKind: 'clarify-material' });
+  for (const reference of otherCoordinatedReferences(rawText, intent.reference)) {
+    let other;
+    try {
+      other = await resolveProductReference(db, reference, lookup);
+    } catch (error) {
+      if (error.code === 'PRODUCT_REFERENCE_NOT_FOUND') continue;
+      if (error.code !== 'PRODUCT_REFERENCE_AMBIGUOUS') throw error;
+      throw chooseMaterial();
+    }
+    if (Number(other.id) !== Number(product.id)) {
+      throw chooseMaterial();
+    }
   }
   let selected;
   try {
@@ -485,11 +525,11 @@ async function offerPickAlternatives(db, selected, kind, targetLocation) {
   const location = targetLocation || selected.ubicacion?.toUpperCase();
   if (!location) throw pickError('La partida no tiene ubicación registrada. Indica la nueva ubicación; no cambié las reservas.');
   const found = await locationLotChoices(db, selected, location);
-  const options = kind === 'lot' ? found.eligible.filter(option => option.stockId !== Number(selected.stock_id))
-    : found.eligible;
+  const isAlternative = option => kind !== 'lot' || option.stockId !== Number(selected.stock_id);
+  const options = found.eligible.filter(isAlternative);
   if (!options.length) {
-    const highest = Math.max(0, ...found.partial.map(option => option.available));
-    throw pickError(`No hay ${kind === 'lot' ? 'otro ' : 'un '}lote disponible de ${selected.producto} en ${location} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas. Si hay saldos parciales, divide la partida o concilia inventario.`);
+    const highest = Math.max(0, ...found.partial.filter(isAlternative).map(option => option.available));
+    throw pickError(`No hay ${kind === 'lot' ? 'otro ' : 'un '}lote disponible de ${selected.producto} en ${location} con saldo suficiente para ${roundQty(selected.cantidad_reservada)} ${selected.unidad || 'und'}${highest ? `; el mayor saldo por lote es ${highest}` : ''}. No cambié las reservas.${highest ? ' Si hay saldos parciales, divide la partida o concilia inventario.' : ''}`);
   }
   return newPickChoice('lot', { allocationId: selected.id, location, options, searchKind: kind });
 }
@@ -597,13 +637,14 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
   const explicitId = mentionedOrderId(rawText);
   const active = await pendingPickReview(db, userId);
   const confirmedChange = !intent && explicitPickChangeConfirmation(rawText);
+  const reviewRequested = intent?.kind === 'review' || isPlainPickReview(rawText);
   if (confirmedChange && !active?.choice) {
     return { message: 'No hay un cambio pendiente de confirmar. No cambié las reservas.' };
   }
-  if (intent && (!active || (explicitId && Number(active.order_id) !== explicitId))) {
+  if (intent && !reviewRequested && (!active || (explicitId && Number(active.order_id) !== explicitId))) {
     return { message: 'Revisa primero los materiales de la OP que quieres alistar. No cambié las reservas.' };
   }
-  const notifiedId = !explicitId && (intent || isPickCorrection(rawText) || isPickReviewIntent(rawText))
+  const notifiedId = !explicitId && (reviewRequested || intent || isPickCorrection(rawText) || isPickReviewIntent(rawText))
     ? await recentPickNotificationReference(db, from) : null;
   if (!explicitId && active && notifiedId && Number(active.order_id) !== notifiedId) {
     return { message: `Hay un alistamiento revisado de OP ID ${active.order_id} y un aviso de OP ID ${notifiedId}. Indica cuál vas a corregir, por ejemplo «Revisa materiales OP ID ${notifiedId}». No se cambiaron reservas ni se inició producción.` };
@@ -657,20 +698,41 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
       ? 'Antes de confirmar, revisa físicamente todas las partidas de este resumen. No se inició producción.' : '';
     let pendingChoice = null;
     let correction = null;
+    let resolvedKind = intent?.kind;
+    const allocationReply = activeChoice?.kind === 'allocation' ? pickAllocationReply(rawText) : null;
     const singleProposal = activeChoice?.kind === 'lot' && activeChoice.confirmOnly === true
       && activeChoice.options?.length === 1;
     const selectedOption = confirmedChange && singleProposal ? 1 : pickOptionNumber(rawText);
     if (cancelsPickEdit(rawText)) {
       note = 'No cambié nada. Conservé las reservas del resumen. Si quieres corregir algo después, dime qué material.';
+    } else if (reviewRequested) {
+      pendingChoice = activeChoice;
+      resolvedKind = 'review';
+      note = 'Este es el resumen de las reservas. No cambié nada.';
+    } else if (activeChoice?.kind === 'allocation' && (allocationReply || (!intent && !isPickCorrection(rawText)))) {
+      const selected = allocationReply ? await resolveClarifiedAllocation(db, rows, activeChoice, allocationReply) : null;
+      if (selected) {
+        resolvedKind = 'allocation-followup';
+        pendingChoice = await offerPickAlternatives(db, selected, activeChoice.kindToOffer);
+        note = choicePrompt(pendingChoice, rows);
+      } else {
+        pendingChoice = activeChoice;
+        const lead = selectedOption !== null ? 'Todavía no hay una selección de lotes o ubicaciones.'
+          : 'Falta identificar una sola partida.';
+        note = `${lead}\n\n${choicePrompt(pendingChoice, rows)}`;
+      }
     } else if (intent) {
       if (intent.kind === 'clarify') {
         note = '¿Qué material quieres corregir y necesitas otro lugar para recogerlo u otro lote? No cambié las reservas.';
+      } else if (intent.kind === 'clarify-material') {
+        note = 'Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.';
       } else {
         try {
-          pendingChoice = await offerStructuredPickIntent(db, rows, intent);
+          pendingChoice = await offerStructuredPickIntent(db, rows, intent, rawText);
           note = choicePrompt(pendingChoice, rows);
         } catch (error) {
           if (error.status !== 409) throw error;
+          resolvedKind = error.resolvedKind || resolvedKind;
           note = error.message;
         }
       }
@@ -680,18 +742,6 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
       pendingChoice = activeChoice;
       note = activeChoice ? `Primero indica la opción que cotejaste.\n\n${choicePrompt(activeChoice, rows)}`
         : 'No hay un cambio pendiente de confirmar. No cambié las reservas.';
-    } else if (activeChoice?.kind === 'allocation' && !isPickCorrection(rawText)) {
-      const reply = pickAllocationReply(rawText);
-      const selected = reply ? await resolveClarifiedAllocation(db, rows, activeChoice, reply) : null;
-      if (selected) {
-        pendingChoice = await offerPickAlternatives(db, selected, activeChoice.kindToOffer);
-        note = choicePrompt(pendingChoice, rows);
-      } else {
-        pendingChoice = activeChoice;
-        const lead = selectedOption !== null ? 'Todavía no hay una selección de lotes o ubicaciones.'
-          : 'Falta identificar una sola partida.';
-        note = `${lead}\n\n${choicePrompt(pendingChoice, rows)}`;
-      }
     } else if (selectedOption !== null) {
       if (!activeChoice) {
         note = 'No hay una selección vigente. Di «corrección: partida N, cambiar ubicación» o «corrección: partida N, cambiar lote» para ver opciones. No se cambiaron reservas.';
@@ -768,9 +818,9 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
         pendingChoice ? JSON.stringify(pendingChoice) : null]
     );
     await db.commit();
-    return { message: pendingChoice
+    return { message: pendingChoice && !reviewRequested
       ? `🏭 OP ID ${order.id} | ${order.codigo_orden} - corrección de alistamiento\n\n${note}`
-      : pickSummary(order, current, note), orderId: order.id };
+      : pickSummary(order, current, note, { choicePending: Boolean(pendingChoice) }), orderId: order.id, resolvedKind };
   } catch (error) {
     await db.rollback().catch(() => {});
     if (error.status === 409 && (isPickCorrection(rawText) || isPickDialogueReply(rawText) || pickOptionNumber(rawText) !== null)
@@ -783,5 +833,5 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
 }
 
 module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation, explicitPickChangeConfirmation, structuredPickIntent,
-  isPickCorrection, isPickReviewIntent, isPickDialogueReply, pickOptionNumber, loadAllocations, pendingPickReview,
+  isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, pickOptionNumber, loadAllocations, pendingPickReview,
   pickLocations, pickLots, pickSummary, recentPickNotificationReference };
