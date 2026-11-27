@@ -110,8 +110,8 @@ const { advanceWasteGuide, finishDraft: finishWasteDraft, parseCauseReply,
   parseWasteMessage, pendingWasteDraft } = require('../../_lib/production-waste-guide');
 const { releaseProductionOrder, confirmProductionMaterials } = require('../../_lib/production-workflow');
 const { advanceProductionPick, structuredPickIntent, explicitPickChangeConfirmation,
-  isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, pickOptionNumber,
-  pendingPickReview, pickedMaterial, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
+  isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, isPickSplitInquiry,
+  pickOptionNumber, pendingPickReview, pickedMaterial, previewPickSplit, recentPickNotificationReference } = require('../../_lib/production-pick-guide');
 const {
   assertCustomerOrderEvidence,
   resolveProductionOrigin,
@@ -1716,6 +1716,23 @@ module.exports = async (req, res) => {
     const userRoles = user.roles || [user.rol_nombre].filter(Boolean);
     const canPick = hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK);
     const nativeText = currentText(rawBody, {}).trim();
+    const splitText = currentUserText(rawBody, {}, { allowParams: false }).trim();
+    if (canPick && isPickSplitInquiry(splitText) && ['MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION',
+      'CERRAR_ORDEN_PRODUCCION', 'AJUSTAR_MATERIALES_PRODUCCION'].includes(action)) {
+      const hasPickContext = await lastProcessedWorkflowAction(db, from) === 'CONFIRMAR_MATERIALES_PRODUCCION'
+        && !await hasRecentReceptionContext(db, user.id, from);
+      if (hasPickContext || action === 'CONFIRMAR_MATERIALES_PRODUCCION') {
+        action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+        const { message } = hasPickContext ? await previewPickSplit({ db, userId: user.id, rawText: splitText })
+          : { message: 'Revisa primero los materiales de la OP que quieres repartir. No cambié las reservas.' };
+        const body = { ok: hasPickContext, message, mensaje: message, context: {
+          picking_intent: { source: 'USER_TEXT', kind: 'split-inquiry' }, inventory_changed: false,
+        } };
+        await saveLog(db, { from, action, priority, payload: rawBody, response: body,
+          status: hasPickContext ? 'PROCESSED' : 'REJECTED' });
+        return await finalizeHandledResponse(body);
+      }
+    }
     const materialReview = canPick && nativeText && nativeText === rawText.trim() && nativeText.length <= 120
       && ['MODO_CHARLA', 'CONFIRMAR_MATERIALES_PRODUCCION', 'CERRAR_ORDEN_PRODUCCION',
         'CONSULTAR_STOCK_MATERIA_PRIMA', 'CONSULTAR_STOCK_PRODUCTO_TERMINADO'].includes(action)

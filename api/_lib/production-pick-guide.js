@@ -100,6 +100,14 @@ function isPickReviewIntent(text) {
     || /\b(?:alistamiento|materiales)\s+(?:de\s+la\s+)?op\s*(?:id\s*)?\d+/u.test(normalize(text));
 }
 
+function isPickSplitInquiry(text) {
+  const raw = normalize(text);
+  const mentionsSplit = /\b(?:repart(?:ir(?:la|las|lo|los)?|o|e|imos)|divid(?:ir(?:la|las|lo|los)?|o|e|imos)|partir(?:la|las|lo|los)?)\b/u.test(raw);
+  const asksHow = /\b(?:como(?:\s+(?:puedo|podemos|debo|se puede|hago para))?|se puede|podemos|que opciones (?:tengo|hay) para|seria posible)\s+(?:lo\s+|la\s+)?(?:repart|divid|partir)/u.test(raw);
+  const asksWithoutChange = /\bsin\s+(?:(?:todavia|aun)\s+)?(?:aplicar|confirmar|cambiar|modificar|tocar|afectar)\b/u.test(raw);
+  return mentionsSplit && (asksHow || asksWithoutChange);
+}
+
 function isPlainPickReview(text) {
   const raw = normalize(text).replace(/^[¿¡]+|[.!?]+$/gu, '').trim();
   return /^(?:revisa|revisar|muestra|muestrame|ensename|consulta|quiero ver)\s+(?:(?:los|el)\s+)?(?:materiales|alistamiento|resumen|(?:que|lo que)\s+(?:quedo|esta|tengo)\s+reservad[oa]s?)(?:\s+(?:(?:de|para)\s+)?(?:(?:la|esta)\s+)?(?:op(?:\s*(?:id\s*)?\d+|-\d{8}-\d{6})|orden(?:\s+\d+)?|produccion))?$/u.test(raw);
@@ -676,7 +684,42 @@ async function applyAllocation(db, selected, desired) {
   return { selected, resolved };
 }
 
+async function previewPickSplit({ db, userId, rawText }) {
+  const active = await pendingPickReview(db, userId);
+  const explicitId = mentionedOrderId(rawText);
+  if (!active || (explicitId && explicitId !== Number(active.order_id))) {
+    return { message: 'Revisa primero los materiales de la OP que quieres repartir. No cambié las reservas.' };
+  }
+  const [orders] = await db.execute(
+    `SELECT id, estado, fase FROM ordenes_produccion WHERE id = ? LIMIT 1`, [active.order_id]
+  );
+  const order = orders[0];
+  if (order?.estado !== 'APROBADA' || order.fase !== 'F0') {
+    return { message: 'La OP de tu revisión ya no está disponible para alistamiento. No cambié las reservas.' };
+  }
+  const rows = await loadAllocations(db, order.id);
+  if (active.huella !== allocationFingerprint(rows)) {
+    return { message: `Las reservas cambiaron. Pide «Revisa materiales OP ID ${order.id}» antes de consultar el reparto.` };
+  }
+  try {
+    const selected = await selectedAllocation(db, rows, rawText);
+    if (!selected) throw pickError('Indica la partida en el resumen.');
+    const part = rows.indexOf(selected) + 1;
+    const qty = roundQty(selected.cantidad_reservada);
+    const unit = selected.unidad || 'und';
+    const note = `Sí, puedes repartir la partida ${part}. Cuenta lo que sí encontraste y verifica de qué ubicación y lote saldría lo que falta. Las partes deben sumar ${qty} ${unit}.\n\n`
+      + `${selected.producto} (${selected.sku}): ${qty} ${unit} | ${selected.ubicacion || 'sin ubicación'} | lote ${selected.lote}.\n\n`
+      + 'Cuando quieras aplicar el reparto, indica la cantidad y ubicación de cada parte, y el lote si cambia. Esta consulta no cambió las reservas ni inició producción.';
+    return { message: pickFeedback(order, note, true) };
+  } catch (error) {
+    if (error.status !== 409) throw error;
+    return { message: pickFeedback(order, `¿Qué partida quieres repartir? Indica su número en el resumen. No cambié las reservas.\n\n${error.allocationIds
+      ? allocationCandidates(rows, error.allocationIds).join('\n') : error.message}`, true) };
+  }
+}
+
 async function advanceProductionPick({ db, userId, from, rawText, intent = null }) {
+  if (isPickSplitInquiry(rawText)) return previewPickSplit({ db, userId, rawText });
   const explicitId = mentionedOrderId(rawText);
   const active = await pendingPickReview(db, userId);
   const confirmedChange = !intent && explicitPickChangeConfirmation(rawText);
@@ -914,5 +957,6 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
 }
 
 module.exports = { advanceProductionPick, allocationFingerprint, explicitPickConfirmation, explicitPickChangeConfirmation, structuredPickIntent,
-  isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, pickOptionNumber, loadAllocations, pendingPickReview,
-  pickLocations, pickLots, pickedMaterial, pickSummary, recentPickNotificationReference };
+  isPickCorrection, isPickReviewIntent, isPlainPickReview, isPickDialogueReply, isPickSplitInquiry,
+  pickOptionNumber, loadAllocations, pendingPickReview, pickLocations, pickLots, pickedMaterial, pickSummary,
+  previewPickSplit, recentPickNotificationReference };

@@ -381,6 +381,7 @@ Si el último aviso o resumen del WMS pide alistar materiales, una corrección d
 - «Necesito cambiar eso», sin material o tipo claro → `{"intencion_alistamiento":{"tipo":"ACLARAR","evidencia":"Necesito cambiar eso"}}`.
 - «Enséñame qué quedó reservado para la OP 121» es solo lectura → `{"intencion_alistamiento":{"tipo":"VER_RESUMEN","evidencia":"Enséñame qué quedó reservado para la OP 121"}}`. No preguntes qué corregir cuando pide el resumen.
 - «No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?» menciona dos materiales → `{"intencion_alistamiento":{"tipo":"ACLARAR_MATERIAL","evidencia":"No encuentro las tapas ni los tarros"}}`. No elijas uno por el operario.
+- «¿Cómo puedo repartir la partida 3 sin cambiar la reserva?» es una consulta de alistamiento: usa `CONFIRMAR_MATERIALES_PRODUCCION` con `params: {}`. No uses `editar_borrador` ni conviertas cantidades hipotéticas en una orden de reparto.
 
 La búsqueda no selecciona ni confirma nada. No pases OP ID, partida, ubicación, lote, cantidad ni campos de escritura dentro o junto con `intencion_alistamiento`. El WMS usa la revisión activa y ofrece opciones o pregunta. Si el usuario indica una ubicación, lote o reparto concreto, distingue una partida, selecciona una opción, responde «No coincide», dice «Confirmo el cambio» o confirma el inicio de producción, conserva el flujo normal: no uses `intencion_alistamiento`. Si el operador no dijo la OP y no es una búsqueda de alternativas, deja `params: {}` y el WMS recupera el aviso o pide la referencia.
 

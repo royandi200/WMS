@@ -77,7 +77,8 @@ function fakeDb({ a9Quantity = 10, a10Quantity = 12, extraA10Lot = false, extraA
       }
       if (sql.includes('FROM notificaciones_salida')) return [notices.map(id => ({
         evento: `production_released:${id}` }))];
-      if (sql.includes('FROM ordenes_produccion op JOIN productos p')) return [[{
+      if (sql.includes('FROM ordenes_produccion op JOIN productos p')
+        || sql.includes('FROM ordenes_produccion WHERE id = ?')) return [[{
         id: params[0], codigo_orden: `OP-20260930-${String(params[0]).padStart(6, '0')}`,
         estado: 'APROBADA', fase: 'F0', producto_sku: '00102-PTASH60',
         producto_nombre: 'ASHWAGANDHA X 60',
@@ -752,6 +753,23 @@ test('un destino sin partida no adivina entre materiales distintos', async () =>
   assert.match(reply.message, /No identifiqué una sola partida/u);
   assert.equal(db.allocations[0].ubicacion, 'A11');
   assert.equal(db.allocations[1].ubicacion, 'A8');
+});
+
+test('consultar un reparto retoma la partida y no escribe, aun si describe destinos completos', async () => {
+  const db = fakeDb({ extraTarroPart: true });
+  const send = rawText => advanceProductionPick({ db, userId: 7, rawText });
+  await send('Revisa materiales OP ID 110');
+  const before = allocationFingerprint(db.allocations);
+  const review = db.review;
+  const split = await send('De las dos unidades de la partida 3 solo encontré una. ¿Cómo puedo repartir la partida sin cambiar todavía la reserva?');
+  assert.match(split.message, /^Sí, puedes repartir la partida 3/u);
+  assert.match(split.message, /Las partes deben sumar 2 und/u);
+  assert.match(split.message, /\*OP 110\*$/u);
+  assert.equal(split.confirm, undefined);
+  assert.match((await send('reparte partida 1: 4 en A10 y 3 en A9, sin cambiar la reserva')).message, /^Sí, puedes repartir la partida 1/u);
+  assert.match((await send('¿Cómo puedo dividir la partida 3 de la OP 111?')).message, /^Revisa primero/u);
+  assert.equal(db.review, review);
+  assert.equal(allocationFingerprint(db.allocations), before);
 });
 
 test('el reparto conserva el total, crea una segunda partida y exige revisar otra vez', async () => {

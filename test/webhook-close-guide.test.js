@@ -30,6 +30,9 @@ require.cache[dbPath] = {
             choice_json: pickReview.choice }] : []];
         if (/SELECT action FROM webhook_logs/u.test(sql)) return [lastWorkflowAction
           ? [{ action: lastWorkflowAction }] : []];
+        if (pickAllocations && /FROM ordenes_produccion WHERE id = \?/u.test(sql)) return [[{
+          id: params[0], estado: 'APROBADA', fase: 'F0',
+        }]];
         if (pickAllocations && /FROM ordenes_produccion op JOIN productos p/u.test(sql)
           && /op\.fase/u.test(sql)) return [[{ id: params[0], codigo_orden: `OP-20260930-${String(params[0]).padStart(6, '0')}`,
             estado: 'APROBADA', fase: 'F0', producto_sku: '00102-PTASH60',
@@ -114,10 +117,11 @@ process.env.BUILDERBOT_WEBHOOK_SECRET = 'qa-webhook-secret';
 process.env.DISABLE_OUTBOUND_NOTIFICATIONS = 'true';
 const handler = require('../api/v1/webhook/builderbot');
 
-async function invoke(action, text, params = {}, transportText = text) {
+async function invoke(action, text, params = {}, transportText = text, serializeInfo = false) {
+  const info = { '@ction': action, body: text, params };
   const req = { method: 'POST', headers: { 'x-builderbot-secret': 'qa-webhook-secret' },
     body: { from: user.telefono, body: transportText,
-      info: { '@ction': action, body: text, params } } };
+      info: serializeInfo ? JSON.stringify(info) : info } };
   const res = { statusCode: 200, body: null, setHeader() {},
     status(code) { this.statusCode = code; return this; },
     json(body) { this.body = body; return this; }, end() { return this; } };
@@ -506,6 +510,50 @@ test('el webhook retoma las opciones nombradas aunque BBC clasifique la respuest
     assert.doesNotMatch(expired.body.mensaje, /Ubicación A10/u);
     assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO kardex/u.test(entry.sql)));
   } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
+});
+
+test('una consulta de reparto con el JSON de borrador equivocado conserva la OP, la partida y las reservas', async () => {
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  pickReview = null;
+  pickAllocations = [1, 2, 3].map(part => ({ id: 500 + part, produccion_material_id: 10,
+    stock_id: 11 + part, lote: `L-TAPA-${part}`, ubicacion_id: 2, cantidad_reservada: 2,
+    producto_id: 1, unidad: 'und', bodega_id: 1, sku: '00001-TPBI', producto: 'TAPA TARRO BLANCO', ubicacion: 'A8' }));
+  const action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+  const text = 'De las dos tapas de la partida 3 solo encontré una. La otra tendría que recogerla en otro lugar. ¿Cómo puedo repartir la partida sin cambiar todavía la reserva?';
+  const legacyFields = { editar_borrador: true, aclarar: 'partida' };
+  try {
+    await invoke(action, 'Revisa materiales OP ID 121');
+    lastWorkflowAction = action;
+    const before = structuredClone([pickAllocations, pickReview]);
+    writes.length = 0;
+    const preview = await invoke(action, text, legacyFields, text, true);
+    assert.equal(preview.body.context.picking_intent.kind, 'split-inquiry');
+    assert.match(preview.body.mensaje.split('\n')[0], /partida 3/u);
+    assert.match(preview.body.mensaje, /2 und \| A8 \| lote L-TAPA-3/u);
+    assert.match(preview.body.mensaje, /\*OP 121\*/u);
+    assert.doesNotMatch(preview.body.mensaje, /Elige el borrador|Confirmo materiales|L-TAPA-1/u);
+    const narrative = '¿Podemos dividir la partida 3?';
+    assert.equal((await invoke('MODO_CHARLA', narrative)).body.context.picking_intent.kind, 'split-inquiry');
+    lastWorkflowAction = 'AVANZAR_RECEPCION_GUIADA_OC';
+    assert.equal((await invoke(action, text, legacyFields)).body.ok, false);
+    lastWorkflowAction = action;
+    user.id = 8;
+    assert.match((await invoke(action, text, legacyFields)).body.mensaje, /Revisa primero/u);
+    user.id = 7;
+    user.rol_nombre = 'consulta';
+    user.roles = ['consulta'];
+    assert.equal((await invoke(action, text, legacyFields)).body.ok, false);
+    assert.deepEqual([pickAllocations, pickReview], before);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO kardex|INSERT INTO produccion_alistamiento_revisiones/u.test(entry.sql)));
+  } finally {
+    user.id = 7;
     user.rol_nombre = 'admin';
     delete user.roles;
     pickReview = null;
