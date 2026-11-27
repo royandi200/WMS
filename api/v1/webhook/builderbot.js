@@ -1749,6 +1749,21 @@ module.exports = async (req, res) => {
     }
     const pickOnlyOperator = hasCapability(userRoles, CAPABILITIES.PRODUCTION_PICK)
       && !hasCapability(userRoles, CAPABILITIES.PRODUCTION_CLOSE);
+    if (pickOnlyOperator && action === 'CONFIRMAR_MATERIALES_PRODUCCION'
+      && params.editar_borrador === true && params.aclarar === 'valor'
+      && rawText.trim() && currentText(rawBody, {}).trim() === rawText.trim()
+      && await pendingPickReview(db, user.id)
+      && await lastProcessedWorkflowAction(db, from) === action
+      && !await hasRecentReceptionContext(db, user.id, from)) {
+      // BBC asked for clarification with draft fields, not a picking selection.
+      const msg = '¿Qué material quieres revisar primero? Dime el nombre tal como aparece en el resumen. No cambié las reservas.';
+      const body = { ok: true, message: msg, mensaje: msg, context: {
+        picking_intent: { source: 'BBC_DRAFT_CLARIFICATION', resolved_kind: 'clarify-material' },
+        inventory_changed: false,
+      } };
+      await saveLog(db, { from, action, priority, payload: rawBody, response: body, status: 'PROCESSED' });
+      return await finalizeHandledResponse(body);
+    }
     const possibleMisroutedPick = action === 'CERRAR_ORDEN_PRODUCCION'
       && params.editar_borrador === true;
     const possiblePickFollowup = ['UNKNOWN', 'MODO_CHARLA', 'CERRAR_ORDEN_PRODUCCION',

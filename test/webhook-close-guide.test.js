@@ -418,6 +418,42 @@ test('el webhook toma la intención estructurada de BBC solo con rol, texto y re
   }
 });
 
+test('la aclaración de BBC con campos de otro borrador conserva el alistamiento vigente', async () => {
+  writes.length = 0;
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  const action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+  const text = 'No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?';
+  const params = { editar_borrador: true, aclarar: 'valor' };
+  lastWorkflowAction = action;
+  pickReview = { userId: user.id, orderId: 121, hash: 'review-121',
+    choice: JSON.stringify({ kind: 'lot', expiresAt: Date.now() + 60000 }) };
+  const original = pickReview;
+  try {
+    const clarified = await invoke(action, text, params);
+    assert.match(clarified.body.mensaje, /Qué material quieres revisar primero/u);
+    assert.equal(clarified.body.context.picking_intent.source, 'BBC_DRAFT_CLARIFICATION');
+    assert.equal(clarified.body.context.inventory_changed, false);
+    assert.equal(pickReview, original);
+    assert.equal((await invoke(action, text, params, 'Otro mensaje')).body.ok, false);
+    lastWorkflowAction = 'AVANZAR_RECEPCION_GUIADA_OC';
+    assert.equal((await invoke(action, text, params)).body.ok, false);
+    lastWorkflowAction = action;
+    pickReview = null;
+    assert.equal((await invoke(action, text, params)).body.ok, false);
+    user.rol_nombre = 'consulta';
+    user.roles = ['consulta'];
+    pickReview = original;
+    assert.equal((await invoke(action, text, params)).body.ok, false);
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO produccion_alistamiento_revisiones|INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
+  } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    pickReview = null;
+    lastWorkflowAction = null;
+  }
+});
+
 test('la confirmación real prevalece sobre la búsqueda de BBC y solo usa la propuesta vigente y propia', async () => {
   writes.length = 0;
   user.rol_nombre = 'alistador';
