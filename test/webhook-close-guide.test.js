@@ -370,6 +370,47 @@ test('el webhook conserva la aclaración, muestra un lote único y descarta el n
   }
 });
 
+test('el webhook toma la intención estructurada de BBC solo con rol, texto y revisión válidos', async () => {
+  writes.length = 0;
+  user.rol_nombre = 'alistador';
+  user.roles = ['alistador'];
+  pickReview = null;
+  pickAllocations = [{ id: 501, produccion_material_id: 10, stock_id: 11, lote: 'R5-260923-TRP',
+    ubicacion_id: 1, cantidad_reservada: 7, producto_id: 6, unidad: 'und', bodega_id: 1,
+    sku: '00006-TRP', producto: 'TARRO CUADRADO x 60', ubicacion: 'A11' }];
+  try {
+    const action = 'CONFIRMAR_MATERIALES_PRODUCCION';
+    const text = '¿Dónde consigo otros tarros?';
+    const intent = { tipo: 'OTRA_UBICACION', producto: 'tarros', evidencia: text };
+    const opts = { intencion_alistamiento: intent };
+    await invoke(action, 'Revisa materiales OP ID 121');
+    lastWorkflowAction = 'CERRAR_ORDEN_PRODUCCION';
+    const wrongContext = await invoke(action, text, opts);
+    assert.equal(wrongContext.body.error, 'PICK_REVIEW_REQUIRED');
+    lastWorkflowAction = action;
+    const wrongAction = await invoke('CERRAR_ORDEN_PRODUCCION', text, opts);
+    assert.equal(wrongAction.body.ok, false);
+    const invented = await invoke(action, text, { intencion_alistamiento: { ...intent, producto: 'tapas' } });
+    assert.equal(invented.body.ok, false);
+    const proposed = await invoke(action, text, opts);
+    assert.equal(proposed.body.ok, true, proposed.body.mensaje);
+    assert.equal(proposed.body.context.picking_intent.source, 'BBC_STRUCTURED');
+    assert.match(proposed.body.mensaje, /Para la ubicación A10, elige el lote/u);
+    assert.equal(pickAllocations[0].stock_id, 11);
+    user.rol_nombre = 'consulta';
+    user.roles = ['consulta'];
+    const denied = await invoke(action, text, opts);
+    assert.equal(denied.body.error, 'RBAC_DENIED');
+    assert.ok(!writes.some(entry => /UPDATE stock|UPDATE ordenes_produccion|INSERT INTO produccion_cierre_borradores/u.test(entry.sql)));
+  } finally {
+    user.rol_nombre = 'admin';
+    delete user.roles;
+    pickReview = null;
+    pickAllocations = null;
+    lastWorkflowAction = null;
+  }
+});
+
 test('alistador con audio parcial de ubicación permanece en OP 111, no entra al cierre', async () => {
   writes.length = 0;
   user.rol_nombre = 'alistador';

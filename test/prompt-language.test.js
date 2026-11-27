@@ -10,3 +10,10 @@ test('WMS classifier prompt preserves source text without language-priming examp
   assert.match(prompt, /Si `\{aiVoice\}` contiene texto, cópialo exactamente/u);
   assert.match(prompt, /Nunca conviertas un «sí» aislado en autorización para crear la OP/u);
 });
+
+test('WMS classifier prompt separates picking suggestions from confirmation', () => {
+  const prompt = readFileSync(resolve(__dirname, '../docs/Prompt WMS.txt'), 'utf8');
+  assert.match(prompt, /\bintencion_alistamiento\b/u);
+  assert.match(prompt, /«¿De dónde puedo sacar otros liners\?»[^\n]*"tipo":"OTRA_UBICACION","producto":"liners"/u);
+  assert.match(prompt, /La búsqueda no selecciona ni confirma nada/u);
+});

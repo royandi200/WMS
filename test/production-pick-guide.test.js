@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  advanceProductionPick, allocationFingerprint, explicitPickConfirmation,
+  advanceProductionPick, allocationFingerprint, explicitPickConfirmation, structuredPickIntent,
   isPickCorrection, pickLocations,
 } = require('../api/_lib/production-pick-guide');
 
@@ -348,6 +348,51 @@ test('una sola ubicación con varios lotes abre directamente la lista de lotes',
   assert.equal(db.allocations[0].stock_id, 11);
   assert.match((await send('opción 2')).message, /Corrección aplicada/u);
   assert.equal(db.allocations[0].stock_id, 14);
+});
+
+test('la intención de BBC requiere evidencia literal y no admite campos que cambien inventario', () => {
+  const evidence = 'de dónde puedo sacar otros liners?';
+  const valid = { tipo: 'OTRA_UBICACION', producto: 'liners', evidencia: evidence };
+  assert.deepEqual(structuredPickIntent({ intencion_alistamiento: valid }, evidence),
+    { kind: 'location', reference: 'liners' });
+  assert.deepEqual(structuredPickIntent({ intencion_alistamiento: {
+    ...valid, tipo: 'OTRO_LOTE',
+  } }, evidence), { kind: 'lot', reference: 'liners' });
+  assert.deepEqual(structuredPickIntent({ intencion_alistamiento: {
+    tipo: 'ACLARAR', evidencia: 'Hay que cambiar eso',
+  } }, 'Hay que cambiar eso'), { kind: 'clarify' });
+  for (const value of [
+    { ...valid, producto: 'tapas' }, { ...valid, producto: 'liner' },
+    { ...valid, evidencia: 'sacar los liners' }, { ...valid, lote: 'L1' },
+    { ...valid, tipo: 'INICIAR_PRODUCCION' },
+  ]) {
+    assert.throws(() => structuredPickIntent({ intencion_alistamiento: value }, evidence), { status: 409 });
+  }
+  assert.throws(() => structuredPickIntent({ intencion_alistamiento: valid, id_orden: 999 }, evidence), { status: 409 });
+});
+
+test('la intención de BBC busca alternativas sin depender de una frase reconocida ni aplicar cambios', async () => {
+  const db = fakeDb({ a9Quantity: 0 });
+  const before = allocationFingerprint(db.allocations);
+  const rawText = '¿Dónde consigo otros tarros?';
+  assert.equal(isPickCorrection(rawText), false);
+  const intent = structuredPickIntent({ intencion_alistamiento: {
+    tipo: 'OTRA_UBICACION', producto: 'tarros', evidencia: rawText,
+  } }, rawText);
+  const blocked = await advanceProductionPick({ db, userId: 7, rawText, intent });
+  assert.match(blocked.message, /Revisa primero los materiales/u);
+  await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
+  const proposed = await advanceProductionPick({ db, userId: 7, rawText, intent });
+  assert.match(proposed.message, /Única alternativa: A10 \| lote R5-260923-TRP/u);
+  assert.equal(proposed.confirm, undefined);
+  assert.equal(allocationFingerprint(db.allocations), before);
+  assert.equal(db.stocks.get(12).reservada, 0);
+  const wrongOrder = await advanceProductionPick({ db, userId: 7,
+    rawText: '¿Dónde consigo otros tarros para OP ID 111?', intent });
+  assert.match(wrongOrder.message, /Revisa primero los materiales/u);
+  const chosen = await advanceProductionPick({ db, userId: 7, rawText: 'Confirmo el cambio' });
+  assert.match(chosen.message, /Corrección aplicada/u);
+  assert.equal(db.stocks.get(12).reservada, 7);
 });
 
 test('si se agota el lote propuesto, muestra el nuevo sin aplicar la confirmación al reemplazo', async () => {

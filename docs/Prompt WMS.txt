@@ -372,11 +372,17 @@ Ejemplo de params:
 
 ### 6. CONFIRMAR_MATERIALES_PRODUCCION | alta
 
-Si el último aviso o resumen del WMS pide alistar materiales, una corrección de lote, ubicación, partida o reparto de esos materiales pertenece al alistamiento, incluso si aún no se pidió un resumen aparte. Ejemplo: «Cambia la ubicación de las tapas a A18» usa `CONFIRMAR_MATERIALES_PRODUCCION`, no `CERRAR_ORDEN_PRODUCCION`. Conserva la frase real en `body`, `text` y `query`; no uses `editar_borrador`, `avance_cierre` ni banderas de confirmación. Si el operador no dijo la OP, deja `params: {}` y el WMS recupera el aviso o pide la referencia. Una corrección no inicia la orden.
+Si el último aviso o resumen del WMS pide alistar materiales, una corrección de lote, ubicación, partida o reparto de esos materiales pertenece al alistamiento, incluso si aún no se pidió un resumen aparte. Ejemplo: «Cambia la ubicación de las tapas a A18» usa `CONFIRMAR_MATERIALES_PRODUCCION`, no `CERRAR_ORDEN_PRODUCCION`. Conserva la frase real en `body`, `text` y `query`; no uses `editar_borrador`, `avance_cierre` ni banderas de confirmación. Una corrección no inicia la orden.
 
-El alistador confirma que recolectó los lotes y da inicio físico a la OP.
+**Buscar alternativas en un alistamiento revisado:** interpreta el propósito aunque el operador no diga «cambiar» o desconozca códigos. Envía en `params` solo `intencion_alistamiento`, con `tipo`, `producto` y `evidencia`. `tipo` es `OTRA_UBICACION` para buscar otro lugar de recogida u `OTRO_LOTE` para buscar un lote distinto en el mismo lugar. `producto` debe ser el nombre o alias que la persona dijo, tal como aparece en el fragmento literal de `evidencia`. Ejemplos de `params`:
 
-Obligatorio: `id_orden`, tomado de una referencia `OP ID N` o del codigo completo mostrado por el WMS.
+- «¿De dónde puedo sacar otros liners?» → `{"intencion_alistamiento":{"tipo":"OTRA_UBICACION","producto":"liners","evidencia":"De dónde puedo sacar otros liners"}}`.
+- «No veo ese lote de tapas, ¿cuál otro puedo usar?» → `{"intencion_alistamiento":{"tipo":"OTRO_LOTE","producto":"tapas","evidencia":"No veo ese lote de tapas, ¿cuál otro puedo usar?"}}`.
+- «Necesito cambiar eso», sin material o tipo claro → `{"intencion_alistamiento":{"tipo":"ACLARAR","evidencia":"Necesito cambiar eso"}}`.
+
+La búsqueda no selecciona ni confirma nada. No pases OP ID, partida, ubicación, lote, cantidad ni campos de escritura dentro o junto con `intencion_alistamiento`. El WMS usa la revisión activa y ofrece opciones o pregunta. Si el usuario indica una ubicación, lote o reparto concreto, distingue una partida, selecciona una opción, responde «No coincide», dice «Confirmo el cambio» o confirma el inicio de producción, conserva el flujo normal: no uses `intencion_alistamiento`. Si el operador no dijo la OP y no es una búsqueda de alternativas, deja `params: {}` y el WMS recupera el aviso o pide la referencia.
+
+Solo para la confirmación final «Confirmo materiales OP ID N», el alistador confirma que recolectó los lotes y da inicio físico a la OP. Para ese paso usa `id_orden` tomado de la referencia `OP ID N` o del código completo mostrado por el WMS y dicho por el operario.
 
 No inventes lotes. La API usa las reservas FEFO existentes.
 
