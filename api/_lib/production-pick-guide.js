@@ -498,6 +498,26 @@ async function offerStructuredPickIntent(db, rows, intent, rawText) {
   return offerPickAlternatives(db, selected, intent.kind);
 }
 
+async function namesMultipleMissingMaterials(db, rows, text) {
+  const clause = /\bno (?:encontre|encuentro|encontramos|veo)\s+([^.!?¿;]+)/u.exec(normalize(text));
+  const mentions = clause?.[1].split(/\s+(?:ni|y|o)\s+/u) || [];
+  if (mentions.length < 2 || mentions.length > 5) return false;
+  const lookup = { productIds: [...new Set(rows.map(row => row.producto_id))], allowContextualPartial: true };
+  const productIds = new Set();
+  for (const mention of mentions) {
+    const reference = mention.trim().replace(/^(?:los?|las?)\s+/u, '').split(/\s+(?:en|donde)\b/u)[0];
+    if (!reference || reference.length > 120) continue;
+    try {
+      const product = await resolveProductReference(db, reference, lookup);
+      productIds.add(Number(product.id));
+      if (productIds.size === 2) return true;
+    } catch (error) {
+      if (!['PRODUCT_REFERENCE_NOT_FOUND', 'PRODUCT_REFERENCE_AMBIGUOUS'].includes(error.code)) throw error;
+    }
+  }
+  return false;
+}
+
 async function offerPickAlternatives(db, selected, kind, targetLocation) {
   if (kind === 'location') {
     const found = await locationLotChoices(db, selected, null);
@@ -722,10 +742,12 @@ async function advanceProductionPick({ db, userId, from, rawText, intent = null 
         note = `${lead}\n\n${choicePrompt(pendingChoice, rows)}`;
       }
     } else if (intent) {
-      if (intent.kind === 'clarify') {
-        note = '¿Qué material quieres corregir y necesitas otro lugar para recogerlo u otro lote? No cambié las reservas.';
-      } else if (intent.kind === 'clarify-material') {
+      if (intent.kind === 'clarify-material' || (intent.kind === 'clarify'
+        && await namesMultipleMissingMaterials(db, rows, rawText))) {
+        resolvedKind = 'clarify-material';
         note = 'Mencionaste varios materiales. ¿Cuál quieres revisar primero? No cambié las reservas.';
+      } else if (intent.kind === 'clarify') {
+        note = '¿Qué material quieres corregir y necesitas otro lugar para recogerlo u otro lote? No cambié las reservas.';
       } else {
         try {
           pendingChoice = await offerStructuredPickIntent(db, rows, intent, rawText);

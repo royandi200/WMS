@@ -438,9 +438,10 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   const rawText = 'No encuentro las tapas ni los tarros. ¿Dónde más puedo mirar?';
   await advanceProductionPick({ db, userId: 7, rawText: 'Revisa materiales OP ID 110' });
   const before = allocationFingerprint(db.allocations);
-  for (const reference of ['tapas', 'tarros']) {
-    const result = await advanceProductionPick({ db, userId: 7, rawText, intent: { kind: 'location', reference } });
-    assert.match(result.message, /Mencionaste varios materiales\. ¿Cuál quieres revisar primero\?/u, reference);
+  for (const intent of [{ kind: 'location', reference: 'tapas' },
+    { kind: 'location', reference: 'tarros' }, { kind: 'clarify' }]) {
+    const result = await advanceProductionPick({ db, userId: 7, rawText, intent });
+    assert.match(result.message, /Mencionaste varios materiales\. ¿Cuál quieres revisar primero\?/u);
     assert.equal(result.resolvedKind, 'clarify-material');
     assert.equal(db.review.choice, null);
     assert.equal(allocationFingerprint(db.allocations), before);
@@ -448,6 +449,10 @@ test('dos materiales coordinados piden prioridad aun cuando BBC proponga solo un
   const single = await advanceProductionPick({ db, userId: 7,
     rawText: 'Busca otro lugar para los tarros y no las tapas', intent: { kind: 'location', reference: 'tarros' } });
   assert.match(single.message, /Ubicación A10/u);
+  const partlyUnknown = await advanceProductionPick({ db, userId: 7,
+    rawText: 'No encuentro las tapas ni las bolsitas', intent: { kind: 'clarify' } });
+  assert.equal(partlyUnknown.resolvedKind, 'clarify');
+  assert.doesNotMatch(partlyUnknown.message, /Mencionaste varios materiales/u);
 });
 
 test('las dos retoma la partida preguntada y No coincide cancela la lista resultante', async () => {
